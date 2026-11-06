@@ -59,7 +59,6 @@ class FreshAgentSessionPresenceTest(unittest.TestCase):
         self.assertIsNotNone(load_fresh_agent_session())
 
 
-@unittest.skipUnless(MODULE_PATH.is_file(), "fresh_agent_session.py is not implemented")
 class FreshAgentSessionTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -86,7 +86,6 @@ class Request:
     state_dir: Path | None = None
     agent: Path | None = None
     claude: Path | None = None
-    strict_log: Path | None = None
 
     @property
     def program(self):

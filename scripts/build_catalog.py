@@ -41,53 +41,11 @@ SYSTEM_SKILLS = {"boundary-contract", "session-intent-analyzer", "task-router"}
 # Domain skills at the repo root: directories with SKILL.md outside FAMILY_DIRS and SYSTEM_SKILLS.
 DOMAIN_FAMILY = "domain"
 
-# Meta entrypoint skills that dispatch to other skills.
-META_SKILLS = {"using-coding-convention"}
-
-# governance_class is a governance involvement axis independent of family.
-CORE_GATE_SKILLS = {"task-router"}
-INTENT_STATE_PRODUCER_SKILLS = {"session-intent-analyzer"}
-BOUNDARY_GATE_SKILLS = {"boundary-contract"}
-GOVERNANCE_SUBSKILLS = {
-    "agent-security-scan",
-    "compact-handoff",
-    "merge-companion",
-    "necessity-gate",
-    "skill-evolution",
-    "using-coding-convention",
-    "writing-skills",
-}
-VERIFICATION_SUBSKILLS = {
-    "adversarial-verification",
-    "receiving-code-review",
-    "requesting-code-review",
-    "systematic-debugging",
-    "test-driven-development",
-}
-COMPLETION_GATE_SKILLS = {
-    "finishing-a-development-branch",
-    "verification-before-completion",
-}
-DOMAIN_ORCHESTRATION_SKILLS: set[str] = set()
-
-GOVERNANCE_CLASSES = {
-    "boundary-gate",
-    "coding-process",
-    "completion-gate",
-    "core-gate",
-    "domain-orchestration",
-    "governance-subskill",
-    "intent-state-producer",
-    "non-governance-domain",
-    "verification-subskill",
-}
-
 # calls field type enum.
-VALID_CALL_TYPES = {"hard", "soft", "union", "meta", "external-hard", "external-union"}
-EXTERNAL_TYPES = {"external-hard", "external-union"}
-UNION_TYPES = {"union", "external-union"}
+VALID_CALL_TYPES = {"hard", "soft", "union", "meta"}
+UNION_TYPES = {"union"}
 
-CATALOG_VERSION = "1.3.0"
+CATALOG_VERSION = "2.0.0"
 
 
 def parse_frontmatter(text: str) -> dict[str, Any]:
@@ -200,27 +158,6 @@ def discover_install_roots(repo_root: Path) -> list[str]:
     return sorted(roots)
 
 
-def infer_governance_class(name: str, family: str) -> str:
-    """Infer the governance involvement taxonomy independent of family."""
-    if name in CORE_GATE_SKILLS:
-        return "core-gate"
-    if name in INTENT_STATE_PRODUCER_SKILLS:
-        return "intent-state-producer"
-    if name in BOUNDARY_GATE_SKILLS:
-        return "boundary-gate"
-    if name in GOVERNANCE_SUBSKILLS:
-        return "governance-subskill"
-    if name in VERIFICATION_SUBSKILLS:
-        return "verification-subskill"
-    if name in COMPLETION_GATE_SKILLS:
-        return "completion-gate"
-    if name in DOMAIN_ORCHESTRATION_SKILLS:
-        return "domain-orchestration"
-    if family == "coding-convention":
-        return "coding-process"
-    return "non-governance-domain"
-
-
 def build_skill_entry(skill_md: Path, repo_root: Path) -> dict[str, Any]:
     text = skill_md.read_text(encoding="utf-8")
     fm = parse_frontmatter(text)
@@ -234,16 +171,12 @@ def build_skill_entry(skill_md: Path, repo_root: Path) -> dict[str, Any]:
         family = SYSTEM_FAMILY
     else:
         family = FAMILY_DIRS.get(parent_dir[0], DOMAIN_FAMILY) if parent_dir else DOMAIN_FAMILY
-    governance_class = infer_governance_class(name, family)
-    if governance_class not in GOVERNANCE_CLASSES:
-        raise ValueError(f"{skill_md}: unknown governance_class '{governance_class}'")
 
     entry: dict[str, Any] = {
         "name": name,
         "path": rel_path,
         "description": fm.get("description", ""),
         "family": family,
-        "governance_class": governance_class,
     }
     if fm.get("compatibility"):
         compat = fm["compatibility"]
@@ -251,10 +184,6 @@ def build_skill_entry(skill_md: Path, repo_root: Path) -> dict[str, Any]:
             entry["compatibility"] = compat
         elif isinstance(compat, str):
             entry["compatibility"] = [compat]
-    if fm.get("allowed-tools"):
-        entry["allowed_tools"] = fm["allowed-tools"]
-    if name in META_SKILLS:
-        entry["meta"] = True
     if fm.get("calls"):
         calls_raw = fm["calls"]
         if isinstance(calls_raw, str):
@@ -274,9 +203,8 @@ def parse_call_string(s: str) -> dict[str, Any]:
     """
     Parse a single string from the calls field.
     Format: "<type>:<target>" or "<type>:<target>:<union_group>"
-    type ∈ {hard, soft, union, meta, external-hard, external-union}
+    type ∈ {hard, soft, union, meta}
     union types require union_group.
-    external types convert target to external_target.
     """
     parts = s.split(":", 2)
     if len(parts) < 2:
@@ -294,10 +222,7 @@ def parse_call_string(s: str) -> dict[str, Any]:
         raise ValueError(f"type '{call_type}' cannot use union_group")
 
     relation: dict[str, Any] = {"type": call_type}
-    if call_type in EXTERNAL_TYPES:
-        relation["external_target"] = target
-    else:
-        relation["target"] = target
+    relation["target"] = target
     if union_group:
         relation["union_group"] = union_group
     return relation

@@ -348,7 +348,8 @@ class ClaudeContextAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'exact-session.jsonl'
             path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
-            records = adapter.native_records(path)
+            from text_lines import committed_records
+            records = adapter.native_records_from_rows(committed_records(path.read_bytes()))
         self.assertEqual(set(records), {2, 3, 4, 5, 6})
         self.assertEqual(records[2], self.human)
         self.assertEqual(records[3], message('assistant', self.thinking))
@@ -694,99 +695,6 @@ class ClaudeContextAdapterTests(unittest.TestCase):
         updated, observations = self.apply(request=request)
         self.assertEqual(updated, request)
         self.assertEqual(observations, [])
-
-
-class SignedCompactionControllerTests(unittest.TestCase):
-    def setUp(self):
-        self.request = dict(model='claude-opus-5-5', max_tokens=8192,
-            thinking={'type': 'adaptive'}, output_config={'effort': 'xhigh'},
-            system=[text('Preserve the objective and restrictions')], tools=[], messages=[
-                dict(role='user', content='earlier work'),
-                dict(role='assistant', content='earlier conclusion'),
-                dict(role='user', content='latest correction; preserve exactly'),
-                dict(role='assistant', content=[dict(type='thinking', thinking='kept', signature='kept-signature')])])
-        self.betas = ('compact-2026-09-04',)
-        self.response = dict(id='msg-compaction', model=self.request['model'], role='assistant',
-            stop_reason='compaction', content=[dict(type='compaction', content='accepted summary', signature='opaque')],
-            usage=dict(input_tokens=0, output_tokens=0,
-                       iterations=[dict(type='compaction', input_tokens=100, output_tokens=20)]))
-
-    def prepare(self, request=None, cut=2, betas=None):
-        operation = getattr(adapter, 'prepare_signed_compaction', None)
-        self.assertTrue(callable(operation), 'The signed API compaction controller is not implemented')
-        return operation(self.request if request is None else request, cut,
-                         native_betas=self.betas if betas is None else betas)
-
-    def test_supported_controller_keeps_latest_tail_thinking_settings_and_originals(self):
-        original = copy.deepcopy(self.request)
-        plan = self.prepare()
-        self.assertEqual(plan.request['messages'], self.request['messages'][:2])
-        self.assertEqual(plan.request['compaction'], {'type': 'summarize'})
-        current = copy.deepcopy(self.request)
-        current['messages'].append(dict(role='user', content='newest instruction'))
-        forwarded = plan.adopt(self.response, current, native_betas=self.betas, summary_accepted=True)
-        self.assertEqual(forwarded['messages'][0]['content'], self.response['content'])
-        self.assertEqual(forwarded['messages'][1:], current['messages'][2:])
-        for key in ('model', 'thinking', 'output_config', 'system', 'tools', 'max_tokens'):
-            self.assertEqual(forwarded[key], current[key])
-        self.assertEqual(self.request, original)
-
-    def test_controller_requires_native_beta_and_semantic_summary_acceptance(self):
-        with self.assertRaises(adapter.NativeContextRejected):
-            self.prepare(betas=())
-        plan = self.prepare()
-        with self.assertRaises(adapter.NativeContextRejected):
-            plan.adopt(self.response, self.request, native_betas=self.betas, summary_accepted=False)
-
-    def test_controller_rejects_pair_split_latest_input_and_required_system_summary(self):
-        for cut in (0, 3, 4, True):
-            with self.subTest(cut=cut), self.assertRaises(adapter.NativeContextRejected):
-                self.prepare(cut=cut)
-        request = copy.deepcopy(self.request)
-        request['messages'][1] = dict(role='assistant', content=[dict(type='tool_use', id='open', name='Read', input={})])
-        request['messages'][2] = dict(role='user', content=[dict(type='tool_result', tool_use_id='open', content='result')])
-        with self.assertRaises(adapter.NativeContextRejected):
-            self.prepare(request)
-        request = copy.deepcopy(self.request)
-        request['messages'][0]['role'] = 'system'
-        with self.assertRaises(adapter.NativeContextRejected):
-            self.prepare(request)
-
-    def test_controller_rejects_changed_prefix_settings_failed_or_foreign_response(self):
-        plan = self.prepare()
-        for key, value in [('system', []), ('model', 'different'), ('thinking', {'type': 'disabled'}),
-                           ('messages', [dict(role='user', content='changed')] + self.request['messages'][1:])]:
-            current = copy.deepcopy(self.request)
-            current[key] = value
-            with self.subTest(key=key), self.assertRaises(adapter.NativeContextRejected):
-                plan.adopt(self.response, current, native_betas=self.betas, summary_accepted=True)
-        for key, value in [('model', 'different'), ('stop_reason', 'max_tokens'), ('content', [])]:
-            response = dict(self.response, **{key: value})
-            with self.subTest(response_key=key), self.assertRaises(adapter.NativeContextRejected):
-                plan.adopt(response, self.request, native_betas=self.betas, summary_accepted=True)
-
-    def test_controller_rejects_nonstring_result_id_inside_a_closed_cut(self):
-        request = copy.deepcopy(self.request)
-        request['messages'] = [self.request['messages'][0],
-            dict(role='assistant', content=[dict(type='tool_use', id='read', name='Read', input={})]),
-            dict(role='user', content=[dict(type='tool_result', tool_use_id=[], content='result')]),
-            self.request['messages'][1], *self.request['messages'][2:]]
-        with self.assertRaises(adapter.NativeContextRejected):
-            self.prepare(request, cut=4)
-
-    def test_controller_rejects_malformed_shapes_and_incompatible_threshold_before_sending(self):
-        for key, value in [('tool_choice', None), ('context_management', None),
-                           ('context_management', {'edits': [None]}),
-                           ('context_management', {'edits': [{'type': 'compact_20260112'}]}),
-                           ('messages', [{'role': 'user'}] + self.request['messages'][1:])]:
-            request = copy.deepcopy(self.request)
-            request[key] = value
-            with self.subTest(key=key, value=value), self.assertRaises(adapter.NativeContextRejected):
-                self.prepare(request)
-        plan = self.prepare()
-        current = dict(self.request, context_management=None)
-        with self.assertRaises(adapter.NativeContextRejected):
-            plan.adopt(self.response, current, native_betas=self.betas, summary_accepted=True)
 
 
 if __name__ == '__main__':

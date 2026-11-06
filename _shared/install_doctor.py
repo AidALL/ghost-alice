@@ -38,7 +38,6 @@ from installer_assets import (
     classify_skill_root,
 )
 
-from mcp_health import summarize_state
 import install_destination
 import state_retention
 
@@ -63,7 +62,6 @@ RUNTIME_SHARED_FILES = (
     "claude_stop_verification_hook.py",
     "completion_check_validator.py",
     "io_trace_hook.py",
-    "governance_events.py",
     "pending_merge_precheck_hook.py",
     "merge_companion_messages.py",
     "session_intent_analyzer_hook.py",
@@ -1205,11 +1203,6 @@ def run(args: argparse.Namespace) -> int:
                 f"  {finding['status']} {finding['skill']}: {finding['layout']} {finding['reason']}"
             )
 
-    if args.mcp_health_state is not None:
-        mcp_status, mcp_detail = summarize_state(args.mcp_health_state)
-        statuses.append(mcp_status)
-        print(f"mcp-health: {mcp_detail}")
-
     encoding_issues = [
         (encoding_root, issue)
         for encoding_root in encoding_roots
@@ -1272,7 +1265,6 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--skill-root", action="append", type=Path, default=[])
     parser.add_argument("--skills-root", type=Path, default=None,
                         help="live skills dir for the core/addon/domain/user management view")
-    parser.add_argument("--mcp-health-state", type=Path, default=None)
     parser.add_argument(
         "--global-rule",
         action="append",

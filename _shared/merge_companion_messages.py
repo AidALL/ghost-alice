@@ -7,22 +7,14 @@ from __future__ import annotations
 from typing import Dict, Literal
 
 PendingMessageContext = Literal[
-    "install_tail",
     "session_start",
-    "git_pre_push",
     "readme",
 ]
 
 
 _USER_COPY: Dict[PendingMessageContext, str] = {
-    "install_tail": (
-        "During the agent tool update, your local changes were backed up instead of being " "overwritten. The next time you open Claude/Codex, please ask " "'Please review backed-up changes.'"
-    ),
     "session_start": (
         "This conversation is a new session. Backed-up personal changes from a previous " "agent tool update may still be unresolved. In this conversation, please ask " "'Please review backed-up changes.' to review what to keep or discard."
-    ),
-    "git_pre_push": (
-        "There are unresolved backed-up changes. Review them before sending this work to " "the remote repository. The default setting does not block push."
     ),
     "readme": (
         "This is the backup folder guide. During the agent tool update, your local changes " "were copied here instead of being overwritten. If an AI chat is already open, " "please ask 'Please review backed-up changes.' Otherwise, open a new chat and ask the same thing."

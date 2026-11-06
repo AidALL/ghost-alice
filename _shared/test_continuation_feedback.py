@@ -23,9 +23,10 @@ class ContinuationFeedbackTests(unittest.TestCase):
                            CODEX_THREAD_ID='current')
         self.original = Path(self.fixture.tmp.name) / 'original.txt'
         self.original.write_text('The unprocessed required result needs this original passage.')
-        scope = assessment.prepare_response_scope(self.source,
-            expected_input_event_id=self.fixture.event, source_paths=[str(self.original)])
-        self.selector = dict(candidate_reference=scope['scope_reference'], source_id=scope['sources'][0]['source_id'])
+        body = 'The unprocessed required result needs this original passage.'
+        candidate = assessment.prepare_response_review(self.source, response_text=body,
+            source_paths=[str(self.original)], claim_statements=[body])
+        self.selector = dict(candidate_reference=candidate['candidate_reference'], source_id=candidate['sources'][0]['source_id'])
         self.ref = dict(work_unit_id='first', contract_revision=1, criterion_id='AC1')
 
     def candidate(self, rows=None, control='active'):

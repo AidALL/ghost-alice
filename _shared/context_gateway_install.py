@@ -82,10 +82,11 @@ def _runtime_root(record):
     return Path(found[0]).parent
 
 
-def install(codex_dir, ledger_root, state_dir, launch_agent, claude_dir=None, *, strict_log_root=None, confirm=True):
+def install(codex_dir, ledger_root, state_dir, launch_agent, claude_dir=None, *, confirm=True):
     _require_gateway_runtime()
     supplied = [codex_dir, ledger_root, state_dir, launch_agent]
-    supplied.extend(p for p in (claude_dir, strict_log_root) if p is not None)
+    if claude_dir is not None:
+        supplied.append(claude_dir)
     if sys.platform != 'darwin' or any(not Path(p).is_absolute() for p in supplied):
         raise GatewayBlocked('macOS and explicit absolute installation coordinates are required')
     home = Path.home()
@@ -94,8 +95,7 @@ def install(codex_dir, ledger_root, state_dir, launch_agent, claude_dir=None, *,
         record = _read_record(home)
         service = record.get('service') if isinstance(record.get('service'), dict) else None
         request = Request('install', home, sys.platform, _runtime_root(record), Path(codex_dir), Path(ledger_root),
-            Path(state_dir), Path(launch_agent), Path(claude_dir) if claude_dir is not None else None,
-            Path(strict_log_root) if strict_log_root is not None else None)
+            Path(state_dir), Path(launch_agent), Path(claude_dir) if claude_dir is not None else None)
         observed = inventory.installation(request, io)
         prior = planning.validate_install(request, observed, service)
         if prior is None:
@@ -174,7 +174,6 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--codex-dir', required=True, type=Path)
     parser.add_argument('--claude-dir', type=Path)
-    parser.add_argument('--strict-log-root', type=Path)
     parser.add_argument('--ledger-root', required=True, type=Path)
     parser.add_argument('--state-dir', required=True, type=Path)
     parser.add_argument('--launch-agent', required=True, type=Path)
@@ -182,7 +181,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         result = install(args.codex_dir, args.ledger_root, args.state_dir, args.launch_agent,
-            claude_dir=args.claude_dir, strict_log_root=args.strict_log_root, confirm=not args.dry_run)
+            claude_dir=args.claude_dir, confirm=not args.dry_run)
     except (GatewayBlocked, GatewayServiceError, GatewayFailure) as exc:
         _print_failure(exc)
         return exc.exit_code

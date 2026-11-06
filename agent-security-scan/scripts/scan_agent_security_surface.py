@@ -51,20 +51,6 @@ GHOST_ALICE_HOOK_MARKERS = (
 SHELL_COMMANDS = {"bash", "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "sh", "zsh"}
 ENV_COMMANDS = {"env"}
 INLINE_INTERPRETER_COMMANDS = {"node", "osascript", "perl", "php", "python", "python3", "ruby"}
-PACKAGE_MANAGER_COMMANDS = {
-    "bunx",
-    "cargo",
-    "go",
-    "npx",
-    "npm",
-    "pip",
-    "pipx",
-    "pnpm",
-    "python",
-    "python3",
-    "uvx",
-    "yarn",
-}
 DIRECT_RUN_PACKAGE_MANAGERS = {"bunx", "npx", "pipx", "uvx"}
 CONTAINER_COMMANDS = {"docker", "podman"}
 CONTAINER_RUN_ACTIONS = {"build", "compose", "pull", "run"}
@@ -360,8 +346,6 @@ def server_has_mcp_auto_install(config: dict[str, Any]) -> bool:
         return True
     if command in CONTAINER_COMMANDS and any(arg in CONTAINER_RUN_ACTIONS for arg in args):
         return True
-    if command in PACKAGE_MANAGER_COMMANDS and MCP_PACKAGE_MANAGER_RE.search(rendered):
-        return True
     return MCP_PACKAGE_MANAGER_RE.search(rendered) is not None
 
 
@@ -621,7 +605,6 @@ def scan(root: Path, home: Path) -> dict[str, Any]:
         "root": str(root),
         "home": str(home),
         "finding_count": len(rows),
-        "finding_count_semantics": "unique_resolved_path",
         "findings": rows,
     }
 

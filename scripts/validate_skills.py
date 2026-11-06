@@ -38,7 +38,6 @@ from check_skill_gate_contract import run_contract_checks  # noqa: E402
 NAME_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 DESCRIPTION_HARD_LIMIT = 1024
 BODY_SOFT_LIMIT = 500
-BODY_TOKEN_SOFT_LIMIT = 5000  # Phase 2-2: rough line count x 10 estimate.
 INLINE_CODE_BLOCK_SOFT_LIMIT = 50  # Phase 2-5: a larger SKILL.md body code block suggests progressive disclosure drift.
 REFERENCE_TOC_LIMIT = 300
 
@@ -132,17 +131,6 @@ def validate_phase2_body(skill_md: Path, text: str, issues: list[Issue]) -> None
     if body_lines > BODY_SOFT_LIMIT:
         issues.append(
             Issue("WARNING", skill_name, "2", "2-1", f"body {body_lines} lines > 500 recommendation")
-        )
-    estimated_tokens = body_lines * 10
-    if estimated_tokens > BODY_TOKEN_SOFT_LIMIT:
-        issues.append(
-            Issue(
-                "WARNING",
-                skill_name,
-                "2",
-                "2-2",
-                f"estimated body tokens {estimated_tokens} > {BODY_TOKEN_SOFT_LIMIT} recommendation (line count x 10)",
-            )
         )
     if PLACEHOLDER_PATTERN.search(body):
         issues.append(Issue("ERROR", skill_name, "2", "2-4", "placeholder found (TODO/TBD/FIXME/draft pending)"))
@@ -481,7 +469,7 @@ def validate_description_collisions(repo_root: Path, issues: list[Issue]) -> Non
 def validate_calls(repo_root: Path, issues: list[Issue]) -> None:
     """
     Validate calls_relation consistency from skill-catalog/skills.json.
-    - target must point to another skill in the catalog, except external calls.
+    - target must point to another skill in the catalog.
     - union_group must contain at least two members because single-member unions are meaningless.
     - self-calls are forbidden.
     """
@@ -500,34 +488,32 @@ def validate_calls(repo_root: Path, issues: list[Issue]) -> None:
         relations = skill.get("calls_relation", [])
         for r in relations:
             rtype = r["type"]
-            # Target existence validation, excluding external calls.
-            if rtype not in {"external-hard", "external-union"}:
-                target = r.get("target")
-                if not target:
-                    issues.append(
-                        Issue("ERROR", name, "P12", "calls", f"missing target: {r}")
+            target = r.get("target")
+            if not target:
+                issues.append(
+                    Issue("ERROR", name, "P12", "calls", f"missing target: {r}")
+                )
+                continue
+            if target == "*" and rtype == "meta":
+                pass  # meta:* means the whole catalog and is excluded from validation.
+            elif target not in skill_names:
+                issues.append(
+                    Issue(
+                        "ERROR",
+                        name,
+                        "P12",
+                        "calls.target",
+                        f"target '{target}' is not in the catalog",
                     )
-                    continue
-                if target == "*" and rtype == "meta":
-                    pass  # meta:* means the whole catalog and is excluded from validation.
-                elif target not in skill_names:
-                    issues.append(
-                        Issue(
-                            "ERROR",
-                            name,
-                            "P12",
-                            "calls.target",
-                            f"target '{target}' is not in the catalog",
-                        )
-                    )
-                elif target == name:
-                    issues.append(
-                        Issue("ERROR", name, "P12", "calls.self", "self-call is forbidden")
-                    )
-                elif rtype != "meta":
-                    flow_edges[name].add(target)
+                )
+            elif target == name:
+                issues.append(
+                    Issue("ERROR", name, "P12", "calls.self", "self-call is forbidden")
+                )
+            elif rtype != "meta":
+                flow_edges[name].add(target)
             # union_group count.
-            if rtype in {"union", "external-union"}:
+            if rtype == "union":
                 grp = r.get("union_group")
                 if grp:
                     union_member_count[(name, grp)] = union_member_count.get((name, grp), 0) + 1
@@ -549,7 +535,7 @@ def validate_calls(repo_root: Path, issues: list[Issue]) -> None:
 
 
 def _validate_call_flow_cycles(flow_edges: dict[str, set[str]], issues: list[Issue]) -> None:
-    """meta:* and external edges are excluded; remaining calls_relation edges are static handoff/flow."""
+    """meta:* edges are excluded; remaining calls_relation edges are static handoff/flow."""
     visited: set[str] = set()
     active: list[str] = []
     active_set: set[str] = set()

@@ -32,7 +32,7 @@ def load_routes():
 class ResponseRouteTests(unittest.TestCase):
     def test_minimal_surface_round_trips_without_invented_judgments(self):
         self.event = self.setup_owned()
-        for mode, units, boundary in (("direct-response", (), "n/a"), ("normal", ("first",), "required")):
+        for mode, units, boundary in (("normal", (), "n/a"), ("normal", ("first",), "required")):
             with self.subTest(mode=mode):
                 candidate = self.candidate(units=units)
                 candidate["routing_surface"] = dict(response_mode=mode, boundary_contract=boundary)
@@ -480,76 +480,6 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertEqual(route["selected_criteria"], [])
         self.assertEqual(len(ledger.read_session_state(**self.coords)["acceptance_criteria"]), 3)
 
-    def test_terminal_route_rejects_selected_execution_without_mutating_ledger(self):
-        self.event = self.setup_owned()
-        before = ledger.read_session_state(**self.coords)
-        for mode in ("direct-response", "clarification-only"):
-            with self.subTest(mode=mode):
-                candidate = self.candidate()
-                candidate["routing_surface"].update(response_mode=mode)
-                with self.assertRaisesRegex(self.api.RouteSchemaError, "terminal.*execution"):
-                    self.record(candidate)
-                self.assertEqual(ledger.read_session_state(**self.coords), before)
-
-    def test_terminal_route_may_retain_unselected_execution_backlog(self):
-        self.event = self.setup_owned()
-        candidate = self.candidate()
-        candidate["routing_surface"].update(response_mode="direct-response")
-        candidate["selected_work_unit_ids"] = []
-        candidate["selected_criteria"] = []
-        route = self.record(candidate)
-        self.assertEqual(route["status"], "ready")
-        self.assertEqual(route["selected_work_unit_ids"], [])
-        self.assertEqual(len(ledger.read_session_state(**self.coords)["acceptance_criteria"]), 3)
-
-    def test_reader_rejects_terminal_projection_with_selected_execution(self):
-        self.event = self.setup_owned()
-        self.record()
-        state = ledger.read_session_state(**self.coords)
-        state["response_route"]["routing_surface"].update(response_mode="direct-response")
-        with self.assertRaisesRegex(self.api.RouteSchemaError, "terminal.*execution"):
-            self.api.project_stored_response_route(state)
-
-    def test_explanation_or_stop_clears_current_execution_without_changing_the_criteria(self):
-        from completion_route import select_completion_route
-        self.event = self.setup_owned()
-        self.record()
-        preserved = deepcopy(ledger.read_session_state(**self.coords)["acceptance_criteria"])
-        for request in ("Explain the pwd result already returned; do not run it again.",
-                        "Stop execution. Only explain the existing result."):
-            with self.subTest(request=request):
-                event = self.intake(request)
-                self.assertEqual(self.api.read_response_route(**self.coords)["status"], "stale")
-                candidate = self.candidate(units=())
-                candidate["routing_surface"].update(response_mode="direct-response")
-                self.record(candidate, event=event)
-                route = self.api.read_response_route(**self.coords)
-                result = select_completion_route(
-                    dict(platform="codex", session_id="current", input_event_id=event, response_route=route),
-                    dict(text="The returned path names the working directory.", phase="final"), {})
-                self.assertNotIn("publication_route", result)
-                self.assertEqual(result["evidence_route"], "no_external_check")
-                self.assertEqual(result["selected_criteria"], [])
-                self.assertEqual(ledger.read_session_state(**self.coords)["acceptance_criteria"], preserved)
-
-    def test_readonly_file_lookup_is_normal_execution_with_owner_verification(self):
-        from completion_route import select_completion_route
-        self.event = self.intake("Find the file in the requested directory.")
-        ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
-            "acceptance_criteria": [self.criterion(summary="Identify the requested file from the directory lookup")]})
-        candidate = self.candidate()
-        candidate["routing_surface"].update(reason="authorized directory lookup")
-        self.record(candidate)
-        route = self.api.read_response_route(**self.coords)
-        key = dict(work_unit_id="first", contract_revision=1, criterion_id="AC1")
-        result = select_completion_route(
-            dict(platform="codex", session_id="current", input_event_id=self.event, response_route=route,
-                 verification_plan=dict(checks=[dict(key, check_id="directory-lookup")])),
-            dict(text="", phase="before_tool"), {})
-        self.assertNotIn("publication_route", result)
-        self.assertEqual(result["evidence_route"], "fresh_affected")
-        self.assertEqual(result["unit_decisions"][0]["criteria"][0]["check_ids"], ["directory-lookup"])
-
     def test_shared_transaction_reads_and_rollback_are_atomic(self):
         self.event = self.setup_owned()
         before = ledger.read_session_state(**self.coords)
@@ -776,6 +706,18 @@ class ResponseRouteTests(unittest.TestCase):
                        (json.dumps(state), "codex", "current"))
         with self.assertRaises(self.api.RouteSchemaError):
             self.api.read_response_route(**self.coords)
+
+    def test_a_stored_route_with_a_retired_mode_reads_as_stale_and_a_new_route_cannot_use_it(self):
+        self.event = self.setup_owned()
+        self.record()
+        with ledger.storage_transaction(self.root) as tx:
+            state = ledger.read_session_state(**self.coords, transaction=tx)
+            state["response_route"]["routing_surface"]["response_mode"] = "direct-response"
+            tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
+                       (json.dumps(state), "codex", "current"))
+        self.assertEqual(self.api.read_response_route(**self.coords)["status"], "stale")
+        with self.assertRaises(self.api.RouteSchemaError):
+            self.api.validate_routing_surface({"response_mode": "direct-response", "boundary_contract": "n/a"})
 
 
 class RouteContextUpdateTests(unittest.TestCase):

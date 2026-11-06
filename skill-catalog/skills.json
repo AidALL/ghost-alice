@@ -1,6 +1,6 @@
 {
-  "version": "1.3.0",
-  "generated_at": "2026-11-04T14:51:17Z",
+  "version": "2.0.0",
+  "generated_at": "2026-11-05T16:08:08Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -20,7 +20,6 @@
       "path": "adversarial-verification/SKILL.md",
       "description": "Assigns independent delegates to try to refute a claim and its evidence and returns a verdict with the part that survives, when the user or another skill calls for an adversarial review or fact-check of a numeric, legal, novelty or prior-art claim.",
       "family": "domain",
-      "governance_class": "verification-subskill",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -30,7 +29,6 @@
       "path": "agent-security-scan/SKILL.md",
       "description": "Scans the host's settings, hooks, skills, Model Context Protocol config and credential files for exposed secrets, remote fetches and side-effecting shell commands, after any of them changes or governance rules from another project are adopted, or when the user asks to check them.",
       "family": "domain",
-      "governance_class": "governance-subskill",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -40,7 +38,6 @@
       "path": "boundary-contract/SKILL.md",
       "description": "Writes a boundary contract listing the work's objective, allowed and prohibited paths and actions, acceptance criteria, phase and stop conditions, when task-router requires one.",
       "family": "system",
-      "governance_class": "boundary-gate",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -50,7 +47,6 @@
       "path": "coding-convention/brainstorming/SKILL.md",
       "description": "Resolves open design decisions, including expected behavior, with the user and writes the accepted design before implementation.",
       "family": "coding-convention",
-      "governance_class": "coding-process",
       "compatibility": [
         "Python 3.11+ standard library"
       ],
@@ -66,7 +62,6 @@
       "path": "compact-handoff/SKILL.md",
       "description": "Writes a handoff of the task's objective, scope, evidence and next action when a long conversation, compaction or handover to another session or agent could lose them, and resumes the task from it afterwards.",
       "family": "domain",
-      "governance_class": "governance-subskill",
       "compatibility": [
         "Python 3.11+ standard library",
         "Ghost-ALICE _shared/text_lines.py, installed beside the skill"
@@ -77,7 +72,6 @@
       "path": "coding-convention/dispatching-parallel-agents/SKILL.md",
       "description": "Assigns two or more tasks to delegates that run in parallel and combines their outputs, when no task edits a file another task reads or edits, no two share mutable state or an exclusive resource, and none needs another's output.",
       "family": "coding-convention",
-      "governance_class": "coding-process",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -87,7 +81,6 @@
       "path": "coding-convention/executing-plans/SKILL.md",
       "description": "Executes an accepted plan with the response model doing every task itself, when inline execution is chosen.",
       "family": "coding-convention",
-      "governance_class": "coding-process",
       "compatibility": [
         "Python 3.11+ standard library"
       ],
@@ -107,7 +100,6 @@
       "path": "coding-convention/finishing-a-development-branch/SKILL.md",
       "description": "For a branch ready to integrate, runs its locally runnable CI jobs before any push or merge and carries out the user's choice, asking if undecided: merge locally, open or merge a pull request, keep, or delete the branch.",
       "family": "coding-convention",
-      "governance_class": "completion-gate",
       "compatibility": [
         "Python 3.11+ standard library"
       ],
@@ -127,7 +119,6 @@
       "path": "merge-companion/SKILL.md",
       "description": "Reviews the user's backed-up edits to installed skills and merges each into the new skill version, discards or defers it as the user chooses, before a task changes or reinstalls an installed skill, or when the user asks for that review.",
       "family": "domain",
-      "governance_class": "governance-subskill",
       "compatibility": [
         "Python 3.11+ standard library",
         "Ghost-ALICE _shared folder, installed beside the skill"
@@ -138,7 +129,6 @@
       "path": "necessity-gate/SKILL.md",
       "description": "Approves, rescopes or rejects new work (a task, follow-up, skill, file, tool, audit or verification cycle, or skill edit) when the response model proposes it or the user asks whether to do it.",
       "family": "domain",
-      "governance_class": "governance-subskill",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -148,7 +138,6 @@
       "path": "coding-convention/receiving-code-review/SKILL.md",
       "description": "When code review findings arrive, judges each against the requirements, code and tests before changing code, and fixes the valid ones.",
       "family": "coding-convention",
-      "governance_class": "verification-subskill",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -158,7 +147,6 @@
       "path": "coding-convention/requesting-code-review/SKILL.md",
       "description": "Has a delegate review the code after a major feature is built or before a merge into main, and checks that a pull request's reviews finished and CI passed on its latest commit before merging it.",
       "family": "coding-convention",
-      "governance_class": "verification-subskill",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -168,11 +156,10 @@
       "path": "session-intent-analyzer/SKILL.md",
       "description": "Records the response model's new or changed interpretation of a request as its `interpreted-as` record before the first tool call of work, and reads that record when it can change the objective, constraints, work choice or whether earlier work continues.",
       "family": "system",
-      "governance_class": "intent-state-producer",
       "compatibility": [
         "Python 3.11+ standard library",
         "Ghost-ALICE _shared folder, installed beside the skill",
-        "hook-capable environments plus hookless/manual fallback"
+        "hook-capable environments"
       ],
       "calls_relation": [
         {
@@ -186,7 +173,6 @@
       "path": "skill-evolution/SKILL.md",
       "description": "Recommends skill changes from recorded tool-call patterns and corrections of the response model's behavior, when the user asks for such recommendations or their pending backlog, or authorizes that analysis.",
       "family": "domain",
-      "governance_class": "governance-subskill",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -196,7 +182,6 @@
       "path": "coding-convention/subagent-driven-development/SKILL.md",
       "description": "Executes an accepted plan in this session by giving each task, one at a time, to a new delegate and reviewing the result, when the user chose delegate execution and each task is self-contained.",
       "family": "coding-convention",
-      "governance_class": "coding-process",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -206,7 +191,6 @@
       "path": "coding-convention/systematic-debugging/SKILL.md",
       "description": "Before a fix is proposed for a failure with an unclear cause, tests hypotheses, fixes the supported cause and counts failed fix attempts.",
       "family": "coding-convention",
-      "governance_class": "verification-subskill",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -216,7 +200,6 @@
       "path": "task-router/SKILL.md",
       "description": "Selects the work, skills, acceptance criteria and boundary contract for a request that needs or may need a tool to change, run, analyze or verify something, or to read a remote source.",
       "family": "system",
-      "governance_class": "core-gate",
       "compatibility": [
         "Python 3.11+ standard library"
       ],
@@ -232,7 +215,6 @@
       "path": "coding-convention/test-driven-development/SKILL.md",
       "description": "Writes a failing test before the code that makes it pass, for a feature or bug fix whose expected behavior is known and testable through the production code.",
       "family": "coding-convention",
-      "governance_class": "verification-subskill",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -242,18 +224,15 @@
       "path": "coding-convention/using-coding-convention/SKILL.md",
       "description": "Before each step of development work (file read, command, edit, plan or review), loads the coding-convention skill that fits it, such as writing-plans or test-driven-development.",
       "family": "coding-convention",
-      "governance_class": "governance-subskill",
       "compatibility": [
         "Python 3.11+ standard library"
-      ],
-      "meta": true
+      ]
     },
     {
       "name": "using-git-worktrees",
       "path": "coding-convention/using-git-worktrees/SKILL.md",
       "description": "Reuses or creates a git worktree when an authorized development task must run separately from the current checkout.",
       "family": "coding-convention",
-      "governance_class": "coding-process",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -263,7 +242,6 @@
       "path": "coding-convention/verification-before-completion/SKILL.md",
       "description": "Before a new completion, working-fix, success or verified-status claim or a recommendation the user will act on, checks it against its acceptance criterion and evidence and decides whether evidence must be reread.",
       "family": "coding-convention",
-      "governance_class": "completion-gate",
       "compatibility": [
         "Python 3.11+ standard library"
       ]
@@ -273,7 +251,6 @@
       "path": "coding-convention/writing-plans/SKILL.md",
       "description": "Writes an implementation plan that breaks accepted requirements into tasks a newcomer to the project can carry out, after design decisions are settled and before implementation.",
       "family": "coding-convention",
-      "governance_class": "coding-process",
       "compatibility": [
         "Python 3.11+ standard library"
       ],
@@ -295,7 +272,6 @@
       "path": "coding-convention/writing-skills/SKILL.md",
       "description": "Writes a new skill or changes an existing one in its folder (SKILL.md, references and scripts) and tests it.",
       "family": "coding-convention",
-      "governance_class": "governance-subskill",
       "compatibility": [
         "Python 3.11+ standard library"
       ]

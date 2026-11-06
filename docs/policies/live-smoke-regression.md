@@ -18,7 +18,7 @@ This procedure runs the same small request in real agent runtimes to verify that
 
 ## Purpose
 
-- Run the same input on the claimed installed Claude Code and Codex targets. [Platform adapter compliance](platform-adapter-compliance.md#states) defines the adapter states.
+- Run the same input on the claimed installed Claude Code and Codex targets.
 - Keep the request small and reversible, such as reading the first 10 README lines.
 - Verify runtime gate observability, not the quality of the summary itself.
 - Save experiment notes as a smoke record, but do not store raw prompts, secrets, or full transcripts.

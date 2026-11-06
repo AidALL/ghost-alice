@@ -74,7 +74,7 @@ Public surface validation:
 python3 scripts/validate_public_surfaces.py
 ```
 
-Session gate contract validation checks the repository contract in `skill-catalog/session-gates.json` and the user-facing policy surfaces:
+Session gate contract validation checks the user-facing policy surfaces:
 
 ```bash
 python scripts/check_skill_gate_contract.py

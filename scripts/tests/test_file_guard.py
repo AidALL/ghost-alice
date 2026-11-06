@@ -12,7 +12,7 @@ import unittest
 
 GUARD = Path(__file__).resolve().parents[2] / 'boundary-contract/scripts/file_guard.py'
 EXACT_TIME = 1790549365245769995
-NODE = shutil.which('node') or '/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node'
+NODE = shutil.which('node')
 
 
 def invoke(*args):
@@ -40,6 +40,7 @@ class FileGuardTests(unittest.TestCase):
     def test_exact_time_survives_real_javascript_roundtrip(self):
         protected = self.protected
         token = capture(protected)
+        self.assertIsNotNone(NODE)
         proc = subprocess.run([NODE, '-e', 'process.stdout.write(JSON.stringify(JSON.parse(process.argv[1])))', json.dumps({'token': token})], text=True, capture_output=True, check=True)
         transported = json.loads(proc.stdout)['token']
         result = invoke('check', '--token', transported)

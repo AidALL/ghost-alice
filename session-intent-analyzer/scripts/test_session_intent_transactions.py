@@ -297,12 +297,11 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
             "current_goal": "Repair the diagnosed configuration",
             "latest_scope": {"allowed": ["configuration"], "prohibited": ["publish"], "raw_prompt": "RAW_SCOPE"},
             "decisions": [{"id": "repair", "summary": "Repair authorized", "tool_output": "RAW_TOOL_OUTPUT"}],
-            "consumer_hints": {"raw": ["RAW_HINT"]},
         })
         rows = self.events()
         changes = rows[-1]["semantic_changes"]
         digest = self.ledger.json_digest
-        # History keeps digests of the allowlisted projection; hints are not semantic fields.
+        # History keeps digests of the allowlisted projection.
         self.assertEqual(set(changes), {"current_goal", "latest_scope", "decisions"})
         self.assertEqual(changes["current_goal"], {"before_digest": digest("Inspect configuration"),
                                                    "after_digest": digest("Repair the diagnosed configuration")})
@@ -312,7 +311,7 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
                          digest([{"id": "repair", "summary": "Repair authorized", "superseded": False}]))
         self.assertEqual(rows[-1]["input_event_id"], anchor)
         self.assertEqual(rows[-1]["ledger_revision"], 2)
-        for raw in ("RAW_USER_PROMPT", "RAW_SCOPE", "RAW_TOOL_OUTPUT", "RAW_HINT"):
+        for raw in ("RAW_USER_PROMPT", "RAW_SCOPE", "RAW_TOOL_OUTPUT"):
             self.assertNotIn(raw, json.dumps(self.events()))
 
     def test_failed_event_insert_rolls_back_state_and_retry_does_not_duplicate_feedback(self):

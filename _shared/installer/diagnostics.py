@@ -1,7 +1,6 @@
 """`--status` and `--doctor`: read-only inspection of an installation.
 
-Port of `installer_lib/uninstall.sh:142-267`. Doctor no longer resumes an
-interrupted addon uninstall: it reports the leftover marker, and the next
+Doctor no longer resumes an interrupted addon uninstall: it reports the leftover marker, and the next
 install or uninstall command resumes the removal. Both commands report the
 install record and how the installed targets differ from it; the record does
 not change their result.
@@ -28,7 +27,7 @@ def _mark(symbol: str, color: str) -> str:
 
 
 def print_target_status(label: str, install_path: Path, indent: str = "  ") -> None:
-    """`●` link with its target, `■` copied, `○` not installed (`uninstall.sh:142-155`)."""
+    """`●` link with its target, `■` copied, `○` not installed."""
     path = Path(install_path)
     if path.is_symlink():
         try:
@@ -44,7 +43,7 @@ def print_target_status(label: str, install_path: Path, indent: str = "  ") -> N
 
 def run_install_doctor(ctx: "Context", mode: str, skills_dir: Path) -> int:
     """`install_doctor.py` with the platform's hook config, global rule and every
-    core target; `--strict` in doctor mode (`uninstall.sh:157-218`)."""
+    core target; `--strict` in doctor mode."""
     from installer import selection
 
     skills_dir = Path(skills_dir)
@@ -134,7 +133,7 @@ def report_install_record(ctx: "Context") -> None:
 
 
 def check_status(ctx: "Context") -> int:
-    """Target listing, doctor in status mode, hook status (`uninstall.sh:220-246`)."""
+    """Target listing, doctor in status mode, hook status."""
     from installer import selection
 
     skills_dir = Path(ctx.skills_dir)
@@ -158,7 +157,7 @@ def check_status(ctx: "Context") -> int:
 
 
 def run_doctor(ctx: "Context") -> int:
-    """Leftover `.removing` markers → warning and rc 1; then doctor strict and hook status (`uninstall.sh:248-267`, without the resume)."""
+    """Leftover `.removing` markers → warning and rc 1; then doctor strict and hook status (without the resume)."""
     skills_dir = Path(ctx.skills_dir)
     report.emit(f"Installer doctor ({skills_dir}):")
     report_install_record(ctx)

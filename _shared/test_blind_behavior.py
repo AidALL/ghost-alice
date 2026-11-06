@@ -106,7 +106,6 @@ class BlindBehaviorModulePresenceTest(unittest.TestCase):
         self.assertIsNotNone(load_blind_behavior())
 
 
-@unittest.skipUnless(MODULE_PATH.is_file(), "blind_behavior.py is not implemented")
 class BlindBehaviorContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -853,7 +852,6 @@ class BlindBehaviorContractTest(unittest.TestCase):
                     self.assertIsNone(outcome["conduct_feedback"])
 
 
-@unittest.skipUnless(MODULE_PATH.is_file(), "blind_behavior.py is not implemented")
 class BlindBehaviorCliTest(unittest.TestCase):
     def test_invalid_option_exits_nonzero_and_is_not_advertised(self):
         result = subprocess.run(

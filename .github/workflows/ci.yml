@@ -79,6 +79,3 @@ jobs:
           GHOST_ALICE_INSTALLED_SKILLS_DIR: ${{ runner.temp }}/ghost-alice-ci-home/.agents/skills
           GHOST_ALICE_INSTALLED_CLAUDE_DIR: ${{ runner.temp }}/ghost-alice-ci-home/.claude
         run: python3 scripts/run_installer_compat_tests.py --group scripts-all
-
-      - name: Validate platform adapters
-        run: python3 scripts/validate_platform_adapters.py

@@ -19,8 +19,6 @@ class TestInstallTailPendingMessage(unittest.TestCase):
         self.assertIn("Next time you open Claude/Codex", body)
         self.assertIn("Please review backed-up changes.", body)
         self.assertNotIn("were backed up", body)
-        self.assertNotIn("Non-developer note", body)
-        self.assertNotIn("Developer note", body)
 
     def test_installer_cli_tail_points_to_next_session(self):
         self.assert_install_tail_copy(INSTALLER_CLI.read_text(encoding="utf-8"))

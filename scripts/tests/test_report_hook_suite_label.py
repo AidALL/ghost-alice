@@ -10,12 +10,6 @@ from installer.report import hook_suite_label as suite_label  # noqa: E402
 
 
 class ReportHookSuiteLabelTests(unittest.TestCase):
-    def test_codex_report_does_not_list_an_external_search_reminder(self):
-        self.assertNotIn("web-search-first", suite_label("codex"))
-
-    def test_claude_report_does_not_list_a_hook_it_does_not_install(self):
-        self.assertNotIn("web-search-first", suite_label("claude"))
-
     def test_shared_hooks_are_listed_for_every_platform(self):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):

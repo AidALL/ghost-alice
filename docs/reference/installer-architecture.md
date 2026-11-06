@@ -171,8 +171,6 @@ Gateway errors keep their phase and stable identifier: exit 2 for a failed preco
 
 Claude Code can expose native skill invocation and hook permissions, but those surfaces do not replace a global instruction port for sessions outside the repository. The installer therefore merges the managed block from `platforms/claude/CLAUDE.md` into the Claude config directory. Codex does not expose the same skill surface, so its separate bootstrap and hook config make required gates auditable through `SKILL.md` read records and hook payloads. Both global rule files preserve text outside their managed blocks; a markerless user-owned destination receives a `.ghost-alice-proposed` file instead of an overwrite.
 
-When the hook binding's `destination` mode is `normal`, Core hook transport preserves the firing native cwd as Core context; installation source and project-trust paths do not replace it.
-
 Managed hook commands and native trust entries must agree with the reviewed installed payload. A running host can retain its previously loaded registration. Verify adoption through an actual native callback after the appropriate reload; refer to [hook trust and reload](../getting-started/troubleshooting.md#native-hook-trust-and-reload). The [session gate notes](../policies/session-gate-matrix.md#notes) list installed bytes and native execution as separate claims.
 
 ## State And Safety Model

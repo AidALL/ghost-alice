@@ -35,7 +35,7 @@ def _with_old_adapter_binding(command: str) -> str:
     return command.replace(encoded, install_destination.encode_binding(binding))
 
 
-class AddonHookInstallTest(unittest.TestCase):
+class AddonHookInstallCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
@@ -60,6 +60,8 @@ class AddonHookInstallTest(unittest.TestCase):
         return [h["command"] for e in self._settings().get("hooks", {}).get(event, [])
                 for h in e.get("hooks", []) if marker in h.get("command", "")]
 
+
+class AddonHookInstallTest(AddonHookInstallCase):
     def test_addon_hook_added_after_core_io_trace(self):
         src = _make_addon(self.tmp, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])
         self.assertEqual(install_hooks.install_hook("claude", addon_sources=[str(src)]), "installed")
@@ -201,7 +203,7 @@ class AddonHookInstallTest(unittest.TestCase):
         self.assertIn(user_audit, commands)
 
 
-class AddonHookSecurityTest(AddonHookInstallTest):
+class AddonHookSecurityTest(AddonHookInstallCase):
     def _core_completion_present(self):
         return any("[completion-reminder]" in h.get("command", "")
                    for ev in self._settings().get("hooks", {}).values() if isinstance(ev, list)

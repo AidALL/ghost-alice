@@ -74,7 +74,7 @@ bash install.sh --uninstall
 python3 scripts/validate_public_surfaces.py
 ```
 
-세션 검사 규칙 검증 명령은 저장소의 `skill-catalog/session-gates.json`과 사용자용 정책 안내를 함께 확인합니다.
+세션 검사 규칙 검증 명령은 사용자용 정책 안내를 확인합니다.
 
 ```bash
 python scripts/check_skill_gate_contract.py

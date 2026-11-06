@@ -294,7 +294,8 @@ class ContextGatewayTests(unittest.TestCase):
         self.wire = Path(self.core.fixture.tmp.name) / 'usage.jsonl'
         self.server = context_gateway.make_server('test-scope', self.wire,
             origins={'codex': f'http://127.0.0.1:{self.upstream.server_port}'},
-            selection=lambda request: context_lifecycle.select_request(request, self.core.fixture.root, self.core.home))
+            selectors={'codex': lambda request, _session: context_lifecycle.select_request(
+                request, self.core.fixture.root, self.core.home)})
         for server in (self.upstream, self.server):
             threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(self.stop)
@@ -615,16 +616,16 @@ class ClaudeGatewayTransportTests(unittest.TestCase):
         self.assertTrue(any(row.get('platform') == 'claude' and row.get('native_session_id') == self.session
                             and row['event'] == 'request-selection' for row in records))
 
-    def test_legacy_codex_callback_coexists_without_new_arguments(self):
-        legacy = []
-        def select(request):
-            legacy.append(request)
+    def test_codex_callback_coexists_with_the_claude_callback(self):
+        codex = []
+        def select(request, _session):
+            codex.append(request)
             return SimpleNamespace(state='preserved', request=request, reason='fixture-preserved', observations=())
-        self.start(selection=select, selectors={'claude': self.selector})
+        self.start(selectors={'codex': select, 'claude': self.selector})
         codex_body = b'{ "input": [] }'
         with self.request('/codex/responses', codex_body, session_id=self.session) as reply:
             self.assertEqual(reply.read(), self.answer)
-        self.assertEqual(legacy, [{'input': []}])
+        self.assertEqual(codex, [{'input': []}])
         self.assertEqual(self.seen[-1][1], codex_body)
         self.assertNotIn('x-ghost-context-session', {key.lower() for key in self.seen[-1][2]})
         with self.request(session_id=self.session):
@@ -684,9 +685,8 @@ class ClaudeGatewayTransportTests(unittest.TestCase):
         selection = next(e for e in events if e['event'] == 'request-selection')
         self.assertEqual((selection['state'], selection['reason']), ('unavailable', 'fixture-source-unavailable'))
 
-    def test_dispatcher_rejects_unknown_platform_noncallable_and_overlap(self):
-        for kwargs in (dict(selectors={'unknown': self.selector}), dict(selectors={'claude': 'not-callable'}),
-                       dict(selection=lambda request: request, selectors={'codex': self.selector})):
+    def test_dispatcher_rejects_unknown_platform_and_noncallable(self):
+        for kwargs in (dict(selectors={'unknown': self.selector}), dict(selectors={'claude': 'not-callable'})):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 context_gateway.make_server('fixture-scope', self.log, **kwargs)
 
@@ -704,9 +704,9 @@ class ClaudeGatewayTransportTests(unittest.TestCase):
         config, path = self.configuration()
         with patch.object(context_lifecycle, 'select_request') as select, patch.object(context_gateway, 'make_server') as make:
             context_gateway.main(['--config', str(path)])
-            selectors = make.call_args.kwargs['selectors']
-            self.assertEqual(set(selectors), {'codex', 'claude'})
-            selectors['claude']({'messages': []}, self.session)
+            selectors = make.call_args.kwargs['server_selectors']
+            self.assertEqual(set(make.call_args.kwargs['selectors']), {'codex'})
+            selectors['claude']({'messages': []}, self.session, ())
             select.assert_called_once_with({'messages': []}, config['ledger_root'], config['claude_dir'],
                                            platform='claude', session_id=self.session)
             self.assertEqual(make.call_args.kwargs['origins']['anthropic'], 'https://api.anthropic.com')

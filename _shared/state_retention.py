@@ -59,7 +59,6 @@ class Policy(NamedTuple):
     skip_links: bool = False
     copy_truncate: bool = False    # size-rotation of a file another process holds open in append mode
     marker: str | None = None      # age: the file whose modification time dates its folder
-    pending: str | None = None     # the change that adds the writer applying this entry, until it does
 
 
 _TABLE = (
@@ -71,9 +70,6 @@ _TABLE = (
            target="service.log", limit=5 * MB, copy_truncate=True),
     Policy("gateway-config-backups", "keep-newest", ("{gateway}/backups/*", "{gateway}/backups/*/**"),
            target="backups", limit=5, group=r"^(?P<key>\d{8}T\d{6}\d*Z)-"),
-    Policy("governance-events", "size-rotation",
-           ("{ghost}/governance-events.jsonl", "{ghost}/governance-events.jsonl.1"),
-           target="governance-events.jsonl", limit=5 * MB),
     Policy("install-logs", "keep-newest", ("{record}/install/*.log", "{record}/install/*.events.jsonl"),
            target="install", limit=30, group=r"^(?P<key>\d{4}-\d{2}-\d{2}-\d{6})\.(?:log|events\.jsonl)$",
            files_only=True),
@@ -89,8 +85,6 @@ _TABLE = (
            keep=5_000),
     Policy("publish-rollbacks", "keep-newest", ("{record}/rollbacks/*", "{record}/rollbacks/*/**"),
            target="rollbacks", limit=20, folders_only=True),
-    # The legacy replacement commands name their own rollback folder; no installation default remains.
-    Policy("rollback-root", "keep-newest", (), limit=20, order="mtime"),
     Policy("hook-settings-backups", "keep-newest", ("{claude}/settings.json.bak*", "{codex}/hooks.json.bak*"),
            target="*.json", limit=3, order="mtime", members="{name}.bak*", siblings=True, files_only=True,
            skip_links=True),

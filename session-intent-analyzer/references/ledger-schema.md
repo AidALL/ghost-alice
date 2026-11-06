@@ -18,7 +18,7 @@ The response model requests portable exports with `--export-to <separate-root>` 
 
 ## intent-state.json
 
-The Python ledger writer replaces scalar goal/summary fields with the latest semantic delta. A supplied `constraints`, `non_goals`, `open_questions`, `risk_flags`, `routing_keywords` or `consumer_hints` value replaces that field as a whole, so an empty list or object clears it. Omitted fields remain unchanged. Owned acceptance criteria merge by `(work_unit_id, contract_revision, id)`; ownerless acceptance criteria merge by stable ID. Decisions merge by stable ID and may supersede prior decisions with `supersedes`. The state is not a transcript.
+The Python ledger writer replaces scalar goal/summary fields with the latest semantic delta. A supplied `constraints`, `non_goals`, `open_questions` or `routing_keywords` value replaces that field as a whole, so an empty list clears it. Omitted fields remain unchanged. Owned acceptance criteria merge by `(work_unit_id, contract_revision, id)`; ownerless acceptance criteria merge by stable ID. Decisions merge by stable ID and may supersede prior decisions with `supersedes`. The state is not a transcript.
 
 ```json
 {
@@ -28,7 +28,6 @@ The Python ledger writer replaces scalar goal/summary fields with the latest sem
   "created_at": "2026-05-19T00:00:00Z",
   "updated_at": "2026-05-19T00:00:01Z",
   "current_goal": "current goal",
-  "user_intent_summary": "compressed intent summary",
   "constraints": [],
   "non_goals": [],
   "open_questions": [],
@@ -39,8 +38,6 @@ The Python ledger writer replaces scalar goal/summary fields with the latest sem
     "admitted": true
   }],
   "decisions": [],
-  "risk_flags": [],
-  "consumer_hints": {},
   "conduct_feedback": []
 }
 ```
@@ -67,7 +64,7 @@ The database event table is append-only and available through `--read-events` an
 
 An event accompanying raw input is user-input-observed and contains event_id equal to the observation's input_event_id plus input_digest. A delta that the response model submits without raw input is intent-updated: it references the input_event_id without creating/displacing an input event. API-written events include ledger_revision and unique mutation_id; older imported events without them remain readable. Claude Code intake appends native-input-staged, native-input-resolved, native-input-superseded with its cause, native-input-waiting once per blocking input and cause, and native-input-notice once per session and cause; none stores input text.
 
-The Python ledger writer derives semantic_changes as before/after digests of normalized state for goals, summaries, constraints, non-goals, questions, acceptance criteria, decisions, feedback and scope. Nested allowlists retain only defined keys; scope retains allowed, prohibited, non_goals, constraints and stop_conditions. Accessory fields, hints, raw prompts and tool output are excluded. Callers still must provide compressed summaries: the parser cannot detect a raw quotation disguised as a valid summary. It does not reconstruct historical digest-only dialogue or invent chronology.
+The Python ledger writer derives semantic_changes as before/after digests of normalized state for goals, summaries, constraints, non-goals, questions, acceptance criteria, decisions, feedback and scope. Nested allowlists retain only defined keys; scope retains allowed, prohibited, non_goals, constraints and stop_conditions. Accessory fields, raw prompts and tool output are excluded. Callers still must provide compressed summaries: the parser cannot detect a raw quotation disguised as a valid summary. It does not reconstruct historical digest-only dialogue or invent chronology.
 
 The shared pointer `current-session.json` is advisory:
 
@@ -93,10 +90,7 @@ The session-start hook delivers the session metadata in its fixed form, which id
   "ledger_root": "/absolute/ledger-root",
   "platform": "codex",
   "session_id": "abc",
-  "state_path": "/absolute/ledger-root/codex/abc/intent-state.json",
-  "events_path": "/absolute/ledger-root/codex/abc/intent-events.jsonl",
-  "database_path": "/absolute/ledger-root/ghost-state.sqlite3",
-  "storage_backend": "sqlite"
+  "state_path": "/absolute/ledger-root/codex/abc/intent-state.json"
 }
 ```
 
@@ -107,12 +101,9 @@ Codex intake commits the canonical digest observation directly. Without delivere
   "schema_version": "session-intent-observation-receipt.v1",
   "intake_status": "observed",
   "ledger_root": "/absolute/ledger-root",
-  "storage_backend": "sqlite",
-  "database_path": "/absolute/ledger-root/ghost-state.sqlite3",
   "platform": "codex",
   "session_id": "abc",
   "state_path": "/absolute/ledger-root/codex/abc/intent-state.json",
-  "events_path": "/absolute/ledger-root/codex/abc/intent-events.jsonl",
   "input_event_id": "sha256:..."
 }
 ```
@@ -137,7 +128,7 @@ The .sqlite-authority.json cutover marker is written before the first semantic c
 
 Migration validates and atomically imports normalized JSON state plus ordered events, reconciling a pending audit event once. It preserves source files and records hashes. Reimport returns existing database state; corrupt sources create no partial session. The operator quiesces source writers before migration and uses database writers afterward. Copying JSON over SQLite is not recovery.
 
-`read_session_state(..., recover_audit=False)` and `--read-state` are read-only; they do not reconcile staged input with the transcript. Unimported JSON preserves missing metadata and pending markers instead of manufacturing intake proof. recover_audit=True explicitly imports/reconciles validated JSON. read_session_events returns ordered authority; list_session_states includes database and unimported JSON identities. load_state and consumer_snapshot resolve compatibility paths through the authority API. Callers report API failures rather than returning a false successful empty snapshot.
+`read_session_state(..., recover_audit=False)` and `--read-state` are read-only; they do not reconcile staged input with the transcript. Unimported JSON preserves missing metadata and pending markers instead of manufacturing intake proof. recover_audit=True explicitly imports/reconciles validated JSON. read_session_events returns ordered authority; list_session_states includes database and unimported JSON identities. consumer_snapshot resolves compatibility paths through the authority API. Callers report API failures rather than returning a false successful empty snapshot.
 
 For live backup, the operator uses SQLite backup or a quiescent consistent copy with journal state. Copying only a live main file may omit WAL commits. JSON exports are inspection artifacts, not transactional backups. Stored summaries do not prevent tampering by a process with write access.
 
@@ -175,7 +166,7 @@ Each owned acceptance criterion carries both work_unit_id and contract_revision;
 }
 ```
 
-The routing_surface requires response_mode (`normal | direct-response | clarification-only`) and boundary_contract (`required | n/a`). The optional reason is a compressed nonempty summary of at most 500 characters. Unknown fields/schema/enums, malformed supplied values, duplicate references, inconsistent owners, unadmitted selection and unbound references raise RouteSchemaError with code route-schema. The optional reason does not relax current input, boundary reference, owner, admission or acceptance criterion and source validation.
+The routing_surface requires response_mode (`normal`) and boundary_contract (`required | n/a`). The optional reason is a compressed nonempty summary of at most 500 characters. Unknown fields/schema/enums, malformed supplied values, duplicate references, inconsistent owners, unadmitted selection and unbound references raise RouteSchemaError with code route-schema. The optional reason does not relax current input, boundary reference, owner, admission or acceptance criterion and source validation.
 
 Selection covers only this response and may be empty. Unselected execution units may remain without activating work. An invalid route does not exempt an actual completion or partial completion claim from proof.
 

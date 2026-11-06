@@ -9,7 +9,6 @@ This page is only a pointer for contributors. It should not duplicate the curren
 ## Where To Look
 
 - Public skill availability: [skill-catalog/skills.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/skills.json)
-- Session gate routing: [skill-catalog/session-gates.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/session-gates.json)
 - Skill authoring rules: [Common governance](../../platforms/common-governance.md)
 - Compliance checklist: [official-docs/derived/skill-compliance-checklist.md](https://github.com/AidALL/ghost-alice/blob/main/official-docs/derived/skill-compliance-checklist.md)
 

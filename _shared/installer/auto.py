@@ -1,9 +1,4 @@
-"""Auto mode: one command, every detected platform, each in a child installer process.
-
-Port of `install.sh:271-299` (plain full uninstall fan-out), `:306-446`
-(auto install with the live counter) and `installer_lib/targets.sh:150-228`
-(`count_auto_common_targets`).
-"""
+"""Auto mode: one command, every detected platform, each in a child installer process."""
 
 from __future__ import annotations
 
@@ -22,7 +17,7 @@ PROGRESS_SUFFIX = "common targets synced on all platforms"
 
 
 def platform_target_keys(ctx: "Context", platform: str, skills: list[str]) -> list[str]:
-    """`support:_shared`, `skill:<name>` for core targets and addon targets of one platform (`targets.sh:150-179`)."""
+    """`support:_shared`, `skill:<name>` for core targets and addon targets of one platform."""
     keys: list[str] = []
     if (runner.REPO_ROOT / "_shared").is_dir():
         keys.append("support:_shared")
@@ -37,7 +32,7 @@ def platform_target_keys(ctx: "Context", platform: str, skills: list[str]) -> li
 
 
 def count_common_targets(ctx: "Context", platforms: list[str], skills: list[str]) -> int:
-    """Size of the intersection of every platform's key set (`targets.sh:181-228`)."""
+    """Size of the intersection of every platform's key set."""
     if not platforms:
         return 0
     common: set[str] | None = None
@@ -50,7 +45,7 @@ def count_common_targets(ctx: "Context", platforms: list[str], skills: list[str]
 def child_command(ctx: "Context", platform: str, *, uninstall: bool = False) -> list[str]:
     """`python cli.py --platform P [--skip-source-health] [--adopt-source] [--visibility V] [--verbose]
     [--addon-source S]... [--addon-tag T]... [--addon-skip] ARGS...`; tags are
-    dropped after the parent prepared git sources (`install.sh:315-333, 385`).
+    dropped after the parent prepared git sources.
     `--adopt-source` carries the parent's install source decision, so a child
     never asks again."""
     argv = [sys.executable, str(runner.REPO_ROOT / "_shared" / "installer" / "cli.py"), "--platform", platform]
@@ -157,14 +152,14 @@ def _run_compact(ctx: "Context", detected: list[str]) -> int:
 
 def run_install_children(ctx: "Context", detected: list[str]) -> int:
     """Verbose: sequential children with their output; compact: children writing
-    to the install log with the common-target progress line (`install.sh:306-446`)."""
+    to the install log with the common-target progress line."""
     if not report.compact_output_enabled():
         return _run_verbose(ctx, detected)
     return _run_compact(ctx, detected)
 
 
 def run_uninstall_children(ctx: "Context", detected: list[str]) -> int:
-    """`[uninstall] (i/n) Starting <platform> full cleanup` and one child each (`install.sh:278-299`)."""
+    """`[uninstall] (i/n) Starting <platform> full cleanup` and one child each."""
     rc = 0
     total = len(detected)
     report.info(f"Detected uninstall targets: {' '.join(detected)}")

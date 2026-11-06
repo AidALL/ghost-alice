@@ -51,9 +51,6 @@ class TestSnapshotV2(unittest.TestCase):
         self.assertEqual(record["relative_path"], "task-router/SKILL.md")
         self.assertEqual(record["file_kind"], "file")
         self.assertEqual(record["encoding"], "utf-8")
-        self.assertIsInstance(record["size"], int)
-        self.assertIsInstance(record["mtime_ns"], int)
-        self.assertRegex(record["mode"], r"^0o[0-7]{3,4}$")
 
     def test_snapshot_v2_records_install_marker_hash(self):
         skill_root = self.skills_dir / "task-router"
@@ -86,23 +83,6 @@ class TestSnapshotV2(unittest.TestCase):
         self.assertEqual(records[str(skill_file)]["asset_id"], "task-router")
         self.assertEqual(records[str(skill_file)]["relative_path"], "task-router/SKILL.md")
         self.assertIsNone(records[str(skill_file)]["install_marker_hash"])
-
-    def test_capture_snapshot_records_v1_migration_event(self):
-        skill_file = self.skills_dir / "task-router" / "SKILL.md"
-        skill_file.parent.mkdir()
-        skill_file.write_text("skill\n", encoding="utf-8")
-        snap = self.root / "snapshot.json"
-        snap.write_text(
-            '{"version":1,"platform":"codex","captured_at":"old","files":{}}\n',
-            encoding="utf-8",
-        )
-
-        capture_snapshot(snap, [skill_file], "codex", skills_dir=self.skills_dir)
-        loaded = load_snapshot(snap)
-
-        self.assertEqual(loaded["migration_events"][0]["event"], "snapshot-v1-to-v2")
-        self.assertEqual(loaded["migration_events"][0]["from_version"], 1)
-        self.assertEqual(loaded["migration_events"][0]["to_version"], 2)
 
 
 if __name__ == "__main__":

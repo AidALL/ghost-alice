@@ -1,8 +1,7 @@
 """Installer output: messages, verbosity, the install log, progress lines,
 the installation report and the event file. Installer messages are English-only.
 
-Port of `installer_lib/report.sh`. Wording is fixed by tests
-(`scripts/tests/test_installer_default_auto.py`, `test_install_progress_line_width.py`,
+Wording is fixed by tests (`scripts/tests/test_installer_default_auto.py`, `test_install_progress_line_width.py`,
 `test_report_hook_suite_label.py`, `test_install_tail_pending_message.py`).
 """
 
@@ -38,7 +37,7 @@ _RESET = "\033[0m"
 
 @dataclass
 class OutputState:
-    """What the shell kept in globals: VERBOSE, INSTALL_REPORT_CHILD, log and event files, the sink."""
+    """The output state of this process: verbosity, report-child mode, log and event files, the sink."""
 
     verbose: bool = False
     report_child: bool = False
@@ -58,8 +57,8 @@ def configure(*, verbose: bool = False, report_child: bool = False, log_file: Pa
               home: Path | None = None) -> OutputState:
     """Set the output state for this process from options and environment.
 
-    `log_file`/`event_file` are honored only when `report_child` is true
-    (the rule install.ps1 already follows). `tty` defaults to `sys.stdout.isatty()`
+    `log_file`/`event_file` are honored only when `report_child` is true.
+    `tty` defaults to `sys.stdout.isatty()`
     and `progress_env` to `GHOST_ALICE_INSTALL_PROGRESS` or `auto`.
     """
     global _state
@@ -136,34 +135,34 @@ def error(message: str) -> None:
 
 
 def detail_ok(message: str) -> None:
-    """`ok(message)` only in verbose mode (`report.sh:23-26`)."""
+    """`ok(message)` only in verbose mode."""
     if _state.verbose:
         ok(message)
 
 
 def detail_warn(message: str) -> None:
-    """`warn(message)` only in verbose mode (`report.sh:28-31`)."""
+    """`warn(message)` only in verbose mode."""
     if _state.verbose:
         warn(message)
 
 
 def colors_enabled() -> bool:
-    """ANSI colors only when stdout is a terminal (`install.sh:95-99`)."""
+    """ANSI colors only when stdout is a terminal."""
     return _state.tty
 
 
 def compact_output_enabled() -> bool:
-    """Not verbose (`report.sh:70-72`)."""
+    """Not verbose."""
     return not _state.verbose
 
 
 def report_enabled() -> bool:
-    """Compact and not a report child (`report.sh:74-76`)."""
+    """Compact and not a report child."""
     return compact_output_enabled() and not _state.report_child
 
 
 def live_counter_enabled() -> bool:
-    """Progress animation: progress env not in PROGRESS_OFF_VALUES, not verbose, stdout a TTY (`report.sh:33-39`)."""
+    """Progress animation: progress env not in PROGRESS_OFF_VALUES, not verbose, stdout a TTY."""
     if _state.progress_env in PROGRESS_OFF_VALUES:
         return False
     if _state.verbose:
@@ -173,7 +172,7 @@ def live_counter_enabled() -> bool:
 
 def log_init() -> Path:
     """Create `<home>/.ghost-alice/install/YYYY-MM-DD-HHMMSS.log` once and export
-    `GHOST_ALICE_INSTALL_LOG_FILE`; an already chosen log file is kept (`report.sh:78-89`). Before it opens a new
+    `GHOST_ALICE_INSTALL_LOG_FILE`; an already chosen log file is kept. Before it opens a new
     log, the folder keeps the last 30 runs (`state_retention` install-logs)."""
     if _state.log_file is None:
         root = locations.install_log_root(_state.home)
@@ -186,7 +185,7 @@ def log_init() -> Path:
 
 def run_logged(step: Callable[..., T], *args, **kwargs) -> T:
     """Run `step` with its output appended to the install log in compact mode,
-    directly otherwise (`report.sh:103-110`)."""
+    directly otherwise."""
     if not compact_output_enabled():
         return step(*args, **kwargs)
     log = log_init()
@@ -202,7 +201,7 @@ def run_logged(step: Callable[..., T], *args, **kwargs) -> T:
 
 
 def failure_excerpt(path: Path | None, max_lines: int = 8) -> list[str]:
-    """The last `max_lines` log lines matching FAILURE_EXCERPT_PATTERN, right-stripped (`report.sh:91-101`)."""
+    """The last `max_lines` log lines matching FAILURE_EXCERPT_PATTERN, right-stripped."""
     if path is None or not Path(path).is_file():
         return []
     matched = [line.rstrip() for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
@@ -210,18 +209,14 @@ def failure_excerpt(path: Path | None, max_lines: int = 8) -> list[str]:
     return matched[-max_lines:] if max_lines > 0 else []
 
 
-def join_by(separator: str, items: Sequence[str]) -> str:
-    return separator.join(items)
-
-
 def count_label(count: int, singular: str, plural: str) -> str:
-    """`1 skill target` / `3 skill targets` (`report.sh:41-50`)."""
+    """`1 skill target` / `3 skill targets`."""
     return f"{count} {singular if count == 1 else plural}"
 
 
 def print_skill_sync_summary(skill_targets: int, support_targets: int, installed: int, updated: int,
                              skipped: int, mode_label: str = "") -> None:
-    """`[2/5] Skill sync: ...` info line (`report.sh:52-68`)."""
+    """`[2/5] Skill sync: ...` info line."""
     message = (f"[2/5] Skill sync: {count_label(skill_targets, 'skill target', 'skill targets')}, "
                f"{count_label(support_targets, 'support target', 'support targets')}; "
                f"{installed} installed, {updated} updated, {skipped} skipped")
@@ -231,12 +226,12 @@ def print_skill_sync_summary(skill_targets: int, support_targets: int, installed
 
 
 def hook_suite_label(platform: str = "") -> str:
-    """The core hooks the installer registers on every host (`report.sh:126-129`)."""
+    """The core hooks the installer registers on every host."""
     return HOOK_SUITE_LABEL
 
 
 def skill_sync_line(current: int, updated: int, new: int) -> str:
-    """`  [2/5] Skill sync          [c] [Current], [u] [updated], [n] [newly added]` (`report.sh:131-135`)."""
+    """`  [2/5] Skill sync          [c] [Current], [u] [updated], [n] [newly added]`."""
     return f"  [2/5] Skill sync          [{current}] [Current], [{updated}] [updated], [{new}] [newly added]"
 
 
@@ -245,19 +240,19 @@ def common_skill_sync_line(common_targets: int) -> str:
 
 
 def progress_bar(done: int, total: int, width: int = 20) -> str:
-    """`#` for the filled part, `-` for the rest; clamped (`report.sh:142-156`)."""
+    """`#` for the filled part, `-` for the rest; clamped."""
     filled = done * width // total if total > 0 else 0
     filled = min(max(filled, 0), width)
     return "#" * filled + "-" * (width - filled)
 
 
 def common_target_progress_line(done: int, total: int, suffix: str = "common targets synced") -> str:
-    """`        Common targets      [<bar 30>] [done/total] suffix` (`report.sh:158-163`)."""
+    """`        Common targets      [<bar 30>] [done/total] suffix`."""
     return f"        Common targets      [{progress_bar(done, total, 30)}] [{done}/{total}] {suffix}"
 
 
 def clear_current_line() -> str:
-    """`\\r\\x1b[2K` (`report.sh:165-167`)."""
+    """`\\r\\x1b[2K`."""
     return "\r\x1b[2K"
 
 
@@ -267,7 +262,7 @@ def auto_update_common_target_progress_line(done: int, total: int, suffix: str) 
 
 def auto_animate_common_target_progress_line(from_count: int, to_count: int, total: int, suffix: str,
                                              delay: float = 0.02) -> None:
-    """Draw every count from `from_count + 1` to `to_count`, clamped to `total` (`report.sh:174-185`)."""
+    """Draw every count from `from_count + 1` to `to_count`, clamped to `total`."""
     from_count = max(from_count, 0)
     to_count = max(to_count, from_count)
     to_count = min(to_count, total)
@@ -291,13 +286,13 @@ def _print_header(platform_label: str, skills_line: str, visibility: str) -> Non
 
 def print_start(platform_label: str, total_targets: int, visibility: str = "dynamic",
                 target_unit: str = "targets") -> None:
-    """Report head plus `[1/5] Preflight ok` and the zero sync line (`report.sh:187-199`)."""
+    """Report head plus `[1/5] Preflight ok` and the zero sync line."""
     _print_header(platform_label, f"  Skills: [{total_targets}] {target_unit}", visibility)
     emit(skill_sync_line(0, 0, 0), newline=False)
 
 
 def print_tail(platform_label: str, visibility: str = "dynamic", notes: Sequence[str] = ()) -> None:
-    """`[3/5] Hooks`, `[4/5] Runtime config`, `[5/5] Verification`, Attention, Details (`report.sh:201-211`).
+    """`[3/5] Hooks`, `[4/5] Runtime config`, `[5/5] Verification`, Attention, Details.
 
     Attention carries the `/visibility` hint when Claude Code is among the platforms (Codex has
     no such command), then `notes`; with neither, the section is left out.
@@ -349,7 +344,7 @@ def _append_event(line: str) -> None:
 
 
 def write_event(platform: str, total_targets: int, current: int, updated: int, new: int) -> None:
-    """Append a `platform-result` JSON line to the event file when one is set (`report.sh:263-268`)."""
+    """Append a `platform-result` JSON line to the event file when one is set."""
     _append_event('{"type":"platform-result","platform":"%s","total_targets":%s,"current":%s,"updated":%s,'
                   '"new":%s,"verification":"ok","hooks":"enabled"}' % (platform, total_targets, current, updated, new))
 
@@ -379,7 +374,7 @@ def read_gateway_notes(event_file: Path) -> list[str]:
 
 
 def write_target_event(platform: str, target_id: str, target_kind: str, status: str) -> None:
-    """Append a `target-result` JSON line to the event file when one is set (`report.sh:270-275`)."""
+    """Append a `target-result` JSON line to the event file when one is set."""
     _append_event('{"type":"target-result","platform":"%s","target_id":"%s","target_kind":"%s","status":"%s"}'
                   % (platform, target_id, target_kind, status))
 

@@ -184,6 +184,10 @@ class IntakeOriginQueueTests(unittest.TestCase):
         self.assertEqual([(item['count'], item['error']) for item in ledger.list_native_intake_failures(self.root)],
                          [(len(errors), 'ValueError')])
 
+    def test_an_input_staged_before_the_transcript_file_exists_still_binds(self):
+        self.log.unlink()
+        self.human('First message of a session whose transcript file does not exist yet.')
+
     def test_generation_boundary_reconcile_records_no_wait(self):
         self.stage('Prompt whose native row the host has not appended yet.')
         before = ledger.read_session_state(**self.coords)

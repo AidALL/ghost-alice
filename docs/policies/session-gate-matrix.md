@@ -2,7 +2,7 @@
 
 [🇺🇸 English](./session-gate-matrix.md) | [🇰🇷 한국어](../ko/policies/session-gate-matrix.md)
 
-The machine gate index is [skill-catalog/session-gates.json](../../skill-catalog/session-gates.json). This page maps each condition to its procedure owner. The [architecture](../../architecture.md) defines component responsibilities; the linked skills define the response model's actions.
+This page maps each condition to its procedure owner. The [architecture](../../architecture.md) defines component responsibilities; the linked skills define the response model's actions.
 
 ## Contents
 

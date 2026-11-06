@@ -16,7 +16,7 @@ _ACTIVE = ContextVar('ghost_alice_install_destination', default=None)
 FIELDS = frozenset({'mode','owned_root','platform_dir','skills_dir','ghost_root','ledger_root','project_root','core_source_root','runtime_shared_dir'})
 COORDINATES = {
     'GHOST_ALICE_GHOST_ROOT':'ghost_root', 'GHOST_ALICE_SESSION_INTENT_ROOT':'ledger_root',
-    'GHOST_ALICE_CORE_ROOT':'core_source_root', 'GHOST_ALICE_PROJECT_CWD':'project_root',
+    'GHOST_ALICE_CORE_ROOT':'core_source_root',
     'GHOST_ALICE_PLATFORM_DIR':'platform_dir', 'GHOST_ALICE_SKILLS_DIR':'skills_dir',
 }
 LEGACY_OVERRIDES = ('GHOST_ALICE_HOOK_SHARED_DIR','GHOST_ALICE_RUNTIME_SHARED_DIR')
@@ -103,7 +103,6 @@ def binding_environment(destination, env):
     result['GHOST_ALICE_RUNTIME_SHARED_DIR'] = destination.runtime_shared_dir
     result['GHOST_ALICE_HOOK_SHARED_DIR'] = result['GHOST_ALICE_RUNTIME_SHARED_DIR']
     result['PYTHONDONTWRITEBYTECODE'] = '1'
-    result['GHOST_ALICE_GOVERNANCE_EVENTS'] = str(Path(destination.ghost_root)/'governance-events.jsonl')
     if destination.mode == 'isolated':
         result['GHOST_ALICE_OWNED_ROOT'] = destination.owned_root
         result['GHOST_ALICE_TEMP_ROOT'] = str(Path(destination.owned_root)/'tmp')
@@ -121,7 +120,7 @@ def use(destination, *, reject_legacy=False):
             if os.environ.get(key):
                 raise ValueError(f'isolated destination conflicts with explicit override {key}')
     token = _ACTIVE.set(resolved)
-    keys = set(COORDINATES) | set(LEGACY_OVERRIDES) | {'GHOST_ALICE_OWNED_ROOT','GHOST_ALICE_TEMP_ROOT','PYTHONDONTWRITEBYTECODE','GHOST_ALICE_GOVERNANCE_EVENTS'}
+    keys = set(COORDINATES) | set(LEGACY_OVERRIDES) | {'GHOST_ALICE_OWNED_ROOT','GHOST_ALICE_TEMP_ROOT','PYTHONDONTWRITEBYTECODE'}
     before = {key:os.environ.get(key) for key in keys}
     replacement = binding_environment(resolved,os.environ)
     for key in keys:

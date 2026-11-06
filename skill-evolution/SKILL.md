@@ -21,7 +21,7 @@ The response model reads the session's intent from the recorded current goal, th
 
 1. The response model selects the authorized trace path and window, then uses the host's shell tool to run `python3 <loaded-skill-directory>/scripts/analyze_io_trace.py <authorized-trace-path> --window <selected-window> --json`, adding `--intent-ledger <state_path from the session metadata>` when the exact session is known. Every path is an absolute path established earlier; the `state_path` value selects that session's ledger through the storage API.
 2. For each `instincts` candidate, it assesses the observed behavior or failure and its effect on the applicable contract. Tool frequency alone does not prove a conduct mismatch.
-3. It then considers `quality_summary`, candidate quality and analyzer decision as triage data. Confidence, recency, authorship and artifact preservation do not grant approval.
+3. It then considers `quality_summary`, candidate quality and analyzer decision as triage data. Recency, authorship and artifact preservation do not grant approval.
 4. It assigns every considered candidate a disposition from the closed list `absorb | project-local | session-only | reject | defer`, with an accountable owner ID in lowercase-hyphenated form, a proposed action and a rationale. Watch/reject triage candidates still receive this disposition.
 5. If the disposition explicitly proposes follow-up work, that work needs its own authorization and passes necessity-gate before it runs. A defer/reject disposition grants no action. Even `decision=route-to-systematic-debugging` stays report content here; this report-only workflow does not start implementation.
 6. The response model performs accepted edits only under the separately authorized editing procedure.
@@ -44,19 +44,13 @@ The response model names the skill or document whose rules could prevent the beh
   "instincts": [{
     "id": "sequence:read-edit-bash",
     "trigger": "Read -> Edit -> Bash sequence",
-    "confidence": 0.7,
     "domain": "sequence",
     "scope": "project",
     "evidence": "3 occurrences",
     "quality": "review",
     "decision": "necessity-gate",
     "session_count": 2,
-    "quality_reasons": ["cross-session-evidence"],
-    "intent_context": {
-      "current_goal": "session intent guard implementation",
-      "constraints": ["do not store raw prompts"],
-      "decision_count": 1
-    }
+    "quality_reasons": ["cross-session-evidence"]
   }],
   "dispositions": [{
     "candidate_id": "sequence:read-edit-bash",

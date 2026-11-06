@@ -274,47 +274,6 @@ class SourceHealthGateTest(unittest.TestCase):
             ps1,
         )
 
-    def test_install_sh_omits_legacy_repo_migration(self) -> None:
-        body = installer_bash_source()
-
-        self.assertNotIn("LEGACY_REPO_NAMES", body)
-        self.assertNotIn("REPO_RENAME_MIGRATION_ONLY", body)
-        self.assertNotIn("LOCAL_CHECKOUT_RENAME_ONLY", body)
-        self.assertNotIn("LOCAL_CHECKOUT_RENAMED_TO", body)
-        self.assertNotIn("is_legacy_checkout_basename", body)
-        self.assertNotIn("local_checkout_rename", body)
-        self.assertNotIn("convert_legacy_repo_url", body)
-        self.assertNotIn("update_notice", body)
-        self.assertNotIn("repo_remote_migration", body)
-        self.assertNotIn("--repo-rename-migration-only", body)
-        self.assertNotIn("--rename-local-checkout", body)
-
-    def test_post_merge_hook_does_not_run_brand_migration(self) -> None:
-        hook = (ROOT / "hooks" / "post-merge").read_text(encoding="utf-8")
-
-        self.assertNotIn("--repo-rename-migration-only", hook)
-        self.assertNotIn("LOCAL_CHECKOUT_RENAMED_TO=", hook)
-        self.assertNotIn("repo rename migration", hook)
-        self.assertIn('bash "$HOOK_CHECKOUT/install.sh" --post-merge --merged-checkout "$MERGED_CHECKOUT"', hook)
-
-    def test_install_ps1_omits_legacy_repo_migration(self) -> None:
-        body = INSTALL_PS1.read_text(encoding="utf-8-sig")
-
-        self.assertNotIn("[switch]$RepoRenameMigrationOnly", body)
-        self.assertNotIn("[switch]$RenameLocalCheckout", body)
-        self.assertNotIn("$script:LegacyRepoNames", body)
-        self.assertNotIn("$script:LocalCheckoutRenamedTo", body)
-        self.assertNotIn("function Test-LegacyCheckoutBasename", body)
-        self.assertNotIn("LocalCheckoutRename", body)
-        self.assertNotIn("function Convert-LegacyRepoUrl", body)
-        self.assertNotIn("UpdateNotice", body)
-        self.assertNotIn("RepoMigration", body)
-        self.assertNotIn("-RepoRenameMigrationOnly", body)
-        self.assertNotIn("-RenameLocalCheckout", body)
-        self.assertNotIn("Move-Item -LiteralPath $ScriptDir", body)
-        self.assertIn("Ghost-ALICE", body)
-
-
 class HarnessAuditSourceHealthTest(unittest.TestCase):
     def make_skill(self, repo: Path, name: str, description: str | None = None) -> None:
         skill_dir = repo / name

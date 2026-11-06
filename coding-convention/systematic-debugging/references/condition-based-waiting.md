@@ -76,8 +76,6 @@ async function waitFor<T>(
 }
 ```
 
-See `condition-based-waiting-example.ts` in this reference directory for a complete implementation with domain-specific helpers (`waitForEvent`, `waitForEventCount`, `waitForEventMatch`).
-
 ## Common Mistakes
 
 Read the state inside the polling callback so each attempt observes the current condition. Use a bounded timeout and an error identifying the unmet condition. Choose the polling interval from the operation and environment; the sample's 10ms interval is illustrative, not a universal requirement.
@@ -88,7 +86,7 @@ The sample treats falsy results as “not ready”. For a valid result of zero, 
 
 ```typescript
 // the tool ticks every 100ms; verifying partial output needs 2 ticks
-await waitForEvent(manager, 'TOOL_STARTED'); // first: wait on the condition
+await waitFor(() => events.find(e => e.type === 'TOOL_STARTED'), "TOOL_STARTED event"); // first: wait on the condition
 await new Promise(r => setTimeout(r, 200));   // then: wait for the time-based behavior
 // 200ms = two 100ms-interval ticks, documented and justified
 ```

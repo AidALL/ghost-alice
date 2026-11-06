@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-from reminder_texts import reminder_text
-
 import argparse
 import json
 import os
@@ -69,9 +67,6 @@ except Exception:
     resolve_session_id = None
     session_paths = None
     _LEDGER_IMPORT_BROKEN = True
-
-
-TERMINAL_ROUTING_INSTRUCTION = reminder_text('terminal-routing')
 
 
 LEDGER_UNAVAILABLE_DEGRADE = "The intake hook cannot load the ledger dependency, so Ghost-ALICE cannot record this input. The response model continues the user's work without recording it and tells the user once per session and cause that Ghost-ALICE is not recording inputs. It does not claim intake was recorded and does not substitute another ledger."
@@ -261,9 +256,6 @@ def _session_coordinates(paths: dict[str, Path]) -> dict[str, str]:
         "platform": state_path.parents[1].name,
         "session_id": state_path.parent.name,
         "state_path": str(state_path),
-        "events_path": str(Path(paths["events"]).resolve()),
-        "database_path": str(state_path.parents[2] / "ghost-state.sqlite3"),
-        "storage_backend": "sqlite",
     }
 
 
@@ -369,7 +361,6 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(json.dumps({"continue": True}) + "\n")
         return 0
     routine = False
-    terminal = TERMINAL_ROUTING_INSTRUCTION
     try:
         ledger_available = all(
             callable(func)
@@ -418,12 +409,10 @@ def main(argv: list[str] | None = None) -> int:
                 _clear_degrade_marker(ledger_root, args.platform, payload)
                 message = input_receipt(ledger_root, args.platform, session_id, paths, observation)
                 routine = True
-                terminal = ""
     except Exception:
         _write_degrade_marker(ledger_root, args.platform, payload, "ledger-write-failed")
         message = message + " " + LEDGER_WRITE_FAILED_DEGRADE
 
-    message = terminal + "\n" + message if terminal else message
     sys.stdout.write(render_payload(args.format, message, ledger_root, routine=routine))
     if args.format == "json":
         sys.stdout.write("\n")

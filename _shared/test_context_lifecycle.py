@@ -728,11 +728,12 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
 
     def test_native_replacement_never_uses_records_outside_its_declared_original_prefix(self):
         import claude_context_adapter as adapter
+        from text_lines import committed_records
         self.append_publication_call(); receipt = self.project(); self.complete_publication(receipt)
         self.rows.extend([self.row('assistant', [dict(type='tool_use', id='later-source', name='Other', input={})]),
             self.row('user', [dict(type='tool_result', tool_use_id='later-source', content='later required original')])])
         self.write_rows()
-        native = adapter.native_records(str(self.log.resolve()))
+        native = adapter.native_records_from_rows(committed_records(self.log.resolve().read_bytes()))
         with closing(sqlite3.connect(self.fixture.root / 'ghost-state.sqlite3')) as connection:
             payload = json.loads(connection.execute('SELECT payload_json FROM core_context_dispositions WHERE reference=?',
                 (receipt['reference'],)).fetchone()[0])

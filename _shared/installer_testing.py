@@ -31,7 +31,6 @@ def make_source(root: Path) -> Path:
         (root / "fam" / sub).mkdir(parents=True)
         (root / "fam" / sub / "SKILL.md").write_text(f"---\nname: {sub}\ndescription: {sub} skill\n---\n", encoding="utf-8")
     (root / "skill-catalog").mkdir()
-    (root / "skill-catalog" / "session-gates.json").write_text("{}", encoding="utf-8")
     (root / "skill-catalog" / "skills.json").write_text("{}", encoding="utf-8")
     (root / "platforms" / "claude").mkdir(parents=True)
     (root / "platforms" / "claude" / "CLAUDE.md").write_text("# Ghost-ALICE Claude Bootstrap\n", encoding="utf-8")

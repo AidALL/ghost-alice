@@ -58,34 +58,10 @@
           "description": "Environment or skill dependencies as free-text entries. Omit when absent.",
           "items": { "type": "string" }
         },
-        "allowed_tools": {
-          "type": "string",
-          "description": "Original Claude Code allowed-tools frontmatter field. Omit when absent."
-        },
         "family": {
           "type": "string",
           "description": "Skill family, such as coding-convention, domain, or system. Inferred from directory structure and the system skill list.",
           "enum": ["coding-convention", "domain", "system"]
-        },
-        "governance_class": {
-          "type": "string",
-          "description": "Governance involvement taxonomy for the skill. This does not replace family; it expresses how much domain, verification, and lifecycle skills participate in governance judgment as a separate axis.",
-          "enum": [
-            "boundary-gate",
-            "coding-process",
-            "completion-gate",
-            "core-gate",
-            "domain-orchestration",
-            "governance-subskill",
-            "intent-state-producer",
-            "non-governance-domain",
-            "verification-subskill"
-          ]
-        },
-        "meta": {
-          "type": "boolean",
-          "description": "Whether this is a meta entrypoint. When true, the skill dispatches other skills. Currently applies only to using-coding-convention.",
-          "default": false
         },
         "calls_relation": {
           "type": "array",
@@ -97,30 +73,16 @@
             "properties": {
               "target": {
                 "type": "string",
-                "description": "Called skill name. For type=meta, target may be '*' to mean all catalog skills. For non-meta internal calls, target must refer to another catalog entry; use external_target for skills outside the catalog."
-              },
-              "external_target": {
-                "type": "string",
-                "description": "Dependency outside this catalog, such as Anthropic-provided docx or pdf skills. Use either target or external_target, not both."
+                "description": "Called skill name. For type=meta, target may be '*' to mean all catalog skills. For non-meta internal calls, target must refer to another catalog entry."
               },
               "type": {
                 "type": "string",
                 "description": "Call relationship type. type=meta may use target='*' as a catalog wildcard.",
-                "enum": ["hard", "soft", "union", "meta", "external-hard", "external-union"]
+                "enum": ["hard", "soft", "union", "meta"]
               },
               "union_group": {
                 "type": "string",
                 "description": "Used only when type=union. Entries in the same union_group form an OR relationship selected by the user."
-              },
-              "source_line": {
-                "type": "integer",
-                "description": "Body citation location as a SKILL.md line number. Forensic field for verifiability.",
-                "minimum": 1
-              },
-              "note": {
-                "type": "string",
-                "description": "Relationship note, body citation, or current policy document reference.",
-                "maxLength": 200
               }
             }
           }

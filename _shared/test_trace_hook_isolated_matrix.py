@@ -82,7 +82,6 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                          "CLAUDE_CONFIG_DIR": str(self.home / ".claude"),
                          "CODEX_HOME": str(self.home / ".codex"),
                          "GHOST_ALICE_SESSION_INTENT_ROOT": str(self.ledger_root),
-                         "GHOST_ALICE_GOVERNANCE_EVENTS": str(self.home / "governance-events.jsonl"),
                          "GHOST_ALICE_PYTHON": sys.executable,
                          "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"})
         for name in ("TEMP", "TMP", "TMPDIR"):
@@ -115,8 +114,8 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         transcript = self.home / f"synthetic-{self.counter}.jsonl"
         transcript.write_text("".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in entries), encoding="utf-8")
         payload[transcript_key] = str(transcript)
-        from claude_stop_verification_hook import _assistant_text_this_turn
-        selected = text or _assistant_text_this_turn(entries)
+        from native_transcript import assistant_text_this_turn
+        selected = text or assistant_text_this_turn(entries)
         if selected:
             self.bind_review(platform, selected, env, purpose=purpose)
             payload['session_id'] = 'fixture-stop'
@@ -216,9 +215,12 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         self.assertEqual(result.stdout, "io-trace observed\n" if profile == "minimal" else "")
 
     def observe(self, platform, session):
-        self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
-                                   "--platform", platform, "--session-id", session,
-                                   "--input", "Synthetic isolated admission case."])
+        self.run_process([sys.executable, "-B", "-c",
+                          "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); "
+                          "import session_intent_ledger as ledger; "
+                          "ledger.record_turn(root=Path(sys.argv[2]), platform=sys.argv[3], session_id=sys.argv[4], "
+                          "raw_user_input='Synthetic isolated admission case.', source='cli')",
+                          str(self.ledger.parent), str(self.ledger_root), platform, session])
         state = self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
                                   "--platform", platform, "--session-id", session, "--snapshot"])
         return json.loads(state.stdout)["latest_input_event_id"]

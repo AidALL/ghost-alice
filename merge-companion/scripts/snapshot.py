@@ -15,9 +15,6 @@ Schema:
       "asset_id": "<skill root name>",
       "relative_path": "<path relative to skills_dir>",
       "file_kind": "file",
-      "size": 123,
-      "mtime_ns": 123456789,
-      "mode": "0o644",
       "encoding": "utf-8" | "binary-or-non-utf8",
       "install_marker_path": "<skill root>/.ghost-alice-install.json",
       "install_marker_hash": "<sha256 hex>"
@@ -103,7 +100,6 @@ def _install_marker(path: Path, skills_dir: Optional[Path]) -> Optional[Path]:
 
 
 def _file_record(path: Path, sha256: str, skills_dir: Optional[Path]) -> dict:
-    st = path.stat()
     marker = _install_marker(path, skills_dir)
     return {
         "path": str(path),
@@ -111,9 +107,6 @@ def _file_record(path: Path, sha256: str, skills_dir: Optional[Path]) -> dict:
         "asset_id": _asset_id(path, skills_dir),
         "relative_path": _relative_path(path, skills_dir),
         "file_kind": "file",
-        "size": st.st_size,
-        "mtime_ns": st.st_mtime_ns,
-        "mode": f"0o{st.st_mode & 0o7777:o}",
         "encoding": _encoding_label(path),
         "install_marker_path": str(marker) if marker is not None else None,
         "install_marker_hash": file_hash(marker) if marker is not None else None,
@@ -134,9 +127,6 @@ def capture_snapshot(
         "files": {},
         "file_records": {},
     }
-    migration_events = _migration_events_for_existing_snapshot(snapshot_path, captured_at)
-    if migration_events:
-        record["migration_events"] = migration_events
     for f in files:
         h = file_hash(f)
         if h is not None:
@@ -149,25 +139,6 @@ def capture_snapshot(
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
     snapshot_path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-
-def _migration_events_for_existing_snapshot(snapshot_path: Path, captured_at: str) -> list[dict]:
-    if not snapshot_path.exists():
-        return []
-    try:
-        previous = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
-    previous_version = previous.get("version")
-    if previous_version == 2:
-        return []
-    return [
-        {
-            "event": "snapshot-v1-to-v2",
-            "from_version": previous_version,
-            "to_version": 2,
-            "migrated_at": captured_at,
-        }
-    ]
 
 def load_snapshot(snapshot_path: Path) -> dict:
     if not snapshot_path.exists():
@@ -197,9 +168,6 @@ def snapshot_records(snapshot: dict, skills_dir: Optional[Path] = None) -> dict[
                 "asset_id": raw.get("asset_id") or _asset_id(path, normalized_skills_dir),
                 "relative_path": raw.get("relative_path") or _relative_path(path, normalized_skills_dir),
                 "file_kind": raw.get("file_kind", "file"),
-                "size": raw.get("size"),
-                "mtime_ns": raw.get("mtime_ns"),
-                "mode": raw.get("mode"),
                 "encoding": raw.get("encoding"),
                 "install_marker_path": raw.get("install_marker_path"),
                 "install_marker_hash": raw.get("install_marker_hash"),
@@ -218,9 +186,6 @@ def snapshot_records(snapshot: dict, skills_dir: Optional[Path] = None) -> dict[
                 "asset_id": _asset_id(path, normalized_skills_dir),
                 "relative_path": _relative_path(path, normalized_skills_dir),
                 "file_kind": "file",
-                "size": None,
-                "mtime_ns": None,
-                "mode": None,
                 "encoding": None,
                 "install_marker_path": None,
                 "install_marker_hash": None,

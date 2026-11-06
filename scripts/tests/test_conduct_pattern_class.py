@@ -128,7 +128,8 @@ class CliRejectionTests(unittest.TestCase):
         def run(*args: str) -> subprocess.CompletedProcess:
             return subprocess.run([*base, *args], capture_output=True, text=True, encoding="utf-8", env=env, check=False)
 
-        self.assertEqual(run("--input", "first input").returncode, 0)
+        LEDGER.record_turn(root=Path(temporary.name), platform="codex", session_id="cli-rejection",
+                           raw_user_input="first input", source="cli")
         before = json.loads(run("--read-intent").stdout)
         goal_before = json.loads(run("--read-state", "--pointer", "/current_goal").stdout)['value']
         delta = {"current_goal": "must not be written", "conduct_feedback": [{**_entry("typo"), "source": "infered"}]}

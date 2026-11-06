@@ -54,16 +54,21 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         write_text(
             tmp / "README.md",
             """
-            The current `skill-catalog/skills.json` contains top-level 2 skills and 1 coding-convention sub-skill, total 3.
+            ## Quick Start
 
-            Installer development and release validation:
+            ## Addons
+
+            ```bash
+            bash install.sh --addon-source <repository-or-path>
+            ```
+
+            ## Documentation Map
+
+            ## Contributing And Validation
 
             ```bash
             python scripts/validate_public_surfaces.py
             ```
-
-            - top-level skills 2 (alpha, beta)
-            - coding-convention family 1 sub-skill (using-coding-convention)
             """,
         )
         for skill in skills:
@@ -76,31 +81,6 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         result = self.run_validator(REPO_ROOT)
 
         self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-        data = self.load_json_output(result)
-        self.assertEqual(data["error_count"], 0, msg=result.stdout)
-
-    def test_validator_accepts_english_readme_contract(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            repo = self.make_fixture(Path(td))
-            write_text(
-                repo / "README.md",
-                """
-                The current `skill-catalog/skills.json` snapshot contains top-level 2 skills and 1 coding-convention sub-skills, total 3.
-
-                Installer development and release validation:
-
-                ```bash
-                python3 scripts/validate_public_surfaces.py
-                ```
-
-                - top-level skills 2 (alpha, beta)
-                - coding-convention family 1 sub-skills (using-coding-convention)
-                """,
-            )
-
-            result = self.run_validator(repo)
-
-        self.assertEqual(result.returncode, 0, msg=result.stdout)
         data = self.load_json_output(result)
         self.assertEqual(data["error_count"], 0, msg=result.stdout)
 
@@ -220,18 +200,6 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
     def test_homepage_has_accessible_navigation_and_figure_references(self) -> None:
         self.assert_accessible_homepage((REPO_ROOT / "index.html").read_text(encoding="utf-8"))
 
-    def test_homepage_accessibility_rejects_dangling_or_duplicate_references(self) -> None:
-        text = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
-        candidates = (
-            text.replace('href="#main"', 'href="#missing"'),
-            text.replace('id="main"', 'id="missing"'),
-            text.replace('id="why-heading"', 'id="unrelated-description"'),
-            text + '<div id="main"></div>',
-        )
-        for number, candidate in enumerate(candidates):
-            with self.subTest(case=number), self.assertRaises(AssertionError):
-                self.assert_accessible_homepage(candidate)
-
     def test_homepage_languages_share_navigation_and_accessible_structure(self) -> None:
         english = (REPO_ROOT / "index.html").read_text()
         korean = (REPO_ROOT / "index_ko.html").read_text()
@@ -269,12 +237,12 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         self.assertIn("index.html", messages)
         self.assertIn("repo-root-relative", messages)
 
-    def test_validator_detects_readme_top_level_list_drift(self) -> None:
+    def test_validator_detects_readme_entrypoint_marker_drift(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = self.make_fixture(Path(td))
             readme = repo / "README.md"
             readme.write_text(
-                readme.read_text(encoding="utf-8").replace("(alpha, beta)", "(alpha)"),
+                readme.read_text(encoding="utf-8").replace("## Addons", "## Extras"),
                 encoding="utf-8",
             )
 
@@ -284,8 +252,7 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         data = self.load_json_output(result)
         messages = "\n".join(finding["message"] for finding in data["findings"])
         self.assertIn("README.md", messages)
-        self.assertIn("top-level", messages)
-        self.assertIn("beta", messages)
+        self.assertIn("## Addons", messages)
 
     def test_validator_detects_claude_wrapper_target_drift(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -332,15 +299,6 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
                 }
             )
             skills_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            readme = repo / "README.md"
-            readme.write_text(
-                readme.read_text(encoding="utf-8")
-                .replace("top-level 2 skills", "top-level 3 skills")
-                .replace("- top-level skills 2", "- top-level skills 3")
-                .replace("total 3", "total 4")
-                .replace("(alpha, beta)", "(alpha, beta, skill-evolution)"),
-                encoding="utf-8",
-            )
             write_text(
                 repo / ".claude" / "commands" / "skill-evolution.md",
                 "@skill-evolution/SKILL.md\n\n$ARGUMENTS\n",

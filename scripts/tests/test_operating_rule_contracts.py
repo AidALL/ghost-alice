@@ -9,7 +9,7 @@ from global_rule_blocks import platform_contract_text
 
 
 class OperatingRuleContractTest(unittest.TestCase):
-    def test_terminal_routes_preserve_authority_and_avoid_governance_work(self):
+    def test_direct_answers_and_clarifications_preserve_authority_and_avoid_governance_work(self):
         common = (ROOT / 'platforms/common-governance.md').read_text()
         intent = common.split('## Session Intent\n', 1)[1].split('\n## ', 1)[0]
         selection = common.split('## Work Selection\n', 1)[1].split('\n## ', 1)[0]

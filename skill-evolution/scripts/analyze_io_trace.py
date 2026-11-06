@@ -24,15 +24,12 @@ DEFAULT_MIN_COUNT = 2
 EMPTY_INTENT_CONTEXT: dict[str, Any] = {
     "schema_version": "session-intent-ledger.v1",
     "current_goal": "",
-    "user_intent_summary": "",
     "constraints": [],
     "non_goals": [],
     "open_questions": [],
     "decision_count": 0,
     "active_decisions": [],
     "latest_scope": {},
-    "risk_flags": [],
-    "consumer_hints": {},
     "conduct_feedback": [],
 }
 SEQUENCE_SIZE = 3
@@ -191,18 +188,6 @@ def most_common_scope(events: list[Event]) -> str:
     return Counter(scopes).most_common(1)[0][0]
 
 
-def confidence(count: int, total: int) -> float:
-    if total <= 0:
-        return 0.0
-    return round(min(0.95, 0.45 + (count / total) * 0.5), 2)
-
-
-def sequence_confidence(count: int, total: int) -> float:
-    if total <= 0:
-        return 0.0
-    return round(min(0.9, 0.55 + (count / total) * 0.45), 2)
-
-
 def quality_metadata(events: list[Event], count: int) -> dict[str, Any]:
     session_count = len({event.session for event in events if event.session})
     reasons: list[str] = []
@@ -265,7 +250,6 @@ def analyze_events(events: list[Event], window: int, min_count: int) -> dict[str
         candidate = {
             "id": f"tool:{tool_id}",
             "trigger": f"{display} used frequently",
-            "confidence": confidence(count, total),
             "domain": "tool-usage",
             "scope": most_common_scope(tool_scopes[tool_id]),
             "evidence": f"{count} occurrences",
@@ -280,7 +264,6 @@ def analyze_events(events: list[Event], window: int, min_count: int) -> dict[str
         candidate = {
             "id": f"workflow:{tool_id}:{domain}",
             "trigger": f"{tool_id} in {domain}",
-            "confidence": confidence(count, total),
             "domain": "workflow",
             "scope": scope,
             "evidence": f"{count} occurrences",
@@ -288,7 +271,7 @@ def analyze_events(events: list[Event], window: int, min_count: int) -> dict[str
         candidate.update(quality_metadata(workflow_events[workflow_key], count))
         instincts.append(candidate)
 
-    instincts.extend(sequence_instincts(events, total, min_count))
+    instincts.extend(sequence_instincts(events, min_count))
     instincts.sort(key=lambda item: (item["domain"], item["id"], item["scope"]))
     quality_summary = {"review": 0, "watch": 0, "reject": 0}
     for item in instincts:
@@ -331,15 +314,12 @@ def load_intent_context(path: Path | None) -> dict[str, Any] | None:
     context.update({
         "schema_version": value.get("schema_version", EMPTY_INTENT_CONTEXT["schema_version"]),
         "current_goal": value.get("current_goal", ""),
-        "user_intent_summary": value.get("user_intent_summary", ""),
         "constraints": list(value.get("constraints", [])),
         "non_goals": list(value.get("non_goals", [])),
         "open_questions": list(value.get("open_questions", [])),
         "decision_count": len(active_decisions),
         "active_decisions": deepcopy(active_decisions),
         "latest_scope": deepcopy(latest_scope) if isinstance(latest_scope, dict) else {},
-        "risk_flags": list(value.get("risk_flags", [])),
-        "consumer_hints": dict(value.get("consumer_hints", {})),
         "conduct_feedback": [item for item in value.get("conduct_feedback", []) if isinstance(item, dict)],
     })
     return context
@@ -351,7 +331,6 @@ def attach_intent_context(report: dict[str, Any], context: dict[str, Any] | None
     report["intent_context"] = context
     for item in report.get("instincts", []):
         if isinstance(item, dict):
-            item["intent_context"] = context
             if context.get("current_goal"):
                 reasons = item.setdefault("quality_reasons", [])
                 if isinstance(reasons, list) and "session-intent-context" not in reasons:
@@ -359,7 +338,7 @@ def attach_intent_context(report: dict[str, Any], context: dict[str, Any] | None
     return report
 
 
-def sequence_instincts(events: list[Event], total: int, min_count: int) -> list[dict[str, Any]]:
+def sequence_instincts(events: list[Event], min_count: int) -> list[dict[str, Any]]:
     by_session: dict[str, list[Event]] = defaultdict(list)
     for event in events:
         by_session[event.session].append(event)
@@ -385,7 +364,6 @@ def sequence_instincts(events: list[Event], total: int, min_count: int) -> list[
         candidate = {
             "id": "sequence:" + "-".join(key),
             "trigger": " -> ".join(labels) + " sequence",
-            "confidence": sequence_confidence(count, total),
             "domain": "sequence",
             "scope": most_common_scope(sequence_events[key]),
             "evidence": f"{count} occurrences",
@@ -423,7 +401,6 @@ def conduct_feedback_instincts(context: dict[str, Any] | None) -> list[dict[str,
         instincts.append({
             "id": f"conduct:{entry_id}",
             "trigger": rule or pattern or entry_id,
-            "confidence": 0.9 if source == "user-said" else 0.6,
             "domain": "conduct",
             "scope": "agent",
             "evidence": pattern or "user conduct correction",
@@ -467,7 +444,7 @@ def render_text(report: dict[str, Any]) -> str:
     ]
     for item in report["instincts"]:
         lines.append(
-            f"- {item['id']} | {item['quality']} | {item['scope']} | {item['confidence']} | {item['evidence']}"
+            f"- {item['id']} | {item['quality']} | {item['scope']} | {item['evidence']}"
         )
     return "\n".join(lines)
 

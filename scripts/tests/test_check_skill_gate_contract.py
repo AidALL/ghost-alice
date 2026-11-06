@@ -1,5 +1,4 @@
 import json
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -10,84 +9,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from check_skill_gate_contract import REQUIRED_PATTERNS, run_contract_checks  # noqa: E402
-
-
-class GateCheckerImportIsolationTests(unittest.TestCase):
-    def test_checker_import_preserves_script_test_discovery(self):
-        probe = """import sys, unittest
-from pathlib import Path
-root = Path.cwd()
-sys.path.insert(0, str(root / 'scripts/tests'))
-sys.path.insert(0, str(root / 'scripts'))
-import check_skill_gate_contract
-suite = unittest.TestLoader().discover('scripts/tests', 'test_completion_check_validator.py')
-assert suite.countTestCases() > 0
-assert Path(sys.modules['test_completion_check_validator'].__file__).parent == root / 'scripts/tests'
-"""
-        result = subprocess.run([sys.executable, '-c', probe], cwd=REPO_ROOT,
-                                text=True, capture_output=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-
-CONTRACT = {
-    "version": 1,
-    "always_first": ["session-intent-analyzer"],
-    "agent_first_after_intake": ["task-router"],
-    "user_input_graph": [
-        "merge-companion-precheck",
-        "session-intent-analyzer",
-        "skill-evolution:report-only-terminal-branch",
-        "task-router",
-        "tool-checkpoint",
-    ],
-    "intent_consumers": {
-        "session-intent-analyzer": ["skill-evolution", "task-router"],
-        "skill-evolution": ["report-only-terminal-branch"],
-    },
-    "conditional_gates": [
-        {
-            "id": "session-intent-analyzer",
-            "trigger": "every user input",
-            "position": "after-merge-companion-precheck-before-task-router-and-report-only-skill-evolution",
-        },
-        {
-            "id": "boundary-contract",
-            "trigger": "task-router boundary-contract: required",
-            "position": "after-task-router-before-tool-call",
-        }
-    ],
-    "domain_routes": {
-        "development": ["using-coding-convention"],
-        "bugfix": ["systematic-debugging", "test-driven-development"],
-    },
-    "before_completion": ["verification-before-completion"],
-    "before_commit_push": ["finishing-a-development-branch"],
-    "on_task_definition": ["necessity-gate"],
-    "routing_surface": {
-        "response_mode": ["normal", "clarification-only", "direct-response"],
-        "boundary_contract": ["required", "n/a"],
-    },
-    "terminal_routes": {
-        "clarification-only": {
-            "owner": "session-intent",
-            "manual_pending_merge": "defer-until-next-actionable-turn",
-            "downstream_work": "none",
-            "user_surface": "minimum-decisive-information-only",
-            "strict_logging": "active",
-        },
-        "direct-response": {
-            "owner": "task-router",
-            "manual_pending_merge": "defer-until-next-actionable-turn",
-            "downstream_work": "none",
-            "user_surface": "resolved-content-only",
-            "strict_logging": "active",
-            "ambient_context": "not-user-referent-or-inspection-authority",
-            "premise_handling": "explain-before-current-state-validation",
-            "evidence_planning": "after-route-classification",
-            "local_diagnosis_authority": "explicit-request-or-established-referent",
-        },
-    },
-}
 
 
 class SkillGateContractTest(unittest.TestCase):
@@ -110,98 +31,6 @@ class SkillGateContractTest(unittest.TestCase):
                 path.write_text(path.read_text().replace(obligation, "REMOVED"))
                 self.assertTrue(any(obligation in issue.message for issue in run_contract_checks(root)))
 
-    def test_missing_clarification_only_machine_route_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            contract_path = root / "skill-catalog" / "session-gates.json"
-            contract = json.loads(contract_path.read_text(encoding="utf-8"))
-            contract.pop("terminal_routes")
-            contract_path.write_text(json.dumps(contract), encoding="utf-8")
-
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("clarification-only terminal route", messages)
-
-    def test_routing_surface_field_outside_the_route_schema_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            contract_path = root / "skill-catalog" / "session-gates.json"
-            contract = json.loads(contract_path.read_text(encoding="utf-8"))
-            contract["routing_surface"]["next_required"] = ["user-input"]
-            contract_path.write_text(json.dumps(contract), encoding="utf-8")
-
-            messages = "\n".join(issue.message for issue in run_contract_checks(root))
-            self.assertIn("routing_surface.next_required is not a response-route control", messages)
-
-    def test_catalog_routing_surface_matches_the_route_schema(self) -> None:
-        sys.path.insert(0, str(REPO_ROOT / "_shared"))
-        import response_route
-
-        catalog = json.loads((REPO_ROOT / "skill-catalog" / "session-gates.json").read_text(encoding="utf-8"))
-        surface = catalog["routing_surface"]
-        self.assertEqual(set(surface), response_route.ROUTING_CONTROLS)
-        for field, values in surface.items():
-            self.assertEqual(set(values), response_route.ROUTING_ENUMS[field])
-
-    def test_missing_direct_response_machine_route_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            contract_path = root / "skill-catalog" / "session-gates.json"
-            contract = json.loads(contract_path.read_text(encoding="utf-8"))
-            contract["terminal_routes"].pop("direct-response")
-            contract_path.write_text(json.dumps(contract), encoding="utf-8")
-
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("direct-response terminal route", messages)
-
-    def test_direct_response_machine_route_rejects_ambient_context_as_authority(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            contract_path = root / "skill-catalog" / "session-gates.json"
-            contract = json.loads(contract_path.read_text(encoding="utf-8"))
-            contract["terminal_routes"]["direct-response"].pop("ambient_context")
-            contract_path.write_text(json.dumps(contract), encoding="utf-8")
-
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("ambient_context=not-user-referent-or-inspection-authority", messages)
-
-    def test_direct_response_machine_route_explains_before_validating_current_state(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            contract_path = root / "skill-catalog" / "session-gates.json"
-            contract = json.loads(contract_path.read_text(encoding="utf-8"))
-            contract["terminal_routes"]["direct-response"].pop("premise_handling")
-            contract_path.write_text(json.dumps(contract), encoding="utf-8")
-
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("premise_handling=explain-before-current-state-validation", messages)
-
-    def test_direct_response_machine_route_classifies_before_evidence_planning(self) -> None:
-        expected_messages = {
-            "evidence_planning": "evidence_planning=after-route-classification",
-            "local_diagnosis_authority": "local_diagnosis_authority=explicit-request-or-established-referent",
-        }
-        for field, expected_message in expected_messages.items():
-            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmpdir:
-                root = Path(tmpdir)
-                self._write_valid_fixture(root)
-                contract_path = root / "skill-catalog" / "session-gates.json"
-                contract = json.loads(contract_path.read_text(encoding="utf-8"))
-                contract["terminal_routes"]["direct-response"].pop(field)
-                contract_path.write_text(json.dumps(contract), encoding="utf-8")
-
-                issues = run_contract_checks(root)
-                messages = "\n".join(issue.message for issue in issues)
-                self.assertIn(expected_message, messages)
-
     def _extract_between(self, text: str, start_marker: str, end_marker: str) -> str:
         start = text.find(start_marker)
         self.assertGreaterEqual(start, 0, f"missing start marker: {start_marker}")
@@ -210,22 +39,12 @@ class SkillGateContractTest(unittest.TestCase):
         self.assertGreaterEqual(end, 0, f"missing end marker after {start_marker}: {end_marker}")
         return text[content_start:end]
 
-    def _assert_fragment_tables(self, sections, required_by_section, forbidden_fragments) -> None:
-        for section_name, fragments in required_by_section.items():
-            for fragment in fragments:
-                with self.subTest(section=section_name, required=fragment):
-                    self.assertIn(fragment, sections[section_name])
-        for section_name, fragment in forbidden_fragments:
-            with self.subTest(section=section_name, forbidden=fragment):
-                self.assertNotIn(fragment, sections[section_name])
-
     def _write_file(self, root: Path, rel_path: str, content: str) -> None:
         path = root / rel_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
 
     def _write_valid_fixture(self, root: Path) -> None:
-        self._write_file(root, "skill-catalog/session-gates.json", json.dumps(CONTRACT))
         # Static fixtures provide wiring tokens; real-repository tests check owners.
         for relative, identifiers in REQUIRED_PATTERNS.items():
             self._write_file(root, relative, "\n".join(identifiers) + "\n")
@@ -538,29 +357,6 @@ class SkillGateContractTest(unittest.TestCase):
             path.write_text(path.read_text().replace("skill-evolution", "REMOVED"))
             self.assertTrue(any("skill-evolution" in issue.message for issue in run_contract_checks(root)))
 
-    def test_runtime_hook_graph_requires_hook_and_manual_pending_merge_boundaries(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            path = root / "skill-catalog/session-gates.json"
-            contract = json.loads(path.read_text())
-            contract["user_input_graph"].remove("merge-companion-precheck")
-            path.write_text(json.dumps(contract))
-            self.assertTrue(any("merge-companion-precheck" in issue.message for issue in run_contract_checks(root)))
-
-    def test_retired_gate_state_block_is_not_a_contract(self) -> None:
-        # The printed [gate-state] block is retired, so no file is checked for its order.
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            agents = root / "AGENTS.md"
-            agents.write_text(
-                agents.read_text() + "\n[gate-state]\n- task-router: done\n- session-intent-analyzer: done\n"
-            )
-
-            messages = "\n".join(issue.message for issue in run_contract_checks(root))
-            self.assertNotIn("gate-state", messages)
-
     def test_instruction_reuse_names_no_retired_printed_fields(self) -> None:
         # The printed skill-call, skills-loaded and skills-reused fields are retired.
         text = (
@@ -569,79 +365,6 @@ class SkillGateContractTest(unittest.TestCase):
         section = text.split("## Instruction Body Reuse", 1)[1].split("\n## ", 1)[0]
         for field in ("skill-call", "skills-loaded", "skills-reused"):
             self.assertNotIn(field, section)
-
-    def test_nonterminal_evolution_is_rejected(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            path = root / "skill-catalog/session-gates.json"
-            contract = json.loads(path.read_text())
-            contract['intent_consumers']['skill-evolution'].append('task-router')
-            path.write_text(json.dumps(contract))
-            messages = '\n'.join(issue.message for issue in run_contract_checks(root))
-            self.assertIn('report-only-terminal-branch', messages)
-
-    def test_direct_intake_contract_rejects_a_renamed_intermediate_stage(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            path = root / "skill-catalog/session-gates.json"
-            contract = json.loads(path.read_text())
-            contract['user_input_graph'].insert(2, 'input-policy-review')
-            contract['intent_consumers']['session-intent-analyzer'].append('input-policy-review')
-            path.write_text(json.dumps(contract))
-            messages = '\n'.join(issue.message for issue in run_contract_checks(root))
-            self.assertIn('direct intake ownership', messages)
-
-    def test_direct_intake_entrypoint_fields_reject_intermediates_duplicates_and_types(self):
-        cases = (
-            ('always_first', ['policy-review', 'session-intent-analyzer']),
-            ('always_first', ['session-intent-analyzer', 'policy-review']),
-            ('always_first', ['session-intent-analyzer', 'session-intent-analyzer']),
-            ('always_first', 'session-intent-analyzer'),
-            ('always_first', None),
-            ('agent_first_after_intake', ['review-input', 'task-router']),
-            ('agent_first_after_intake', ['task-router', 'review-input']),
-            ('agent_first_after_intake', ['task-router', 'task-router']),
-            ('agent_first_after_intake', 'task-router'),
-            ('agent_first_after_intake', {'task-router': True}),
-            ('agent_first_after_intake', None),
-        )
-        for field, value in cases:
-            with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as tmpdir:
-                root = Path(tmpdir)
-                self._write_valid_fixture(root)
-                path = root / 'skill-catalog/session-gates.json'
-                contract = json.loads(path.read_text())
-                contract[field] = value
-                path.write_text(json.dumps(contract))
-                messages = '\n'.join(issue.message for issue in run_contract_checks(root))
-                self.assertIn(f'{field} direct intake ownership', messages)
-
-    def test_direct_intake_graph_fields_reject_wrong_shapes_and_order(self):
-        graph = CONTRACT['user_input_graph']
-        cases = (
-            ('user_input_graph', graph[:3] + ['task-router', 'task-router', 'tool-checkpoint']),
-            ('user_input_graph', [graph[0], 'task-router', graph[2], 'session-intent-analyzer', graph[4]]),
-            ('user_input_graph', None),
-            ('user_input_graph', 'task-router'),
-            ('user_input_graph', graph[:3] + [['task-router'], graph[4]]),
-            ('intent_consumers', None),
-            ('intent_consumers', {**CONTRACT['intent_consumers'], 'review-input': ['task-router']}),
-            ('intent_consumers', {'session-intent-analyzer': ['task-router', 'task-router'], 'skill-evolution': ['report-only-terminal-branch']}),
-            ('intent_consumers', {'session-intent-analyzer': {'task-router': True, 'skill-evolution': True}, 'skill-evolution': ['report-only-terminal-branch']}),
-            ('intent_consumers', {'session-intent-analyzer': None, 'skill-evolution': ['report-only-terminal-branch']}),
-        )
-        for field, value in cases:
-            with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as tmpdir:
-                root = Path(tmpdir)
-                self._write_valid_fixture(root)
-                path = root / 'skill-catalog/session-gates.json'
-                contract = json.loads(path.read_text())
-                contract[field] = value
-                path.write_text(json.dumps(contract))
-                errors = [issue for issue in run_contract_checks(root) if issue.severity == 'ERROR']
-                self.assertTrue(errors, (field, value))
 
     def test_claude_bootstrap_rejects_missing_common_owner(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -760,34 +483,6 @@ class SkillGateContractTest(unittest.TestCase):
             self.assertIn("task-router/SKILL.md", text)
             self.assertIn("boundary-contract/SKILL.md", text)
             self.assertIn("verification-before-completion", text)
-
-    def test_session_gate_strings_are_required_from_the_installer_package_not_the_shells(self) -> None:
-        # The thin shells run the Python installer; `_shared/installer/` owns the gate contract and hook suite strings.
-        self.assertNotIn("install.sh", REQUIRED_PATTERNS)
-        self.assertNotIn("install.ps1", REQUIRED_PATTERNS)
-        self.assertIn("session-gates.json", REQUIRED_PATTERNS["_shared/installer/source.py"])
-        self.assertNotIn("installer_lib", (REPO_ROOT / "scripts" / "check_skill_gate_contract.py").read_text(encoding="utf-8"))
-
-    def test_real_repo_contract_surfaces_do_not_reintroduce_tool_shape_policy(self) -> None:
-        old_phrase = "deterministic " + "inspection"
-        old_phrase_title = "Deterministic " + "inspection"
-        scanned_paths = [
-            "docs/policies/session-gate-matrix.md",
-            "task-router/SKILL.md",
-            "install.sh",
-            "install.ps1",
-            "scripts/tests/test_global_rule_blocks.py",
-            "_shared/test_install_hooks.py",
-        ]
-
-        hits: list[str] = []
-        for relative_path in scanned_paths:
-            text = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
-            if old_phrase in text or old_phrase_title in text:
-                hits.append(relative_path)
-
-        self.assertEqual(hits, [], f"old tool-shape policy phrase remains in: {hits}")
-
 
 if __name__ == "__main__":
     unittest.main()

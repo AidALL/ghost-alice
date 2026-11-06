@@ -1,6 +1,5 @@
 """The installer command line: options, the command table, dispatch and the install step order.
 
-Port of `install.sh:29-37, 49-72, 115-269, 448-562` and `installer_lib/install.sh:880-1139`.
 `COMMAND_LINE` is the one table of commands: `parse_options`, `find_command`, `dispatch`,
 `run_command` and `print_help` read it. `run_install` holds the install step order that
 `docs/reference/installer-architecture.md` draws.
@@ -35,7 +34,7 @@ VISIBILITY_FLAGS = ("--visibility", "--agent-visibility")
 
 @dataclass
 class Options:
-    """What `parse_options` reads from argv (`install.sh:49-72, 115-201`)."""
+    """What `parse_options` reads from argv."""
 
     platform: str = "claude"
     platform_explicit: bool = False
@@ -56,7 +55,7 @@ class Options:
 
 @dataclass
 class Context:
-    """What the shell kept in globals for one command. The checkout the installer
+    """The state of one command. The checkout the installer
     runs from is `runner.REPO_ROOT`, never a field here."""
 
     options: Options
@@ -185,7 +184,7 @@ def parse_options(argv: list[str]) -> Options:
     `--adopt-source`, `--merged-checkout`, `--addon-source`, `--addon-tag`, `--addon-skip`, `--verbose|-v`,
     `--visibility|--agent-visibility` and the table's flag commands
     (`Command.flag`); everything else stays in `args` in order. Missing or
-    invalid values print the shell's error and exit 1 (`install.sh:115-201`)."""
+    invalid values print an error and exit 1."""
     options = Options()
     flag_fields = {name: command.flag for command in COMMANDS if command.flag for name in command.names}
     tokens = list(argv)
@@ -250,7 +249,7 @@ def parse_options(argv: list[str]) -> Options:
 
 
 def reject_isolated_destination(argv: list[str]) -> None:
-    """`--destination-file`, `--destination-file=...` or `--isolated` anywhere → ISOLATED_REJECTION, exit 2 (`install.sh:29-37`)."""
+    """`--destination-file`, `--destination-file=...` or `--isolated` anywhere → ISOLATED_REJECTION, exit 2."""
     for arg in argv:
         if arg in ("--destination-file", "--isolated") or arg.startswith("--destination-file="):
             print(f"[ERROR] {ISOLATED_REJECTION}", file=sys.stderr)
@@ -258,7 +257,7 @@ def reject_isolated_destination(argv: list[str]) -> None:
 
 
 def args_request_uninstall(args: list[str]) -> bool:
-    """Any name of the uninstall command in args (`install.sh:215-225`)."""
+    """Any name of the uninstall command in args."""
     return any(arg in UNINSTALL.names for arg in args)
 
 
@@ -279,18 +278,18 @@ def find_command(options: Options) -> Command | None:
 
 def auto_detect_requested(options: Options) -> bool:
     """Install without an explicit or prompted platform runs once per detected
-    platform; a command runs once (`install.sh:255-269`)."""
+    platform; a command runs once."""
     return not options.platform_explicit and not options.prompt_platform and find_command(options) is INSTALL
 
 
 def plain_full_uninstall_requested(options: Options) -> bool:
-    """The uninstall command alone, without an explicit or prompted platform (`install.sh:271-278`)."""
+    """The uninstall command alone, without an explicit or prompted platform."""
     return (find_command(options) is UNINSTALL and len(options.args) == 1
             and not options.platform_explicit and not options.prompt_platform)
 
 
 def prompt_platform() -> str:
-    """Interactive platform choice; no TTY → error exit 1; `q` → `Installation cancelled.` exit 0 (`uninstall.sh:5-38`)."""
+    """Interactive platform choice; no TTY → error exit 1; `q` → `Installation cancelled.` exit 0."""
     if not sys.stdin.isatty():
         _fail("--prompt-platform requires an interactive terminal.")
     while True:
@@ -313,7 +312,7 @@ def prompt_platform() -> str:
 
 def print_help() -> int:
     """The `--help` text: the usage lines with the reported install command, then
-    each section's rows in table order (`install.sh:507-546`)."""
+    each section's rows in table order."""
     report.emit("Usage:")
     for arguments, comment in HELP_USAGE:
         report.emit(f"  {report.install_command() + arguments:<45}# {comment}")
@@ -346,7 +345,7 @@ def _details_log() -> None:
 
 
 def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool) -> tuple[transaction.SyncCounts, int, int]:
-    """S12: `_shared` and every target, as links (claude) or one copy batch (codex) (`install.sh:910-1058`)."""
+    """`_shared` and every target, as links (claude) or one copy batch (codex)."""
     skills_dir = Path(ctx.skills_dir)
     shared_src = runner.REPO_ROOT / "_shared"
     shared_dest = skills_dir / "_shared"
@@ -431,13 +430,13 @@ def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool
 
 
 def prepare_install(ctx: Context) -> None:
-    """S1 prerequisites and S2 the git hook path, before the install lock."""
+    """Prerequisites and the git hook path, before the install lock."""
     prerequisites.install_prerequisites()
     ctx.hook_change = source.setup_git_hooks()
 
 
 def run_install(ctx: Context) -> int:
-    """S4–S18 for the skills in `args` (every skill when none), under the install
+    """For the skills in `args` (every skill when none), under the install
     lock that `run_command` takes and releases (`docs/reference/installer-architecture.md`)."""
     options = ctx.options
     skills = list(options.args) or list(selection.ALL_SKILLS)
@@ -445,12 +444,12 @@ def run_install(ctx: Context) -> int:
     visibility = ctx.visibility
     # The first install over an earlier installer's records creates the install record before anything is placed.
     report.run_logged(transaction.migrate_record, ctx)
-    # S4 source, S5 selection (contradiction 9: the source check comes first)
+    # Source, selection (the source check comes first)
     if not report.run_logged(source.check_source_health, skip=options.skip_source_health):
         raise InstallerExit(1)
     collected = selection.collect_targets(ctx, skills)
     skills_dir.mkdir(parents=True, exist_ok=True)
-    # S6–S10: checks before any placement. Deprecated installed skills leave the
+    # Checks before any placement. Deprecated installed skills leave the
     # discovery path first, so that the encoding guard does not scan their content.
     if not report.run_logged(selection.cleanup_deprecated_installed_skills, ctx, skills_dir):
         raise InstallerExit(1)
@@ -461,12 +460,12 @@ def run_install(ctx: Context) -> int:
         raise InstallerExit(1)
     report.run_logged(addons.resume_pending_uninstalls, ctx)
     selection.check_addon_collisions(ctx)
-    # S11 report start
+    # Report start
     if report.report_enabled() and report.live_counter_enabled():
         report.print_start(ctx.platform, collected.total_target_count, visibility)
     elif not report.compact_output_enabled():
         report.info("[1/5] Preflight: ok")
-    # S12 placement
+    # Placement
     copy_only = locations.prefers_copy_install(ctx.platform)
     counts, installed, skipped = _place_targets(ctx, collected, copy_only)
     if not report.compact_output_enabled():
@@ -484,7 +483,7 @@ def run_install(ctx: Context) -> int:
             report.info(f"To update skills safely: cd {runner.REPO_ROOT} && {report.install_command()} --update-source")
         if installed > 0 and not copy_only:
             report.info("With symlink install, safe source updates refresh linked skills after the checkout fast-forwards.")
-    # S13 runtime, S14 hooks, S15 managed blocks, S16 commands (contradiction 9: blocks after the runtime and hooks)
+    # Runtime, hooks, managed blocks, commands (blocks after the runtime and hooks)
     if not report.run_logged(transaction.sync_runtime_shared, ctx):
         report.error("Runtime shared core sync failed. Aborting hook install")
         _details_log()
@@ -504,7 +503,7 @@ def run_install(ctx: Context) -> int:
         raise InstallerExit(1)
     if report.run_logged(hosts.sync_commands, ctx, "sync", ctx.platform) != 0:
         report.warn("Commands sync failed (continuing)")
-    # S17 records (a later change replaces these with one install record)
+    # Records
     if not report.run_logged(transaction.verify_after_copy, ctx, skills_dir, copy_only, skills):
         raise InstallerExit(1)
     if not report.run_logged(transaction.write_ownership_markers, ctx, skills_dir, copy_only, skills):
@@ -516,7 +515,7 @@ def run_install(ctx: Context) -> int:
         raise InstallerExit(1)
     if not report.run_logged(transaction.write_install_state_manifest, ctx, skills_dir, copy_only, skills, ctx.hook_change):
         raise InstallerExit(1)
-    # S18 result
+    # Result
     report.write_event(ctx.platform, collected.total_target_count, counts.skipped, counts.updated, counts.installed)
     if report.report_enabled():
         if report.live_counter_enabled():
@@ -580,8 +579,8 @@ def run_command(command: Command, ctx: Context) -> int:
 def dispatch(options: Options) -> int:
     """`--addon` shortcuts, then the table's command (`find_command`): an unknown
     option ends with exit 1, the full uninstall and auto mode run once per
-    detected platform, every other command runs once through `run_command`
-    (`install.sh:253-562`). A command that `checks_source` compares the install
+    detected platform, every other command runs once through `run_command`.
+    A command that `checks_source` compares the install
     source first, before the addon sources are prepared; the auto mode compares
     it once, in the parent."""
     command = find_command(options)
@@ -628,7 +627,6 @@ def main(argv: list[str] | None = None) -> int:
         options = parse_options(argv)
         report.configure(verbose=options.verbose,
                          report_child=os.environ.get("GHOST_ALICE_INSTALL_REPORT_CHILD") == "1")
-        source.assert_session_gate_contract()
         return dispatch(options)
     except InstallerExit as stop:
         return stop.code

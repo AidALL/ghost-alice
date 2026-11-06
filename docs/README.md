@@ -42,7 +42,6 @@ The [installation guide](./getting-started/installation.md) covers cloning, OS-n
 | Runtime gate matrix | [policies/session-gate-matrix.md](./policies/session-gate-matrix.md) | [ko/policies/session-gate-matrix.md](./ko/policies/session-gate-matrix.md) |
 | Platform compatibility | [policies/installer-platform-compatibility-matrix.md](./policies/installer-platform-compatibility-matrix.md) | [ko/policies/installer-platform-compatibility-matrix.md](./ko/policies/installer-platform-compatibility-matrix.md) |
 | Tool output semantics | [policies/tool-output-semantics.md](./policies/tool-output-semantics.md) | [ko/policies/tool-output-semantics.md](./ko/policies/tool-output-semantics.md) |
-| Platform adapter compliance | [policies/platform-adapter-compliance.md](./policies/platform-adapter-compliance.md) | [ko/policies/platform-adapter-compliance.md](./ko/policies/platform-adapter-compliance.md) |
 | Live smoke regression | [policies/live-smoke-regression.md](./policies/live-smoke-regression.md) | [ko/policies/live-smoke-regression.md](./ko/policies/live-smoke-regression.md) |
 | Evaluator artifact contract | [policies/evaluator-artifact-contract.md](./policies/evaluator-artifact-contract.md) | [ko/policies/evaluator-artifact-contract.md](./ko/policies/evaluator-artifact-contract.md) |
 | Public release checklist | [release/public-release-checklist.md](./release/public-release-checklist.md) | [ko/release/public-release-checklist.md](./ko/release/public-release-checklist.md) |

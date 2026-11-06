@@ -37,12 +37,6 @@ SECRET_PATTERNS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
     re.compile(r"(?i)(api[_-]?key|token|secret)\s*[:=]\s*['\"]?[A-Za-z0-9._-]{20,}"),
 ]
-LIVE_CONFIG_PATTERNS = [
-    "/.claude/settings.json",
-    "/.codex/hooks.json",
-    "/.codex/config.toml",
-    "/.agents/skills/",
-]
 BLANK_VALUES = {"", "n/a", "na", "none", "null", "-", "not set"}
 
 
@@ -81,11 +75,6 @@ def contains_secret_like_value(text: str) -> bool:
     return any(pattern.search(text) for pattern in SECRET_PATTERNS)
 
 
-def touches_live_config(value: str) -> bool:
-    normalized = value.replace("\\", "/")
-    return any(pattern in normalized for pattern in LIVE_CONFIG_PATTERNS)
-
-
 def validate_text(text: str) -> dict[str, Any]:
     fields = parse_handoff(text)
     errors: list[str] = []
@@ -100,11 +89,6 @@ def validate_text(text: str) -> dict[str, Any]:
 
     if contains_secret_like_value(text):
         errors.append("secret-like-value")
-
-    files_changed = fields.get("files-changed", "")
-    rollback = fields.get("rollback", "")
-    if touches_live_config(files_changed) and is_blank(rollback):
-        errors.append("rollback-required-for-live-config")
 
     tests_run = fields.get("tests-run", "")
     if tests_run.strip().lower() in {"not run", "not-run", "pending"}:

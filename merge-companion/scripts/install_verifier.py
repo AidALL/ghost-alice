@@ -12,19 +12,10 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from file_walker import EXCLUDED_DIR_NAMES, EXCLUDED_FILE_NAMES, EXCLUDED_FILE_SUFFIXES
 
 COPY_MODES = {"copy", "copy-fallback"}
 LINK_MODES = {"symlink", "junction"}
-EXCLUDED_DIR_NAMES = {
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    "node_modules",
-    ".git",
-}
-EXCLUDED_FILE_NAMES = {".DS_Store"}
-EXCLUDED_FILE_SUFFIXES = {".pyc"}
 
 
 @dataclass(frozen=True)

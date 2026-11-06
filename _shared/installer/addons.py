@@ -1,9 +1,4 @@
-"""Addon sources and the addon entry points the installer drives.
-
-Port of `install.sh:203-213`, `installer_lib/targets.sh:28-148`,
-`installer_lib/uninstall.sh:50-79, 110-140, 269-281, 457-478` and
-`installer_lib/install.sh:612-638, 665-675, 766-781`.
-"""
+"""Addon sources and the addon entry points the installer drives."""
 
 from __future__ import annotations
 
@@ -27,14 +22,14 @@ _SAFE_ID = re.compile(r"^[a-z][a-z0-9-]*$")
 
 
 def source_is_git_url(source: str) -> bool:
-    """http://, https://, ssh://, file:// or `git@host:` (`targets.sh:28-34`)."""
+    """http://, https://, ssh://, file:// or `git@host:`."""
     if source.startswith(("http://", "https://", "ssh://", "file://")):
         return True
     return bool(re.match(r"^git@[^:]+:", source))
 
 
 def selected_ref(tags: list[str]) -> str:
-    """The single `--addon-tag`; more than one → error exit 1 (`targets.sh:36-46`)."""
+    """The single `--addon-tag`; more than one → error exit 1."""
     if not tags:
         return ""
     if len(tags) > 1:
@@ -44,13 +39,13 @@ def selected_ref(tags: list[str]) -> str:
 
 
 def source_cache_key(source: str, ref: str) -> str:
-    """First 24 hex chars of sha256(`source\\0ref`) (`targets.sh:48-62`)."""
+    """First 24 hex chars of sha256(`source\\0ref`)."""
     return hashlib.sha256((source + "\0" + ref).encode("utf-8")).hexdigest()[:24]
 
 
 def clone_git_source(source: str, ref: str) -> Path:
     """Shallow clone into `<cache root>/<key>` through a `.tmp.<pid>` dir;
-    messages `Cloning addon source: ...` / `Addon source clone failed: ...` (`targets.sh:64-94`)."""
+    messages `Cloning addon source: ...` / `Addon source clone failed: ...`."""
     if shutil.which("git") is None:
         report.error("git not found; cannot clone addon source URL")
         raise InstallerExit(1)
@@ -75,7 +70,7 @@ def clone_git_source(source: str, ref: str) -> Path:
 
 
 def prepare_sources(ctx: "Context") -> None:
-    """Resolve git URLs to cache paths once; a tag with a local source is an error (`targets.sh:96-121`)."""
+    """Resolve git URLs to cache paths once; a tag with a local source is an error."""
     if ctx.addon_sources_prepared:
         return
     if ctx.options.addon_skip or not ctx.addon_sources:
@@ -114,8 +109,7 @@ def _source_args(ctx: "Context") -> list[str]:
 
 
 def collect_addon_targets(ctx: "Context") -> "list[Target]":
-    """`addon_installer.py --source ... --core-skill ... --platform P --format json` → targets with addon ids
-    (`targets.sh:123-148`, the shell read `--format shell`)."""
+    """`addon_installer.py --source ... --core-skill ... --platform P --format json` → targets with addon ids."""
     from installer.selection import Target
 
     if ctx.options.addon_skip or not ctx.addon_sources:
@@ -137,7 +131,7 @@ def collect_addon_targets(ctx: "Context") -> "list[Target]":
 
 
 def list_addons(ctx: "Context") -> int:
-    """`--list-addons`: disabled → info; no source → error 1; else the text listing (`uninstall.sh:110-140`)."""
+    """`--list-addons`: disabled → info; no source → error 1; else the text listing."""
     if ctx.options.addon_skip:
         report.info("Addon installation is disabled (--addon-skip)")
         return 0
@@ -150,7 +144,7 @@ def list_addons(ctx: "Context") -> int:
 
 
 def write_sidecars(ctx: "Context", skills_dir: Path) -> bool:
-    """`addon_installer.py write-sidecars ...` after install when sources exist (`install.sh:612-638`)."""
+    """`addon_installer.py write-sidecars ...` after install when sources exist."""
     if not ctx.addon_sources:
         return True
     installed_at = datetime.now(timezone.utc).isoformat()
@@ -167,7 +161,7 @@ def write_sidecars(ctx: "Context", skills_dir: Path) -> bool:
 
 
 def migrate_state_once(ctx: "Context") -> None:
-    """`addon_migration.py` when an install-state file exists; failures ignored (`install.sh:766-781`)."""
+    """`addon_migration.py` when an install-state file exists; failures ignored."""
     from installer import selection
 
     state_path = locations.install_state_path(ctx.platform)
@@ -187,7 +181,7 @@ def _addon_location_args(ctx: "Context") -> list[str]:
 
 
 def repair_missing(ctx: "Context") -> bool:
-    """`addon_installer.py repair-missing ...` when the addons dir exists (`install.sh:665-675`)."""
+    """`addon_installer.py repair-missing ...` when the addons dir exists."""
     if not locations.addons_dir(ctx.platform).is_dir():
         return True
     result = runner.run_tool("_shared/addon_installer.py", "repair-missing", "--platform", ctx.platform,
@@ -204,7 +198,7 @@ def _uninstall_args(ctx: "Context") -> list[str]:
 
 
 def resume_pending_uninstalls(ctx: "Context") -> None:
-    """`addon_uninstall.py --resume-pending ...` with output kept in `~/.ghost-alice/addon-resume.log` (`uninstall.sh:269-281`)."""
+    """`addon_uninstall.py --resume-pending ...` with output kept in `~/.ghost-alice/addon-resume.log`."""
     if not locations.addons_dir(ctx.platform).is_dir():
         return
     result = runner.run_tool("_shared/addon_uninstall.py", "--resume-pending", *_uninstall_args(ctx), capture=True)
@@ -217,18 +211,18 @@ def resume_pending_uninstalls(ctx: "Context") -> None:
 
 
 def uninstall_addon(ctx: "Context", addon_id: str) -> int:
-    """`addon_uninstall.py --addon-id ... --confirm`; the child's exit code (`uninstall.sh:329-333`)."""
+    """`addon_uninstall.py --addon-id ... --confirm`; the child's exit code."""
     return runner.run_tool("_shared/addon_uninstall.py", "--addon-id", addon_id, *_uninstall_args(ctx)).returncode
 
 
 def dependents_rc(ctx: "Context", skill: str) -> int:
-    """`addon_uninstall.py --dependents <skill>`; 2 means an installed addon depends on it (`uninstall.sh:367-368`)."""
+    """`addon_uninstall.py --dependents <skill>`; 2 means an installed addon depends on it."""
     return runner.run_tool("_shared/addon_uninstall.py", "--dependents", skill,
                            "--addons-dir", str(locations.addons_dir(ctx.platform)), capture=True).returncode
 
 
 def uninstall_all_before_full(ctx: "Context") -> bool:
-    """Remove every addon with a sidecar before full cleanup; False when one is preserved (`uninstall.sh:457-478`)."""
+    """Remove every addon with a sidecar before full cleanup; False when one is preserved."""
     addons_dir = locations.addons_dir(ctx.platform)
     if not addons_dir.is_dir():
         return True
@@ -246,7 +240,7 @@ def uninstall_all_before_full(ctx: "Context") -> bool:
 
 
 def installed_addon_id(addon_id: str, addons_dir: Path) -> bool:
-    """A safe id with `<id>.json` or `<id>.json.removing` in the addons dir (`uninstall.sh:50-55`)."""
+    """A safe id with `<id>.json` or `<id>.json.removing` in the addons dir."""
     if not _SAFE_ID.match(addon_id):
         return False
     addons_dir = Path(addons_dir)
@@ -255,7 +249,7 @@ def installed_addon_id(addon_id: str, addons_dir: Path) -> bool:
 
 def promote_bare_installed_addon_ids(ctx: "Context", names: list[str]) -> tuple[list[str], list[str]]:
     """Split requested names into (addon ids, skills): a name that is not a core
-    target but is an installed addon id becomes an addon id (`uninstall.sh:57-79`)."""
+    target but is an installed addon id becomes an addon id."""
     from installer import selection
 
     addons_dir = locations.addons_dir(ctx.platform)

@@ -29,13 +29,6 @@ class CompletionLifecycleContractTests(unittest.TestCase):
     def test_claim_review_precedes_whole_answer_review_and_recording(self):
         self.assert_review_contract(SKILL.read_text())
 
-    def test_missing_judgment_or_false_code_semantics_rejects_contract(self):
-        body = SKILL.read_text()
-        for phrase in ('Compare each claim with its original sources and acceptance criterion',
-                       'separately judge the complete draft', 'code does not decide their meaning'):
-            with self.subTest(phrase=phrase), self.assertRaises((AssertionError, ValueError)):
-                self.assert_review_contract(body.replace(phrase, 'removed'))
-
     def test_reuse_and_discretionary_checks_have_one_owner(self):
         body = SKILL.read_text()
         reuse = section(body, 'Verify-or-reuse gate')

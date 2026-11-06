@@ -41,6 +41,6 @@ Before requesting compaction or transferring a task, the response model records 
 
 ## Validator and warnings
 
-All eight fields are required. The validator rejects secret-like values without printing them. A handoff that involves live configuration, such as host settings and hooks or installed skill directories, requires a concrete rollback path. A `tests-run` value of `not run` or `pending` produces a warning: compaction may proceed, but completion is not established.
+All eight fields are required. The validator rejects secret-like values without printing them. A `tests-run` value of `not run` or `pending` produces a warning: compaction may proceed, but completion is not established.
 
 The response model must not invoke /compact automatically, create extra reports only for compaction or present the handoff as completion evidence. `../coding-convention/verification-before-completion/SKILL.md` decides what proves completion.

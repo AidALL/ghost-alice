@@ -507,42 +507,38 @@ class ContextGatewayInstallTests(unittest.TestCase):
                 self.assertEqual(plist['ProgramArguments'][2], str(runtime / '_shared' / 'context_gateway.py'))
                 self.assertEqual(self.service()['runtime_root'], str(runtime))
 
-    def test_the_optional_claude_dir_and_strict_log_root_enter_the_state_file(self):
+    def test_the_optional_claude_dir_enters_the_state_file(self):
         args, _ = self.installation_fixture()
         self.mocked_install(args)
         state = json.loads(self.reg.state_path.read_text())
-        self.assertNotIn('strict_log_root', state)
         self.assertNotIn('claude_dir', state)
-        strict = self.reg.root / 'strict'
         settings = self.reg.claude / 'settings.json'
         settings.write_text('{"env":{"original":"preserved"}}')
-        self.mocked_install(args, claude_dir=self.reg.claude, strict_log_root=strict)
+        self.mocked_install(args, claude_dir=self.reg.claude)
         state = json.loads(self.reg.state_path.read_text())
-        self.assertEqual((state['claude_dir'], state['strict_log_root']), (str(self.reg.claude), str(strict)))
+        self.assertEqual(state['claude_dir'], str(self.reg.claude))
         self.assertEqual(settings.read_text(), '{"env":{"original":"preserved"}}')
         self.assertEqual(self.service()['state_digest'], digest(self.reg.state_path.read_bytes()))
 
     def test_relative_coordinates_are_rejected_before_service_or_file_changes(self):
         args, original = self.installation_fixture()
-        for kwargs in ({'claude_dir': Path('relative-claude')}, {'strict_log_root': Path('relative')}):
-            with self.subTest(kwargs=kwargs), patch.object(install, '_service_state') as service:
-                with self.assertRaises(ValueError):
-                    self.mocked_install(args, **kwargs)
-                service.assert_not_called()
+        with patch.object(install, '_service_state') as service:
+            with self.assertRaises(ValueError):
+                self.mocked_install(args, claude_dir=Path('relative-claude'))
+            service.assert_not_called()
         self.assertEqual(self.snapshot(), original)
 
     def test_cli_forwards_the_coordinates_and_prints_the_result(self):
         args, _ = self.installation_fixture()
-        explicit = self.reg.root / 'strict'
         cli = ['--codex-dir', str(args[0]), '--ledger-root', str(args[1]), '--state-dir', str(args[2]),
-               '--launch-agent', str(args[3]), '--claude-dir', str(self.reg.claude), '--strict-log-root', str(explicit)]
+               '--launch-agent', str(args[3]), '--claude-dir', str(self.reg.claude)]
         stdout = io.StringIO()
         with patch.object(install, 'install', return_value=dict(status='installed', service=LABEL,
                                                                 listener_ready=True)) as run, \
              contextlib.redirect_stdout(stdout):
             self.assertEqual(install.main(cli), 0)
         self.assertEqual(run.call_args.args, (args[0], args[1], args[2], args[3]))
-        self.assertEqual(run.call_args.kwargs, dict(claude_dir=self.reg.claude, strict_log_root=explicit, confirm=True))
+        self.assertEqual(run.call_args.kwargs, dict(claude_dir=self.reg.claude, confirm=True))
         self.assertEqual(json.loads(stdout.getvalue()), dict(status='installed', service=LABEL, listener_ready=True))
 
     # The provider blocks.

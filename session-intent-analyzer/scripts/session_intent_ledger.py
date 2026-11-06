@@ -30,8 +30,8 @@ SCHEMA_VERSION = "session-intent-ledger.v1"
 CURRENT_SESSION_SCHEMA = "session-intent-current.v1"
 SESSION_INTENT_ROOT_ENV = "GHOST_ALICE_SESSION_INTENT_ROOT"
 LEGACY_DEFAULT_ROOT = Path("~/.ghost-alice/session-intent")
-TEXT_FIELDS = ("current_goal", "user_intent_summary", "routing_summary")
-LIST_FIELDS = ("constraints", "non_goals", "open_questions", "risk_flags")
+TEXT_FIELDS = ("current_goal", "routing_summary")
+LIST_FIELDS = ("constraints", "non_goals", "open_questions")
 ACCEPTANCE_CRITERIA_SOURCES = {"user-said", "interpreted-as", "previous-tool", "system-doc"}
 ACCEPTANCE_CRITERIA_ADMITTED_SOURCES = {"user-said", "previous-tool", "system-doc"}
 # Stored labels are never rewritten; readers map a legacy label to its current name.
@@ -241,7 +241,6 @@ def default_state(platform: str, session_id: str) -> dict[str, Any]:
         "created_at": now,
         "updated_at": now,
         "current_goal": "",
-        "user_intent_summary": "",
         "constraints": [],
         "non_goals": [],
         "open_questions": [],
@@ -250,33 +249,8 @@ def default_state(platform: str, session_id: str) -> dict[str, Any]:
         "response_route": None,
         "decisions": [],
         "conduct_feedback": [],
-        "risk_flags": [],
-        "consumer_hints": {},
         "intake_status": "pending",
-        "last_intake_source": "",
-        "last_semantic_delta_status": "not-provided",
-        "semantic_delta_policy": "agent-updates-when-intent-materially-changes",
     }
-
-
-def load_state(path: Path, platform: str = "unknown", session_id: str = "unknown") -> dict[str, Any]:
-    if path.name == "intent-state.json" and storage_is_initialized(path.parents[2]):
-        return read_session_state(root=path.parents[2], platform=path.parent.parent.name, session_id=path.parent.name)
-    if not path.exists():
-        return default_state(platform, session_id)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return default_state(platform, session_id)
-    if not isinstance(data, dict):
-        return default_state(platform, session_id)
-    state = default_state(
-        str(data.get("platform") or platform),
-        str(data.get("session_id") or session_id),
-    )
-    state.update(data)
-    state["schema_version"] = SCHEMA_VERSION
-    return state
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -796,17 +770,6 @@ def merge_unique(existing: Any, incoming: Any) -> list[Any]:
     return values
 
 
-def merge_consumer_hints(existing: Any, incoming: Any) -> dict[str, list[str]]:
-    merged: dict[str, list[str]] = {}
-    if isinstance(existing, dict):
-        for key, value in existing.items():
-            merged[str(key)] = merge_unique([], value)
-    if isinstance(incoming, dict):
-        for key, value in incoming.items():
-            merged[str(key)] = merge_unique(merged.get(str(key), []), value)
-    return merged
-
-
 def normalize_decision(raw: Any, timestamp: str) -> dict[str, Any] | None:
     if isinstance(raw, str):
         decision_id = safe_component(raw.lower(), "decision")
@@ -1045,9 +1008,6 @@ def apply_delta(state: dict[str, Any], delta: dict[str, Any] | None) -> dict[str
             delta.get("acceptance_criteria"),
         )
 
-    if "consumer_hints" in delta:
-        state["consumer_hints"] = merge_consumer_hints({}, delta.get("consumer_hints"))
-
     if "conduct_feedback" in delta:
         state["conduct_feedback"] = merge_conduct_feedback(
             state.get("conduct_feedback", []), delta.get("conduct_feedback"), now
@@ -1118,9 +1078,6 @@ def _commit_turn(connection, state, observation, *, has_input, intent_delta, sou
     if "routing_keywords" in (intent_delta or {}):
         state["keywords_input_event_id"] = state.get("latest_input_event_id", "")
     state["intake_status"] = "pending-native-origin" if _pending_native_inputs(state) else "observed"
-    state["last_intake_source"] = source
-    state["last_semantic_delta_status"] = "recorded" if intent_delta else "not-provided"
-    state["semantic_delta_policy"] = "agent-updates-when-intent-materially-changes"
     event: dict[str, Any] = {
         "ts": observation["observed_at"],
         "event": "user-input-observed" if has_input else "intent-updated",
@@ -1802,19 +1759,6 @@ def record_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_i
             "platform": platform, "session_id": session_id,
             "input_event_id": expected_input_event_id,
             "response_route_digest": json_digest(projection),
-            "review_scope": {
-                "route": deepcopy(projection),
-                "canonical_criteria": [deepcopy(row) for row in state["acceptance_criteria"]
-                    if any((row.get("work_unit_id"), row.get("contract_revision"), row["id"]) ==
-                        (selected["work_unit_id"], selected["contract_revision"], selected["id"])
-                        for selected in projection["selected_criteria"])],
-                "relevant_context": {key: deepcopy(state.get(key, {} if key == "latest_scope" else []))
-                    for key in ("constraints", "non_goals", "decisions", "latest_scope")},
-                "input_binding": {"platform": platform, "session_id": session_id,
-                    "input_event_id": expected_input_event_id,
-                    "input_digest": state["latest_input_digest"],
-                    "input_char_count": state["latest_input_char_count"]},
-            },
             "selected_work_unit_ids": projection["selected_work_unit_ids"],
             "selected_criteria": [{k: c[k] for k in ("work_unit_id", "contract_revision", "criterion_id")}
                                   for c in projection["selected_criteria"]],
@@ -1869,10 +1813,8 @@ def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
             "latest_input_digest", "latest_input_char_count")},
         "canonical_input_event_id": state.get("canonical_input_event_id"),
         "current_context_input_event_id": state.get('current_context_input_event_id',''),
-        "intake_status": state.get("intake_status"),
         "pending_native_input_count": len(_pending_native_inputs(state)),
         "current_goal": state.get("current_goal", ""),
-        "user_intent_summary": state.get("user_intent_summary", ""),
         "constraints": list(state.get("constraints", [])),
         "non_goals": list(state.get("non_goals", [])),
         "open_questions": list(state.get("open_questions", [])),
@@ -1882,15 +1824,8 @@ def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
         "decision_count": len(active_decisions),
         "active_decisions": deepcopy(active_decisions),
         "latest_scope": deepcopy(latest_scope) if isinstance(latest_scope, dict) else {},
-        "risk_flags": list(state.get("risk_flags", [])),
-        "consumer_hints": dict(state.get("consumer_hints", {})),
         "conduct_feedback": list(state.get("conduct_feedback", [])),
         "intake_status": state.get("intake_status", "pending"),
-        "last_semantic_delta_status": state.get("last_semantic_delta_status", "not-provided"),
-        "semantic_delta_policy": state.get(
-            "semantic_delta_policy",
-            "agent-updates-when-intent-materially-changes",
-        ),
     }
 
 
@@ -1904,7 +1839,7 @@ def intent_reference(state):
         "summary": state.get("routing_summary", ""),
         "keywords_input_event_id": state.get("keywords_input_event_id", ""),
         "references": {
-            "intent": "/user_intent_summary", "goal": "/current_goal",
+            "goal": "/current_goal",
             "boundary": "/latest_scope", "constraints": "/constraints",
             "decisions": "/decisions", "route": "/response_route",
         },
@@ -1940,7 +1875,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=str(default_root()), help="ledger root")
     parser.add_argument("--platform", default="codex", help="agent platform")
     parser.add_argument("--session-id", default="", help="session identifier; required for writes without a bound host session")
-    parser.add_argument("--input", default=None, help="raw input to hash only; never persisted")
     parser.add_argument("--delta-json", default=None, help="intent delta JSON")
     parser.add_argument("--expected-input-event-id", default=None,
                         help="input_event_id that --read-intent returns; required after intake")
@@ -1969,14 +1903,14 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--delta-json must decode to an object")
     root = Path(args.root)
     if args.list_native_waits or args.list_native_failures:
-        if (args.input is not None or delta is not None or args.migrate or args.session_id or args.snapshot
+        if (delta is not None or args.migrate or args.session_id or args.snapshot
                 or args.read_intent or args.read_state or args.read_events or args.export_to
                 or (args.list_native_waits and args.list_native_failures)):
             raise SystemExit("a native intake listing is one root-wide read; it takes no session, other read or mutation flag")
         listing = list_native_input_waits if args.list_native_waits else list_native_intake_failures
         print(json.dumps(listing(root, args.platform), ensure_ascii=False))
         return 0
-    read_only = (args.snapshot or args.read_intent or args.read_state or args.read_events or args.export_to) and args.input is None and delta is None and not args.migrate
+    read_only = (args.snapshot or args.read_intent or args.read_state or args.read_events or args.export_to) and delta is None and not args.migrate
     if args.pointer and not args.read_state:
         raise SystemExit("--pointer requires --read-state")
     if (args.read_intent or args.read_state or args.read_events or args.export_to) and not read_only:
@@ -2055,7 +1989,6 @@ def main(argv: list[str] | None = None) -> int:
             root=root,
             platform=args.platform,
             session_id=session_id,
-            raw_user_input=args.input,
             intent_delta=delta,
             source="cli",
             expected_input_event_id=args.expected_input_event_id,

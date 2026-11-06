@@ -2,9 +2,7 @@
 
 One owner for "the installer ends with code N" (`InstallerExit`) and for
 "call `_shared/<tool>.py` or `merge-companion/scripts/<tool>.py` with these
-arguments" (`run_tool`). The shell did the second with
-`"$py" "${SCRIPT_DIR}/<tool>" args` at 23 call sites; the Python port keeps the
-arguments and the child's own output and exit code.
+arguments" (`run_tool`). The child keeps its own output and exit code.
 """
 
 from __future__ import annotations
@@ -62,9 +60,9 @@ def run_tool(
     `merge-companion/scripts/snapshot_cli.py`). Without `capture`, the child
     writes to the installer's current output sink (`report.sink()`), which is
     the terminal or the install log in compact mode; stderr follows stdout
-    there, like the shell's `>>"$LOG" 2>&1`. With `capture`, stdout and stderr
+    there. With `capture`, stdout and stderr
     are returned as text. `env` adds to the inherited environment.
-    `no_bytecode` passes `-B` (the shell did this for `retired_assets.py`).
+    `no_bytecode` passes `-B`.
     """
     argv = [python_executable()]
     if no_bytecode:

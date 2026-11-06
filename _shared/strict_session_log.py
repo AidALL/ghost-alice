@@ -145,7 +145,7 @@ def append_event(home: Path | None, platform: str, session_id: str, event: dict[
     if duration is not None:
         row["observed_duration_s"] = duration
         row["observed_duration_source"] = observed_duration_source(event.get("observed_duration_source"))
-    for optional_key in ("surface_item", "surface_items", "model_surface_output", "user_surface_output"):
+    for optional_key in ("surface_item", "model_surface_output", "user_surface_output"):
         if optional_key in event:
             row[optional_key] = _safe_json_value(event[optional_key])
     line = json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"

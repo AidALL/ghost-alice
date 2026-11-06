@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -207,23 +206,6 @@ def _extract(payload: dict[str, Any]) -> dict[str, str]:
     return row
 
 
-def _capture_governance_event(raw: str) -> None:
-    script = Path(__file__).with_name("governance_events.py")
-    if not script.exists():
-        return
-    try:
-        subprocess.run(
-            [sys.executable, str(script)],
-            input=_safe_text(raw),
-            text=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-    except Exception:
-        return
-
-
 def _append_log(row: dict[str, str]) -> None:
     payload = {"ts": _utc_now(), **row}
     line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
@@ -233,7 +215,6 @@ def _append_log(row: dict[str, str]) -> None:
 def main() -> int:
     try:
         raw = _read_stdin_utf8()
-        _capture_governance_event(raw)
         payload = json.loads(raw) if raw.strip() else {}
         if not isinstance(payload, dict):
             payload = {}

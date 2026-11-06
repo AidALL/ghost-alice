@@ -16,13 +16,10 @@ import re
 from completion_check_validator import (extract_original_proof, parse_original_completion_evidence,
                                         looks_like_evidence_claim, review_comparison_text)
 from native_completion import _ledger
-from text_lines import committed_byte_lines
 
 _SEAL = object()
 _DEFINITION = ('work_unit_id', 'contract_revision', 'id', 'summary', 'source', 'admitted')
 _SOURCE_RESPONSE_KIND = 'source-response-review.v2'
-_RESPONSE_SCOPE_KIND = 'response-review-scope.v1'
-_NATIVE_RESPONSE_KIND = 'native-source-response-review.v1'
 
 
 class CompletionAssessmentError(ValueError):
@@ -83,7 +80,7 @@ def _coordinates(source):
     root = source.get('GHOST_ALICE_SESSION_INTENT_ROOT')
     owner = {k: source.get('GHOST_ALICE_' + k.upper()) for k in ('platform', 'session_id')}
     _require(isinstance(root, str) and Path(root).is_absolute(), 'authority-unavailable', 'Exact ledger root is required')
-    _require(owner['platform'] in {'codex', 'claude', 'agent-runtime'}
+    _require(owner['platform'] in {'codex', 'claude'}
         and isinstance(owner['session_id'], str) and bool(owner['session_id']),
         'owner-mismatch', 'Exact native owner is required')
     _require(owner['platform'] != 'codex' or source.get('CODEX_THREAD_ID') in (None, '', owner['session_id']),
@@ -176,82 +173,19 @@ def _require_record_sources(candidate, judgments):
              'Original bytes for a new supported judgment are unavailable or changed')
 
 
-def _reference_sources(source_paths, appendable_sources=()):
+def _reference_sources(source_paths):
     from source_reference import reference_source
     _require(isinstance(source_paths, list) and len(source_paths) == len(set(source_paths))
         and all(isinstance(p, str) and Path(p).is_absolute() for p in source_paths),
         'source-unavailable', 'Unique explicit absolute source paths are required')
-    _require(set(appendable_sources) <= set(source_paths), 'source-unavailable',
-        'Appendable native logs must belong to this source selection')
-    return [reference_source(path, appendable=path in appendable_sources) for path in source_paths]
+    return [reference_source(path) for path in source_paths]
 
 
-def _native_row_input(connection, owner, native_input_row):
-    """Resolve a host-retained Claude row through Core's committed actor audit."""
-    import native_transcript
-    _require(owner['platform'] == 'claude' and isinstance(native_input_row, dict)
-        and set(native_input_row) == {'message_id', 'transcript_path'}
-        and all(isinstance(value, str) and bool(value) for value in native_input_row.values())
-        and Path(native_input_row['transcript_path']).is_absolute(),
-        'input-unavailable', 'An exact native Claude message and transcript are required')
-    path = Path(native_input_row['transcript_path']).resolve()
-    records = {}
-    try:
-        with path.open('rb') as stream:
-            identity = os.fstat(stream.fileno())
-            cursor = hashlib.sha256(json.dumps([str(path), identity.st_dev, identity.st_ino]).encode()).hexdigest()
-            for start, offset, line in committed_byte_lines(stream.read()):
-                try:
-                    entry = json.loads(line)
-                except (ValueError, UnicodeError):
-                    continue
-                if not isinstance(entry, dict) or not isinstance(entry.get('uuid'), str):
-                    continue
-                actor = native_transcript.native_input_actor(entry)
-                records.setdefault(entry['uuid'], []).append(dict(owner=entry.get('sessionId'),
-                    parent=entry.get('parentUuid'), actor=actor,
-                    text=native_transcript._input_text(entry) if actor == 'human' else None,
-                    locator=dict(cursor_key=cursor, start_offset=start, end_offset=offset)))
-    except OSError as exc:
-        raise CompletionAssessmentError('input-unavailable', 'Original native transcript is unavailable') from exc
-    identity, seen = native_input_row['message_id'], set()
-    while True:
-        _require(isinstance(identity, str) and bool(identity),
-            'input-unavailable', 'Native parent identity is unavailable')
-        matches = records.get(identity, [])
-        _require(len(matches) == 1 and identity not in seen,
-            'input-unavailable', 'One unambiguous native parent chain is required')
-        row = matches[0]
-        _require(row['owner'] == owner['session_id'], 'input-unavailable', 'Native parent belongs to another session')
-        if not seen:
-            _require(row['actor'] in ('human', 'notification'),
-                'input-unavailable', 'Native response input must be human or a host-stamped task result')
-        if row['actor'] == 'human':
-            locator, text = row['locator'], row['text']
-            break
-        seen.add(identity)
-        identity = row['parent']
-    _require(isinstance(text, str), 'input-unavailable', 'Native human input text is unavailable')
-    rows = connection.execute('''SELECT event_json FROM intent_events WHERE platform=? AND session_id=?
-        AND json_extract(event_json, '$.event')='native-input-resolved' ''',
-        (owner['platform'], owner['session_id'])).fetchall()
-    resolved = [event for raw, in rows if (event := json.loads(raw)).get('actor') == 'human'
-        and event.get('native_row') == locator]
-    _require(len(resolved) == 1, 'input-unavailable', 'Native row lacks one committed actor resolution')
-    return resolved[0]['input_event_id'], _digest(text), len(text), text
-
-
-def response_input_binding(source, expected_input_event_id=None, *, native_input_row=None,
-                           include_native_prompt=False, transaction=None):
+def response_input_binding(source, expected_input_event_id=None, *, transaction=None):
     """Authenticate an original native intake without promoting it to current input."""
     core, root, owner = _coordinates(source)
     with core._read_connection(root, transaction) as connection:
         _require(connection is not None, 'input-unavailable', 'Original intake is unavailable')
-        native = _native_row_input(connection, owner, native_input_row) if native_input_row is not None else None
-        if native is not None:
-            _require(expected_input_event_id is None or expected_input_event_id == native[0],
-                'input-unavailable', 'Native row and supplied original input disagree')
-            expected_input_event_id = native[0]
         _require(isinstance(expected_input_event_id, str) and bool(expected_input_event_id),
             'input-unavailable', 'An exact original input event is required')
         state = core._stored_state(connection, **owner)
@@ -267,8 +201,6 @@ def response_input_binding(source, expected_input_event_id=None, *, native_input
             and len(digest) == 71 and type(count) is int and count >= 0
             and core._observation_matches(event, owner['platform'], owner['session_id'],
                 expected_input_event_id, digest, count), 'input-unavailable', 'Original intake binding is invalid')
-        _require(native is None or native[:3] == (expected_input_event_id, digest, count),
-            'input-unavailable', 'Native row differs from its original intake')
         canonical = core._canonical_intake_record(connection, state)
         protected = canonical is not None and tuple(canonical) == (
             expected_input_event_id, digest, count, sequence)
@@ -277,85 +209,7 @@ def response_input_binding(source, expected_input_event_id=None, *, native_input
             _require(imported is not None and sequence > imported,
                 'input-unavailable', 'Copied legacy input cannot establish native review authority')
     binding = dict(owner, input_event_id=expected_input_event_id, input_digest=digest, input_char_count=count)
-    if include_native_prompt and native is not None:
-        binding['native_prompt'] = native[3]
     return binding
-
-
-def _scope_contract(scope, work_unit_id=None):
-    route = scope['route']
-    _require(isinstance(route, dict), 'route-unavailable', 'Original owned route snapshot is required')
-    owner = {key: scope['input_binding'][key] for key in ('platform', 'session_id')}
-    units = [unit for unit in route['work_units'] if unit['work_unit_id'] in route['selected_work_unit_ids']
-        and (work_unit_id is None or unit['work_unit_id'] == work_unit_id)]
-    _require(len(units) == 1 and units[0]['owner'] == owner,
-        'criterion-unbound', 'Select exactly one originally owned work unit')
-    unit = units[0]
-    rows = [{key: row[key] for key in _DEFINITION} for row in scope['canonical_criteria']
-        if row['work_unit_id'] == unit['work_unit_id'] and row['contract_revision'] == unit['contract_revision']]
-    return dict(work_unit_id=unit['work_unit_id'], contract_revision=unit['contract_revision'],
-        owner=owner, criteria=rows, relevant_context=scope['relevant_context'])
-
-
-def prepare_response_scope(source, *, expected_input_event_id, source_paths, appendable_sources=(), native_output=None):
-    """Bind the original intake, recorded route and source references before nomination.
-
-    A scope without a recorded route supports ordinary nomination only. This
-    record supplies no claim judgment, completion admission or display receipt.
-    """
-    core, root, owner = _coordinates(source)
-    with core._transaction(root) as connection:
-        binding = response_input_binding(source, expected_input_event_id, transaction=connection)
-        rows = connection.execute('''SELECT event_json FROM intent_events WHERE platform=? AND session_id=?
-            AND json_extract(event_json, '$.event')='response-route-recorded'
-            AND json_extract(event_json, '$.input_event_id')=? ORDER BY sequence DESC''',
-            (owner['platform'], owner['session_id'], expected_input_event_id)).fetchall()
-        scope = dict(kind=_RESPONSE_SCOPE_KIND, intent_root=str(root), input_binding=binding,
-            route=None, relevant_context=None, canonical_criteria=[], sources=_reference_sources(source_paths, appendable_sources))
-        if native_output is not None:
-            _require(isinstance(native_output, dict) and set(native_output) == {'turn_id', 'message_id'}
-                and all(isinstance(v, str) and bool(v) for v in native_output.values()),
-                'scope-invalid', 'Exact native output coordinates are required')
-            scope['native_output'] = dict(native_output)
-        if rows:
-            event = json.loads(rows[0][0])
-            retained = event.get('review_scope')
-            if retained is not None:
-                _require(isinstance(retained, dict) and retained.get('input_binding') == binding
-                    and isinstance(retained.get('route'), dict)
-                    and core.json_digest(retained['route']) == event.get('response_route_digest')
-                    and all(retained['route'].get(key) == binding[key]
-                        for key in ('platform', 'session_id', 'input_event_id'))
-                    and retained['route'].get('status') == 'ready'
-                    and isinstance(retained.get('relevant_context'), dict)
-                    and isinstance(retained.get('canonical_criteria'), list),
-                    'scope-invalid', 'Original route snapshot does not match its owning intake')
-                scope.update(route=retained['route'], relevant_context=retained['relevant_context'],
-                    canonical_criteria=retained['canonical_criteria'])
-        _schema(connection)
-        reference = _reference(scope)
-        connection.execute('INSERT OR IGNORE INTO core_completion_candidates VALUES (?,?,?)',
-            (reference, reference, _json(scope)))
-    return dict(scope, scope_reference=reference)
-
-
-def _stored_response_scope(connection, reference, root, owner):
-    scope = _stored(connection, 'core_completion_candidates', reference)
-    _require(scope.get('kind') == _RESPONSE_SCOPE_KIND and scope.get('intent_root') == str(root)
-        and all(scope.get('input_binding', {}).get(key) == value for key, value in owner.items()),
-        'owner-mismatch', 'Review scope belongs to another native owner')
-    return scope
-
-
-def read_response_scope(source, scope_reference, expected_input_event_id):
-    """Read original source coordinates and scope without loading source bodies."""
-    core, root, owner = _coordinates(source)
-    with core._read_connection(root) as connection:
-        scope = _stored_response_scope(connection, scope_reference, root, owner)
-        _require(scope['input_binding']['input_event_id'] == expected_input_event_id,
-            'scope-invalid', 'Review scope belongs to another input')
-    return dict(scope, sources=_scope_sources(scope, [s['locator'] for s in scope['sources']]),
-                scope_reference=scope_reference)
 
 
 def _record_source_references(sources, root, owner, candidate_reference):
@@ -367,16 +221,6 @@ def _same_sources(left, right):
     # Source IDs authenticate the original bytes and locator, independently of storage location.
     return [{k: s[k] for k in ('source_id', 'locator', 'digest')} for s in left] == [
         {k: s[k] for k in ('source_id', 'locator', 'digest')} for s in right]
-
-
-def _scope_sources(scope, source_paths):
-    owner = {k: scope['input_binding'][k] for k in ('platform', 'session_id')}
-    available = {item['locator']: item for item in _record_source_references(scope['sources'],
-        scope['intent_root'], owner, _reference(scope))}
-    _require(isinstance(source_paths, list) and all(isinstance(path, str) for path in source_paths)
-        and len(source_paths) == len(set(source_paths)) and set(source_paths) <= available.keys(),
-        'source-unavailable', 'Nomination may select only original scope sources')
-    return [available[path] for path in source_paths]
 
 
 def _response_review_key(root, owner, route, text):
@@ -449,43 +293,9 @@ def _source_response_records(connection, root, owner, route, text):
     return records
 
 
-
-
-def _validate_native_response(candidate, connection, root, owner):
-    _require(candidate.get('kind') == _NATIVE_RESPONSE_KIND
-        and candidate.get('intent_root') == str(root) and candidate.get('owner') == owner,
-        'owner-mismatch', 'Native review belongs to another owner')
-    scope = _stored_response_scope(connection, candidate['scope_reference'], root, owner)
-    _require(candidate['input_event_id'] == scope['input_binding']['input_event_id']
-        and candidate['sources'] == _scope_sources(scope, [s['locator'] for s in candidate['sources']]),
-        'scope-invalid', 'Native review must retain its original input and source bytes')
-
-
-def lookup_native_response_record(source, *, expected_input_event_id, text, native_output=None):
-    """Return the historical review for the exact original native output, not current work evidence."""
-    core, root, owner = _coordinates(source)
-    with core._read_connection(root) as connection:
-        if not connection.execute("SELECT 1 FROM sqlite_master WHERE name='core_completion_responses'").fetchone():
-            return None
-        rows = connection.execute('''SELECT r.reference, c.payload_json FROM core_completion_responses r
-            JOIN core_completion_candidates c ON c.reference=json_extract(r.payload_json, '$.candidate_reference')
-            WHERE json_extract(c.payload_json, '$.kind')=?
-            AND json_extract(c.payload_json, '$.owner.platform')=?
-            AND json_extract(c.payload_json, '$.owner.session_id')=?
-            AND json_extract(c.payload_json, '$.input_event_id')=?
-            AND json_extract(c.payload_json, '$.response_binding.text')=? ORDER BY r.rowid DESC''',
-            (_NATIVE_RESPONSE_KIND, owner['platform'], owner['session_id'], expected_input_event_id, text)).fetchall()
-        for reference, raw in rows:
-            candidate = json.loads(raw)
-            if native_output is not None and candidate.get('native_output') == native_output:
-                return lookup_original_response_record(source, reference,
-                    expected_input_event_id=expected_input_event_id, text=text, transaction=connection)
-    return None
-
-
 def prepare_response_review(source, *, response_text, source_paths, verified_at=None,
                             reuse_candidate=None, work_unit_id=None,
-                            claim_statements=None, scope_reference=None):
+                            claim_statements=None):
     """Retain the complete answer and return references for the two judgments.
 
     Source timestamps remain in the original bytes. observed_at dates this
@@ -511,7 +321,7 @@ def prepare_response_review(source, *, response_text, source_paths, verified_at=
             'proof-invalid', 'Completion evidence requires its original verification time')
         return review_receipt(prepare_assessment(source, proof=proof, verified_at=verified_at,
             source_paths=source_paths, reuse_candidate=reuse_candidate,
-            work_unit_id=work_unit_id, response_text=response_text, scope_reference=scope_reference))
+            work_unit_id=work_unit_id, response_text=response_text))
     core, root, owner = _coordinates(source)
     _require(verified_at is None, 'response-unbound', 'An explanation does not create a verification timestamp')
     _require(bool(source_paths), 'source-unavailable', 'Explanation sources are required')
@@ -526,14 +336,12 @@ def prepare_response_review(source, *, response_text, source_paths, verified_at=
         binding['binding_id'] = _reference(binding)
         bindings.append(binding)
     with core._transaction(root) as connection:
-        scope = (_stored_response_scope(connection, scope_reference, root, owner)
-            if scope_reference is not None else None)
-        route = scope['route'] if scope is not None else _current_response_context(core, root, owner, connection)[1]
+        route = _current_response_context(core, root, owner, connection)[1]
         _require(isinstance(route, dict), 'route-unavailable', 'Original owned route snapshot is required')
         response = dict(text=response_text, purpose='explanation')
         response['binding_id'] = _reference(response)
         candidate = dict(kind=_SOURCE_RESPONSE_KIND, intent_root=str(root), owner=owner,
-            route=route, sources=_scope_sources(scope, source_paths) if scope is not None else _reference_sources(source_paths),
+            route=route, sources=_reference_sources(source_paths),
             bindings=bindings, response_binding=response)
         _schema(connection)
         key = _response_review_key(root, owner, route, response_text)
@@ -583,12 +391,8 @@ def record_response_review(source, candidate_reference, review, *, context_use_j
             supported = all(j['verdict'] == 'supported' for j in review['claims'] + [judgment])
             result['status'] = 'reviewed' if supported else 'unsupported'
             return review_receipt(result)
-        native = candidate.get('kind') == _NATIVE_RESPONSE_KIND
         route = candidate.get('route')
-        if native:
-            _validate_native_response(candidate, connection, root, owner)
-        else:
-            _validate_response_review(candidate, root, owner, route)
+        _validate_response_review(candidate, root, owner, route)
         _validate_claim_judgments(candidate, review['claims'])
         _require(_valid_judgment(judgment, candidate['response_binding']['binding_id'],
             {s['source_id'] for s in candidate['sources']}), 'response-assessment-required',
@@ -597,7 +401,7 @@ def record_response_review(source, candidate_reference, review, *, context_use_j
         # Current lookup independently checks whether their live sources changed.
         payload = dict(kind=candidate['kind'], candidate_reference=candidate_reference,
             judgments=review['claims'], judgment=judgment)
-        key = candidate_reference if native else _response_review_key(root, owner, route, candidate['response_binding']['text'])
+        key = _response_review_key(root, owner, route, candidate['response_binding']['text'])
         previous = [row[0] for row in connection.execute('''SELECT reference FROM core_completion_responses
             WHERE json_extract(payload_json, '$.candidate_reference')=?''', (candidate_reference,))]
         reference = _reference(payload)
@@ -645,8 +449,7 @@ def _lookup_source_response(core, root, owner, connection, text):
 
 
 def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candidate=None,
-                       work_unit_id=None, response_text=None, transaction=None,
-                       scope_reference=None):
+                       work_unit_id=None, response_text=None, transaction=None):
     """Snapshot explicit observation paths and canonical conditions for review.
 
     Native answer producers use prepare_response_review and record_response_review;
@@ -670,13 +473,7 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
     except (ValueError, TypeError, AttributeError) as exc:
         raise CompletionAssessmentError('proof-invalid', str(exc)) from exc
     with core._transaction(root, transaction) as connection:
-        scope = (_stored_response_scope(connection, scope_reference, root, owner)
-            if scope_reference is not None else None)
-        if scope is None:
-            contract, event, selected = _current_contract(core, root, owner, connection, work_unit_id)
-        else:
-            contract = _scope_contract(scope, work_unit_id)
-            event, selected = scope['input_binding']['input_event_id'], scope['route']['selected_criteria']
+        contract, event, selected = _current_contract(core, root, owner, connection, work_unit_id)
         _schema(connection)
         if reuse_candidate:
             old = _stored(connection, 'core_completion_candidates', reuse_candidate)
@@ -688,7 +485,7 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
                 proof = old['proof']
         else:
             try:
-                sources = _scope_sources(scope, source_paths) if scope is not None else _reference_sources(source_paths)
+                sources = _reference_sources(source_paths)
             except OSError as exc:
                 raise CompletionAssessmentError('source-unavailable', str(exc)) from exc
         rows = {row['id']: row for row in contract['criteria']}
@@ -709,11 +506,9 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
         if response_text is not None:
             response = dict(text=response_text, proof_digest=_digest(proof))
             if report_only:
-                route = scope['route'] if scope is not None else core.read_response_route(root=root, **owner, transaction=connection)
                 _require(bool(reuse_candidate) and old['proof'] == proof and old['contract'] == contract,
                     'response-unbound', 'An explanation must reuse an original reviewed proof under its current owned contract')
-                original = lookup_assessment(source, contract, proof, verified_at, transaction=connection,
-                    historical=scope is not None)
+                original = lookup_assessment(source, contract, proof, verified_at, transaction=connection)
                 _require(all(j['verdict'] == 'supported' for j in original.judgments),
                     'assessment-unsupported', 'An explanation requires supported original judgments')
                 response['purpose'] = 'explanation'
@@ -828,7 +623,7 @@ def record_assessment(source, candidate_reference, judgments, *, response_judgme
     return result
 
 
-def lookup_assessment(source, contract, proof, verified_at, *, transaction=None, historical=False):
+def lookup_assessment(source, contract, proof, verified_at, *, transaction=None):
     """Authenticate retained Core review; current routing is unnecessary for reads."""
     core, root, owner = _coordinates(source)
     _require(contract.get('owner') == owner, 'owner-mismatch', 'Review belongs to another owner')
@@ -843,15 +638,12 @@ def lookup_assessment(source, contract, proof, verified_at, *, transaction=None,
         candidate = _stored(connection, 'core_completion_candidates', payload['candidate_reference'])
         _require(('candidate' not in payload or candidate == payload['candidate']) and candidate['intent_root'] == str(root),
                  'assessment-invalid', 'Review candidate authority differs')
-        issues = {} if historical else _source_issues(candidate, {sid for j in payload['judgments'] for sid in j['source_ids']})
+        issues = _source_issues(candidate, {sid for j in payload['judgments'] for sid in j['source_ids']})
         result = VerifiedAssessment(payload, _SEAL, issues, candidate=candidate)
         coverage = assessment_coverage(result, contract, proof, verified_at)
         _require(not issues or bool(coverage), next(iter(issues.values()), 'source-changed'),
                  'Reviewed observation sources changed or are unavailable')
         return result
-
-
-verified_assessment = lookup_assessment
 
 
 def lookup_current_proof(source, proof, *, transaction=None, work_unit_id=None):
@@ -951,82 +743,6 @@ def lookup_current_response(source, text, *, transaction=None):
         issues = _source_issues(candidate, set(reviewed['judgment']['source_ids']))
         _require(not issues, next(iter(issues.values()), 'source-changed'), 'Response observations changed or are unavailable')
     return assessment
-
-
-def lookup_current_response_record(source, text, *, transaction=None):
-    """Return exact native output coordinates after the existing Core authentication.
-
-    Native rendering preserves every byte. The broader control-spacing lookup
-    remains available to its original consumers but cannot replace native text.
-    """
-    core, root, owner = _coordinates(source)
-    with core._read_connection(root, transaction) as connection:
-        authenticated = lookup_current_response(source, text, transaction=connection)
-        if isinstance(authenticated, dict):
-            reference = _reference(authenticated)
-            reviewed = authenticated
-        else:
-            rows = connection.execute('''SELECT reference FROM core_completion_responses
-                WHERE json_extract(payload_json, '$.assessment_reference')=?
-                AND json_extract(payload_json, '$.response_binding.text')=?''',
-                (authenticated.reference, text)).fetchall()
-            _require(len(rows) == 1, 'response-unbound', 'Native output requires one exact reviewed body')
-            reference = rows[0][0]
-            reviewed = _stored(connection, 'core_completion_responses', reference)
-        candidate = _stored(connection, 'core_completion_candidates', reviewed['candidate_reference'])
-        _require(candidate['response_binding']['text'] == text,
-            'response-unbound', 'Native output must preserve the exact reviewed body')
-    return dict(status='reviewed', response_text=text, response_reference=reference,
-        candidate_reference=reviewed['candidate_reference'])
-
-
-def lookup_original_response_record(source, response_reference, *, expected_input_event_id, text,
-                                    transaction=None):
-    """Authenticate exact reviewed bytes for their original native input.
-
-    This read preserves historical judgments and never grants current work
-    completion or permission to replace another turn's output.
-    """
-    core, root, owner = _coordinates(source)
-    with core._read_connection(root, transaction) as connection:
-        reviewed = _stored(connection, 'core_completion_responses', response_reference)
-        candidate = _stored(connection, 'core_completion_candidates', reviewed['candidate_reference'])
-        if candidate.get('kind') == _NATIVE_RESPONSE_KIND:
-            _validate_native_response(candidate, connection, root, owner)
-            event = candidate['input_event_id']
-            judgments = reviewed['judgments']
-            _validate_claim_judgments(candidate, judgments)
-        elif candidate.get('kind') == _SOURCE_RESPONSE_KIND:
-            route = candidate['route']
-            _validate_response_review(candidate, root, owner, route)
-            event = route['input_event_id']
-            judgments = reviewed['judgments']
-            _validate_claim_judgments(candidate, judgments)
-        else:
-            _require(candidate.get('schema_version') == 'completion-assessment-candidate.v1'
-                and candidate.get('intent_root') == str(root)
-                and candidate.get('contract', {}).get('owner') == owner,
-                'owner-mismatch', 'Original response belongs to another owner')
-            event = candidate['input_event_id']
-            assessment = lookup_assessment(source, candidate['contract'], candidate['proof'],
-                candidate['verified_at'], transaction=connection, historical=True)
-            _require(reviewed.get('assessment_reference') == assessment.reference
-                and reviewed.get('response_binding') == candidate.get('response_binding')
-                and _same_sources(candidate['sources'], assessment.candidate['sources'])
-                and candidate['bindings'] == assessment.candidate['bindings'],
-                'response-unbound', 'Response review differs from its authenticated original claim review')
-            judgments = assessment.judgments
-            _validate_claim_judgments(candidate, judgments)
-        response = candidate.get('response_binding')
-        _require(event == expected_input_event_id and isinstance(response, dict)
-            and response.get('text') == text, 'response-unbound',
-            'Return only the exact original body for its original input')
-        _require(_valid_judgment(reviewed.get('judgment'), response['binding_id'],
-            {item['source_id'] for item in candidate['sources']})
-            and all(j['verdict'] == 'supported' for j in judgments + [reviewed['judgment']]),
-            'response-unsupported', 'Both original claim and whole-response reviews must support the body')
-    return dict(status='reviewed', response_text=text, response_reference=response_reference,
-        candidate_reference=reviewed['candidate_reference'])
 
 
 def _assessed_bindings(assessment, contract, proof, verified_at):

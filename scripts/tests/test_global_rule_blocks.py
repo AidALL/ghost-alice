@@ -231,7 +231,6 @@ class GlobalRuleBlockTest(unittest.TestCase):
     def test_codex_source_owns_one_hookless_fallback(self) -> None:
         blocks = _load_global_rule_blocks()
         source = blocks.platform_contract_text(REPO_ROOT / "platforms/codex/AGENTS.md")
-        self.assertFalse(hasattr(blocks, "CODEX_HOOKLESS_FALLBACK_BLOCK"))
         for renderer in (
             blocks.render_codex_managed_block,
             blocks.render_codex_bootstrap,
@@ -250,7 +249,6 @@ class GlobalRuleBlockTest(unittest.TestCase):
         source = blocks.platform_contract_text(REPO_ROOT / "platforms/claude/CLAUDE.md")
 
         self.assertTrue(source.startswith(blocks.CLAUDE_BOOTSTRAP_MARKER))
-        self.assertFalse(hasattr(blocks, "CLAUDE_HOOKLESS_FALLBACK_BLOCK"))
         for renderer in (
             blocks.render_claude_managed_block,
             blocks.render_claude_bootstrap,

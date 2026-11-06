@@ -237,10 +237,6 @@ class LineTests(ReportCase):
         out = self.captured(report.print_skill_sync_summary, 1, 0, 0, 0, 1)
         self.assertEqual(out, "[INFO] [2/5] Skill sync: 1 skill target, 0 support targets; 0 installed, 0 updated, 1 skipped\n")
 
-    def test_join_by(self):
-        self.assertEqual(report.join_by(", ", ["claude", "codex"]), "claude, codex")
-        self.assertEqual(report.join_by(", ", []), "")
-
     def test_hook_suite_label(self):
         # report.sh:126-129; test_report_hook_suite_label.py
         for platform in ("claude", "codex", ""):

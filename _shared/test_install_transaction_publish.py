@@ -35,6 +35,8 @@ class PublishCase(unittest.TestCase):
             (self.src / name / "SKILL.md").write_text(f"{name} v2\n", encoding="utf-8")
         (self.src / "_shared" / "__pycache__").mkdir()
         (self.src / "_shared" / "__pycache__" / "x.cpython-314.pyc").write_bytes(b"cache")
+        (self.src / "_shared" / ".DS_Store").write_bytes(b"finder")
+        (self.src / "_shared" / "loose.pyc").write_bytes(b"cache")
         self.claude = self.home / ".claude" / "skills"
         self.codex = self.home / ".agents" / "skills"
         self.claude.mkdir(parents=True)
@@ -139,7 +141,7 @@ class PublishTests(PublishCase):
         dest = self.codex / "_shared"
         install_transaction.publish(self.request("codex", self.target("_shared", dest, "copy", kind="support")))
         self.assertFalse(dest.is_symlink())
-        self.assertFalse((dest / "__pycache__").exists())
+        self.assertEqual([path.name for path in dest.iterdir()], ["SKILL.md"])
         entry = self.record()["targets"][str(dest)]
         self.assertEqual((entry["mode"], entry["kind"], entry["baseline"]), ("copy", "support", "recorded"))
         self.assertEqual(entry["files"], content_digest.tree(dest))
@@ -286,18 +288,6 @@ class StagingAndRetentionTests(PublishCase):
     def test_a_replacement_names_its_rollback_folder(self):
         with self.assertRaises(TypeError):
             install_transaction.ReplacementBatch([(self.src / "alpha", self.codex / "alpha", "copy")])
-        with self.assertRaises(TypeError):
-            install_transaction.staged_copy_replace(self.src / "alpha", self.codex / "alpha")
-
-    def test_the_replacement_commands_require_a_rollback_folder(self):
-        commands = (["copy-replace", "--source", "a", "--dest", "b"],
-                    ["symlink-replace", "--source", "a", "--dest", "b"],
-                    ["copy-replace-many", "--target", "a", "b"])
-        for command in commands:
-            with self.subTest(command=command[0]), contextlib.redirect_stderr(io.StringIO()):
-                with self.assertRaises(SystemExit) as stop:
-                    install_transaction._parse_args(command)
-                self.assertEqual(stop.exception.code, 2)
 
     def test_a_publish_failure_event_offers_the_event_log_to_its_retention_entry(self):
         # The entry rotates past 5MB (state_retention tests); the writer offers its log after each event.
@@ -446,6 +436,63 @@ class FailureTests(PublishCase):
             install_transaction.recover(self.ghost, txid)
         self.assertEqual(self.journal(txid)["phase"], "prepare")
 
+    def test_a_missing_source_keeps_the_original_and_records_a_failure_event(self):
+        dest = self.codex / "beta"
+        missing = self.src / "missing-source"
+        log = self.ghost / "install-state" / "codex-events.jsonl"
+        with self.assertRaises(install_transaction.InstallTransactionError):
+            install_transaction.publish(self.request("codex", self.target("beta", dest, "copy", source=missing),
+                                                     event_log=str(log)))
+        events = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["schema_version"], 1)
+        self.assertEqual(events[0]["event"], "copy_replace_failure")
+        self.assertEqual(events[0]["phase"], "stage-copy")
+        self.assertEqual(events[0]["source_path"], missing.as_posix())
+        self.assertEqual(events[0]["dest_path"], dest.as_posix())
+        self.assertIn("source does not exist", events[0]["error"])
+        self.assertEqual((dest / "SKILL.md").read_text(encoding="utf-8"), "beta v1\n")
+
+    def test_a_stage_that_fails_its_verification_keeps_the_original_and_records_the_phase(self):
+        dest = self.codex / "beta"
+        log = self.ghost / "install-state" / "codex-events.jsonl"
+        real_copy = install_transaction._copy_to_stage
+
+        def corrupting_copy(source, stage):
+            real_copy(source, stage)
+            (stage / "SKILL.md").write_text("corrupt stage\n", encoding="utf-8")
+
+        with mock.patch.object(install_transaction, "_copy_to_stage", side_effect=corrupting_copy):
+            with self.assertRaises(install_transaction.InstallTransactionError):
+                install_transaction.publish(self.request("codex", self.target("beta", dest, "copy"),
+                                                         event_log=str(log)))
+        self.assertEqual((dest / "SKILL.md").read_text(encoding="utf-8"), "beta v1\n")
+        events = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(events[0]["phase"], "stage-verify")
+        self.assertIn("staged copy verification failed", events[0]["error"])
+
+    def test_a_later_target_that_fails_staging_keeps_every_original_and_is_the_one_reported(self):
+        beta = self.codex / "beta"
+        log = self.ghost / "install-state" / "codex-events.jsonl"
+        real_copy = install_transaction._copy_to_stage
+
+        def corrupting_copy(source, stage):
+            real_copy(source, stage)
+            if source.name == "beta":
+                (stage / "SKILL.md").write_text("corrupt stage\n", encoding="utf-8")
+
+        cases = (("stage-copy", self.target("beta", beta, "copy", source=self.src / "missing-source"), real_copy),
+                 ("stage-verify", self.target("beta", beta, "copy"), corrupting_copy))
+        for phase, second, copy in cases:
+            with self.subTest(phase=phase), mock.patch.object(install_transaction, "_copy_to_stage", side_effect=copy):
+                with self.assertRaises(install_transaction.InstallTransactionError):
+                    install_transaction.publish(self.request(
+                        "codex", self.target("alpha", self.codex / "alpha", "copy"), second, event_log=str(log)))
+                self.assertEqual(self.snapshot(*self.dests), self.before_files)
+                self.assertEqual(installed_payload.path(self.ghost).read_bytes(), self.before_record)
+                event = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
+                self.assertEqual((event["phase"], event["dest_path"]), (phase, beta.as_posix()))
+
     def test_a_journal_that_cannot_be_written_stops_the_publish_before_any_change(self):
         shutil.rmtree(self.ghost / "rollbacks")
         (self.ghost / "rollbacks").write_text("not a folder", encoding="utf-8")
@@ -496,6 +543,8 @@ class CommandLineTests(PublishCase):
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
             install_transaction.publish(request)
+        # The counter moves after each placed target, not only after the last one.
+        self.assertIn("  [2/5] Skill sync [0] [Current], [0] [updated], [1] [newly added]", stdout.getvalue())
         self.assertIn("  [2/5] Skill sync [0] [Current], [1] [updated], [1] [newly added]", stdout.getvalue())
         self.assertTrue(stdout.getvalue().endswith("\n"))
         self.assertEqual([json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()], [

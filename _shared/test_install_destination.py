@@ -56,7 +56,7 @@ def _bound_hook_environment(tmp_path, platform, *, mode='normal', extra_env=None
     import install_destination
     root=tmp_path/'owned';root.mkdir()
     value=destination_fixture(root);value['mode']=mode
-    fields=('GHOST_ALICE_PROJECT_CWD','CLAUDE_PROJECT_DIR','GHOST_ALICE_PLATFORM')
+    fields=('CLAUDE_PROJECT_DIR','GHOST_ALICE_PLATFORM')
     code=f'import json,os,sys; print(json.dumps({{"continue":True,"systemMessage":json.dumps({{"env":{{k:os.environ.get(k) for k in {fields!r}}},"input":json.load(sys.stdin)}})}}))'
     command=f'{sys.executable.replace(chr(92),"/")} -c {shlex.quote(code)}'
     wrapped=base64.urlsafe_b64encode(command.encode()).decode()
@@ -77,15 +77,9 @@ def test_normal_bound_runner_preserves_native_context_and_domain_project_hint(tm
     cli_project=str(tmp_path/'claude-project')
     observed=_bound_hook_environment(tmp_path,platform,native_cwd=native,
         extra_env={'CLAUDE_PROJECT_DIR':cli_project})
-    assert observed['env']['GHOST_ALICE_PROJECT_CWD']==native
     assert observed['env']['CLAUDE_PROJECT_DIR']==cli_project
     assert observed['env']['GHOST_ALICE_PLATFORM']==platform
     assert observed['input']['cwd']==native
-
-
-def test_normal_bound_runner_does_not_use_installation_project_when_native_cwd_is_invalid(tmp_path):
-    observed=_bound_hook_environment(tmp_path,'codex',native_cwd='invalid-relative-cwd')
-    assert observed['env']['GHOST_ALICE_PROJECT_CWD'] is None
 
 
 @pytest.mark.parametrize('invalid',({},[],'',False,0))
@@ -212,7 +206,6 @@ def test_generated_chain_and_public_actions_under_os_write_deny(tmp_path):
         run(['/bin/sh','-c',command],json.dumps(dict(hook_event_name=event,session_id='location-source-fixture',cwd=str(root/'project'),**payload)))
     assert (root/'ledger/ghost-state.sqlite3').is_file()
     assert (root/'ghost/io-trace.jsonl').is_file()
-    assert (root/'ghost/governance-events.jsonl').is_file()
     assert not (root/'ghost/hooks/tool-checkpoint-surface-state.json').exists()
     config=(root/'platform/config.toml').read_text()
     assert str(root/'project') in config

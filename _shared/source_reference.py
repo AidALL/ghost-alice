@@ -74,7 +74,7 @@ def _core_source(reference):
     if row is None:
         raise SourceReferenceError('Original source record is unavailable')
     record = json.loads(row[0])
-    owner = record.get('owner') or record.get('contract', {}).get('owner') or record.get('input_binding', {})
+    owner = record.get('owner') or record.get('contract', {}).get('owner') or {}
     if (_identity(record) != reference['candidate_reference'] or record.get('intent_root') != str(root)
             or any(owner.get(k) != reference['owner'].get(k) for k in ('platform', 'session_id'))):
         raise SourceReferenceError('Original source record is unbound')

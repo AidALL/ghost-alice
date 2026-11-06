@@ -1,6 +1,6 @@
 # Verify-Or-Reuse Contract
 
-This reference is the canonical semantic contract for deciding whether a claim about an artifact needs a new read, fetch, shell inspection, or connector call, or whether retained evidence already answers it. Claude Code and Codex use the same contract. The executable form is `scripts/verify_or_reuse.py` in this skill directory.
+This reference is the canonical semantic contract for deciding whether a claim about an artifact needs a new read, fetch, shell inspection, or connector call, or whether retained evidence already answers it. Claude Code and Codex use the same contract.
 
 ## Contents
 
@@ -14,8 +14,6 @@ This reference is the canonical semantic contract for deciding whether a claim a
 - [Authoritative Copy](#authoritative-copy)
 - [Restatement](#restatement)
 - [Confirmed Flaw Propagation](#confirmed-flaw-propagation)
-- [Deterministic Helper](#deterministic-helper)
-- [Conversation Audit Template](#conversation-audit-template)
 - [Worked Cases](#worked-cases)
 - [Out Of Scope](#out-of-scope)
 
@@ -54,7 +52,7 @@ Last-known author: `current-agent`, `user`, `other-agent`, `external-process`, `
 
 Authority needs a basis. `interaction-contract`, `permission`, `sharing-state`, and `observed-event` are evidence. `storage-location`, `assumption`, and `none` are not; an authority claimed on those bases becomes `unknown`. A local file or a Drive document is not `externally-writable` because of where it is stored. When the party holding an open change path confirms that nothing relevant changed (`writer_confirmed_unchanged`), that path is closed for the claim and retained evidence answers it as current; an observed mutation event still wins over the confirmation.
 
-Observed mutation events after the retained evidence: `agent-write-succeeded`, `external-revision`, `sync-revision`, `other-agent-write`, `user-provided-changed-artifact`. When the retained evidence is the response model's authored content and the last-known author is someone else, the helper derives `last-writer-changed`.
+Observed mutation events after the retained evidence: `agent-write-succeeded`, `external-revision`, `sync-revision`, `other-agent-write`, `user-provided-changed-artifact`. When the retained evidence is the response model's authored content and the last-known author is someone else, the trigger is `last-writer-changed`.
 
 Signals that are recorded but never count as mutations: `user-message`, `edit-instruction-unexecuted`, `agent-write-failed`, `agent-read`. Hypothetical changes are recorded separately and ignored.
 
@@ -106,11 +104,11 @@ An objection that a check was redundant asks whether an actual change path or mu
 
 ## Authoritative Copy
 
-When several versions of an artifact exist, a current-state claim uses the copy the user designated (`user-designated`). Otherwise it uses the newest version backed by dates (`dated-version`) or compared content (`content-compared`). A folder named latest (`folder-name`), a copy used before (`familiarity`), or no basis (`none`) is not evidence of recency. Tied or missing evidence leaves the copy unresolved: inspect the candidates' dates or content, or ask which copy is authoritative. `authoritative_copy()` in the helper applies this rule.
+When several versions of an artifact exist, a current-state claim uses the copy the user designated (`user-designated`). Otherwise it uses the newest version backed by dates (`dated-version`) or compared content (`content-compared`). A folder named latest (`folder-name`), a copy used before (`familiarity`), or no basis (`none`) is not evidence of recency. Tied or missing evidence leaves the copy unresolved: inspect the candidates' dates or content, or ask which copy is authoritative.
 
 ## Restatement
 
-Avoid repeating an unchanged delivered explanation, status or apology when it adds no information. A user's request to restate a result can require that content again. `audit_restatement()` flags potential repeats for review and excludes fenced boundary contract, completion and partial completion blocks, whose schema repeats by design.
+Avoid repeating an unchanged delivered explanation, status or apology when it adds no information. A user's request to restate a result can require that content again.
 
 ## Confirmed Flaw Propagation
 
@@ -124,38 +122,6 @@ For a confirmed flaw in an authored prompt, document, plan or other requested ar
 | No flaw confirmed | `none` |
 
 Failure classes: `confirmed-flaw-not-propagated` for an explanation, a previous version, or a partial patch where the corrected complete deliverable was required; `unnecessary-reapproval` for asking permission for a safe in-scope fix; `unconfirmed-out-of-scope-change` for applying an out-of-scope fix without confirmation.
-
-## Deterministic Helper
-
-The helper encodes the same rules for tests and audits. Do not spend a tool call on it when the flow already settles the verdict; its purpose is regression evidence and after-the-fact review, not a gate before every answer.
-
-```bash
-python3 scripts/verify_or_reuse.py decide --facts-json '{"claim_time":"authored-at","claim_copy":"chat-sandbox:plan.md","retained_evidence":{"present":true,"copy":"chat-sandbox:plan.md","origin":"authored"},"last_known_author":"current-agent","mutation_authority":"agent-mediated","authority_basis":"interaction-contract","events_since_evidence":["user-message"]}'
-python3 scripts/verify_or_reuse.py audit --platform codex --facts-json '{"claim_time":"authored-at","claim_copy":"chat-sandbox:plan.md","retained_evidence":{"present":true,"copy":"chat-sandbox:plan.md","origin":"authored"},"last_known_author":"current-agent","mutation_authority":"agent-mediated","authority_basis":"interaction-contract","events_since_evidence":["user-message"]}' --calls-json '[{"tool":"shell","copy":"chat-sandbox:plan.md"}]'
-python3 scripts/verify_or_reuse.py flaw --facts-json '{"flaw_confirmed":true}' --response explanation-only
-```
-
-Each `--calls-json` entry names a `tool` or a neutral `class`; `tool_class()` in the script maps the tool names it knows, and any other tool name counts as `other`, which is not an inspection. Invalid values, and unknown values other than tool names, exit with status 2 instead of being guessed. Record a possibility in `hypothetical_changes`, not in `events_since_evidence`.
-
-## Conversation Audit Template
-
-Use this template to review a finished turn without storing raw conversation text.
-
-```text
-[verify-or-reuse-audit]
-- claim: <compressed claim>
-- claim-time: authored-at | current
-- target-copy: <claim_copy>
-- retained-evidence: present | lost | other-copy
-- last-known-author: <author>
-- actual-mutation-authority: <authority> (basis: <basis>)
-- observed-mutation-event: <events | none>
-- verdict: reuse | verify | wrong-copy | unverified
-- trigger: <trigger | none>
-- calls: <tool -> copy, ...>
-- findings: <redundant-verification | duplicate-verification | wrong-copy-inspection | non-evidential-inspection | none>
-- conduct: <confirmed-flaw-not-propagated | unnecessary-reapproval | unconfirmed-out-of-scope-change | none>
-```
 
 ## Worked Cases
 
