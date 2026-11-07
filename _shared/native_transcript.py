@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 
+import install_destination
 from source_reference import json_digest, matches_input, text_digest
 from text_lines import committed_byte_lines, committed_length, committed_lines, committed_records
 
@@ -23,6 +24,12 @@ SDK_ENTRYPOINTS = frozenset({'sdk-cli', 'claude-desktop'})
 APP_EVENT_KEYS = frozenset({'type', 'commandMode', 'prompt', 'source_uuid', 'timestamp', 'delivery_id'})
 # Actors a located row can resolve to; None means the markers are unknown.
 RESOLVED_ACTORS = ('human', 'sdk', 'context', 'notification')
+
+
+def codex_home(source):
+    """Codex's data folder as text: the Ghost-ALICE override, then CODEX_HOME, then `.codex` under the user's home."""
+    return (source.get('GHOST_ALICE_CODEX_DIR') or source.get('CODEX_HOME')
+            or str(install_destination.home_directory(source) / '.codex'))
 
 
 def codex_transcript_path(platform_dir, session_id):

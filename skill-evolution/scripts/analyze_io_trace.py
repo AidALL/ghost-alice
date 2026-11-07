@@ -1,24 +1,31 @@
 #!/usr/bin/env python3
 """Analyze Ghost-ALICE io-trace JSONL and emit report-only instinct candidates.
 
-Dependencies: Python 3.11+ standard library only.
+Dependencies: Python 3.11+ standard library and the Core helpers in `_shared`.
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import re
+import sys
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_shared"))
+import install_destination  # noqa: E402
+from ledger_access import load_ledger  # noqa: E402
 
-DEFAULT_TRACE = Path("~/.ghost-alice/io-trace.jsonl")
+
+def default_trace() -> Path:
+    """The io-trace file under the Ghost-ALICE root the installation names."""
+    return install_destination.ghost_root() / "io-trace.jsonl"
+
+
 DEFAULT_WINDOW = 1000
 DEFAULT_MIN_COUNT = 2
 EMPTY_INTENT_CONTEXT: dict[str, Any] = {
@@ -284,22 +291,12 @@ def analyze_events(events: list[Event], window: int, min_count: int) -> dict[str
     }
 
 
-@lru_cache(maxsize=1)
-def _ledger_module() -> Any:
-    """Load the session-intent ledger once; it owns storage reads and source labels."""
-    entry = Path(__file__).resolve().parents[2] / "session-intent-analyzer/scripts/session_intent_ledger.py"
-    spec = importlib.util.spec_from_file_location("ghost_evolution_ledger", entry)
-    ledger = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(ledger)
-    return ledger
-
-
 def load_intent_context(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
     path = path.expanduser()
     if path.name == "intent-state.json" and any((path.parents[2] / name).exists() for name in ("ghost-state.sqlite3", ".sqlite-authority.json")):
-        value = _ledger_module().read_session_state(root=path.parents[2], platform=path.parent.parent.name, session_id=path.parent.name)
+        value = load_ledger().read_session_state(root=path.parents[2], platform=path.parent.parent.name, session_id=path.parent.name)
     else:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
@@ -397,7 +394,7 @@ def conduct_feedback_instincts(context: dict[str, Any] | None) -> list[dict[str,
             continue
         rule = str(entry.get("corrective_rule") or "").strip()
         pattern = str(entry.get("failure_pattern") or "").strip()
-        source = _ledger_module().canonical_source(entry.get("source"), "user-said")
+        source = load_ledger().canonical_source(entry.get("source"), "user-said")
         instincts.append({
             "id": f"conduct:{entry_id}",
             "trigger": rule or pattern or entry_id,
@@ -451,7 +448,7 @@ def render_text(report: dict[str, Any]) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Analyze io-trace JSONL into report-only instinct candidates.")
-    parser.add_argument("path", nargs="?", default=str(DEFAULT_TRACE), help="io-trace JSONL path")
+    parser.add_argument("path", nargs="?", default=str(default_trace()), help="io-trace JSONL path")
     parser.add_argument("--window", type=int, default=DEFAULT_WINDOW, help="number of recent events to inspect")
     parser.add_argument("--min-count", type=int, default=DEFAULT_MIN_COUNT, help="minimum occurrences")
     parser.add_argument("--intent-ledger", default="", help="session-intent-analyzer intent-state.json path")

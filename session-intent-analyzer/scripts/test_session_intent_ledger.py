@@ -731,6 +731,12 @@ class SessionIntentLedgerTests(unittest.TestCase):
         pointer = self.ledger.read_current_session_pointer(root, "codex")
         self.assertEqual(pointer, "session-real")
 
+    def test_resolve_session_id_reads_every_host_session_key(self) -> None:
+        root = self.tmpdir / "ledger-keys"
+        self.assertEqual(self.ledger.resolve_session_id(root=root, platform="codex", payload={"threadId": "t-1"}), "t-1")
+        self.assertEqual(self.ledger.resolve_session_id(root=root, platform="codex", payload={"threadId": "t-1"}, for_write=True), "t-1")
+        self.assertEqual(self.ledger.safe_component("a=b" + "x" * 130), ("a=b" + "x" * 130)[:120])
+
     def test_resolve_session_id_prefers_explicit_payload_env_then_pointer(self) -> None:
         root = self.tmpdir / "ledger"
         self.ledger.write_current_session_pointer(root, "codex", "s-pointer")

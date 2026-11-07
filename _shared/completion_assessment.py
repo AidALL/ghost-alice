@@ -14,7 +14,7 @@ import re
 
 from completion_check_validator import (extract_original_proof, parse_original_completion_evidence,
                                         looks_like_evidence_claim, review_comparison_text)
-from native_completion import _ledger
+import ledger_access
 from source_reference import canonical_json, json_digest, text_digest
 from timestamps import parse_timestamp
 
@@ -66,17 +66,10 @@ class VerifiedAssessment:
 
 
 def _coordinates(source):
-    root = source.get('GHOST_ALICE_SESSION_INTENT_ROOT')
-    owner = {k: source.get('GHOST_ALICE_' + k.upper()) for k in ('platform', 'session_id')}
-    _require(isinstance(root, str) and Path(root).is_absolute(), 'authority-unavailable', 'Exact ledger root is required')
-    _require(owner['platform'] in {'codex', 'claude'}
-        and isinstance(owner['session_id'], str) and bool(owner['session_id']),
-        'owner-mismatch', 'Exact native owner is required')
-    _require(owner['platform'] != 'codex' or source.get('CODEX_THREAD_ID') in (None, '', owner['session_id']),
-             'owner-mismatch', 'Native owner conflicts with the host')
-    core = _ledger(source)
-    core.validate_identity(**owner)
-    return core, Path(root).resolve(), owner
+    try:
+        return ledger_access.coordinates(source)
+    except ledger_access.CoordinateError as exc:
+        raise CompletionAssessmentError(exc.reason, str(exc)) from None
 
 
 def _schema(connection):

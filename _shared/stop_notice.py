@@ -19,14 +19,16 @@ from typing import Any, Mapping
 import atomic_write
 from completion_check_validator import (extract_claim_evidence_entries, extract_control_block,
                                         extract_partial_unverified_entries, find_control_block_positions)
+import install_destination
+import ledger_access
 from native_completion import assess_native_completion
 from native_transcript import stop_response_text
+from session_identity import session_candidates
 import strict_session_log
 
 SCHEMA_VERSION = 'stop-notice.v1'
 FILE_NAME = 'stop-notice.json'
 ENV_FILE = 'GHOST_ALICE_STOP_NOTICE_FILE'
-NATIVE_SESSION_KEYS = ('session_id', 'sessionId', 'thread_id', 'threadId')
 CLAIM_LIMIT = 160
 CODE = re.compile(r'([a-z]+(?:-[a-z]+)+):')
 # The validator's diagnostic is written for the response model, so the text names only the problem;
@@ -57,16 +59,15 @@ HELD_ROW_LABELS = {
 
 
 def native_session(native_input: Mapping[str, Any]) -> str:
-    """The session the host named; an unnamed session stays empty, never guessed."""
-    return next((native_input[key] for key in NATIVE_SESSION_KEYS
-                 if isinstance(native_input.get(key), str) and native_input[key].strip()), '')
+    """The session the host named in the payload; an unnamed session stays empty, never guessed from the environment."""
+    return next((value for value in session_candidates(None, dict(native_input))
+                 if isinstance(value, str) and value.strip()), '')
 
 
 def notice_path(env: Mapping[str, str], native_input: Mapping[str, Any], platform: str) -> Path:
     """The notice file in the session folder, next to the hook log."""
-    home = next((Path(env[name]) for name in ('HOME', 'USERPROFILE') if str(env.get(name) or '').strip()), None)
     session = strict_session_log.session_id_from_payload(dict(native_input), dict(env), platform=platform)
-    return strict_session_log.log_path(home, platform, session).parent / FILE_NAME
+    return strict_session_log.log_path(install_destination.home_directory(env), platform, session).parent / FILE_NAME
 
 
 def build_stop_notice(platform: str, native_input: Mapping[str, Any], env: Mapping[str, str]) -> dict[str, Any]:
@@ -77,7 +78,7 @@ def build_stop_notice(platform: str, native_input: Mapping[str, Any], env: Mappi
                    body_digest='sha256:' + hashlib.sha256(text.encode()).hexdigest(), state='quiet', control=None,
                    claims=None, unsupported_claims=[], issues=[], unresolved_criteria=[],
                    remaining_work={'declared': False}, text='')
-    source = dict(env, GHOST_ALICE_PLATFORM=platform, GHOST_ALICE_SESSION_ID=session)
+    source = ledger_access.source_environment(platform, session, environment=env)
     # An empty answer has no claims or block to compare; the declaration in the current route still stands.
     assessment = assess_native_completion(source, text=text, native_input=dict(native_input))
     control = _control(text)

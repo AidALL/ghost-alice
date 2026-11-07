@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import install_destination
+from session_identity import host_bound_session
 import sqlite3
 from timestamps import parse_timestamp
 from typing import Callable
@@ -178,8 +179,7 @@ def main() -> int:
     parser.add_argument("--body-retained", action="store_true")
     parser.add_argument("--read-records", action="store_true")
     args = parser.parse_args()
-    native = os.environ.get("CODEX_THREAD_ID") if args.platform == "codex" else None
-    bound = native or os.environ.get("GHOST_ALICE_SESSION_ID")
+    bound = host_bound_session(args.platform, os.environ)
     if bound and bound != args.session_id:
         parser.error("session id conflicts with the current host binding")
     if args.read_records:

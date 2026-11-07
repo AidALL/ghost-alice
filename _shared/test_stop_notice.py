@@ -91,6 +91,13 @@ class StopNoticeCase(unittest.TestCase):
 
 
 class StopNoticeMessageTests(StopNoticeCase):
+    def test_native_session_reads_every_host_session_key_and_no_environment(self):
+        import stop_notice
+        self.assertEqual(stop_notice.native_session({"conversation_id": "c-1"}), "c-1")
+        self.assertEqual(stop_notice.native_session({"threadId": "t-1"}), "t-1")
+        self.assertEqual(stop_notice.native_session({"session_id": " "}), "")
+        self.assertEqual(stop_notice.native_session({}), "")
+
     def test_supported_completion_with_nothing_declared_is_quiet(self):
         payload = self.run_stop(COMPLETE)
         assert_stop_observation(self, payload)

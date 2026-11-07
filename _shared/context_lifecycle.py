@@ -19,8 +19,9 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import completion_assessment as core_api
-from claude_context_adapter import NativeContextRejected, SignedPrefixSelectionUnsupported, ToolInputSelectionUnsupported
-from native_transcript import codex_transcript_path
+from claude_context_adapter import NativeContextRejected, SignedPrefixSelectionUnsupported, ToolInputSelectionUnsupported, claude_home
+import ledger_access
+from native_transcript import codex_home, codex_transcript_path
 from source_reference import FORMAT as FILE_SOURCE_FORMAT, json_digest, matches_input, SourceReferenceError, reference_source, source_text, verify_source
 from text_lines import committed_byte_lines, committed_records, line_number
 
@@ -226,7 +227,7 @@ def locate_outputs(source, expected_input_event_id, literal, kind='output'):
         state = _current_input(core, root, owner, connection)
         if state['latest_input_event_id'] != expected_input_event_id:
             raise ContextSelectionRejected('The native intake receipt changed')
-    home = source.get('GHOST_ALICE_CODEX_DIR') or source.get('CODEX_HOME') or str(Path.home() / '.codex')
+    home = codex_home(source)
     path = codex_transcript_path(home, owner['session_id'])
     if path is None:
         raise ContextSelectionRejected('The original native transcript is unavailable')
@@ -384,7 +385,7 @@ def record_disposition(source, expected_input_event_id, selected, *, transaction
         raise ContextSelectionRejected('Native replacement projection requires Claude whole-result judgments')
     if owner['platform'] != 'codex' or source.get('CODEX_THREAD_ID') != owner['session_id']:
         raise ContextSelectionRejected('The responding native Codex owner is required')
-    home = source.get('GHOST_ALICE_CODEX_DIR') or source.get('CODEX_HOME') or str(Path.home() / '.codex')
+    home = codex_home(source)
     path = codex_transcript_path(home, owner['session_id'])
     if path is None or not isinstance(selected, list):
         raise ContextSelectionRejected('An owned native transcript and explicit current selection are required')
@@ -459,8 +460,7 @@ def _select_manual_request(request, root, codex_home, *, _inspect=None, _blocked
     session = request.get('prompt_cache_key')
     if not isinstance(session, str) or not session:
         return RequestSelection(request, 'preserved', 'session-unclassified')
-    source = dict(GHOST_ALICE_SESSION_INTENT_ROOT=str(root), GHOST_ALICE_PLATFORM='codex',
-                  GHOST_ALICE_SESSION_ID=session)
+    source = ledger_access.source_environment('codex', session, root=root)
     try:
         core, root, owner = core_api._coordinates(source)
         with core._read_connection(root) as connection:
@@ -606,7 +606,7 @@ def _select_manual_request(request, root, codex_home, *, _inspect=None, _blocked
 
 def _claude_originals(source, owner, binding):
     from response_context_use import _path, _native, _bound_human, ResponseUseRejected
-    home = source.get('GHOST_ALICE_CLAUDE_DIR') or str(Path.home() / '.claude')
+    home = claude_home(source)
     path = _path(home, 'claude', owner['session_id'])
     if path is None:
         raise ContextSelectionRejected('The original native Claude transcript is unavailable')
@@ -798,8 +798,7 @@ def _select_claude_request(request, root, native_home, session, *, _inspect=None
         return RequestSelection(request, 'preserved', 'input-unclassified')
     if not isinstance(session, str) or not session:
         return RequestSelection(request, 'preserved', 'session-unclassified')
-    source = dict(GHOST_ALICE_SESSION_INTENT_ROOT=str(root), GHOST_ALICE_PLATFORM='claude',
-                  GHOST_ALICE_SESSION_ID=session, GHOST_ALICE_CLAUDE_DIR=str(native_home))
+    source = ledger_access.source_environment('claude', session, root=root, native_dir=native_home)
     try:
         core, root, owner = core_api._coordinates(source)
         with core._read_connection(root) as connection:
@@ -914,8 +913,7 @@ def _cross_scope_blocks(request, root, native_home, platform, session_id):
     session = request.get('prompt_cache_key') if platform == 'codex' else session_id
     if not isinstance(session, str) or not session:
         return set(), set(), False, None
-    source = dict(GHOST_ALICE_SESSION_INTENT_ROOT=str(root), GHOST_ALICE_PLATFORM=platform,
-                  GHOST_ALICE_SESSION_ID=session)
+    source = ledger_access.source_environment(platform, session, root=root)
     try:
         core, root, _ = core_api._coordinates(source)
         with core._read_connection(root) as connection:
@@ -1117,7 +1115,7 @@ def _claude_native_readiness(core, root, owner, source, request, state, native_b
         original = payload.get('original')
         if (not isinstance(original,dict) or set(original)!= {'storage','locator','digest','byte_length','appendable','source_id'}
             or original.get('storage')!=FILE_SOURCE_FORMAT
-            or adapter.native_path(source['GHOST_ALICE_CLAUDE_DIR'],owner['session_id'])!=original['locator']):
+            or adapter.native_path(claude_home(source),owner['session_id'])!=original['locator']):
             return None
         verify_source(original)
         if context_input_binding(source,payload['input_binding']['input_event_id'],transaction=connection)!=payload['input_binding']:
@@ -1162,7 +1160,7 @@ def _claude_native_readiness(core, root, owner, source, request, state, native_b
             # selections; committed provenance still owns input admission.
             native_boundary = line_number(content, start)
             requirements = _claude_wait_eligible(request,payload,reference,native,prefix,can_rewrite,root=root,
-                native_home=source['GHOST_ALICE_CLAUDE_DIR'],session=owner['session_id'],
+                native_home=claude_home(source),session=owner['session_id'],
                 native_boundary=native_boundary,wire_boundary=prompts[-1][0],native_betas=native_betas)
             if requirements is None or not requirements.current_input_required:
                 return None
@@ -1184,7 +1182,7 @@ def _claude_native_readiness(core, root, owner, source, request, state, native_b
         if context_input_binding(source,payload['input_binding']['input_event_id'],transaction=connection)!=payload['input_binding']:
             return None
         requirements = _claude_wait_eligible(request,payload,reference,native,prefix,can_rewrite,root=root,
-            native_home=source['GHOST_ALICE_CLAUDE_DIR'],session=owner['session_id'],
+            native_home=claude_home(source),session=owner['session_id'],
             native_boundary=human_record,wire_boundary=human_index,native_betas=native_betas)
         if requirements is None or not requirements.replacement_carrier_ids:
             return None
@@ -1228,8 +1226,7 @@ def prepare_native_request(request, root, native_home, *, platform='codex', sess
     the request body supplies no actor authority. Public selectors stay pure.
     """
     if platform == 'claude' and isinstance(session_id, str) and session_id:
-        source = dict(GHOST_ALICE_SESSION_INTENT_ROOT=str(root), GHOST_ALICE_PLATFORM=platform,
-                      GHOST_ALICE_SESSION_ID=session_id, GHOST_ALICE_CLAUDE_DIR=str(native_home))
+        source = ledger_access.source_environment(platform, session_id, root=root, native_dir=native_home)
         try:
             core, selected_root, owner = core_api._coordinates(source)
             state = core.reconcile_native_inputs(root=selected_root, **owner)
@@ -1329,9 +1326,8 @@ def main(argv=None):
     session = args.session_id or os.environ.get('CODEX_THREAD_ID' if args.platform == 'codex' else 'GHOST_ALICE_SESSION_ID')
     if not session:
         raise ContextSelectionRejected('The exact native session is required')
-    source = dict(os.environ, GHOST_ALICE_SESSION_INTENT_ROOT=args.root, GHOST_ALICE_PLATFORM=args.platform,
-                  GHOST_ALICE_SESSION_ID=session)
-    source['GHOST_ALICE_CODEX_DIR' if args.platform == 'codex' else 'GHOST_ALICE_CLAUDE_DIR'] = args.native_dir
+    source = ledger_access.source_environment(args.platform, session, root=args.root, native_dir=args.native_dir,
+                                              environment=os.environ)
     if args.use_judgments_json is not None:
         from response_context_use import record_use_judgments
         result = record_use_judgments(source, args.expected_input_event_id, json.loads(args.use_judgments_json))

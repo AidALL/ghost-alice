@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
@@ -69,6 +71,15 @@ class AggregateRecommendationsTests(unittest.TestCase):
         self.assertEqual(result["recommendations"][1]["id"], "b")
         # no fabricated composite weight: the model judges priority from the objective signals, the code does not bake a magic score
         self.assertNotIn("priority_score", top)
+
+    def test_root_discovery_and_time_parsing_and_ledger_loading_come_from_their_owners(self) -> None:
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_SESSION_INTENT_ROOT": str(self.root)}):
+            self.assertEqual(self.mod.discover_root(), self.root)
+        self.assertEqual(self.mod.parse_timestamp.__module__, "timestamps")
+        self.assertIsNone(self.mod.parse_timestamp("2026-06-05T00:00:00"))
+        self.assertEqual(self.mod.load_ledger.__module__, "ledger_access")
+        self.assertFalse(hasattr(self.mod, "parse_ts"))
+        self.assertFalse(hasattr(self.mod, "_ledger_module"))
 
     def test_empty_root_returns_no_recommendations(self) -> None:
         result = self.mod.aggregate(self.root, now="2026-06-05T00:00:00Z")

@@ -13,9 +13,10 @@ from pathlib import Path
 import sqlite3
 
 import completion_assessment as core_api
-from claude_context_adapter import (NativeContextRejected, SignedPrefixSelectionUnsupported,
+from claude_context_adapter import (NativeContextRejected, SignedPrefixSelectionUnsupported, claude_home,
                                     require_rewriteable_prefix)
-from native_transcript import codex_transcript_path, is_actual_user_prompt
+import ledger_access
+from native_transcript import codex_home, codex_transcript_path, is_actual_user_prompt
 from source_reference import SourceReferenceError, json_digest, matches_input, reference_source, verify_source
 from text_lines import committed_records
 
@@ -178,9 +179,7 @@ def record_use(source, expected_input_event_id, observation, *, purpose, call_id
     core, root, owner = core_api._coordinates(source)
     platform, session = owner['platform'], owner['session_id']
     _require(platform in ('codex', 'claude'), 'The native lookup owner is unsupported')
-    key, fallback = ('GHOST_ALICE_CODEX_DIR', 'CODEX_HOME') if platform == 'codex' else (
-                    'GHOST_ALICE_CLAUDE_DIR', 'CLAUDE_CONFIG_DIR')
-    home = source.get(key) or source.get(fallback) or str(Path.home() / ('.codex' if platform == 'codex' else '.claude'))
+    home = codex_home(source) if platform == 'codex' else claude_home(source)
     path = _path(home, platform, session)
     _require(path is not None, 'The owned original native transcript is unavailable')
     with core._transaction(root) as connection:
@@ -254,9 +253,7 @@ def record_use_judgments(source, expected_input_event_id, judgments, *, transact
     core, root, owner = core_api._coordinates(source)
     platform, session = owner['platform'], owner['session_id']
     _require(platform in ('codex', 'claude'), 'The native responding owner is unsupported')
-    key, fallback = ('GHOST_ALICE_CODEX_DIR', 'CODEX_HOME') if platform == 'codex' else (
-                    'GHOST_ALICE_CLAUDE_DIR', 'CLAUDE_CONFIG_DIR')
-    home = source.get(key) or source.get(fallback) or str(Path.home() / ('.codex' if platform == 'codex' else '.claude'))
+    home = codex_home(source) if platform == 'codex' else claude_home(source)
     path = _path(home, platform, session)
     _require(path is not None, 'The owned original native transcript is unavailable')
     references = []
@@ -470,8 +467,7 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
         return RequestSelection(request, 'preserved', 'session-unclassified')
     if platform == 'codex' and request.get('prompt_cache_key') != session:
         return RequestSelection(request, 'preserved', 'session-unclassified')
-    source = dict(GHOST_ALICE_SESSION_INTENT_ROOT=str(root), GHOST_ALICE_PLATFORM=platform,
-                  GHOST_ALICE_SESSION_ID=session)
+    source = ledger_access.source_environment(platform, session, root=root)
     try:
         core, root, owner = core_api._coordinates(source)
         with core._read_connection(root) as connection:

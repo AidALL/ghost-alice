@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 
+import ledger_access
 from text_lines import line_at, stream_lines
 
 
@@ -134,10 +135,8 @@ def main():
             if any(not control[key] for key in ('purpose', 'root',
                                                'platform', 'session_id', 'native_dir')):
                 raise ValueError('A declared use requires its exact runtime root, platform, session and native directory')
-            source = dict(os.environ, GHOST_ALICE_SESSION_INTENT_ROOT=control['root'],
-                GHOST_ALICE_PLATFORM=control['platform'], GHOST_ALICE_SESSION_ID=control['session_id'])
-            source['GHOST_ALICE_CODEX_DIR' if control['platform'] == 'codex'
-                   else 'GHOST_ALICE_CLAUDE_DIR'] = control['native_dir']
+            source = ledger_access.source_environment(control['platform'], control['session_id'],
+                root=control['root'], native_dir=control['native_dir'], environment=os.environ)
             result = lookup_with_use(**args, source=source,
                 expected_input_event_id=control['expected_input_event_id'],
                 purpose=control['purpose'], call_id=control['call_id'])

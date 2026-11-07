@@ -182,7 +182,7 @@ class UnroutedNativeWorkTests(unittest.TestCase):
             GHOST_ALICE_SESSION_INTENT_ROOT=str(fixture.root),
             GHOST_ALICE_PLATFORM='claude', GHOST_ALICE_SESSION_ID='current')
         native = importlib.import_module('native_completion')
-        with patch.object(native._ledger(source), 'read_response_route',
+        with patch.object(importlib.import_module('ledger_access').load_ledger(), 'read_response_route',
                 side_effect=ValueError('selected execution work needs an admitted owned criterion')):
             rejected_route = native.assess_native_completion(source)
         self.assertEqual(rejected_route['input_event_id'], fixture.event)
@@ -788,7 +788,8 @@ sys.path.insert(0, sys.argv[1])
 import hook_profile_gate
 import native_completion
 import completion_check_validator
-core = native_completion._ledger(os.environ)
+import ledger_access
+core = ledger_access.load_ledger()
 core.read_response_route(root=Path(os.environ['GHOST_ALICE_SESSION_INTENT_ROOT']),
     platform='claude', session_id='runtime-isolation')
 import completion_assessment, response_route, session_intent_analyzer_hook

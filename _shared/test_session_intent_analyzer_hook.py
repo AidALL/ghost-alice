@@ -455,6 +455,13 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
                 self.assertEqual(receipt_from(message)["intake_status"], "observed")
         self.assertEqual(len(self.events("terminal-intake")), 2)
 
+    def test_bound_identity_reads_every_host_session_key_and_keeps_the_exact_rule(self):
+        from session_intent_analyzer_hook import bound_session_identity
+        self.assertEqual(bound_session_identity("claude", {"threadId": "thread=1"}, {}), "thread=1")
+        self.assertEqual(bound_session_identity("claude", {"conversation_id": "c-1"}, {}), "c-1")
+        self.assertIsNone(bound_session_identity("claude", {"session_id": "a b", "threadId": "exact"}, {}))
+        self.assertIsNone(bound_session_identity("claude", {"session_id": "x" * 121}, {}))
+
     def test_identity_rules_stay_with_their_owners(self):
         root = SCRIPT.parents[1]
         self.assertIn('session metadata', (root / 'session-intent-analyzer/SKILL.md').read_text())
@@ -814,7 +821,8 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         self.hook = shared / "session_intent_analyzer_hook.py"
         shutil.copy2(SCRIPT, self.hook)
         shutil.copy2(SCRIPT.with_name("install_destination.py"),shared/"install_destination.py")
-        for dependency in ('reminder_texts.py', 'reminder_texts.json', 'atomic_write.py', 'source_reference.py', 'timestamps.py'):
+        for dependency in ('reminder_texts.py', 'reminder_texts.json', 'atomic_write.py', 'source_reference.py', 'timestamps.py',
+                           'ledger_access.py', 'session_identity.py'):
             shutil.copy2(SCRIPT.with_name(dependency), shared / dependency)
         self.home = self.base / "home"
         self.home.mkdir()
