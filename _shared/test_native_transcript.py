@@ -38,6 +38,17 @@ def queued_human(text='Correction typed while Claude works.'):
         prompt=text, source_uuid='source', timestamp='2026-10-21T10:07:52Z', delivery_id='delivery'))
 
 
+def queued_human_with_image(text='Seen in the GitHub app.'):
+    """Claude desktop 2.1.299 row for input the user typed with an image attached while Claude works."""
+    row = queued_human(text)
+    row['attachment'].update(
+        prompt=[dict(type='image', source=dict(type='base64', media_type='image/png', data='iVBORw0KGgo=')),
+                dict(type='text', text=text)],
+        fileAttachments=[dict(file_name='IMG_0001.png', file_uuid='file-uuid', is_image=True)],
+        inlinedImagePaths=['/tmp/IMG_0001.png'])
+    return row
+
+
 def queued_app_event(text='<ci-monitor-event>Auto-fix enabled.</ci-monitor-event>'):
     return queued(dict(type='queued_command', commandMode='prompt', prompt=text, source_uuid='source',
         timestamp='2026-10-21T09:19:00Z', delivery_id='delivery'))
@@ -70,6 +81,23 @@ class NativeInputActorTests(unittest.TestCase):
 
     def test_input_typed_while_claude_works_is_human(self):
         self.assertEqual(native_input_actor(queued_human()), 'human')
+
+    def test_input_typed_with_an_image_while_claude_works_is_human(self):
+        self.assertEqual(native_input_actor(queued_human_with_image()), 'human')
+        self.assertTrue(native_transcript.is_prompt_row(queued_human_with_image()))
+
+    def test_queued_human_prompt_without_a_known_block_shape_stays_unknown(self):
+        variants = {
+            'block without type': [dict(text='x')],
+            'text block without text': [dict(type='text', text=5)],
+            'prompt object': dict(type='text', text='x'),
+            'prompt number': 5,
+        }
+        for name, prompt in variants.items():
+            with self.subTest(variant=name):
+                row = queued_human_with_image()
+                row['attachment']['prompt'] = prompt
+                self.assertIsNone(native_input_actor(row))
 
     def test_queued_app_event_is_non_human_context(self):
         self.assertEqual(native_input_actor(queued_app_event()), 'context')

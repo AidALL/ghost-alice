@@ -17,8 +17,9 @@ from text_lines import committed_byte_lines, committed_length, committed_lines, 
 # Host entrypoints whose SDK-started turns Core reads as non-human context.
 SDK_ENTRYPOINTS = frozenset({'sdk-cli', 'claude-desktop'})
 # Every key Claude desktop 2.1.295-2.1.299 writes on an app event delivered
-# while Claude works. Its marker is the missing origin, so any other key keeps
-# the row unknown instead of removing a human input's authority.
+# while Claude works; its prompt is text. Its marker is the missing origin, so any
+# other key or prompt shape keeps the row unknown instead of removing a human
+# input's authority.
 APP_EVENT_KEYS = frozenset({'type', 'commandMode', 'prompt', 'source_uuid', 'timestamp', 'delivery_id'})
 # Actors a located row can resolve to; None means the markers are unknown.
 RESOLVED_ACTORS = ('human', 'sdk', 'context', 'notification')
@@ -100,11 +101,23 @@ def is_actual_user_prompt(entry):
                                      for item in items)
 
 
+def _text_blocks(content):
+    """Texts of a block-list prompt; None unless every block is a dict with a string type and every text block has a string text."""
+    if (not isinstance(content, list) or any(not isinstance(block, dict) or not isinstance(block.get('type'), str)
+            or (block['type'] == 'text' and not isinstance(block.get('text'), str)) for block in content)):
+        return None
+    return [block['text'] for block in content if block['type'] == 'text']
+
+
 def _queued_prompt(entry):
-    """Attachment that delivers a prompt while Claude works; the row has no actor markers."""
+    """Attachment that delivers a prompt while Claude works; the row has no actor markers.
+
+    The host writes the prompt as text, or as content blocks when the user attached an image.
+    """
     attachment = entry.get('attachment') if entry.get('type') == 'attachment' else None
     if (isinstance(attachment, dict) and attachment.get('type') == 'queued_command'
-            and attachment.get('commandMode') == 'prompt' and isinstance(attachment.get('prompt'), str)
+            and attachment.get('commandMode') == 'prompt'
+            and (isinstance(attachment.get('prompt'), str) or _text_blocks(attachment.get('prompt')) is not None)
             and not entry.get('isMeta') and not entry.get('isSidechain')):
         return attachment
     return None
@@ -320,7 +333,7 @@ def native_input_actor(entry):
             for block in content)):
             return 'sdk'
     attachment = _queued_prompt(entry)
-    if (attachment is not None and set(attachment) <= APP_EVENT_KEYS
+    if (attachment is not None and isinstance(attachment.get('prompt'), str) and set(attachment) <= APP_EVENT_KEYS
             and entry.get('entrypoint') in SDK_ENTRYPOINTS and entry.get('userType') == 'external'):
         return 'context'
     return None
@@ -371,11 +384,9 @@ def matches_input_text(content, binding):
         return matches_input(text, binding)
     if isinstance(content, str):
         return exact(content)
-    if (not isinstance(content, list) or any(not isinstance(block, dict)
-        or not isinstance(block.get('type'), str)
-        or (block['type'] == 'text' and not isinstance(block.get('text'), str)) for block in content)):
+    texts = _text_blocks(content)
+    if texts is None:
         return False
-    texts = [block['text'] for block in content if block['type'] == 'text']
     if texts and (exact(''.join(texts)) or exact('\n'.join(texts))):
         return True
     return sum(block.get('type') == 'text' and not set(block) - {'type', 'text', 'cache_control'}
@@ -391,10 +402,7 @@ def _candidate_texts(content):
     """Every text form matches_input_text can bind, so an index lookup misses no match."""
     if isinstance(content, str):
         return [content]
-    if (not isinstance(content, list) or any(not isinstance(block, dict) or not isinstance(block.get('type'), str)
-        or (block['type'] == 'text' and not isinstance(block.get('text'), str)) for block in content)):
-        return []
-    texts = [block['text'] for block in content if block['type'] == 'text']
+    texts = _text_blocks(content)
     return [''.join(texts), '\n'.join(texts), *texts] if texts else []
 
 
