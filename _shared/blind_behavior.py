@@ -134,7 +134,8 @@ def load_sealed_case(path: Path | str) -> tuple[dict[str, Any], str]:
 def _canonical_manifest(platform: str) -> Path:
     if platform not in PLATFORMS:
         raise ValueError("platform must be claude or codex")
-    return Path.home() / ".ghost-alice" / "install-state" / f"{platform}.json"
+    from installer import locations
+    return locations.install_state_path(platform)
 
 
 def load_installed_provenance(platform: str, manifest_path: Path | str | None = None) -> dict[str, str]:

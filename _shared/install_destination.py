@@ -75,11 +75,24 @@ def current():
     return _ACTIVE.get()
 
 
+def home_directory(env=None):
+    """The user's home: HOME, then USERPROFILE, then HOMEDRIVE with HOMEPATH, then the interpreter's answer."""
+    source = os.environ if env is None else env
+    for key in ('HOME', 'USERPROFILE'):
+        value = str(source.get(key) or '').strip()
+        if value:
+            return Path(value)
+    drive, path = str(source.get('HOMEDRIVE') or '').strip(), str(source.get('HOMEPATH') or '').strip()
+    if drive and path:
+        return Path(drive + path)
+    return Path.home()
+
+
 def ghost_root(home=None, env=None):
     active = current()
     source = os.environ if env is None else env
     value = active.ghost_root if active else source.get('GHOST_ALICE_GHOST_ROOT')
-    return Path(value) if value else (Path(home) if home is not None else Path.home()) / '.ghost-alice'
+    return Path(value) if value else (Path(home) if home is not None else home_directory(source)) / '.ghost-alice'
 
 
 def assert_mutation_path(path, *, env=None):

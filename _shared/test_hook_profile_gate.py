@@ -229,7 +229,7 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             destination, transcript = self._wrapper_fixture(directory, session)
             with (mock.patch.object(hook_profile_gate, '_reconcile_native_intake',
                                     side_effect=ValueError('native transcript cursors are invalid')),
-                  mock.patch('native_completion._ledger', return_value=broken)):
+                  mock.patch('ledger_access.load_ledger', return_value=broken)):
                 code, calls, _ = self._run_wrapper(directory, destination, transcript, session, 'Stop', '')
             rows = [json.loads(line) for line in
                     _strict_log_path(directory, 'claude', session).read_text(encoding='utf-8').splitlines()]
@@ -288,7 +288,7 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             session = 'notice-failure'
             destination, transcript = self._wrapper_fixture(directory, session)
             with (mock.patch.object(hook_profile_gate, '_reconcile_native_intake'),
-                  mock.patch('native_completion._ledger', return_value=failing)):
+                  mock.patch('ledger_access.load_ledger', return_value=failing)):
                 code, calls, output = self._run_wrapper(directory, destination, transcript, session, 'PreToolUse',
                                                         json.dumps(decision) + '\n')
         self.assertEqual((code, calls), (0, 1))

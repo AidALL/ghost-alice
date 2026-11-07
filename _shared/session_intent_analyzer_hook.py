@@ -6,60 +6,35 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def _home() -> Path:
-    for key in ("HOME", "USERPROFILE"):
-        value = os.environ.get(key, "").strip()
-        if value:
-            return Path(value)
-    drive = os.environ.get("HOMEDRIVE", "").strip()
-    path = os.environ.get("HOMEPATH", "").strip()
-    if drive and path:
-        return Path(f"{drive}{path}")
-    return Path.home()
-
-
-def _ledger_dir_candidates() -> list[Path]:
-    """The source and installed runtime both ship their own sibling ledger API."""
-    return [REPO_ROOT / "session-intent-analyzer" / "scripts"]
-
-
-for LEDGER_DIR in _ledger_dir_candidates():
-    if (LEDGER_DIR / "session_intent_ledger.py").is_file() and str(LEDGER_DIR) not in sys.path:
-        sys.path.insert(0, str(LEDGER_DIR))
-        break
+import ledger_access
+from session_identity import bound_session, is_exact
 
 try:
-    from session_intent_ledger import (  # noqa: E402
-        DEFAULT_ROOT,
-        build_input_observation,
-        record_turn,
-        stage_native_input,
-        resolve_session_id,
-        session_paths,
-    )
-    _LEDGER_SCRIPT = Path(sys.modules['session_intent_ledger'].__file__).resolve()
+    _LEDGER = ledger_access.load_ledger()
+    DEFAULT_ROOT = _LEDGER.DEFAULT_ROOT
+    build_input_observation = _LEDGER.build_input_observation
+    record_turn = _LEDGER.record_turn
+    stage_native_input = _LEDGER.stage_native_input
+    resolve_session_id = _LEDGER.resolve_session_id
+    session_paths = _LEDGER.session_paths
     _LEDGER_IMPORT_BROKEN = False
-except ImportError as _ledger_exc:
-    # ImportError naming the ledger module itself means it is genuinely absent (skill uninstalled, mid-reinstall, or relocated) -> degrade as "unavailable". An ImportError naming a DIFFERENT module means the ledger is present but a transitive dependency is broken -> flag as broken, not absent, so a real defect is not silently labelled "unavailable". Either way degrade gracefully instead of crashing at import time.
+except ledger_access.LedgerUnavailable:
+    # The sibling ledger is absent (skill uninstalled, mid-reinstall, or relocated): degrade as "unavailable".
     DEFAULT_ROOT = ".tmp/session-intent"
     build_input_observation = None
     record_turn = None
     stage_native_input = None
     resolve_session_id = None
     session_paths = None
-    _LEDGER_IMPORT_BROKEN = getattr(_ledger_exc, "name", None) not in (None, "session_intent_ledger")
+    _LEDGER_IMPORT_BROKEN = False
 except Exception:
-    # Present but broken at import (syntax error, a failing transitive dependency). Still degrade non-blockingly, but flag it as broken.
+    # Present but broken at import (syntax error, a failing transitive dependency): degrade non-blockingly, flagged as broken so a real defect is not labelled "unavailable".
     DEFAULT_ROOT = ".tmp/session-intent"
     build_input_observation = None
     record_turn = None
@@ -73,37 +48,14 @@ LEDGER_UNAVAILABLE_DEGRADE = "The intake hook cannot load the ledger dependency,
 LEDGER_WRITE_FAILED_DEGRADE = "The intake hook could not write this input to the ledger, so Ghost-ALICE cannot record it. The response model continues the user's work without recording it and tells the user once per session and cause that Ghost-ALICE is not recording inputs. It does not claim persistence and does not use an old input binding."
 LEDGER_BROKEN_DEGRADE = "The ledger module exists but the intake hook could not load it, so Ghost-ALICE cannot record this input. The response model continues the user's work without recording it and tells the user once per session and cause that Ghost-ALICE is not recording inputs. It does not claim intake was recorded and does not substitute another ledger."
 DEGRADE_MARKER_FILE = "ledger-degraded.json"
-_SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.=-]+")
-
-
-def _safe_component(value: Any) -> str:
-    # The router imports this normalizer so both hooks address the same degrade marker.
-    text = str(value or "unknown").strip()
-    text = _SAFE_COMPONENT_RE.sub("-", text)
-    text = re.sub(r"^[.-]+|[.-]+$", "", text)
-    return text or "unknown"
 
 
 def bound_session_identity(platform: str, payload: dict[str, Any],
                            env: dict[str, str] | None = None) -> str | None:
     """Exact host identity from the hook payload or environment, readable even when the ledger is broken."""
-    environment = os.environ if env is None else env
-    if not isinstance(platform, str) or not platform or _safe_component(platform) != platform or len(platform) > 120:
+    if not is_exact(platform):
         return None
-    for candidate in (
-        payload.get("session_id"),
-        payload.get("sessionId"),
-        payload.get("conversation_id"),
-        payload.get("thread_id"),
-        environment.get("CODEX_THREAD_ID") if platform == "codex" else None,
-        environment.get("GHOST_ALICE_SESSION_ID"),
-    ):
-        if candidate in (None, ""):
-            continue
-        if not isinstance(candidate, str) or len(candidate) > 120 or _safe_component(candidate) != candidate:
-            return None
-        return candidate
-    return None
+    return bound_session(platform, payload, os.environ if env is None else env)
 
 
 def _degrade_marker_path(root: Path, platform: str, payload: dict[str, Any]) -> Path | None:
@@ -221,9 +173,9 @@ def native_context_capability(session_id: str, platform: str = 'codex') -> dict[
             return dict(native_provider='anthropic-subscription-gateway', procedure=str(procedure), native_dir=home)
         if platform != 'codex':
             return None
-        from native_transcript import codex_transcript_path
+        from native_transcript import codex_home, codex_transcript_path
         from hook_definitions import PROVIDER
-        home = os.environ.get('GHOST_ALICE_CODEX_DIR') or os.environ.get('CODEX_HOME') or str(_home() / '.codex')
+        home = codex_home(os.environ)
         path = codex_transcript_path(home, session_id)
         if path is None:
             return None

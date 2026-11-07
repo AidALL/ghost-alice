@@ -24,6 +24,9 @@ from pathlib import Path
 from typing import NoReturn
 
 import install_destination
+import ledger_access
+import native_transcript
+from session_identity import is_exact
 
 # Bind transport before source-provider imports. Invalid transport cannot open audit writes.
 if "--binding-b64" in sys.argv:
@@ -118,13 +121,7 @@ def _configured_node_runtime_from_value(value: str | None) -> Path | None:
 def _codex_config_candidates(env: dict[str, str]) -> list[Path]:
     if env.get("GHOST_ALICE_PLATFORM_DIR") and env.get("GHOST_ALICE_PLATFORM")=="codex":
         return [Path(env["GHOST_ALICE_PLATFORM_DIR"])/"config.toml"]
-    codex_home = env.get("CODEX_HOME")
-    if codex_home:
-        return [Path(codex_home).expanduser() / "config.toml"]
-    home = _home_from_env(env)
-    if home is not None:
-        return [home / ".codex" / "config.toml"]
-    return []
+    return [Path(native_transcript.codex_home(env)).expanduser() / "config.toml"]
 
 
 def _codex_configured_node_runtime_paths(env: dict[str, str]) -> list[Path]:
@@ -159,10 +156,7 @@ def _registered_node_runtime_path(
 ) -> Path | None:
     if active_platform not in VALID_HOOK_PLATFORMS:
         return None
-    home = _home_from_env(env)
-    if home is None:
-        return None
-    config = runtime_config.load_config(env=env, home=home)
+    config = runtime_config.load_config(env=env, home=install_destination.home_directory(env))
     hook_runtime = config.get("hook_runtime")
     if not isinstance(hook_runtime, dict):
         return None
@@ -411,14 +405,6 @@ def _decode_payload(payload: str) -> str:
         raise HookCommandRejected("hook payload decode failed") from exc
 
 
-def _home_from_env(env: dict[str, str]) -> Path | None:
-    for env_name in ("HOME", "USERPROFILE"):
-        home = env.get(env_name, "").strip()
-        if home:
-            return Path(home)
-    return None
-
-
 def _read_stdin() -> str:
     if sys.stdin.isatty():
         return ""
@@ -481,10 +467,9 @@ def _platform_name(env: dict[str, str]) -> str:
 
 
 def _pending_merge_manifest_path(env: dict[str, str], platform: str) -> Path | None:
-    home = _home_from_env(env)
-    if home is None or bound_session_identity(platform, {"session_id": "pending-merge"}, {}) is None:
+    if not is_exact(platform):
         return None
-    return install_destination.ghost_root(home,env) / "pending-merges" / platform / "manifest.json"
+    return install_destination.ghost_root(install_destination.home_directory(env), env) / "pending-merges" / platform / "manifest.json"
 
 
 def _has_pending_merge_undecided(env: dict[str, str], platform: str) -> bool:
@@ -767,8 +752,7 @@ def _reconcile_native_intake(env, hook_payload):
     session = bound_session_identity('claude', hook_payload, env)
     if session is None:
         return
-    from native_completion import _ledger
-    module = _ledger(env)
+    module = ledger_access.load_ledger()
     module.reconcile_native_inputs(root=Path(env['GHOST_ALICE_SESSION_INTENT_ROOT']),
                                    platform='claude', session_id=session, record_wait=True)
 
@@ -810,8 +794,7 @@ def _native_intake_notice(env, hook_payload):
     if session is None:
         return None
     try:
-        from native_completion import _ledger
-        notice = _ledger(env).claim_native_input_notice(root=Path(env['GHOST_ALICE_SESSION_INTENT_ROOT']),
+        notice = ledger_access.load_ledger().claim_native_input_notice(root=Path(env['GHOST_ALICE_SESSION_INTENT_ROOT']),
                                                         platform='claude', session_id=session)
     except Exception:  # noqa: BLE001 - the inner hook's output goes out; the wait stays recorded for a later hook
         return None
@@ -835,8 +818,7 @@ def _record_native_intake_failure(env, hook_payload, error):
         session = bound_session_identity('claude', hook_payload, env)
         if session is None:
             raise ValueError('no bound native session')
-        from native_completion import _ledger
-        _ledger(env).record_native_intake_failure(root=Path(env['GHOST_ALICE_SESSION_INTENT_ROOT']),
+        ledger_access.load_ledger().record_native_intake_failure(root=Path(env['GHOST_ALICE_SESSION_INTENT_ROOT']),
                                                   platform='claude', session_id=session, error=error)
     except Exception:  # noqa: BLE001 - the hook log row keeps the record when the ledger cannot
         failure['recorded'] = 'hook-log'
@@ -906,7 +888,7 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     observed_duration = time.perf_counter() - started
     declared, host_stdout = _take_surface_declaration(result.stdout)
     hook_payload = _payload_from_stdin(stdin_text)
-    config = runtime_config.load_config(env=env, home=_home_from_env(env))
+    config = runtime_config.load_config(env=env, home=install_destination.home_directory(env))
     profile = config["agent_visibility"]["profile"]
     event = _event_name(hook_payload, env)
     context = _visibility_context(
@@ -928,7 +910,7 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     )
     platform = env.get("GHOST_ALICE_PLATFORM", "unknown")
     session_id = strict_session_log.session_id_from_payload(hook_payload, env=env, platform=platform)
-    log_ref = str(strict_session_log.log_path(_home_from_env(env), platform, session_id))
+    log_ref = str(strict_session_log.log_path(install_destination.home_directory(env), platform, session_id))
     item = _surface_item_for_result(
         hook_id=hook_id,
         stdout=host_stdout,
@@ -953,7 +935,7 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
             user_stdout = _with_system_notice(user_stdout, notice)
     try:
         strict_session_log.append_event(
-            home=_home_from_env(env),
+            home=install_destination.home_directory(env),
             platform=platform,
             session_id=session_id,
             event={
@@ -1013,10 +995,10 @@ def _append_rejection_audit(hook_id: str, stderr: str, *, platform: str,
     env = os.environ
     if hook_payload is None:
         hook_payload = _payload_from_stdin(_read_stdin())
-    config = runtime_config.load_config(env=env, home=_home_from_env(env))
+    config = runtime_config.load_config(env=env, home=install_destination.home_directory(env))
     profile = config["agent_visibility"]["profile"]
     session_id = strict_session_log.session_id_from_payload(hook_payload, env=env, platform=platform)
-    log_ref = str(strict_session_log.log_path(_home_from_env(env), platform, session_id))
+    log_ref = str(strict_session_log.log_path(install_destination.home_directory(env), platform, session_id))
     item = classify_surface_item(
         value_key="hook-command-rejection",
         value_kind="gate",
@@ -1027,7 +1009,7 @@ def _append_rejection_audit(hook_id: str, stderr: str, *, platform: str,
         value=_one_line(stderr),
     )
     strict_session_log.append_event(
-        home=_home_from_env(env),
+        home=install_destination.home_directory(env),
         platform=platform,
         session_id=session_id,
         event={

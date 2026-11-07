@@ -8,6 +8,7 @@ import os
 import re
 from pathlib import Path
 import install_destination
+from session_identity import session_candidates
 import state_retention
 from source_reference import text_digest
 from timestamps import utc_now
@@ -49,7 +50,7 @@ def safe_component(value: str | None, fallback: str = "unknown") -> str:
 
 
 def log_path(home: Path | None, platform: str, session_id: str) -> Path:
-    base = Path(home) if home is not None else Path.home()
+    base = Path(home) if home is not None else install_destination.home_directory()
     return (
         install_destination.ghost_root(base)
         / "session-logs"
@@ -63,15 +64,8 @@ def session_id_from_payload(
     payload: dict[str, Any], env: dict[str, str] | None = None, *, platform: str | None = None,
 ) -> str:
     source_env = env or {}
-    raw = (
-        payload.get("session_id")
-        or payload.get("sessionId")
-        or payload.get("conversation_id")
-        or payload.get("thread_id")
-        or (source_env.get("CODEX_THREAD_ID") if (platform or source_env.get("GHOST_ALICE_PLATFORM")) == "codex" else None)
-        or source_env.get("GHOST_ALICE_SESSION_ID")
-    )
-    return safe_component(str(raw) if raw is not None else None)
+    candidates = session_candidates(platform or source_env.get("GHOST_ALICE_PLATFORM"), payload, source_env)
+    return safe_component(str(candidates[0]) if candidates else None)
 
 
 def _payload_digest(event: dict[str, Any]) -> str:

@@ -49,6 +49,10 @@ class TestStrictSessionLogPath(unittest.TestCase):
 
         self.assertEqual(session_id, "s-123")
 
+    def test_session_id_from_payload_reads_every_host_session_key(self):
+        self.assertEqual(strict_session_log.session_id_from_payload({"threadId": "thread=1"}), "thread-1")
+        self.assertEqual(strict_session_log.session_id_from_payload({"conversation_id": "c-1"}), "c-1")
+
     def test_native_codex_log_identity_preserves_payload_and_platform_precedence(self):
         env = {"GHOST_ALICE_PLATFORM": "codex", "CODEX_THREAD_ID": "native", "GHOST_ALICE_SESSION_ID": "generic"}
         self.assertEqual(strict_session_log.session_id_from_payload({}, env), "native")

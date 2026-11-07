@@ -10,33 +10,21 @@ recency without a fabricated priority weight. The consuming model judges priorit
 from those signals. This script returns candidates; the consuming model judges
 and reports proposed changes. The script does not edit skills.
 
-Dependencies: Python 3.11+ standard library only.
+Dependencies: Python 3.11+ standard library and the Core helpers in `_shared`.
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
+import sys
 from datetime import datetime, timezone
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-
-def parse_ts(value: Any) -> datetime | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-def iso_z(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_shared"))
+from ledger_access import load_ledger  # noqa: E402
+from timestamps import format_timestamp, parse_timestamp  # noqa: E402
 
 
 def positive_int(value: Any, default: int = 1) -> int:
@@ -50,34 +38,20 @@ def positive_int(value: Any, default: int = 1) -> int:
 
 
 def discover_root(start: Path | None = None) -> Path:
-    here = (start or Path(__file__)).resolve()
-    for parent in here.parents:
-        candidate = parent / ".tmp" / "session-intent"
-        if candidate.exists():
-            return candidate
-    return Path("~/.ghost-alice/session-intent").expanduser()
+    """The ledger root the ledger would use from `start`: the environment, then the repository, then the legacy home root."""
+    return load_ledger().default_root(cwd=(start or Path(__file__)).resolve().parent)
 
 
 def iter_state_files(root: Path) -> list[Path]:
     return sorted(root.glob("*/*/intent-state.json"))
 
 
-@lru_cache(maxsize=1)
-def _ledger_module() -> Any:
-    """Load the session-intent ledger once; it owns storage reads and source labels."""
-    entry = Path(__file__).resolve().parents[2] / "session-intent-analyzer/scripts/session_intent_ledger.py"
-    spec = importlib.util.spec_from_file_location("ghost_backlog_ledger", entry)
-    ledger = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(ledger)
-    return ledger
-
-
 def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
-    now_dt = parse_ts(now) or datetime.now(timezone.utc)
+    now_dt = parse_timestamp(now) or datetime.now(timezone.utc)
     by_id: dict[str, dict[str, Any]] = {}
     state_files = iter_state_files(root)
     if (root / "ghost-state.sqlite3").exists() or (root / ".sqlite-authority.json").exists():
-        records = _ledger_module().list_session_states(root)
+        records = load_ledger().list_session_states(root)
         session_count = len(records)
     else:
         records = []
@@ -122,11 +96,11 @@ def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
                 agg["failure_pattern"] = str(entry["failure_pattern"])
             if entry.get("corrective_rule"):
                 agg["corrective_rule"] = str(entry["corrective_rule"])
-            agg["sources"].add(_ledger_module().canonical_source(entry.get("source"), "user-said"))
+            agg["sources"].add(load_ledger().canonical_source(entry.get("source"), "user-said"))
             agg["sessions"].add(session)
             agg["occurrence_count"] += positive_int(entry.get("occurrence_count"), 1)
             agg["statuses"].append(str(entry.get("status") or "open"))
-            ts = parse_ts(entry.get("updated_at")) or parse_ts(entry.get("created_at"))
+            ts = parse_timestamp(entry.get("updated_at")) or parse_timestamp(entry.get("created_at"))
             if ts is not None:
                 if agg["first_seen"] is None or ts < agg["first_seen"]:
                     agg["first_seen"] = ts
@@ -151,8 +125,8 @@ def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
             "sources": sorted(agg["sources"]),
             "session_count": len(agg["sessions"]),
             "occurrence_count": agg["occurrence_count"],
-            "first_seen": iso_z(agg["first_seen"]),
-            "last_seen": iso_z(agg["last_seen"]),
+            "first_seen": format_timestamp(agg["first_seen"], microseconds=True) if agg["first_seen"] else None,
+            "last_seen": format_timestamp(agg["last_seen"], microseconds=True) if agg["last_seen"] else None,
             "days_since_last": days_since_last,
             "decision": "necessity-gate",
         })

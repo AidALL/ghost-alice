@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
@@ -48,6 +49,19 @@ class AnalyzeIoTraceTests(unittest.TestCase):
         path.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True), encoding="utf-8")
         self.addCleanup(lambda: shutil.rmtree(tmpdir, ignore_errors=True))
         return path
+
+    def test_default_trace_and_ledger_loading_come_from_their_owners(self) -> None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("analyze_io_trace_under_test", ANALYZER)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module  # the module's dataclass resolves its annotations through sys.modules
+        self.addCleanup(sys.modules.pop, spec.name, None)
+        spec.loader.exec_module(module)
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": "/ghost"}):
+            self.assertEqual(module.default_trace(), pathlib.Path("/ghost") / "io-trace.jsonl")
+        self.assertEqual(module.load_ledger.__module__, "ledger_access")
+        self.assertFalse(hasattr(module, "_ledger_module"))
+        self.assertFalse(hasattr(module, "DEFAULT_TRACE"))
 
     def test_conduct_feedback_emitted_as_candidate(self) -> None:
         intent = self.write_intent_state({

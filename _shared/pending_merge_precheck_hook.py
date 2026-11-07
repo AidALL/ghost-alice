@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,19 +22,7 @@ from session_intent_analyzer_hook import bound_session_identity
 
 
 def _pending_manifest_path(platform: str) -> Path:
-    return install_destination.ghost_root(_home()) / "pending-merges" / platform / "manifest.json"
-
-
-def _home() -> Path:
-    for key in ("HOME", "USERPROFILE"):
-        value = os.environ.get(key, "").strip()
-        if value:
-            return Path(value)
-    drive = os.environ.get("HOMEDRIVE", "").strip()
-    path = os.environ.get("HOMEPATH", "").strip()
-    if drive and path:
-        return Path(f"{drive}{path}")
-    return Path.home()
+    return install_destination.ghost_root(install_destination.home_directory()) / "pending-merges" / platform / "manifest.json"
 
 
 def _pending_entries(platform: str) -> list[dict[str, Any]]:

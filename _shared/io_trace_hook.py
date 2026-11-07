@@ -15,7 +15,8 @@ from pathlib import Path
 import install_destination
 from typing import Any
 
-from session_intent_analyzer_hook import bound_session_identity, _safe_component
+from session_identity import is_exact
+from session_intent_analyzer_hook import bound_session_identity
 import state_retention
 from timestamps import utc_now
 
@@ -101,15 +102,8 @@ def _patch_paths(patch: str) -> list[str]:
     return paths
 
 
-def _home() -> Path:
-    configured = os.environ.get("HOME")
-    if configured:
-        return Path(configured).expanduser()
-    return Path.home()
-
-
 def _log_file() -> Path:
-    return install_destination.ghost_root(_home()) / "io-trace.jsonl"
+    return install_destination.ghost_root(install_destination.home_directory()) / "io-trace.jsonl"
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -156,9 +150,7 @@ def _text(value: Any, fallback: str = "") -> str:
 def _platform(payload: dict[str, Any]) -> str:
     # Installer-supplied host context wins over incidental payload metadata.
     value = os.environ.get("GHOST_ALICE_PLATFORM") or payload.get("platform")
-    if not isinstance(value, str) or not value or len(value) > 120 or _safe_component(value) != value:
-        return "unknown"
-    return value
+    return value if is_exact(value) else "unknown"
 
 
 def _extract(payload: dict[str, Any]) -> dict[str, str]:

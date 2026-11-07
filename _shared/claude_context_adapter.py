@@ -7,6 +7,7 @@ import copy
 from pathlib import Path
 import re
 
+import install_destination
 from source_reference import json_digest
 
 platform = 'claude'
@@ -40,6 +41,12 @@ def _semantic_block(value):
 
 def semantic_fingerprint(block):
     return json_digest(_semantic_block(block))
+
+
+def claude_home(source):
+    """Claude Code's config folder as text: the Ghost-ALICE override, then CLAUDE_CONFIG_DIR, then `.claude` under the user's home."""
+    return (source.get('GHOST_ALICE_CLAUDE_DIR') or source.get('CLAUDE_CONFIG_DIR')
+            or str(install_destination.home_directory(source) / '.claude'))
 
 
 def native_path(home, session):

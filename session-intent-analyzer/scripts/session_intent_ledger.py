@@ -53,7 +53,6 @@ CONDUCT_PATTERN_CLASSES = (
     "governance-record-error",
     "domain-rule",
 )
-SAFE_COMPONENT = re.compile(r"[^A-Za-z0-9_.=-]+")
 # JSON numbers must retain their exact value in the JavaScript consumers.
 MAX_SHARED_INTEGER = (1 << 53) - 1
 INPUT_ANCHOR_FIELDS = ("ledger_revision", "latest_input_event_id", "latest_input_digest", "latest_input_char_count")
@@ -103,11 +102,7 @@ def utc_now() -> str:
 
 
 def safe_component(value: str | None, fallback: str = "unknown") -> str:
-    text = (value or "").strip()
-    if not text:
-        return fallback
-    cleaned = SAFE_COMPONENT.sub("-", text).strip(".-")
-    return cleaned[:120] or fallback
+    return _shared_module("session_identity").safe_component(value, fallback)
 
 
 def text_digest(value: str | bytes) -> str:
@@ -196,16 +191,10 @@ def resolve_session_id(
     env: dict[str, str] | None = None,
     for_write: bool = False,
 ) -> str:
-    payload = payload or {}
-    env = env or {}
+    identity = _shared_module("session_identity")
     for candidate in (
         explicit,
-        payload.get("session_id"),
-        payload.get("sessionId"),
-        payload.get("conversation_id"),
-        payload.get("thread_id"),
-        env.get("CODEX_THREAD_ID") if safe_component(platform) == "codex" else None,
-        env.get("GHOST_ALICE_SESSION_ID"),
+        *identity.session_candidates(safe_component(platform), payload or {}, env or {}),
         None if for_write else read_current_session_pointer(root, platform),
     ):
         if for_write and candidate not in (None, ""):
@@ -262,8 +251,9 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
 
 def validate_identity(platform: str, session_id: str) -> None:
     """Mutation identities are exact, never sanitized aliases of another ID."""
+    identity = _shared_module("session_identity")
     for value in (platform, session_id):
-        if not isinstance(value, str) or not value or safe_component(value, "") != value:
+        if not identity.is_exact(value):
             raise ValueError("invalid ledger identity: use the exact canonical platform and session ID from the session receipt")
 
 
@@ -298,14 +288,7 @@ def _load_legacy_state(paths: dict[str, Path], platform: str, session_id: str, *
         # For imported v1 state without an anchor, recover it from the validated
         # audit before committing the session to SQLite.
         try:
-            rows = (_shared_module('text_lines').split_lines(paths["events"].read_text(encoding="utf-8"))
-                    if paths["events"].exists() else [])
-            for line in rows:
-                if not line.strip():
-                    continue
-                event = json.loads(line)
-                if not isinstance(event, dict) or event.get("platform") != platform or event.get("session_id") != session_id:
-                    raise ValueError("legacy ledger audit identity mismatch")
+            for event in _legacy_events(paths, platform, session_id):
                 if event.get("event") == "user-input-observed":
                     if not event.get("event_id") or not event.get("input_digest"):
                         raise ValueError("legacy input lineage is incomplete")
@@ -557,6 +540,24 @@ def _legacy_events(paths: dict[str, Path], platform: str, session_id: str) -> li
     return result
 
 
+def _legacy_import(paths: dict[str, Path], platform: str, session_id: str):
+    """The JSON-era state and audit with the pending audit event merged; the third value names the mismatch, or None."""
+    state = _load_legacy_state(paths, platform, session_id)
+    events = _legacy_events(paths, platform, session_id)
+    pending = state.pop("pending_audit_event", None)
+    if pending is not None:
+        if (not isinstance(pending, dict) or pending.get("platform") != platform
+                or pending.get("session_id") != session_id or not pending.get("mutation_id")
+                or pending.get("ledger_revision") != state["ledger_revision"]):
+            return state, events, "pending ledger audit is invalid"
+        matches = [row for row in events if row.get("mutation_id") == pending["mutation_id"]]
+        if matches and matches != [pending]:
+            return state, events, "ledger audit conflicts with committed state"
+        if not matches:
+            events.append(pending)
+    return state, events, None
+
+
 def _save_state(connection, state):
     connection.execute("""INSERT INTO sessions VALUES(?,?,?,?,?)
         ON CONFLICT(platform,session_id) DO UPDATE SET revision=excluded.revision,
@@ -578,24 +579,14 @@ def _load_state_for_update(connection, paths, platform, session_id):
         return state
     sources = {key: hashlib.sha256(paths[key].read_bytes()).hexdigest()
                for key in ("state", "events") if paths[key].exists()}
-    state = _load_legacy_state(paths, platform, session_id)
+    state, events, mismatch = _legacy_import(paths, platform, session_id)
+    if mismatch is not None:
+        raise ValueError(mismatch)
     # Portable state may carry a copied intake stamp or ready route. Only a
     # fresh intake committed here can establish canonical current authority.
     state["canonical_input_event_id"] = ""
     if isinstance(state.get("response_route"), dict):
         state["response_route"]["status"] = "stale"
-    events = _legacy_events(paths, platform, session_id)
-    pending = state.pop("pending_audit_event", None)
-    if pending is not None:
-        if (not isinstance(pending, dict) or pending.get("platform") != platform
-                or pending.get("session_id") != session_id or not pending.get("mutation_id")
-                or pending.get("ledger_revision") != state["ledger_revision"]):
-            raise ValueError("pending ledger audit is invalid")
-        matches = [row for row in events if row.get("mutation_id") == pending["mutation_id"]]
-        if matches and matches != [pending]:
-            raise ValueError("ledger audit conflicts with committed state")
-        if not matches:
-            events.append(pending)
     # Detect source-file mutations during import; source writers
     # must be stopped during import. The originals remain a recovery source.
     after = {key: hashlib.sha256(paths[key].read_bytes()).hexdigest()
@@ -824,8 +815,8 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
     if "work_unit_id" in raw or "contract_revision" in raw:
         unit = raw.get("work_unit_id")
         revision = raw.get("contract_revision")
-        if (not isinstance(unit, str) or not unit or safe_component(unit, "") != unit
-                or len(unit) > 120 or type(revision) is not int or not 1 <= revision <= MAX_SHARED_INTEGER):
+        if (not _shared_module("session_identity").is_exact(unit)
+                or type(revision) is not int or not 1 <= revision <= MAX_SHARED_INTEGER):
             raise ValueError("criterion ownership requires an exact work_unit_id and positive integer contract_revision")
         criterion.update(work_unit_id=unit, contract_revision=revision)
     return criterion
@@ -1550,19 +1541,9 @@ def _imported_event_count(connection: sqlite3.Connection, root: Path, state: dic
         if any(not paths[key].is_file() or hashlib.sha256(paths[key].read_bytes()).hexdigest() != digest
                for key, digest in sources.items()):
             return None
-        imported = _legacy_events(paths, *coordinates)
-        original = _load_legacy_state(paths, *coordinates)
-        pending = original.get("pending_audit_event")
-        if pending is not None:
-            if (not isinstance(pending, dict) or pending.get("platform") != coordinates[0]
-                    or pending.get("session_id") != coordinates[1] or not pending.get("mutation_id")
-                    or pending.get("ledger_revision") != original["ledger_revision"]):
-                return None
-            matches = [e for e in imported if e.get("mutation_id") == pending["mutation_id"]]
-            if matches and matches != [pending]:
-                return None
-            if not matches:
-                imported.append(pending)
+        _, imported, mismatch = _legacy_import(paths, *coordinates)
+        if mismatch is not None:
+            return None
         prefix = [json.loads(row[0]) for row in connection.execute(
             "SELECT event_json FROM intent_events WHERE platform=? AND session_id=? ORDER BY sequence LIMIT ?",
             (*coordinates, len(imported)))]
@@ -1916,11 +1897,7 @@ def main(argv: list[str] | None = None) -> int:
     # identity binds CLI mutations; an explicit historical snapshot remains a
     # supported read-only operation. Keep the library's explicit-session API
     # independent of the environment for adapters and offline processing.
-    bound_session = ""
-    if args.platform == "codex":
-        bound_session = os.environ.get("CODEX_THREAD_ID", "")
-    if not bound_session:
-        bound_session = os.environ.get("GHOST_ALICE_SESSION_ID", "")
+    bound_session = _shared_module("session_identity").host_bound_session(args.platform, os.environ)
     explicit_session = args.session_id
     if not read_only:
         try:

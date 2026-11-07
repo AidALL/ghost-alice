@@ -7,13 +7,12 @@ does not depend on the host ordering its independently registered Stop hooks.
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 from pathlib import Path
 import sqlite3
-import sys
 
 from completion_check_validator import extract_original_proof, looks_like_evidence_claim, validate_completion_text
 from completion_route import select_completion_route
+import ledger_access
 from native_transcript import native_tool_activity, stop_response_text
 
 
@@ -43,24 +42,6 @@ def _claim_judgments(reviewed):
             for b in reviewed.candidate['bindings']]
 
 
-def _ledger(source):
-    """Load this Core module's sibling ledger; callers supply database and session coordinates."""
-    path = Path(__file__).resolve().parents[1] / 'session-intent-analyzer/scripts/session_intent_ledger.py'
-    name = '_native_completion_ledger_' + hashlib.sha256(str(path).encode()).hexdigest()[:16]
-    if name not in sys.modules:
-        spec = importlib.util.spec_from_file_location(name, path)
-        if spec is None or spec.loader is None:
-            raise ImportError('The session-intent ledger API is unavailable')
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        try:
-            spec.loader.exec_module(module)
-        except BaseException:
-            sys.modules.pop(name, None)
-            raise
-    return sys.modules[name]
-
-
 def assess_native_completion(source, *, text='', transaction=None, native_input=None):
     """Return the canonical input/body-bound assessment without mutating proof.
 
@@ -76,18 +57,10 @@ consumers obtain it directly from this Core API and check their input binding.
     route, context, context_status, context_issue = None, {}, 'unavailable', None
     input_observation = None
     try:
-        root = source.get('GHOST_ALICE_SESSION_INTENT_ROOT')
-        if not isinstance(root, str) or not Path(root).is_absolute():
-            raise ValueError('Exact ledger root is missing')
-        if platform not in {'codex', 'claude'} or not isinstance(session, str) or not session:
-            raise ValueError('Native owner identity is missing')
-        if platform == 'codex' and source.get('CODEX_THREAD_ID') not in (None, '', session):
-            raise ValueError('Native owner identity conflicts with host')
-        ledger = _ledger(source)
-        ledger.validate_identity(platform, session)
+        ledger, root, _ = ledger_access.coordinates(source)
         # Intake identity exists independently of a selected response route.
         # Use one authoritative snapshot and never adopt compatibility JSON.
-        with ledger._read_connection(Path(root), transaction) as connection:
+        with ledger._read_connection(root, transaction) as connection:
             state = ledger._stored_state(connection, platform, session)
             event = (state.get('latest_input_event_id') if state is not None
                 and ledger._canonical_input_bound(connection, Path(root), state) else None)

@@ -225,8 +225,9 @@ def _read_text(path: Path) -> str:
 
 
 def _default_log_root() -> Path:
-    home = Path.home()
-    return home / ".ghost-alice" / "live-smoke"
+    """`live-smoke` under the install record root, where the retention table keeps the smoke results."""
+    from installer import locations
+    return locations.record_root() / "live-smoke"
 
 
 def _timestamp() -> str:

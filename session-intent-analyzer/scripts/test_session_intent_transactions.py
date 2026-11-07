@@ -376,6 +376,32 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
         self.assertEqual(self.state()["latest_input_event_id"], anchor)
         self.assertEqual(self.state()["ledger_revision"], 1)
 
+    def test_one_legacy_import_reader_serves_the_writer_and_the_import_check(self):
+        self.write(raw_user_input="legacy input")
+        legacy = self.state()
+        original_events = self.events()
+        self.root = self.root / "legacy-import"
+        self.identity["root"] = self.root
+        self.paths = self.ledger.session_paths(**self.identity)
+        legacy["pending_audit_event"] = dict(original_events[-1], platform="claude")
+        self.ledger.write_json(self.paths["state"], legacy)
+        self.paths["events"].write_text("".join(json.dumps(row) + "\n" for row in original_events))
+        state, events, mismatch = self.ledger._legacy_import(self.paths, "codex", "session-a")
+        self.assertEqual(mismatch, "pending ledger audit is invalid")
+        self.assertEqual(events, original_events)
+        self.assertNotIn("pending_audit_event", state)
+        with self.assertRaises(ValueError) as caught:
+            with self.ledger.storage_transaction(self.root) as connection:
+                self.ledger._load_state_for_update(connection, self.paths, "codex", "session-a")
+        self.assertEqual(str(caught.exception), "pending ledger audit is invalid")
+        legacy["pending_audit_event"] = dict(original_events[-1], ledger_revision=legacy["ledger_revision"],
+                                             mutation_id="pending-mutation")
+        self.ledger.write_json(self.paths["state"], legacy)
+        state, events, mismatch = self.ledger._legacy_import(self.paths, "codex", "session-a")
+        self.assertIsNone(mismatch)
+        self.assertEqual(events[-1]["mutation_id"], "pending-mutation")
+        self.assertEqual(len(events), len(original_events) + 1)
+
     def test_an_import_that_also_attested_an_unread_file_keeps_its_event_count(self):
         self.write(raw_user_input="legacy input")
         anchor = self.observed_id()

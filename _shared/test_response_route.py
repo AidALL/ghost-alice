@@ -664,6 +664,14 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(json.loads(result.stderr)["error"], "route-binding")
 
+    def test_the_ledger_loads_this_module_with_its_ledger_bound_when_only_the_scripts_folder_is_importable(self):
+        program = ("import sys; sys.path.insert(0, sys.argv[1]); import session_intent_ledger as core; "
+                   "routes = core._shared_module('response_route'); print(routes.ledger is core)")
+        result = subprocess.run([sys.executable, "-c", program, str(ROOT / "session-intent-analyzer" / "scripts")],
+                                capture_output=True, text=True, env={k: v for k, v in os.environ.items() if k != "PYTHONPATH"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "True")
+
     def test_copied_skill_and_shared_helper_use_the_same_authority(self):
         self.event = self.setup_owned()
         install = Path(self.tmp.name) / "isolated-skills"
@@ -671,7 +679,8 @@ class ResponseRouteTests(unittest.TestCase):
         (install / "_shared").mkdir()
         shutil.copy2(ROOT / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py",
                      install / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py")
-        for helper in ("response_route.py", "install_destination.py", "source_reference.py", "timestamps.py"):
+        for helper in ("response_route.py", "install_destination.py", "source_reference.py", "timestamps.py",
+                       "ledger_access.py", "session_identity.py"):
             shutil.copy2(ROOT / "_shared" / helper, install / "_shared" / helper)
         script = install / "_shared" / "response_route.py"
         import os

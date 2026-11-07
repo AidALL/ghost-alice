@@ -14,10 +14,16 @@ import sqlite3
 import sys
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
-    import session_intent_ledger as ledger
-except ModuleNotFoundError as exc:
+    import ledger_access
+except ModuleNotFoundError as exc:  # a copy of this script without its sibling helpers resolves the installation below
+    if exc.name != "ledger_access":
+        raise
+    ledger_access = None
+try:
+    ledger = ledger_access.load_ledger() if ledger_access is not None else None
+except ImportError as exc:
     if exc.name != "session_intent_ledger":
         raise
     ledger = None
@@ -65,9 +71,9 @@ def _load_installed_ledger(platform):
     scripts = Path(root) / "session-intent-analyzer" / "scripts"
     if not (scripts / "session_intent_ledger.py").is_file():
         raise RouteBindingError("The selected installation has no session-intent ledger module")
-    sys.path.insert(0, str(scripts))
-    import session_intent_ledger
-    return session_intent_ledger
+    sys.path.insert(0, str(Path(root) / "_shared"))
+    import ledger_access as installed_access
+    return installed_access.load_ledger(scripts / "session_intent_ledger.py")
 
 
 def _object(value, keys, label, optional=()):
@@ -427,9 +433,9 @@ def record_response_route(root, platform, session_id, expected_input_event_id, c
         if platform != 'codex':
             raise RouteBindingError('Source-local context selection updates currently require Codex')
     if context_selection is not None or context_use_judgments is not None:
-        source = context_source if context_source is not None else dict(os.environ,
-            GHOST_ALICE_SESSION_INTENT_ROOT=str(root), GHOST_ALICE_PLATFORM=platform,
-            GHOST_ALICE_SESSION_ID=session_id)
+        from ledger_access import source_environment
+        source = context_source if context_source is not None else source_environment(
+            platform, session_id, root=root, environment=os.environ)
         if any(source.get(key) != value for key, value in (
             ('GHOST_ALICE_SESSION_INTENT_ROOT', str(root)), ('GHOST_ALICE_PLATFORM', platform),
             ('GHOST_ALICE_SESSION_ID', session_id))):
@@ -501,8 +507,8 @@ def main(argv=None):
             result = read_response_route(args.root, args.platform, args.session_id,
                                          expected_input_event_id=args.expected_input_event_id)
         else:
-            bound = os.environ.get("CODEX_THREAD_ID", "") if args.platform == "codex" else ""
-            bound = bound or os.environ.get("GHOST_ALICE_SESSION_ID", "")
+            from session_identity import host_bound_session
+            bound = host_bound_session(args.platform, os.environ)
             if bound and bound != args.session_id:
                 raise RouteBindingError("session identity mismatch with the bound host session")
             try:
