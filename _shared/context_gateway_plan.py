@@ -47,7 +47,7 @@ def valid_state(value):
             or not 0 < value['port'] < 65536 or not isinstance(value.get('scope'), str) or not value['scope']
             or any(not _absolute(value.get(k)) for k in ('ledger_root', 'codex_dir', 'usage_log'))
             or any(k in value and not _absolute(value[k]) for k in ('claude_dir', 'strict_log_root'))):
-        raise GatewayBlocked('The prior owned listener/state binding is unavailable; preserve it for review')
+        raise GatewayBlocked('The prior owned listener/state binding is unavailable; preserve it for the human user to review')
     return value
 
 
@@ -101,19 +101,19 @@ def validate_install(request, inventory, service):
         if agent.exists:
             raise GatewayBlocked('An unowned launch agent must be preserved; the install record has no service entry for it')
         if inventory.state_entries:
-            raise GatewayBlocked('Existing gateway state lacks its install record entry; preserve it for review')
+            raise GatewayBlocked('Existing gateway state lacks its install record entry; preserve it for the human user to review')
         if _markers(original):
-            raise GatewayBlocked('Gateway provider blocks without an install record entry; preserve the configuration for review')
+            raise GatewayBlocked('Gateway provider blocks without an install record entry; preserve the configuration for the human user to review')
         # Rendering also rejects an unowned provider selection.
         render_provider(original, 1, 'preflight')
         return None
     coordinates = {'launch_agent': request.agent, 'state_path': request.state_path, 'config_path': request.config}
     if any(Path(service[key]) != path for key, path in coordinates.items()):
-        raise GatewayBlocked('Detach or review the existing registered gateway before changing its installation coordinates')
+        raise GatewayBlocked('The human user reviews the existing registered gateway, or decides to detach it, before its installation coordinates change')
     if (agent.raw is None or digest(agent.raw) != service['launch_agent_digest']
             or state_item.raw is None or digest(state_item.raw) != service['state_digest']
             or (service.get('config_block_digest') is not None and _block_digest(original) != service['config_block_digest'])):
-        raise GatewayBlocked('Gateway service files changed outside the installer; review them, then run the gateway command again')
+        raise GatewayBlocked('Gateway service files changed outside the installer; the human user reviews them before the gateway command runs again')
     prior = valid_state(document(state_item))
     if _markers(original):
         _owned_provider_removal(original, prior)
@@ -178,7 +178,7 @@ def detach_plan(request, inventory, service, *, domain):
     regular(agent_item)
     if (state_item.raw is None or agent_item.raw is None or digest(state_item.raw) != service['state_digest']
             or digest(agent_item.raw) != service['launch_agent_digest']):
-        raise GatewayBlocked('Gateway service or state changed; preserve owned coordinates for review')
+        raise GatewayBlocked('Gateway service or state changed; preserve owned coordinates for the human user to review')
     state = valid_state(document(state_item))
     cleaned = _owned_provider_removal(original.raw.decode(), state).encode() if original.raw is not None else None
     item = dict(kind='context-gateway', action='would-detach', reason='owned-context-gateway',

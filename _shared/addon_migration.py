@@ -3,8 +3,7 @@
 
 Read the source state without modification. Seed a sidecar only when a target has
 unambiguous ``addon_id`` ownership and no sidecar exists. Record unattributed
-non-core targets in ``~/.ghost-alice/addons/_migration-report.json`` for explicit
-reconciliation; do not invent ownership or discard unresolved targets.
+non-core targets in ``~/.ghost-alice/addons/_migration-report.json`` for the human user to decide each target's owning addon explicitly; do not invent ownership or discard unresolved targets.
 
 Dependencies: Python standard library.
 """

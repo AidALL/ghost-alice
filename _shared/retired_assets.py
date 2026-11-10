@@ -16,7 +16,7 @@ import sys
 from datetime import datetime, timezone
 import uuid
 
-from installer_assets import _content_hashes, classify_skill_root, OWNERSHIP_GHOST_ALICE_MANAGED, OWNERSHIP_USER_MODIFIED_MANAGED
+from installer_assets import _content_hashes, classify_skill_root, OWNERSHIP_GHOST_ALICE_MANAGED, OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED
 from install_destination import assert_mutation_path, ghost_root
 from install_transaction import _rename_path
 import state_retention
@@ -107,11 +107,11 @@ def _retire(path, *, ownership, backup_root, platform, source_root, pending_root
     _rename_path(path, backup)
     try:
         _audit(event, result, 'moved', must_write=True)
-        if ownership == OWNERSHIP_USER_MODIFIED_MANAGED:
+        if ownership == OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED:
             entry = dict(id='retired-'+uuid.uuid4().hex, platform=platform, skill=asset_name,
                 source_path=str(path), backup_path=str(backup), snapshot_hash=_digest(baseline),
                 current_hash=content_hash,
-                change_kind='retired-managed', reason='retired-managed-user-changes-preserved',
+                change_kind='retired-managed', reason='retired-managed-external-changes-preserved',
                 ownership=ownership, decided=False, decision=None,
                 created_at=datetime.now(timezone.utc).isoformat().replace('+00:00','Z'))
             # Last fallible persistence step: a committed entry always points to
@@ -151,7 +151,7 @@ def retire_skill(path, *, platform, source_root, pending_root):
                 backup_root=Path(pending_root)/'deprecated-skill-backups', platform=platform,
                 source_root=source_root, pending_root=pending_root, link_target=str(path.readlink()))
         return dict(action='preserved', path=str(path), ownership=classification.ownership, reason='unproven-retired-link')
-    if classification.ownership not in {OWNERSHIP_GHOST_ALICE_MANAGED, OWNERSHIP_USER_MODIFIED_MANAGED}:
+    if classification.ownership not in {OWNERSHIP_GHOST_ALICE_MANAGED, OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED}:
         return dict(action='preserved', path=str(path), ownership=classification.ownership, reason=classification.reason)
     return _retire(path, ownership=classification.ownership,
         backup_root=Path(pending_root)/'deprecated-skill-backups', platform=platform,
@@ -166,7 +166,7 @@ def retire_command(path, *, source_root, pending_root=None):
     content = path.read_text(encoding='utf-8')
     if not content.startswith('@jailbreak-detector/SKILL.md\n') or '$ARGUMENTS' not in content:
         return {'action':'preserved', 'path':str(path), 'reason':'unknown-command-ownership'}
-    ownership = OWNERSHIP_GHOST_ALICE_MANAGED if content.rstrip('\n') == original.rstrip('\n') else OWNERSHIP_USER_MODIFIED_MANAGED
+    ownership = OWNERSHIP_GHOST_ALICE_MANAGED if content.rstrip('\n') == original.rstrip('\n') else OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED
     return _retire(path, ownership=ownership, backup_root=path.parent.parent/'retired-command-backups',
         platform='claude', source_root=source_root, pending_root=pending_root or ghost_root(), baseline=original)
 

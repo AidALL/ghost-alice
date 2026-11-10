@@ -22,6 +22,8 @@ ANALYZER = SCRIPT_DIR / "analyze_io_trace.py"
 
 
 class AnalyzeIoTraceTests(unittest.TestCase):
+    # The fixtures stand in for the response model's recorded source claims, decisions and scope.
+    # user-said does not authenticate a sender; allowed/prohibited do not establish human authorization.
     def write_trace(self, rows: list[dict[str, str]]) -> pathlib.Path:
         tmpdir = pathlib.Path(tempfile.mkdtemp(prefix="skill-evolution-test-"))
         path = tmpdir / "io-trace.jsonl"
@@ -91,10 +93,28 @@ class AnalyzeIoTraceTests(unittest.TestCase):
         candidate = conduct[0]
         self.assertEqual(candidate["id"], "conduct:scope-narrowing")
         self.assertEqual(candidate["quality"], "review")
-        self.assertEqual(candidate["decision"], "necessity-gate")
+        self.assertEqual(candidate["suggested_next_step"], "necessity-gate")
+        self.assertNotIn("decision", candidate)
         self.assertEqual(candidate["domain"], "conduct")
         self.assertIn("cover the whole committed scope", candidate["trigger"])
         self.assertGreaterEqual(report["quality_summary"]["review"], 1)
+
+    def test_legacy_missing_sources_stay_unknown_in_reports(self) -> None:
+        entries = [{"id": "missing", "corrective_rule": "Recorded correction"}]
+        entries.extend({"id": str(index), "source": source, "corrective_rule": "Recorded correction"}
+                       for index, source in enumerate((None, "", " ", "user-explicit", "inferred", "legacy-value")))
+        intent = self.write_intent_state({"conduct_feedback": entries})
+        original = intent.read_bytes()
+        reports = {item["id"]: item for item in self.run_analyzer([], "--intent-ledger", str(intent))["instincts"]}
+        for entry_id in ("missing", "0", "1", "2"):
+            item = reports["conduct:" + entry_id]
+            self.assertEqual(item["source"], "unknown")
+            self.assertIn("source-unknown", item["quality_reasons"])
+            self.assertEqual(item["evidence"], "recorded conduct feedback")
+        self.assertEqual(reports["conduct:3"]["source"], "user-said")
+        self.assertEqual(reports["conduct:4"]["source"], "interpreted-as")
+        self.assertEqual(reports["conduct:5"]["source"], "legacy-value")
+        self.assertEqual(intent.read_bytes(), original)
 
     def test_open_recommendations_retrievable_standalone(self) -> None:
         intent = self.write_intent_state({
@@ -122,7 +142,7 @@ class AnalyzeIoTraceTests(unittest.TestCase):
         self.assertEqual(len(conduct), 1)
         self.assertEqual(conduct[0]["id"], "conduct:intent-vs-skill-gap")
         self.assertEqual(conduct[0]["source"], "interpreted-as")
-        self.assertEqual(conduct[0]["decision"], "necessity-gate")
+        self.assertEqual(conduct[0]["suggested_next_step"], "necessity-gate")
 
     def test_generates_tool_workflow_and_sequence_instincts(self) -> None:
         rows = [
@@ -255,7 +275,7 @@ class AnalyzeIoTraceTests(unittest.TestCase):
         sequence = instincts["sequence:read-edit-bash"]
 
         self.assertEqual(sequence["quality"], "review")
-        self.assertEqual(sequence["decision"], "necessity-gate")
+        self.assertEqual(sequence["suggested_next_step"], "necessity-gate")
         self.assertEqual(sequence["session_count"], 2)
         self.assertIn("cross-session-evidence", sequence["quality_reasons"])
         self.assertGreaterEqual(result["quality_summary"]["review"], 1)
@@ -276,7 +296,7 @@ class AnalyzeIoTraceTests(unittest.TestCase):
         loop = instincts["sequence:bash-bash-bash"]
 
         self.assertEqual(loop["quality"], "reject")
-        self.assertEqual(loop["decision"], "route-to-systematic-debugging")
+        self.assertEqual(loop["suggested_next_step"], "route-to-systematic-debugging")
         self.assertEqual(loop["session_count"], 1)
         self.assertIn("single-session-evidence", loop["quality_reasons"])
         self.assertIn("debugging-or-test-loop", loop["quality_reasons"])
@@ -310,7 +330,7 @@ class AnalyzeIoTraceTests(unittest.TestCase):
         instincts = {item["id"]: item for item in result["instincts"]}
 
         self.assertEqual(result["intent_context"]["current_goal"], "implement session intent guard")
-        self.assertEqual(instincts["tool:read"]["decision"], "observe-more")
+        self.assertEqual(instincts["tool:read"]["suggested_next_step"], "observe-more")
         self.assertNotIn("events", json.dumps(result, ensure_ascii=False))
 
     def test_corrected_scope_reaches_report_without_changing_triage(self) -> None:
@@ -336,8 +356,8 @@ class AnalyzeIoTraceTests(unittest.TestCase):
         self.assertEqual(context["decision_count"], 1)
         self.assertEqual(context["constraints"], state["constraints"])
         self.assertEqual(context["non_goals"], state["non_goals"])
-        self.assertEqual([(i["id"], i["decision"]) for i in report["instincts"]],
-                         [(i["id"], i["decision"]) for i in baseline["instincts"]])
+        self.assertEqual([(i["id"], i["suggested_next_step"]) for i in report["instincts"]],
+                         [(i["id"], i["suggested_next_step"]) for i in baseline["instincts"]])
         self.assertEqual(path.read_bytes(), before)
 
     def test_legacy_intent_context_does_not_invent_decisions_or_scope(self) -> None:
@@ -369,7 +389,7 @@ class AnalyzeIoTraceTests(unittest.TestCase):
 
         self.assertNotIn("intent_context", result)
         self.assertNotIn("intent_context", instincts["tool:read"])
-        self.assertEqual(instincts["tool:read"]["decision"], "observe-more")
+        self.assertEqual(instincts["tool:read"]["suggested_next_step"], "observe-more")
 
 
 if __name__ == "__main__":

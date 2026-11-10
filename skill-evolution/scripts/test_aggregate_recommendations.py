@@ -29,6 +29,7 @@ def load_module():
 
 
 class AggregateRecommendationsTests(unittest.TestCase):
+    # The fixtures assign source labels as the response model would; user-said is a claim about origin.
     def setUp(self) -> None:
         self.root = pathlib.Path(tempfile.mkdtemp(prefix="agg-rec-test-"))
         self.addCleanup(lambda: shutil.rmtree(self.root, ignore_errors=True))
@@ -68,8 +69,10 @@ class AggregateRecommendationsTests(unittest.TestCase):
         self.assertEqual(top["occurrence_count"], 2)
         self.assertEqual(top["last_seen"], "2026-06-05T00:00:00Z")
         self.assertEqual(top["sources"], ["interpreted-as", "user-said"])
+        self.assertEqual(top["suggested_next_step"], "necessity-gate")
+        self.assertNotIn("decision", top)
         self.assertEqual(result["recommendations"][1]["id"], "b")
-        # no fabricated composite weight: the model judges priority from the objective signals, the code does not bake a magic score
+        # The response model judges priority from the recurrence and recency signals; the script supplies no composite score.
         self.assertNotIn("priority_score", top)
 
     def test_root_discovery_and_time_parsing_and_ledger_loading_come_from_their_owners(self) -> None:
@@ -85,6 +88,35 @@ class AggregateRecommendationsTests(unittest.TestCase):
         result = self.mod.aggregate(self.root, now="2026-06-05T00:00:00Z")
         self.assertEqual(result["recommendation_count"], 0)
         self.assertEqual(result["recommendations"], [])
+
+    def test_saved_recommendations_render_without_rewriting_or_conflicting_aliases(self) -> None:
+        self._write("codex", "s1", [{"id": "a", "corrective_rule": "Read the selected source"}])
+        report = self.mod.aggregate(self.root)
+        item = report["recommendations"][0]
+        item["decision"] = item.pop("suggested_next_step")
+        original = json.dumps(report, sort_keys=True)
+        self.assertIn("-> necessity-gate", self.mod.render_text(report))
+        self.assertEqual(json.dumps(report, sort_keys=True), original)
+        item["suggested_next_step"] = "necessity-gate"
+        self.assertIn("-> necessity-gate", self.mod.render_text(report))
+        item["suggested_next_step"] = "observe-more"
+        with self.assertRaisesRegex(ValueError, "conflicting.*suggested_next_step"):
+            self.mod.render_text(report)
+
+    def test_legacy_missing_sources_stay_unknown_in_reports(self) -> None:
+        entries = [{"id": "missing", "corrective_rule": "Recorded correction"}]
+        entries.extend({"id": str(index), "source": source, "corrective_rule": "Recorded correction"}
+                       for index, source in enumerate((None, "", " ", "user-explicit", "inferred", "legacy-value")))
+        self._write("codex", "legacy", entries)
+        path = self.root / "codex" / "legacy" / "intent-state.json"
+        original = path.read_bytes()
+        reports = {item["id"]: item for item in self.mod.aggregate(self.root)["recommendations"]}
+        for entry_id in ("missing", "0", "1", "2"):
+            self.assertEqual(reports[entry_id]["sources"], ["unknown"])
+        self.assertEqual(reports["3"]["sources"], ["user-said"])
+        self.assertEqual(reports["4"]["sources"], ["interpreted-as"])
+        self.assertEqual(reports["5"]["sources"], ["legacy-value"])
+        self.assertEqual(path.read_bytes(), original)
 
     def test_session_local_occurrence_count_affects_ranking(self) -> None:
         self._write("codex", "s1", [

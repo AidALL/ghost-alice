@@ -1,31 +1,31 @@
 ---
 name: using-git-worktrees
-description: Reuses or creates a git worktree when an authorized development task must run separately from the current checkout.
+description: Reuses or creates a git worktree when a development task that the human user's instructions authorize must run separately from the current checkout.
 compatibility:
   - "Python 3.11+ standard library"
 ---
 
 # Using Git Worktrees
 
-The response model selects an isolated checkout when the authorized development task requires isolation. Reuse a suitable attached or existing checkout before creating another. Prefer the host's managed-worktree API; use the shell procedure only when that API is unavailable or unsuitable.
+The response model selects an isolated checkout when the development task that the human user's instructions authorize requires isolation. Reuse a suitable attached or existing checkout before creating another. Prefer the host's managed-worktree API; use the shell procedure only when that API is unavailable or unsuitable.
 
 ## Select the checkout
 
 Inspect the repository identity, current branch and existing worktrees. Check whether an existing checkout satisfies the task's branch, file ownership and isolation requirements. Preserve its uncommitted work.
 
-For a new shell-managed worktree, use an explicit project or user location. Otherwise prefer an existing `.worktrees/` directory, then `worktrees/`. If neither exists and no project preference settles the choice, ask whether to use a project-local directory or `~/.config/coding-convention/worktrees/<project-name>/`.
+For a new shell-managed worktree, use a location that the project instructions or the human user name explicitly. Otherwise prefer an existing `.worktrees/` directory, then `worktrees/`. If neither exists and no project preference settles the choice, ask the human user whether to use a project-local directory or `~/.config/coding-convention/worktrees/<project-name>/`.
 
-Before creating inside the repository, check the exact selected directory with `git check-ignore`. Do not accept a result for a different directory. If it is not ignored, add an ignore rule only within existing authority and verify it, or use an authorized external directory. An external directory needs no repository ignore rule.
+Before creating inside the repository, check the exact selected directory with `git check-ignore`. Do not accept a result for a different directory. If it is not ignored, add an ignore rule only within what the human user's instructions already authorize and verify it, or use an external directory that the human user authorized. An external directory needs no repository ignore rule.
 
 ## Create and prepare
 
-Resolve the absolute target path, repository and agreed starting ref before issuing a command. For a new branch, use the host/project naming convention. For continuing work, use the requested existing ref rather than silently starting from a default branch.
+Resolve the absolute target path, repository and starting ref that the human user agreed to before issuing a command. For a new branch, use the host/project naming convention. For continuing work, use the existing ref that the human user requested rather than silently starting from a default branch.
 
-The shell operation is `git worktree add <absolute-target> -b <new-branch> <starting-ref>` for an authorized new branch. Existing branches require the corresponding existing-branch form. Replace the arguments from inspected state; do not execute the angle-bracket notation.
+The shell operation is `git worktree add <absolute-target> -b <new-branch> <starting-ref>` for a new branch that the human user authorized. Existing branches require the corresponding existing-branch form. Replace the arguments from inspected state; do not execute the angle-bracket notation.
 
 Follow the project's declared package manager and setup instructions. Do not run every example package manager or install dependencies merely because a file exists. A task prohibition on network, installation or setup overrides the default preparation.
 
-Apply verification-before-completion to the selected checkout's relevant baseline. Distinguish a pre-existing failure from the proposed change and correct it only within the authorized task.
+Apply verification-before-completion to the selected checkout's relevant baseline. Distinguish a pre-existing failure from the proposed change and correct it only within the task that the human user's instructions authorize.
 
 ## Result and cleanup
 

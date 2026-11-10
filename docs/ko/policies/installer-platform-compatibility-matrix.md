@@ -42,7 +42,7 @@
 
 | 플랫폼 | 런타임 설치 항목 | 계약 | 담당 회귀 테스트 |
 | --- | --- | --- | --- |
-| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `settings.json` 훅과 `permissions.allow` | `platforms/claude/CLAUDE.md`의 독립적인 관리 블록을 설치하여 임의 작업 디렉터리에서도 공통 계약과 훅 없는 대체 절차를 제공합니다. 관리 표지가 없는 사용자 파일은 변경하지 않고, 설치 상태에 포함하지 않는 제안 파일을 따로 작성합니다. 설치된 Ghost-ALICE 스킬 전체에 `Skill(<name>)` 권한을 허용하며, Core 검사 스킬만 담은 축소된 허용 목록으로는 부족합니다. | `scripts.tests.test_global_rule_blocks`, `scripts.tests.test_validate_entrypoints`, `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestInstallHook` |
+| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `settings.json` 훅과 `permissions.allow` | `platforms/claude/CLAUDE.md`의 독립적인 관리 블록을 설치하여 임의 작업 디렉터리에서도 공통 계약과 훅 없는 대체 절차를 제공합니다. 관리 표지가 없는 사용자 파일은 변경하지 않고, 설치 상태에 포함하지 않는 제안 파일을 따로 작성합니다. 인스톨러는 설치된 Ghost-ALICE 스킬 전체의 `Skill(<name>)` 허용 규칙을 Claude Code 설정에 기록하며, Core 스킬의 규칙은 설치할 때마다 기록합니다. Core 검사 스킬만 담은 축소된 허용 목록으로는 부족합니다. | `scripts.tests.test_global_rule_blocks`, `scripts.tests.test_validate_entrypoints`, `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestInstallHook` |
 | Codex | `~/.codex/hooks.json`, `~/.codex/config.toml`, 부트스트랩 `AGENTS.md` | 모델에 노출된 Skill 도구가 없으므로 필수 게이트는 `SKILL.md` 조회와 워크플로 실행으로 기록합니다. `hooks.json`의 훅 이벤트 이름은 설치된 설정이며 런타임 호출의 증거가 아닙니다. 게이트 완료 주장은 관찰된 훅 입력·출력 근거, 실환경 점검, 또는 훅 없는 대체 절차나 수동 대체 절차의 문구를 요구합니다. `tool-checkpoint` 훅 항목은 설치·불일치 검증 대상입니다. 주장이 외부 도구 근거를 요구하면 검증 참조에 따라 그 근거를 선택합니다. Windows 네이티브 Codex에서는 별도 실환경 점검이 실제 훅 호출의 입력·출력과 `SKILL.md` 조회 기록을 확인합니다. | `_shared.test_install_hooks`, `scripts.check_skill_gate_contract`, Windows 네이티브 실환경 점검 |
 
 Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공통 지침 소스로 지정합니다. 작업은 그 소스와 프로젝트 고유 제약을 함께 적용하며, 바로 답할 때는 로더의 도구 없는 답변 규칙을 따릅니다. Status와 doctor는 문단 제목과 관계없이 로더가 지정한 공통 파일을 요구합니다. 인스톨러는 다른 프로젝트의 지침 예산을 늘리지 않습니다. 사용자 거버넌스 파일을 보호하며, Codex 공통 계약 경로가 심볼릭 링크이면 교체를 거부합니다. 자세한 내용은 [공통 거버넌스와 프로젝트 지침](../getting-started/installation.md#공통-거버넌스와-프로젝트-지침)을 확인해 주세요.
@@ -55,7 +55,7 @@ Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공�
 
 ### session-intent-analyzer
 
-인스톨러는 session-intent-analyzer를 단일 UserPromptSubmit 접수 담당자이자 SessionStart 세션 영수증 훅으로 등록합니다. 접수가 입력을 기록하는 방식은 세션 게이트 매트릭스의 [세션 의도 원장 계약](session-gate-matrix.md#세션-의도-원장-계약)이 정합니다.
+인스톨러는 session-intent-analyzer를 호스트의 프롬프트 제출 이벤트(`UserPromptSubmit`)에서 Core 코드의 입력 접수를 담당하는 유일한 훅이자 SessionStart 세션 영수증 훅으로 등록합니다. 호스트는 프롬프트가 제출될 때 프롬프트 제출 이벤트의 훅을 실행하며, 이벤트 이름은 프롬프트를 보낸 주체를 밝히지 않습니다. Core 코드의 입력 접수가 호스트가 `user` 역할로 전달한 프롬프트를 기록하는 방식은 세션 게이트 매트릭스의 [세션 의도 원장 계약](session-gate-matrix.md#세션-의도-원장-계약)이 정합니다.
 
 ### 병합 대기 사전 확인
 

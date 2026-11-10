@@ -142,7 +142,7 @@ class AddonHookInstallTest(AddonHookInstallCase):
                             for e in self._settings()["hooks"]["PostToolUse"] for h in e.get("hooks", [])))
 
     def test_addon_install_preserves_unmanaged_marker_substring_hook(self):
-        # A user hook whose command merely CONTAINS the addon marker substring, but carries no [hook-runner:] ownership proof, must survive the addon stale-prune at install time (parity with remove_addon_hook's exact ownership predicate). Substring-only pruning would delete user data.
+        # An unmanaged hook whose command merely CONTAINS the addon marker substring, but carries no [hook-runner:] ownership proof, must survive the addon stale-prune at install time. Substring-only pruning would delete a hook the installer does not own.
         user_cmd = "echo audit [addon:hookaddon] obs run >> ~/mylog"
         (self.claude / "settings.json").write_text(json.dumps({
             "hooks": {"PostToolUse": [{"hooks": [{"type": "command", "command": user_cmd}]}]}
@@ -179,7 +179,7 @@ class AddonHookInstallTest(AddonHookInstallCase):
 
     def test_install_removes_a_retired_adapter_registration(self):
         # An older installer registered addon adapter hooks through the runner with this comment; this Core has no
-        # adapters, so install removes the registration and keeps a user command that only quotes the comment.
+        # adapters, so install removes the registration and keeps an unmanaged command that only quotes the comment.
         script = self.tmp / "old-adapter.py"
         script.write_text("import sys; sys.exit(0)\n", encoding="utf-8")
         retired = _with_old_adapter_binding(install_hooks._entry_command(install_hooks._hook_runner_command_entry(
@@ -272,7 +272,7 @@ class AddonHookSecurityTest(AddonHookInstallCase):
         self.assertFalse(any("[addon:hookaddon] obs [hook-runner:obs]" in command for command in commands),
                          msg="remove_addon_hook failed to delete the managed addon hook")
 
-    def test_remove_addon_hook_preserves_user_command_in_same_entry(self):
+    def test_remove_addon_hook_preserves_unmanaged_command_in_same_entry(self):
         src = _make_addon(self.tmp, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])
         install_hooks.install_hook("claude", addon_sources=[str(src)])
         s = self._settings()

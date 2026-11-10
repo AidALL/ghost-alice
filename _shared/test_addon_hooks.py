@@ -84,8 +84,12 @@ class AddonHookParseTest(unittest.TestCase):
     def test_stop_event_rejected(self):
         self._assert_rejected([{"id": "s", "event": "on_agent_stop", "script": "hooks/obs.py"}], "hook")
 
-    def test_user_prompt_event_rejected(self):
-        self._assert_rejected([{"id": "u", "event": "on_user_prompt", "script": "hooks/obs.py"}], "hook")
+    def test_prompt_submit_event_and_legacy_alias_are_rejected(self):
+        for event in ("on_prompt_submit", "on_user_prompt"):
+            with self.subTest(event=event):
+                src = _make_addon(self.tmp / event, [{"id": "u", "event": event, "script": "hooks/obs.py"}])
+                with self.assertRaisesRegex(ai.AddonManifestError, "not permitted"):
+                    ai.load_addon_targets([src], platform="claude")
 
     def test_pre_tool_use_event_rejected(self):
         # PreToolUse can BLOCK a tool -> not observational -> rejected by the allowlist

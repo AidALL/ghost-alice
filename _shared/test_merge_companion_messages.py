@@ -9,7 +9,7 @@ from merge_companion_messages import render_pending_merge_message
 
 class TestMergeCompanionMessages(unittest.TestCase):
     def assert_user_copy_first(self, body: str) -> None:
-        user_idx = body.index("User:")
+        user_idx = body.index("For the human user:")
         tech_idx = body.index("Tech:")
         self.assertLess(user_idx, tech_idx)
 

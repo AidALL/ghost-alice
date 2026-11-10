@@ -37,11 +37,11 @@ Keep the incident's cumulative count across agents and handoffs. An unknown caus
 
 After five failed repair rounds and before another correction attempt, the response model must complete the first premise reassessment: use the accumulated observations to reconsider the causal hypothesis, target mapping, design and verification method. Five is a maximum before that reassessment, not a minimum retry count or a limit on the whole task. Once the reassessment is recorded, counts six or seven do not alone demand another reassessment; new contrary evidence or an active stopping condition can.
 
-To continue after reassessment, identify a distinguishable hypothesis, the observation that can discriminate it and a stopping condition. The user’s remaining resource limit and, for a delegated task, the parent’s remaining allocation to that task still apply. Reassessment resets neither attempts nor consumed resources. Reaching one of those limits suspends that incident's further attempts. Five failures alone do not require a human decision.
+To continue after reassessment, identify a distinguishable hypothesis, the observation that can discriminate it and a stopping condition. The user’s remaining resource limit and, for a delegated task, the remaining allocation from the parent (the session or agent that started the delegate) to that task still apply. Reassessment resets neither attempts nor consumed resources. Reaching one of those limits suspends that incident's further attempts. Five failures alone do not require a human decision.
 
 Boundary-contract owns authorization and the renewal of self-declared implementation limits. Verification-before-completion defines useful checks, required evidence and proof reuse. Its response review reference defines how to recover from a recording failure: an identical unchanged recording failure suspends further recording attempts without waiting for five rounds.
 
-Exclude suspended or human-waiting branches from executable work until a relevant dependency change or decision permits continuation. Keep these decisions in existing context and handoffs, without adding a compulsory report, counter hook or classifier.
+Exclude suspended or human-waiting branches from executable work until a relevant dependency change, the human user's decision for a human-waiting branch or a limit the human user set, or the parent's decision for its own allocation to a delegated task permits continuation. Keep these decisions in existing context and handoffs, without adding a compulsory report, counter hook or classifier.
 
 ## Failure modes
 

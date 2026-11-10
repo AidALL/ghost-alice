@@ -76,10 +76,42 @@ class PatternClassNormalizationTests(unittest.TestCase):
         merged = LEDGER.merge_conduct_feedback([stored], [_entry("fresh", "restatement-loop")], TIMESTAMP)
         self.assertEqual([entry["id"] for entry in merged], ["legacy-odd", "fresh"])
 
-    def test_missing_source_keeps_the_compatible_default(self) -> None:
-        entry = _entry("legacy")
-        del entry["source"]
-        self.assertEqual(LEDGER.normalize_conduct_feedback(entry, TIMESTAMP)["source"], "user-said")
+    def test_new_correction_requires_a_supported_source(self) -> None:
+        missing = _entry("missing")
+        del missing["source"]
+        invalid_entries = [missing, "A correction without a source"]
+        invalid_entries.extend({**_entry("empty"), "source": value}
+                               for value in (None, "", " ", False, 0, [], {}, "unknown"))
+        for entry in invalid_entries:
+            with self.subTest(entry=entry), self.assertRaisesRegex(ValueError, "source"):
+                LEDGER.normalize_conduct_feedback(entry, TIMESTAMP)
+
+    def test_content_updates_require_their_own_source(self) -> None:
+        for update in ({"summary": "New observation"}, {"corrective_rule": "New correction"},
+                       {"failure_pattern": "New mismatch"}, {"occurrence_count": 2},
+                       {"source": None}, {"source": ""}):
+            with self.subTest(update=update), self.assertRaisesRegex(ValueError, "source"):
+                LEDGER.merge_conduct_feedback([_entry("existing")],
+                                               [{"id": "existing", **update}], TIMESTAMP)
+
+    def test_status_and_class_updates_preserve_source_content_and_occurrences(self) -> None:
+        for source in ("interpreted-as", "inferred", "legacy-value", "", None):
+            stored = {**_entry("existing"), "occurrence_count": 4}
+            if source is None:
+                del stored["source"]
+            else:
+                stored["source"] = source
+            with self.subTest(source=source):
+                merged = LEDGER.merge_conduct_feedback([stored],
+                    [{"id": "existing", "pattern_class": "restatement-loop", "status": "encoded"}], TIMESTAMP)
+                self.assertEqual(merged, [{**stored, "pattern_class": "restatement-loop", "status": "encoded"}])
+
+    def test_status_only_update_cannot_create_an_entry_or_accept_an_unknown_class(self) -> None:
+        with self.assertRaisesRegex(ValueError, "source"):
+            LEDGER.merge_conduct_feedback([], [{"id": "absent", "status": "open"}], TIMESTAMP)
+        with self.assertRaisesRegex(ValueError, "pattern_class"):
+            LEDGER.merge_conduct_feedback([_entry("existing")],
+                [{"id": "existing", "pattern_class": "unknown"}], TIMESTAMP)
 
     def test_legacy_source_labels_are_kept_and_read_as_current_labels(self) -> None:
         for legacy, current in (("user-explicit", "user-said"), ("inferred", "interpreted-as")):
@@ -129,17 +161,22 @@ class CliRejectionTests(unittest.TestCase):
             return subprocess.run([*base, *args], capture_output=True, text=True, encoding="utf-8", env=env, check=False)
 
         LEDGER.record_turn(root=Path(temporary.name), platform="codex", session_id="cli-rejection",
-                           raw_user_input="first input", source="cli")
+                           raw_input="first input", source="cli")
         before = json.loads(run("--read-intent").stdout)
         goal_before = json.loads(run("--read-state", "--pointer", "/current_goal").stdout)['value']
-        delta = {"current_goal": "must not be written", "conduct_feedback": [{**_entry("typo"), "source": "infered"}]}
-        result = run("--expected-input-event-id", before["input_event_id"], "--delta-json", json.dumps(delta))
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("'user-said'", result.stderr)
-        after = json.loads(run("--read-intent").stdout)
-        goal_after = json.loads(run("--read-state", "--pointer", "/current_goal").stdout)['value']
-        self.assertEqual(after, before)
-        self.assertEqual(goal_after, goal_before)
+        missing = _entry("missing")
+        del missing["source"]
+        for entry in (missing, {**_entry("typo"), "source": "infered"}, {**_entry("blank"), "source": " "}):
+            with self.subTest(entry=entry):
+                delta = {"current_goal": "must not be written", "conduct_feedback": [_entry("valid"), entry]}
+                result = run("--expected-input-event-id", before["input_event_id"], "--delta-json", json.dumps(delta))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("'user-said'", result.stderr)
+                after = json.loads(run("--read-intent").stdout)
+                goal_after = json.loads(run("--read-state", "--pointer", "/current_goal").stdout)['value']
+                self.assertEqual(after, before)
+                self.assertEqual(goal_after, goal_before)
+                self.assertEqual(json.loads(run("--read-state", "--pointer", "/conduct_feedback").stdout)['value'], [])
 
 
 class AggregatorGroupingTests(unittest.TestCase):

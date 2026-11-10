@@ -1,4 +1,4 @@
-"""Loopback native-request gateway with Core-authenticated input selection.
+"""Loopback native-request gateway that applies the response model's selection of model input, authenticated by Core code.
 
 Native credentials and server answer bytes pass through unchanged. Logs contain
 structure, hashes and server usage, never conversation or credential bodies: a

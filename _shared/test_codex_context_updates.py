@@ -47,7 +47,7 @@ class CodexContextUpdateTests(unittest.TestCase):
         self.assertEqual(result.state, 'selected')
         self.assertEqual(result.request['input'][2]['output'], [self.fixture.output['output'][1]])
         self.assertEqual(result.request['input'][-1]['output'], '')
-        self.assertEqual(result.request['input'][0], self.fixture.user)
+        self.assertEqual(result.request['input'][0], self.fixture.first_prompt)
         self.assertEqual(result.request['input'][3], self.opaque)
         self.assertEqual(result.request['input'][1], self.fixture.call)
         self.assertEqual(result.request['input'][-2], self.call)
@@ -121,10 +121,10 @@ class CodexContextUpdateTests(unittest.TestCase):
         self.fixture.record([])
         self.assertEqual(self.select().request, self.fixture.request)
 
-    def test_retained_decision_keeps_original_input_binding_after_new_human(self):
+    def test_retained_decision_keeps_original_input_binding_after_next_input(self):
         first_event = self.fixture.fixture.event
         next_event = self.fixture.fixture.intake('continue the second comparison')
-        self.fixture.rows.append(dict(type='response_item', payload=dict(self.fixture.user,
+        self.fixture.rows.append(dict(type='response_item', payload=dict(self.fixture.first_prompt,
             content=[dict(type='input_text', text='continue the second comparison')])))
         self.fixture.write_rows()
         self.fixture.request['input'].append(self.fixture.rows[-1]['payload'])
@@ -160,7 +160,7 @@ class CodexContextUpdateTests(unittest.TestCase):
             self.update([dict(self.first, block_index=1, disposition='keep')])
         self.assertEqual(self.current_payload(), before)
 
-    def test_updates_to_prior_message_blocks_preserve_current_human_and_group_omissions(self):
+    def test_updates_to_prior_message_blocks_preserve_current_input_and_group_omissions(self):
         fixture = fixtures.ContextLifecycleTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)

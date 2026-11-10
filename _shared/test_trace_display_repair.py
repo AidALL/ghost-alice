@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 from test_completion_recovery import VALID
-from test_completion_skill_evidence import assert_stop_observation, skill_call, user
+from test_completion_skill_evidence import assert_stop_observation, skill_call, user_role_row
 import test_completion_skill_evidence as skill_fixture
 
 HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
@@ -24,7 +24,7 @@ class TraceDisplayRepairTests(unittest.TestCase):
                 for latest, stale, issue in ((VALID, invalid, None), (invalid, VALID, "must include evidence")):
                     with self.subTest(platform=platform, key=key, issue=issue), tempfile.TemporaryDirectory() as temp:
                         path = Path(temp) / "unflushed-native-transcript.jsonl"
-                        entries = [user("Check the fixture."), skill_call(),
+                        entries = [user_role_row("Check the fixture."), skill_call(),
                                    {"type": "assistant", "message": {"role": "assistant", "content": stale}}]
                         path.write_text("".join(json.dumps(e) + "\n" for e in entries))
                         env = {k:v for k,v in os.environ.items() if not k.startswith(("GHOST_ALICE_", "CODEX_", "CLAUDE_"))}
@@ -38,7 +38,7 @@ class TraceDisplayRepairTests(unittest.TestCase):
     def test_fresh_native_body_does_not_replace_core_review(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'no-skill.jsonl'
-            path.write_text(json.dumps(user('Check the fixture.')) + '\n')
+            path.write_text(json.dumps(user_role_row('Check the fixture.')) + '\n')
             env = {k:v for k,v in os.environ.items()
                    if not k.startswith(('GHOST_ALICE_', 'CODEX_', 'CLAUDE_'))}
             skill_fixture.StopHookSkillEvidenceTests._review_format_fixture(
@@ -52,7 +52,7 @@ class TraceDisplayRepairTests(unittest.TestCase):
         self.assertNotIn('Invoke the Claude Code Skill tool', observed['body_issue'])
 
     def hook(self, text, platform="codex", host="sdk-cli"):
-        entries = [user("Recompute and report the result."), skill_call(),
+        entries = [user_role_row("Recompute and report the result."), skill_call(),
                    {"type": "assistant", "message": {"role": "assistant", "content": text}}]
         with tempfile.TemporaryDirectory() as temp:
             transcript = Path(temp) / "transcript.jsonl"
@@ -90,9 +90,9 @@ class TraceDisplayRepairTests(unittest.TestCase):
         for platform in ("codex", "claude"):
             for previous in (VALID, "The requested work is complete."):
                 with self.subTest(platform=platform, previous=previous):
-                    entries = [user("Old request."), skill_call(),
+                    entries = [user_role_row("Old request."), skill_call(),
                                {"type": "assistant", "message": {"role": "assistant", "content": previous}},
-                               user("A new request without an assistant reply yet.")]
+                               user_role_row("A new request without an assistant reply yet.")]
                     with tempfile.TemporaryDirectory() as temp:
                         path = Path(temp) / "transcript.jsonl"
                         path.write_text("".join(json.dumps(e) + "\n" for e in entries))

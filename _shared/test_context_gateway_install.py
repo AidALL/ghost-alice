@@ -25,6 +25,34 @@ from hook_definitions import PROVIDER  # noqa: E402
 
 
 class ContextGatewayInstallTests(unittest.TestCase):
+    def test_apply_aliases_preview_without_changing_registration(self):
+        args, original = self.installation_fixture()
+        for selection in ({"apply_changes": False}, {"confirm": False},
+                          {"apply_changes": False, "confirm": False}):
+            with self.subTest(selection=selection):
+                self.assertEqual(self.mocked_install(args, running=True, **selection)['status'], 'dry-run')
+                self.assertEqual(self.snapshot(), original)
+
+    def test_conflicting_apply_aliases_fail_before_runtime_or_service_work(self):
+        args, original = self.installation_fixture()
+        with patch.object(install, '_require_gateway_runtime') as capability, \
+             patch.object(install.platform, 'operation_lock') as lock:
+            with self.assertRaisesRegex(ValueError, 'apply_changes.*confirm.*conflict'):
+                install.install(*args, apply_changes=False, confirm=True)
+        capability.assert_not_called()
+        lock.assert_not_called()
+        self.assertEqual(self.snapshot(), original)
+
+    def test_matching_true_aliases_register_once(self):
+        args, _ = self.installation_fixture(service=False)
+        result = self.mocked_install(args, apply_changes=True, confirm=True)
+        self.assertEqual(result['status'], 'installed')
+        self.assertEqual(self.reg.config.read_text().count(install.TABLE_BEGIN), 1)
+
+    def test_legacy_true_alias_registers(self):
+        args, _ = self.installation_fixture(service=False)
+        self.assertEqual(self.mocked_install(args, confirm=True)['status'], 'installed')
+
     def installation_fixture(self, *, service=True):
         """A registered (or, without `service`, a Core-only) home; returns the command's arguments and the
         bytes of every file the registration may touch."""
@@ -365,7 +393,7 @@ class ContextGatewayInstallTests(unittest.TestCase):
 
     def test_a_dry_run_prints_the_plan_and_changes_nothing(self):
         args, original = self.installation_fixture()
-        result = self.mocked_install(args, running=True, confirm=False)
+        result = self.mocked_install(args, running=True, apply_changes=False)
         self.assertEqual((result['status'], result['action']), ('dry-run', 'would-install'))
         self.assertEqual([step['phase'] for step in result['plan']['steps']],
                          ['prepare', 'stop', 'verify-absence', 'stage', 'bootstrap', 'readiness', 'commit', 'retire'])
@@ -538,7 +566,7 @@ class ContextGatewayInstallTests(unittest.TestCase):
              contextlib.redirect_stdout(stdout):
             self.assertEqual(install.main(cli), 0)
         self.assertEqual(run.call_args.args, (args[0], args[1], args[2], args[3]))
-        self.assertEqual(run.call_args.kwargs, dict(claude_dir=self.reg.claude, confirm=True))
+        self.assertEqual(run.call_args.kwargs, dict(claude_dir=self.reg.claude, apply_changes=True))
         self.assertEqual(json.loads(stdout.getvalue()), dict(status='installed', service=LABEL, listener_ready=True))
 
     # The provider blocks.

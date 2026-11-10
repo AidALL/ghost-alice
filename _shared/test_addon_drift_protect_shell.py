@@ -1,4 +1,4 @@
-"""Shell e2e: reinstalling an addon must preserve drifted user targets.
+"""Shell e2e: reinstalling an addon must preserve targets with external changes; the installer does not record the changes' writers.
 
 Hash-check same-addon targets and reject a repointed link or edited copy.
 Run: python3 -m pytest _shared/test_addon_drift_protect_shell.py -q
@@ -74,7 +74,7 @@ class DriftProtectTest(unittest.TestCase):
             # Install must abort (collision) rather than overwrite the drift.
             self.assertNotEqual(second.returncode, 0,
                                 msg="reinstall over drift must abort: " + second.stderr + second.stdout)
-            # The user's drifted link must be untouched.
+            # The link with an external change must be untouched.
             self.assertTrue(skill.is_symlink() or _is_reparse_point(skill))
             self.assertEqual(os.path.realpath(skill), os.path.realpath(user_dir))
             self.assertEqual((skill / "SKILL.md").read_text(encoding="utf-8"), "# USER OWNED\n")

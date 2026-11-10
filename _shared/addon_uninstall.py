@@ -8,7 +8,7 @@ Removes ONLY the targets recorded in one addon's sidecar, and only when:
   install time. That recorded hash is the ownership proof: a target that still
   matches is safe to remove; a target that has drifted (re-pointed symlink,
   edited copy) or has no recorded hash is PRESERVED as manual-review. Never
-  clobber a user-modified asset; fail closed when ownership is unprovable.
+  clobber an asset with an external change: a change after install that the installer's records do not hold; the installer does not record who made it. Fail closed when ownership is unprovable.
 
 Safety properties:
 - Containment FIRST: ``target``'s location (its parent dir, resolved) must be
@@ -16,7 +16,7 @@ Safety properties:
   touched. install_mode ``missing`` means the asset was never installed -> no-op.
 - Symlink-safe: a symlink target is removed by unlinking the LINK, never the
   resolved target; a copy target is removed as a directory tree.
-- Two-phase + resumable: a ``<addon_id>.json.removing`` intent marker
+- Two-phase + resumable: a ``<addon_id>.json.removing`` removal marker
   is written before any removal and cleared only after the sidecar is deleted.
   ``resume_pending`` finds leftover markers and finishes the removal idempotently.
 - Sidecar deleted LAST: only after every target is removed or safely
@@ -39,6 +39,8 @@ import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from installer.config import APPLY_UNSET, resolve_apply_changes
 
 import addon_registry
 import hash_utils
@@ -123,7 +125,7 @@ def _symlink_safe_remove(path: Path) -> None:
         path.unlink()
 
 
-def _process_target(entry: dict[str, Any], *, allowed_roots: list[Path], confirm: bool) -> dict[str, Any]:
+def _process_target(entry: dict[str, Any], *, allowed_roots: list[Path], apply_changes: bool) -> dict[str, Any]:
     name = entry.get("name")
     dest = entry.get("target")
     mode = entry.get("install_mode") or "missing"
@@ -148,7 +150,7 @@ def _process_target(entry: dict[str, Any], *, allowed_roots: list[Path], confirm
         item["action"] = "manual-review"
         item["reason"] = "modified-since-install (preserved)"
         return item
-    if confirm:
+    if apply_changes:
         _symlink_safe_remove(Path(dest))
         item["action"] = "removed"
     else:
@@ -313,7 +315,7 @@ def _prune_pending_merge_state(addon_id: str, *, addons_dir: str | os.PathLike[s
     _mark_pending_manifest_deleted_entries(addon_id, addons_dir=addons_dir, platform=platform, provided=provided)
 
 
-def _addon_hook_items(record: dict[str, Any], *, platform: str, confirm: bool) -> list[dict[str, Any]]:
+def _addon_hook_items(record: dict[str, Any], *, platform: str, apply_changes: bool) -> list[dict[str, Any]]:
     """Remove (or, in dry-run, preview) the addon's observational hooks by exact marker.
 
     Hook markers are recorded top-level in the sidecar (kind not in provided[]); each
@@ -337,7 +339,7 @@ def _addon_hook_items(record: dict[str, Any], *, platform: str, confirm: bool) -
             continue
         marker_str = f"[addon:{addon_id}] {hook_id}"
         item: dict[str, Any] = {"kind": "hook", "name": hook_id, "marker": marker_str}
-        if not confirm:
+        if not apply_changes:
             item["action"] = "would-remove"
             out.append(item)
             continue
@@ -350,7 +352,7 @@ def _addon_hook_items(record: dict[str, Any], *, platform: str, confirm: bool) -
     return out
 
 
-def _retired_hook_items(provided: list[dict[str, Any]], *, platform: str, confirm: bool) -> list[dict[str, Any]]:
+def _retired_hook_items(provided: list[dict[str, Any]], *, platform: str, apply_changes: bool) -> list[dict[str, Any]]:
     """Detach the registrations an older installer recorded under the retired kind "adapter" before any file goes.
 
     The installer removes every retired hook as one rule (install_hooks.remove_retired_hooks); this item names the
@@ -369,7 +371,7 @@ def _retired_hook_items(provided: list[dict[str, Any]], *, platform: str, confir
         if not isinstance(hook_id, str) or not addon_registry.ADDON_ID_RE.fullmatch(hook_id):
             continue
         item: dict[str, Any] = {"kind": "adapter", "name": name, "marker": f"[adapter:{name}] {hook_id}"}
-        if not confirm:
+        if not apply_changes:
             item["action"] = "would-remove"
         else:
             if removed is None:
@@ -385,16 +387,16 @@ def _managed_executable_items(
     provided: list[dict[str, Any]],
     *,
     platform: str,
-    confirm: bool,
+    apply_changes: bool,
 ) -> list[dict[str, Any]]:
     return (
-        _addon_hook_items(record, platform=platform, confirm=confirm)
-        + _retired_hook_items(provided, platform=platform, confirm=confirm)
-        + _skill_permission_items(record, platform=platform, confirm=confirm)
+        _addon_hook_items(record, platform=platform, apply_changes=apply_changes)
+        + _retired_hook_items(provided, platform=platform, apply_changes=apply_changes)
+        + _skill_permission_items(record, platform=platform, apply_changes=apply_changes)
     )
 
 
-def _skill_permission_items(record, *, platform, confirm):
+def _skill_permission_items(record, *, platform, apply_changes):
     if platform != "claude":
         return []
     import install_hooks
@@ -405,7 +407,7 @@ def _skill_permission_items(record, *, platform, confirm):
         raise ValueError("Claude settings must be a JSON object")
     return addon_skill_permissions.detach(
         record, settings_file, settings, set(install_hooks._ghost_alice_installed_skill_names()),
-        install_hooks._write_settings, dry_run=not confirm,
+        install_hooks._write_settings, dry_run=not apply_changes,
     )
 
 
@@ -415,55 +417,63 @@ def uninstall_addon(
     addons_dir: str | os.PathLike[str],
     allowed_roots: list[Path],
     platform: str = "claude",  # selects hook removal and install/pending-state cleanup
-    confirm: bool = True,
+    apply_changes: bool = APPLY_UNSET,
+    confirm: bool = APPLY_UNSET,
 ) -> dict[str, Any]:
     """Uninstall one addon. Returns a report dict with status + per-target items.
 
     status: ``removed`` (all targets removed, sidecar deleted), ``partial`` (some
-    target preserved as manual-review/refused; sidecar + marker kept for retry,
-    but managed executable hooks removed), ``dry-run`` (confirm=False),
+    target preserved as manual-review (waiting for the human user to review) or refused; sidecar + marker kept for retry,
+    but managed executable hooks removed), ``dry-run`` (apply_changes=False),
     ``resumed-noop`` (a leftover marker but the sidecar was already gone --
     nothing to remove).
     """
+    apply_changes = resolve_apply_changes(apply_changes, confirm, default=True)
     addons_dir = Path(addons_dir)
     marker = _removing_marker_path(addon_id, addons_dir=addons_dir)
     try:
         record = addon_registry.read_record(addon_id, addons_dir=addons_dir)
     except addon_registry.RecordNotFound as not_found:
         try:
-            marker.unlink()
+            if apply_changes:
+                marker.unlink()
+            else:
+                marker.lstat()
         except FileNotFoundError:
             raise not_found from None  # no sidecar and no marker -> genuinely not found
+        if not apply_changes:
+            return {"addon_id": addon_id, "status": "dry-run", "items": [],
+                    "has_pending_marker": True}
         return {"addon_id": addon_id, "status": "resumed-noop", "items": []}
     except addon_registry.RegistryError as exc:
-        # Unreadable/corrupt/future-major sidecar (e.g. unsupported schema, identity mismatch). Never crash the uninstall or the resume loop, and never delete an asset we cannot attribute: preserve the sidecar + marker untouched and surface a non-removed status so automation/doctor flag it for manual review.
+        # Unreadable/corrupt/future-major sidecar (e.g. unsupported schema, identity mismatch). Preserve the sidecar and marker and return a non-removed status so automation or doctor flags the files for the human user to review.
         return {"addon_id": addon_id, "status": "error",
                 "reason": f"sidecar unreadable: {exc}", "items": []}
 
     provided = [entry for entry in record.get("provided", []) if isinstance(entry, dict)]
-    if confirm:
-        _write_marker(marker, addon_id, provided)  # intent marker BEFORE any removal
+    if apply_changes:
+        _write_marker(marker, addon_id, provided)  # removal marker BEFORE any removal
 
     # Detach executable entrypoints before changing their files. A configuration
     # write failure leaves the targets and sidecar intact for a later resume.
-    hook_items = _managed_executable_items(record, provided, platform=platform, confirm=confirm)
+    hook_items = _managed_executable_items(record, provided, platform=platform, apply_changes=apply_changes)
 
     # Entries of the retired kind "adapter" have no file of their own: the script lives inside the owning skill
     # directory, and the installer removes the hook registration as a retired hook.
     file_targets = [entry for entry in provided if entry.get("kind") != "adapter"]
-    if confirm and any(item["action"] in _BLOCKED_ACTIONS for item in hook_items):
+    if apply_changes and any(item["action"] in _BLOCKED_ACTIONS for item in hook_items):
         return {"addon_id": addon_id, "status": "partial", "items": hook_items}
-    items = [_process_target(entry, allowed_roots=allowed_roots, confirm=confirm) for entry in file_targets]
+    items = [_process_target(entry, allowed_roots=allowed_roots, apply_changes=apply_changes) for entry in file_targets]
     blocked = [item for item in items + hook_items if item["action"] in _BLOCKED_ACTIONS]
 
-    if not confirm:
+    if not apply_changes:
         report = {"addon_id": addon_id, "status": "dry-run",
                   "items": items + hook_items}
         report["has_pending_marker"] = marker.exists()
         return report
     if blocked:
         # The hooks are already detached; preserve blocked targets, the sidecar
-        # and the removal marker for retry/manual review.
+        # and the removal marker for a retry or the human user's review.
         return {"addon_id": addon_id, "status": "partial", "items": items + hook_items}
 
     # Fully removable: delete the sidecar only after hooks and targets are handled.
@@ -482,9 +492,11 @@ def resume_pending(
     addons_dir: str | os.PathLike[str],
     allowed_roots: list[Path],
     platform: str = "claude",
-    confirm: bool = True,
+    apply_changes: bool = APPLY_UNSET,
+    confirm: bool = APPLY_UNSET,
 ) -> list[dict[str, Any]]:
-    """Finish any addon uninstall interrupted mid-flight, idempotently."""
+    """Finish an addon uninstall left unfinished by a failure, a killed process or an interrupt such as Ctrl-C, idempotently."""
+    apply_changes = resolve_apply_changes(apply_changes, confirm, default=True)
     base = Path(addons_dir)
     if not base.is_dir():
         return []
@@ -497,7 +509,7 @@ def resume_pending(
             results.append(
                 uninstall_addon(
                     stem, addons_dir=base, allowed_roots=allowed_roots,
-                    platform=platform, confirm=confirm,
+                    platform=platform, apply_changes=apply_changes,
                 )
             )
         except addon_registry.RecordNotFound:
@@ -530,7 +542,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skills-dir", action="append", default=[],
                         help="An allowed managed root for target containment (repeatable)")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--confirm", action="store_true", help="confirm removals (the default unless --dry-run)")
+    parser.add_argument("--apply", "--confirm", dest="apply_changes", action="store_true",
+                        help="apply removals (the default unless --dry-run)")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--addon-id")
     group.add_argument("--resume-pending", action="store_true")
@@ -555,15 +568,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2 if (deps or skipped) else 0
 
     allowed_roots = [Path(root) for root in args.skills_dir]
-    confirm = not args.dry_run
+    apply_changes = not args.dry_run
     if args.resume_pending:
         results = resume_pending(addons_dir=args.addons_dir, allowed_roots=allowed_roots,
-                                 platform=args.platform, confirm=confirm)
+                                 platform=args.platform, apply_changes=apply_changes)
         print(json.dumps({"resumed": results}, ensure_ascii=False, indent=2))
         return 2 if any(r["status"] not in {"removed", "dry-run", "resumed-noop"} for r in results) else 0
     try:
         result = uninstall_addon(args.addon_id, addons_dir=args.addons_dir,
-                                 allowed_roots=allowed_roots, platform=args.platform, confirm=confirm)
+                                 allowed_roots=allowed_roots, platform=args.platform, apply_changes=apply_changes)
     except addon_registry.RecordNotFound:
         print(json.dumps({"addon_id": args.addon_id, "status": "not-found", "items": []}))
         return 1

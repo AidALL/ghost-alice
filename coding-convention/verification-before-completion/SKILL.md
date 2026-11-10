@@ -9,15 +9,15 @@ compatibility:
 
 A delegate reviews its assigned evidence and returns the result to its parent. The response model answering the user performs response route registration, the response review and final delivery.
 
-The response model follows this instruction document to judge claims before a new completion, fix, success, verified-status or material recommendation claim, and before rereading an artifact to support a claim. Match every claim to the user's actual acceptance criterion and evidence. A printed success label, another agent's report or a completion or partial completion block is not proof.
+The response model follows this instruction document to judge claims before a new completion, fix, success, verified-status or material recommendation claim, and before rereading an artifact to support a claim. Match every claim to the actual acceptance criterion that the human user set and the evidence. A printed success label, another agent's report or a completion or partial completion block is not proof.
 
 ## Acceptance criteria and claim scope
 
-Extract the requested result and accepted constraints from user intent and the active contract. Compare the proposed result with the original sources and required acceptance criteria, including how the verified parts support the whole requested outcome. Reconsider a selected reference or interpretation when contrary evidence challenges it; do not rewrite the source or the user's acceptance criterion to make the result pass.
+Extract the requested result and accepted constraints from what the human user wants and the active contract. Compare the proposed result with the original sources and required acceptance criteria, including how the verified parts support the whole requested outcome. Reconsider a selected reference or interpretation when contrary evidence challenges it; do not rewrite the source or the acceptance criterion that the human user set to make the result pass.
 
 For each proposed claim, identify the acceptance criterion, checked target and failure context, observation method, source locator and original verification time. Distinguish source conformance, executable regression, installed-copy delivery and behavior in an ongoing conversation. Evidence for one stage supports only that stage. A source edit or installation does not demonstrate behavioral improvement; a case passed by both baseline and candidate does not establish that the candidate caused improvement.
 
-Honor the acceptance criteria the user agreed for an issue's disposition. If the user agreed that a historical issue counts as resolved when a selected current check does not reproduce it, judge that acceptance criterion rather than inventing a universal-reliability requirement.
+Honor the acceptance criteria the human user agreed to for an issue's disposition. If the human user agreed that a historical issue counts as resolved when a selected current check does not reproduce it, judge that acceptance criterion rather than inventing a universal-reliability requirement.
 
 A verdict you endorse is your claim, including a reviewer's verdict. A new absence claim requires a search that could find the missing object; reuse an earlier search only when its target and acceptance criterion remain unchanged. Severity and confidence never replace evidence.
 
@@ -29,7 +29,7 @@ Before inspecting an artifact again, apply [references/verify-or-reuse.md](refer
 
 Before a discretionary check, the response model identifies the unresolved acceptance criterion or competing explanation, why the method distinguishes the alternatives, and which attainable outcomes would change a specific next action or the judgment of an acceptance criterion. If no outcome can change that decision, do not run the check. For stochastic repetition, define the uncertainty, sampling rule and stopping condition before repeating.
 
-Mandatory checks are those that the user or the project requires; they remain required. A check that a skill lists is required only when its outcome can change the next action or the judgment of an acceptance criterion. An unavailable required observation leaves its acceptance criterion unresolved. An inconclusive check supplies no pass or fail verdict on the work, although it consumes the resources used to run and record it.
+Mandatory checks are those that the human user or the project instructions require; they remain required. A check that a skill lists is required only when its outcome can change the next action or the judgment of an acceptance criterion. An unavailable required observation leaves its acceptance criterion unresolved. An inconclusive check supplies no pass or fail verdict on the work, although it consumes the resources used to run and record it.
 
 Choose evidence for the claim: content or behavior for semantic claims; hashes or provenance for identity, integrity, drift, merge safety or reproducibility. Hash equality cannot establish behavior. A tool's actual action result may itself satisfy the acceptance criterion; do not run a second check merely to obtain another output.
 
@@ -41,23 +41,23 @@ Systematic-debugging defines [incident accounting and continuation](../systemati
 
 For a new completion or partial completion claim in the current turn:
 
-1. Load this skill through the host's real mechanism, or validly reuse its body under [Instruction Body Reuse](references/verify-or-reuse.md#instruction-body-reuse), and apply the workflow to the user's current input.
+1. Load this skill through the host's real mechanism, or validly reuse its body under [Instruction Body Reuse](references/verify-or-reuse.md#instruction-body-reuse), and apply the workflow to the input the response model is answering.
 2. Map each claim to its acceptance criterion and actual evidence. A successful result already returned in this turn can supply fresh evidence; run a further check only for an acceptance criterion it does not cover. Read the result, source locator, exit status and failures before judging it.
 3. Follow session-intent-analyzer's `references/ledger-schema.md`, section Core Response Projection, to bind the response route to the current input. Resolve that reference from the selected installed session-intent-analyzer directory.
-4. Compare each claim with its original sources and acceptance criterion, then separately judge the complete draft against the user's objective and constraints. Follow [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) to submit both judgments to Core code. Core code authenticates and stores them; code does not decide their meaning.
+4. Compare each claim with its original sources and acceptance criterion, then separately judge the complete draft against the human user's objective and constraints. Follow [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) to submit both judgments to Core code. Core code authenticates and stores them; code does not decide their meaning.
 5. Deliver the supported reviewed answer with its completion or partial completion block under the review reference's [Deliver](references/response-review.md#deliver) section.
 
 Explaining an unchanged prior result is not a new completion submission. Core code selects completion processing from an actual `[completion-check]` or `[partial-check]` marker; it does not infer completion from prose or selected execution work. The response model identifies its new completion claims and sends them through this workflow. Never describe an old check as freshly executed.
 
 ## Retained original results
 
-For a source-backed explanation, [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) defines both judgments; record them only when the user explicitly requests an authenticated explanation review. New completion and partial-completion claims follow the finalization sequence above.
+For a source-backed explanation, [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) defines both judgments; record them only when the human user explicitly requests an authenticated explanation review. New completion and partial-completion claims follow the finalization sequence above.
 
 ## Retain evidence on first execution
 
 Before a necessary action or check, arrange to retain its original result, exit status, source locator and verification time. Keep an orchestrated tool result in session state when later steps need the original object.
 
-If the result is already available, cite it or copy its unchanged contents into permitted storage. Do not rerun the action to populate a variable, add redirection or create an evidence file. Missing storage is not missing verification. If the original result is lost or incomplete, state that gap and use verify-or-reuse to decide the affected observation.
+If the result is already available, cite it or copy its unchanged contents into storage that the human user's instructions and the project instructions do not prohibit and the host's permission rules allow. Do not rerun the action to populate a variable, add redirection or create an evidence file. Missing storage is not missing verification. If the original result is lost or incomplete, state that gap and use verify-or-reuse to decide the affected observation.
 
 To record proof, follow the review reference's [Proof bytes and time](references/response-review.md#proof-bytes-and-time).
 
@@ -71,7 +71,7 @@ For supported partial success, use `[partial-check]` with `scope: partial`, the 
 
 The same proof format applies on every host. Core code authenticates the per-claim and whole-response judgments under the current response route that this session owns, as specified in [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review). Skill loading and reuse remain facts of the workflow and its records; a Skill invocation or self-report field is neither completion evidence nor a separate prerequisite for accepting a completion claim.
 
-The examples below illustrate serialization only; replace their claims and source locators with actual results. They do not assert that any example check ran.
+The examples below illustrate serialization only; replace their claims and source locators with actual results. They do not assert that any example check ran. Each `[source: user-said]` tag is the response model's claim that the human user directly supplied that acceptance criterion; the tag does not prove that origin.
 
 Full result:
 
@@ -107,9 +107,9 @@ Partial result:
 - evidence: Original regression output with source locator
 ```
 
-## Confirmed flaw propagation
+## Verified Flaw Propagation
 
-For a confirmed flaw in the requested deliverable, apply [Confirmed Flaw Propagation](references/verify-or-reuse.md#confirmed-flaw-propagation).
+For a flaw in the requested deliverable that the response model verified against evidence, apply [Verified Flaw Propagation](references/verify-or-reuse.md#verified-flaw-propagation).
 
 ## External evidence and evaluator requirements
 
@@ -121,6 +121,6 @@ Before claiming a result that adversarial-verification reviewed at level-3-high-
 
 A changed diff is not proof of a fix; lint is not proof of a build. [references/verification-detail.md](references/verification-detail.md) gives examples for specific acceptance criteria.
 
-While supported authorized work remains, report partial status in commentary and continue it. Stop dependent work for an explicit stop, missing required decision, exhausted resources or unavailable prerequisite, and report that precise limitation.
+While supported work that the human user's instructions authorize remains, report partial status in commentary and continue it. Stop dependent work for an explicit stop from the human user, a missing required decision only the human user can make, exhausted resources or an unavailable prerequisite, and report that precise limitation.
 
 Before finalizing, verify that every claimed result has an acceptance criterion and evidence, every unresolved required acceptance criterion remains visible, no claim exceeds its checked stage, and no unchanged action ran again merely for recording.

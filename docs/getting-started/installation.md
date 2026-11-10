@@ -128,7 +128,7 @@ bash install.sh --status
 
 ### Install Source
 
-The install record `~/.ghost-alice/installed-payload.json` names the checkout the installation came from, the install source. Install and `--repair` compare that checkout with the one they run from before they change anything. When the recorded checkout no longer exists, for example after a fresh clone at another path, the installer records the new checkout as the install source without asking. When both checkouts exist, such as a second clone or a git worktree, the installer shows both folders. At a terminal it asks whether this checkout replaces the install source and stops unless the answer is yes; elsewhere it stops with exit code 2. To move the installation to another checkout on purpose, run the installer there with `--adopt-source`; its first placement records that checkout as the install source. `--repair` never moves the installation: from another checkout it stops with exit code 2 and names that install command.
+The install record `~/.ghost-alice/installed-payload.json` names the checkout the installation came from, the install source. Install and `--repair` compare that checkout with the one they run from before they change anything. When the recorded checkout no longer exists, for example after a fresh clone at another path, the installer records the new checkout as the install source without asking. When both checkouts exist, such as a second clone or a git worktree, the installer shows both folders. At a terminal it asks whether this checkout replaces the install source and stops unless the answer typed at the installer's terminal question is yes (the installer does not check who typed it); elsewhere it stops with exit code 2. When the human user decides to move the installation to another checkout, run the installer there with `--adopt-source`; its first placement records that checkout as the install source. `--repair` never moves the installation: from another checkout it stops with exit code 2 and names that install command.
 
 ```bash
 cd /path/to/new-checkout
@@ -180,7 +180,7 @@ Ghost-ALICE installs `/visibility strict|dynamic|minimal` as a Claude Code works
 
 The installer requires Python 3.11 or newer for every command, `--help` and `--list` included: `install.sh` only finds or prepares Python and hands the arguments to `_shared/installer/cli.py`. If Python 3.11+ is missing, it attempts automatic preparation where possible.
 
-The optional macOS native context gateway requires Python 3.14 or newer with `compression.zstd`. Its registration command, `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`, checks that capability first, then writes the launch agent, `state.json` and the Codex provider blocks and records the service in the install record. It copies no module: the service runs the runtime `_shared` the installer published, so install Core first. This component requirement does not change the Core installer and hook minimum of Python 3.11. If Codex `config.toml`, the launch agent or a state file is a symlink, registration and detachment stop before changing the service and preserve the link and its target. A refresh keeps the listener's port and scope while the three service files are as the install record says; a file changed outside the installer stops the command before any change, and an existing launch agent, state directory entry or provider block the record does not name is preserved. If a first registration fails and the candidate service is confirmed stopped, rollback removes that attempt's new state artifacts and record entry so a new attempt can proceed. An uncertain stop or concurrent artifact change preserves recovery material for review. After the registration, `bash install.sh` alone updates the installation; `bash install.sh gateway detach --confirm` unregisters the service and keeps its state directory. When launchd runs a gateway service that the install record does not name, install and `--repair` leave that service as it is and print one warning that names the registration command; the registration records the service and restarts it on the new code.
+The optional macOS native context gateway requires Python 3.14 or newer with `compression.zstd`. Its registration command, `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`, checks that capability first, then writes the launch agent, `state.json` and the Codex provider blocks and records the service in the install record. It copies no module: the service runs the runtime `_shared` the installer published, so install Core first. This component requirement does not change the Core installer and hook minimum of Python 3.11. If Codex `config.toml`, the launch agent or a state file is a symlink, registration and detachment stop before changing the service and preserve the link and its target. A refresh keeps the listener's port and scope while the three service files are as the install record says; a file changed outside the installer stops the command before any change, and an existing launch agent, state directory entry or provider block the record does not name is preserved. If a first registration fails and the candidate service is confirmed stopped, rollback removes that attempt's new state artifacts and record entry so a new attempt can proceed. An uncertain stop or concurrent artifact change preserves recovery material for review. After the registration, `bash install.sh` alone updates the installation; `bash install.sh gateway detach --apply` unregisters the service and keeps its state directory. When launchd runs a gateway service that the install record does not name, install and `--repair` leave that service as it is and print one warning that names the registration command; the registration records the service and restarts it on the new code.
 
 - macOS: if Homebrew is available, `brew install python3`
 - Linux / WSL: available package managers such as `apt-get`, `dnf`, `yum`, or `pacman`
@@ -227,7 +227,7 @@ Removing an addon retains Core records. Per-addon removal keeps modified files a
 
 Full/platform removal archives pending merge originals and last-platform installation recovery copies under unique `~/.ghost-alice/uninstall-backup/<platform>/support-state/` directories. It keeps previous archives, source checkouts, conversation/session evidence, intent ledgers, audit traces and secrets. See [uninstall cleanup](./uninstall.md) for ownership and shared-file rules.
 
-For Claude, the installer records which manifest-selected addon `Skill(...)` grants it actually added in `~/.ghost-alice/addon-permissions/claude.json`. Addon removal clears one owned occurrence and preserves preexisting grants and extra user occurrences. A legacy grant without ownership evidence requires manual review. For Codex, addon removal clears unchanged owned hook trust hashes and moves surviving Core/user trust tables with their hook positions, preserving their metadata. A trust collision or configuration write failure prevents successful file removal; see [uninstall cleanup](./uninstall.md).
+For Claude Code, the installer records which manifest-selected addon `Skill(...)` allow rules it actually added in `~/.ghost-alice/addon-permissions/claude.json`. Addon removal clears one owned occurrence and preserves preexisting rules and later duplicate rules that this installer did not add. The installer preserves a legacy rule without ownership evidence for the human user to review. For Codex, addon removal clears unchanged owned hook trust hashes and moves surviving Core hook trust entries and the entries of hooks Ghost-ALICE did not install with their hook positions, preserving their metadata; the installer does not record who wrote the latter entries. A trust collision or configuration write failure prevents successful file removal; see [uninstall cleanup](./uninstall.md).
 
 ### Installed Surfaces
 
@@ -248,11 +248,11 @@ A full install deploys:
 
 An installation that registered the optional context gateway: the install record's `service` section names the service's code root, `~/.ghost-alice/runtime/current`, and its three service files. The runtime placement (`_shared` and the companion script `session-intent-analyzer/scripts/session_intent_ledger.py`) stops the service before its files change and starts it after. `bash install.sh` alone is the update; no gateway refresh precedes it. The install prints one `Context gateway:` line with the service's runtime root and whether the service is running. An installation an earlier installer registered gets its `service` section once from the gateway's installation receipt, at the first install, repair or uninstall.
 
-The installer owns only the marked Ghost-ALICE block in each global rule file. It refreshes that block while preserving adjacent user text. If the destination is a markerless user-owned file, installation leaves it unchanged, writes `<rule-file>.ghost-alice-proposed`, and status/doctor does not report the proposal as an installed global rule.
+The installer owns only the marked Ghost-ALICE block in each global rule file. It refreshes that block while preserving text outside the bootstrap. If the destination is a file without a Ghost-ALICE marker, installation leaves it unchanged, writes `<rule-file>.ghost-alice-proposed`, and status/doctor does not report the proposal as an installed global rule.
 
 ### Common Governance and Project Instructions
 
-Ghost-ALICE common governance applies across projects and task domains. On a normal Codex route, the response model reads the common contract at the path rendered into the managed `~/.codex/AGENTS.md` loader. The installer writes that contract to the sibling `ghost-alice-governance.md`. Claude Code receives the common contract directly in the managed portion of `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. Project instruction files add project-specific constraints; they do not supply a second copy of the common procedures. User instructions and project-specific constraints retain precedence.
+Ghost-ALICE common governance applies across projects and task domains. On a normal Codex route, the response model reads the common contract at the path rendered into the managed `~/.codex/AGENTS.md` loader. The installer writes that contract to the sibling `ghost-alice-governance.md`. Claude Code receives the common contract directly in the managed portion of `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. Project instruction files add project-specific constraints; they do not supply a second copy of the common procedures. The common contract's [Operating Model](../../platforms/common-governance.md#operating-model) defines the precedence of instructions that the human user enters in the conversation and the constraints stated in instruction files.
 
 ```mermaid
 flowchart LR
@@ -262,25 +262,25 @@ flowchart LR
     C --> M["Model applies common procedures"]
     H --> M
     P["Project-specific constraints"] --> M
-    U["User objective and instructions"] --> M
+    U["Objective and instructions the human user enters in the conversation"] --> M
 ```
 
-If Codex cannot read the named common file, the model tells the user once that the Ghost-ALICE contract is missing and continues the user's work without writing Ghost-ALICE ledger records. On Codex, when no tool is needed, the model answers directly without reading the common file; when it is unclear whether a tool is needed, it treats the request as work and reads the common file first. Status and doctor check the loader and its declared companion together. The installer preserves adjacent user text and markerless user-owned rule files; it refuses to replace a Codex common contract through a symlink. A proposal is not an installed contract. The installer does not change unrelated projects' instruction budgets or rewrite their local rules.
+If Codex cannot read the named common file, the model tells the user once that the Ghost-ALICE contract is missing and continues the user's work without writing Ghost-ALICE ledger records. On Codex, when no tool is needed, the model answers directly without reading the common file; when it is unclear whether a tool is needed, it treats the request as work and reads the common file first. Status and doctor check the loader and its declared companion together. The installer preserves text outside the bootstrap and rule files without a Ghost-ALICE marker; it refuses to replace a Codex common contract through a symlink. A proposal is not an installed contract. The installer does not change unrelated projects' instruction budgets or rewrite their local rules.
 
 
 ### merge-companion
 
-When an update detects user-modified installed files, the installer isolates those candidates in a pending merge queue.
+When an update detects external changes in installed files, the installer isolates those candidates in a pending merge queue. External changes are changes the installer finds in installed targets after install that its records do not hold; the installer does not record who made them.
 
 - manifest: `~/.ghost-alice/pending-merges/<platform>/manifest.json`
 - backup: `~/.ghost-alice/pending-merges/<platform>/`
 - install state: `~/.ghost-alice/install-state/<platform>.json`
 
-On the next Claude/Codex session, the hook reports pending entries. When you ask to review them, or when work changes an affected skill, `merge-companion` asks whether each should be merged, discarded, or deferred.
+On the next Claude Code/Codex session, the hook reports pending entries. When the human user asks to review them, or when work changes an affected skill, the response model follows `merge-companion` to ask the human user whether to merge, discard or defer each entry.
 
 ## Uninstall
 
-Uninstall uses the installer-owned install-state manifest and removes only the Ghost-ALICE managed block from the platform global rule file. User-authored text remains in place.
+Uninstall uses the installer-owned install-state manifest and removes only the Ghost-ALICE managed block from the platform global rule file. Text outside the bootstrap remains in place.
 
 ```bash
 bash install.sh --uninstall

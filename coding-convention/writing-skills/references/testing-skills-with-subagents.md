@@ -1,6 +1,6 @@
 # Evaluating Skills With Delegates
 
-Use this reference when a bounded application or pressure case requires an independent delegate and delegation is authorized. Pure reference guidance usually needs search/application checks, not discipline-pressure scenarios.
+Use this reference when a bounded application or pressure case requires an independent delegate and the human user authorized that delegation. Pure reference guidance usually needs search/application checks, not discipline-pressure scenarios.
 
 ## Prepare the assignment
 
@@ -24,7 +24,7 @@ The response model fills the actual fixture paths and required tool limits befor
 
 ## Reviewer application to a supplied mixed target
 
-Use this case when the live uncertainty concerns a reviewer's inspection of a supplied mixed code-and-instruction target. It evaluates that reviewer application, not the parent's ability to prepare the assignment. Follow the parent skill's [baseline and evaluation procedure](../SKILL.md#validate-and-evaluate).
+Use this case when the live uncertainty concerns a reviewer's inspection of a supplied mixed code-and-instruction target. It evaluates that reviewer application, not the ability of the parent (the session or agent that started the delegate) to prepare the assignment. Follow the parent skill's [baseline and evaluation procedure](../SKILL.md#validate-and-evaluate).
 
 The response model prepares an isolated actual Git repository with a base commit, a head commit containing a CLI change, and a separately identified uncommitted change to a maintenance procedure. For this case, the accepted original requirement adds `--output-format` while preserving the old `--format` alias, defaults and errors. A later clarification after permission to continue requires the alias in help and examples and instructs future maintainers to preserve it.
 
@@ -48,9 +48,9 @@ The delegate inspects the actual target and returns findings to the parent under
 
 ## Parent assignment-preparation case
 
-Use this case when the live uncertainty concerns how the parent constructs review input. Give the parent the original request, later corrections, its separate interpretation and access to the Git checkout. Ask it to prepare the actual review assignment under the selected skill guidance; do not preassemble the assignment's fields or tell it which packaging difference the evaluation expects.
+Use this case when the live uncertainty concerns how the parent constructs review input. The response model that runs the evaluation gives the parent the evaluation case's original request and later corrections, a separate interpretation and access to the Git checkout. Ask it to prepare the actual review assignment under the selected skill guidance; do not preassemble the assignment's fields or tell it which packaging difference the evaluation expects.
 
-For a baseline/candidate comparison, use the same original inputs and Git state in separate contexts, with only the selected guidance changed. Compare the resulting assignments with the original requirement and the actual committed and uncommitted targets. Judge preserved constraints, correct targets, unsupported assumptions and unnecessary questions; matching a particular heading or field label is not the evaluation criterion. An equally adequate baseline and candidate leave the claimed improvement unestablished for that case.
+For a baseline/candidate comparison, the response model that runs the evaluation supplies the same evaluation case's inputs and Git state to separate contexts, with only the selected guidance changed. Compare the resulting assignments with the evaluation case's original requirement that the response model running the evaluation supplied and the actual committed and uncommitted targets. Judge preserved constraints, correct targets, unsupported assumptions and unnecessary questions; matching a particular heading or field label is not the evaluation criterion. An equally adequate baseline and candidate leave the claimed improvement unestablished for that case.
 
 ## Review and correction
 

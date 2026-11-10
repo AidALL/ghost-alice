@@ -2,13 +2,13 @@
 
 This illustrative workflow changes a CLI and its maintenance instructions. The requirements, target labels and findings below are fictional; they do not report an executed review or test.
 
-## Accepted sources
+## The human user's requirement and clarification, and the proposal and plan of the parent (the session or agent that started the delegate)
 
 The original user requirement is: “Add `--output-format` for text or JSON output. Preserve `--format` as an alias, including its existing default and error behavior. Update the CLI maintenance instructions.”
 
 After the parent asks to continue, the user clarifies: “Continue. Keep the old alias visible in help and examples; the maintenance instructions must tell future editors to preserve it.” In a real assignment, the parent supplies original-source locators for both requirements; the reviewer retrieves the passages needed for the current comparison.
 
-The parent separately proposes routing both flag names to the same parser destination. The accepted plan assigns the parser and regression coverage to one task, and help examples and `docs/cli-maintenance.md` to another.
+The parent separately proposes routing both flag names to the same parser destination. The parent's plan assigns the parser and regression coverage to one task, and help examples and `docs/cli-maintenance.md` to another.
 
 ## Implementation and review target
 

@@ -238,7 +238,7 @@ def merge_codex_bootstrap_text(existing_text: str | None, source_text: str) -> t
 
 
 def codex_requires_governance_companion(text: str) -> bool:
-    """Read only the managed loader's dependency, preserving user text authority."""
+    """Read only the managed loader's dependency; text outside its managed block declares no managed dependency."""
     managed_block = _find_managed_block(text, CODEX_SPEC)
     if managed_block is None:
         return False
@@ -276,7 +276,7 @@ def apply_codex_bootstrap(
         if contract.exists():
             status, _ = _merge_bootstrap_text(_read_text(contract), platform_contract_text(source_path), CODEX_SPEC)
             if status == "proposed":
-                raise GlobalRuleBlockError(f"user-owned governance contract: {contract}")
+                raise GlobalRuleBlockError(f"governance contract without a Ghost-ALICE managed block: {contract}")
         _apply_bootstrap(source_path, contract, CODEX_SPEC)
         loader_text = loader_text.replace(placeholder, contract.resolve().as_posix())
     return _apply_bootstrap(

@@ -50,7 +50,7 @@ class RetentionTestCase(unittest.TestCase):
 
 
 class PolicyTableTests(unittest.TestCase):
-    """The table holds the approved methods and limits."""
+    """The table holds the retention methods and limits that the human user approved."""
 
     def test_approved_limits(self):
         policies = state_retention.POLICIES
@@ -715,6 +715,7 @@ class InvariantMatchTests(unittest.TestCase):
             ".ghost-alice/context-gateway/backups/20261020T000000000000Z-artifacts/manifest.json": "gateway-config-backups",
             ".ghost-alice/install/2026-10-22-000019.events.jsonl": "install-logs",
             ".ghost-alice/uninstall-reports/codex-confirm-20261021T150111Z.json": "uninstall-reports",
+            ".ghost-alice/uninstall-reports/codex-apply-20261021T150111Z.json": "uninstall-reports",
             ".ghost-alice/uninstall-backup/codex/support-state/pending-merges-517xy6wp/original/manifest.json":
                 "uninstall-backup",
             ".ghost-alice/state-retention-failures.jsonl": "retention-failures",

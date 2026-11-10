@@ -8,7 +8,7 @@ Use concrete task purposes, symptoms and relevant domain terms. State a technolo
 
 ## Body and references
 
-The body supplies the executable handoff defined in [Author the package](../SKILL.md#author-the-package), not only an acting-agent label. For a two-stage review, identify the first review's actual returned findings and the condition under which the response model sends the accepted target and those findings to the delegate for the second review. The second review cannot silently replace the first.
+The body supplies the executable handoff defined in [Author the package](../SKILL.md#author-the-package), not only an acting-agent label. For a two-stage review, identify the first review's actual returned findings and the condition under which the response model sends the review target that it established from the task and the repository state, together with those findings, to the delegate for the second review. The second review cannot silently replace the first.
 
 Use search terms the intended user or response model will encounter, including concrete error names and domain vocabulary. Name the skill for its responsibility rather than a generic label such as helper.
 
@@ -16,7 +16,7 @@ Replace repeated policy with a link to the document and section that define the 
 
 ## Brevity
 
-Reduce words that do not change the decision, not instructions that establish authority or evidence. Move long details to conditionally loaded references and keep one complete representative example. Word counts are an editing aid, not a substitute for required contract coverage.
+Reduce words that do not change the decision, not instructions that state the human user's authority or the evidence a claim requires. Move long details to conditionally loaded references and keep one complete representative example. Word counts are an editing aid, not a substitute for required contract coverage.
 
 ## Evaluation
 

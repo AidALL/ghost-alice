@@ -25,11 +25,11 @@ def _source_status_issue(reasons, *, explanation=False):
             'The response model keeps affected acceptance pending until that source or authenticated retained proof is available for the affected review.'),
     }
     observed = ' '.join(f'{reason}: {observations[reason]}' for reason in sorted(set(reasons)))
-    acceptance = 'Response' if explanation else 'Completion'
-    return (f'{observed} {acceptance} acceptance is blocked for the affected review. '
+    acceptance = 'response' if explanation else 'completion claim'
+    return (f"{observed} Core code's Stop script does not pass the {acceptance} for the affected review. "
         'This source state does not establish that a claim is false. '
         'Preserve the original proof, source references and verification time. '
-        'Retain unaffected claims and evidence; continue independent authorized work. '
+        "Retain unaffected claims and evidence; continue independent work that the human user's instructions authorize. "
         'Do not replay business work or expand unrelated review.' + (
             ' Keep any explanation review internal; do not submit completion controls for this explanation.'
             if explanation else ''))
@@ -42,7 +42,7 @@ def _claim_judgments(reviewed):
             for b in reviewed.candidate['bindings']]
 
 
-def assess_native_completion(source, *, text='', transaction=None, native_input=None):
+def assess_native_completion(source, *, text='', transaction=None, hook_payload=None):
     """Return the canonical input/body-bound assessment without mutating proof.
 
 The result is a transient view, not a transferable authorization token. Native
@@ -50,8 +50,8 @@ consumers obtain it directly from this Core API and check their input binding.
 """
     if not isinstance(text, str):
         raise ValueError('Invalid native assessment request')
-    if native_input is not None and not text.strip():
-        text = stop_response_text(native_input)
+    if hook_payload is not None and not text.strip():
+        text = stop_response_text(hook_payload)
     source = dict(source)
     platform, session = source.get('GHOST_ALICE_PLATFORM'), source.get('GHOST_ALICE_SESSION_ID')
     route, context, context_status, context_issue = None, {}, 'unavailable', None
@@ -108,8 +108,8 @@ consumers obtain it directly from this Core API and check their input binding.
     selected = select_completion_route(context)
     issue, claim_judgments = None, None
     repair_target = 'completion_metadata'
-    native_activity = (native_tool_activity(platform, session, native_input, input_observation=input_observation)
-        if native_input is not None else None)
+    native_activity = (native_tool_activity(platform, session, hook_payload, input_observation=input_observation)
+        if hook_payload is not None else None)
     if review_issue:
         issue = review_issue
         repair_target = review_target

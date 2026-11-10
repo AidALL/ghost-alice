@@ -209,17 +209,17 @@ def quality_metadata(events: list[Event], count: int) -> dict[str, Any]:
 
     if "debugging-or-test-loop" in reasons and session_count < 2:
         quality = "reject"
-        decision = "route-to-systematic-debugging"
+        suggested_next_step = "route-to-systematic-debugging"
     elif session_count >= 2:
         quality = "review"
-        decision = "necessity-gate"
+        suggested_next_step = "necessity-gate"
     else:
         quality = "watch"
-        decision = "observe-more"
+        suggested_next_step = "observe-more"
 
     return {
         "quality": quality,
-        "decision": decision,
+        "suggested_next_step": suggested_next_step,
         "session_count": session_count,
         "quality_reasons": reasons,
     }
@@ -292,6 +292,11 @@ def analyze_events(events: list[Event], window: int, min_count: int) -> dict[str
 
 
 def load_intent_context(path: Path | None) -> dict[str, Any] | None:
+    """Read decision entries recorded by the response model, without inferring who decided.
+
+    Only each entry's optional source claims who decided; Core code does not require it.
+    active_decisions contains entries no later entry superseded, and decision_count counts them.
+    """
     if path is None:
         return None
     path = path.expanduser()
@@ -374,9 +379,9 @@ def conduct_feedback_instincts(context: dict[str, Any] | None) -> list[dict[str,
     """Emit a first-class evolution candidate for each open conduct_feedback entry.
 
     Tool-frequency patterns and supported conduct_feedback supply candidate data.
-    The returned decision label is triage data. The consuming model evaluates it
-    under skill-evolution and follows necessity-gate only when proposing
-    separately authorized work.
+    suggested_next_step names the script's proposed next step. The response model
+    evaluates the candidate under skill-evolution and follows necessity-gate when
+    proposing work that the human user's instructions authorize separately.
     """
     if not context:
         return []
@@ -394,15 +399,15 @@ def conduct_feedback_instincts(context: dict[str, Any] | None) -> list[dict[str,
             continue
         rule = str(entry.get("corrective_rule") or "").strip()
         pattern = str(entry.get("failure_pattern") or "").strip()
-        source = load_ledger().canonical_source(entry.get("source"), "user-said")
+        source = load_ledger().canonical_source(entry.get("source"), "") or "unknown"
         instincts.append({
             "id": f"conduct:{entry_id}",
             "trigger": rule or pattern or entry_id,
             "domain": "conduct",
             "scope": "agent",
-            "evidence": pattern or "user conduct correction",
+            "evidence": pattern or "recorded conduct feedback",
             "quality": "review",
-            "decision": "necessity-gate",
+            "suggested_next_step": "necessity-gate",
             "session_count": 1,
             "quality_reasons": ["conduct-feedback", f"source-{source}"],
             "source": source,

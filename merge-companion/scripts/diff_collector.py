@@ -1,4 +1,4 @@
-"""Compare current files against snapshot, register user-modified files in manifest.
+"""Compare installed skill copies with the snapshot and register external changes in the manifest.
 
 Dependencies: Python 3.11+ standard library + local merge-companion modules.
 """
@@ -19,7 +19,7 @@ if str(_SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(_SHARED_DIR))
 from merge_companion_messages import render_pending_merge_message
 
-README_FIRST_TEMPLATE = f"""# READ-ME-FIRST. Ghost-ALICE User Change Quarantine Directory
+README_FIRST_TEMPLATE = f"""# READ-ME-FIRST. Ghost-ALICE External Change Quarantine Directory
 
 {render_pending_merge_message("readme")}
 
@@ -31,24 +31,17 @@ Ask the AI chat:
 
 ## Review procedure
 
-The response model obtains the current platform's pending-merge
-result as the installed merge-companion skill's Entry and activation section
-directs. It follows that skill for any undecided entry, using the exact
-manifest entry's id, source_path and backup_path. The user's integrate, discard
-or defer choice supplies the decision; this generated guide supplies no approval.
+The response model obtains the current platform's pending-merge result as the installed merge-companion skill's Entry and activation section directs. It follows that skill for any undecided entry, using the exact manifest entry's id, source_path and backup_path. The human user chooses whether to integrate, discard or defer each entry; this generated guide supplies no approval.
 
-The merge-companion reference `references/manifest-schema.md`, section
-`Apply and record a decision`, owns staged application and manifest recording.
-A successful file application and its recorded decision are separate results.
+The merge-companion reference `references/manifest-schema.md`, section `Apply and record a decision`, owns staged application and manifest recording. The response model applies the human user's choice and records the outcome as separate results.
 
 ## Directory Structure
 
 - manifest.json is the metadata SSOT for pending and decided entries.
 - snapshot.json is the file hash snapshot from the previous install.
-- *.bak files are quarantined user-change backups and are not rotation targets.
+- *.bak files preserve external changes found after installation and are not rotation targets.
 
-diff_collector.py automatically creates and updates this file. If a user edits
-it, the next install overwrites it.
+diff_collector.py automatically creates and updates this file. The next install overwrites any external changes to this generated guide.
 """
 
 
@@ -238,7 +231,7 @@ def _changed_file_kind(
     return "unchanged"
 
 
-def collect_user_changes(
+def collect_external_changes(
     snapshot_path: Path,
     files: Iterable[Path],
     skills_dir: Optional[Path] = None,
@@ -393,6 +386,7 @@ def _manifest_entry(
         "change_kind": change_kind,
         "relative_path": change.get("relative_path") or safe_name,
     }
+    # The installer registers the change as pending; no merge, discard or defer outcome is recorded yet.
     entry = {
         "id": _pending_entry_id(entry_seed),
         "platform": platform,
@@ -504,6 +498,7 @@ def quarantine_legacy_target(
         suffix += 1
 
     shutil.move(str(target_path), str(backup_path))
+    # The installer registers the backup to await the human user's merge, discard or defer choice.
     entry = {
         "id": f"{timestamp}-{safe_name}-legacy-target",
         "platform": platform,

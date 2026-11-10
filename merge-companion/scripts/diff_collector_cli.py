@@ -10,12 +10,12 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from diff_collector import collect_user_changes, register_changes_in_manifest
-from file_walker import walk_user_files
+from diff_collector import collect_external_changes, register_changes_in_manifest
+from file_walker import walk_installed_copy_files
 
 
-def _walk_user_files(skills_dir: Path, targets: list[str] | tuple[str, ...] = ()) -> list[Path]:
-    return walk_user_files(skills_dir, targets)
+def _walk_installed_copy_files(skills_dir: Path, targets: list[str] | tuple[str, ...] = ()) -> list[Path]:
+    return walk_installed_copy_files(skills_dir, targets)
 
 
 def main() -> int:
@@ -29,8 +29,8 @@ def main() -> int:
                    help="skill root this install replaces; checked even without its install marker")
     args = p.parse_args()
     skills_dir = Path(args.skills_dir)
-    files = _walk_user_files(skills_dir, args.target)
-    changes = collect_user_changes(Path(args.snapshot), files, skills_dir=skills_dir)
+    files = _walk_installed_copy_files(skills_dir, args.target)
+    changes = collect_external_changes(Path(args.snapshot), files, skills_dir=skills_dir)
     register_changes_in_manifest(
         changes,
         pending_dir=Path(args.pending),

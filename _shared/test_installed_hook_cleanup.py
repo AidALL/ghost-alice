@@ -55,7 +55,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
         return forms
 
     def test_reinstall_removes_every_installed_form_of_retired_hooks(self):
-        user = {"type": "command", "command": "echo user-owned"}
+        unmanaged_hook = {"type": "command", "command": "echo unmanaged-hook"}
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 self._create_platform_dir(platform)
@@ -63,7 +63,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
                 settings = self._read_settings(platform)
                 forms = self.retired_forms(platform)
                 settings["hooks"]["UserPromptSubmit"].append(
-                    {"matcher": "preserved", "custom": 7, "hooks": [*forms, user]})
+                    {"matcher": "preserved", "custom": 7, "hooks": [*forms, unmanaged_hook]})
                 settings["hooks"]["SessionStart"].append({"hooks": forms[:1]})
                 self._write_settings(platform, settings)
 
@@ -74,24 +74,24 @@ class InstalledHookCleanupTests(TempHomeTestCase):
                         self.assertNotIn(marker, command)
                     for hook_id in hook_definitions.RETIRED_CORE_HOOK_IDS:
                         self.assertFalse(install_hooks._hook_runner_id_match(command, hook_id), command)
-                self.assertIn({"matcher": "preserved", "custom": 7, "hooks": [user]},
+                self.assertIn({"matcher": "preserved", "custom": 7, "hooks": [unmanaged_hook]},
                               after["hooks"]["UserPromptSubmit"])
                 self.assertTrue(all(group.get("hooks") for groups in after["hooks"].values() for group in groups))
                 self.assertEqual(install_hooks.install_hook(platform), "already")
 
     def test_reinstall_removes_hook_groups_without_hooks_on_both_hosts(self):
-        user_stop = {"type": "command", "command": "echo user-stop"}
+        unmanaged_stop_hook = {"type": "command", "command": "echo unmanaged-stop"}
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 self._write_settings(platform, {"hooks": {
                     "PreToolUse": [{"matcher": "Bash", "hooks": []}],
-                    "Stop": [{"hooks": []}, {"matcher": "", "hooks": [user_stop]}, {"matcher": ""}],
+                    "Stop": [{"hooks": []}, {"matcher": "", "hooks": [unmanaged_stop_hook]}, {"matcher": ""}],
                 }})
                 self.assertEqual(install_hooks.install_hook(platform), "installed")
                 hooks = self._read_settings(platform)["hooks"]
                 self.assertEqual([(event, group) for event, groups in hooks.items()
                                   for group in groups if not group.get("hooks")], [])
-                self.assertIn({"matcher": "", "hooks": [user_stop]}, hooks["Stop"])
+                self.assertIn({"matcher": "", "hooks": [unmanaged_stop_hook]}, hooks["Stop"])
 
     def test_codex_reinstall_moves_trust_with_handlers_and_drops_orphan_tables(self):
         self._create_platform_dir("codex")
@@ -99,11 +99,11 @@ class InstalledHookCleanupTests(TempHomeTestCase):
         hooks_file = self._config_file("codex")
         settings = self._read_settings("codex")
         intake_groups = settings["hooks"]["UserPromptSubmit"]
-        user = {"type": "command", "command": "echo user-prompt"}
+        unmanaged_hook = {"type": "command", "command": "echo unmanaged-prompt"}
         retired = install_hooks._hook_runner_command_entry(
             "prompt", "python3 /old/_shared/task_router_reminder_hook.py # " + install_hooks.HOOK_MARKER,
             install_hooks.HOOK_MARKER, platform_key="codex")
-        settings["hooks"]["UserPromptSubmit"] = [retired, {"hooks": [user]}, *intake_groups]
+        settings["hooks"]["UserPromptSubmit"] = [retired, {"hooks": [unmanaged_hook]}, *intake_groups]
         self._write_settings("codex", settings)
 
         def key(event, group, handler=0):
@@ -112,13 +112,13 @@ class InstalledHookCleanupTests(TempHomeTestCase):
         def table(state_key, *lines):
             return "\n".join([f"[hooks.state.{json.dumps(state_key)}]", *lines]) + "\n"
 
-        user_hash = install_hooks._codex_command_hook_hash("UserPromptSubmit", {"hooks": [user]}, user)
+        unmanaged_hook_hash = install_hooks._codex_command_hook_hash("UserPromptSubmit", {"hooks": [unmanaged_hook]}, unmanaged_hook)
         intake_hash = install_hooks._codex_command_hook_hash(
             "UserPromptSubmit", intake_groups[0], intake_groups[0]["hooks"][0])
         config = self._codex_config_toml()
         config.write_text(_without_hook_state(config.read_text()) + "\n" + "".join([
             table(key("UserPromptSubmit", 0), 'trusted_hash = "retired-reminder"', "enabled = true"),
-            table(key("UserPromptSubmit", 1), f'trusted_hash = "{user_hash}"', "enabled = false"),
+            table(key("UserPromptSubmit", 1), f'trusted_hash = "{unmanaged_hook_hash}"', "enabled = false"),
             table(key("UserPromptSubmit", 2), f'trusted_hash = "{intake_hash}"', "enabled = true"),
             table(key("Stop", 7), 'trusted_hash = "orphan"', "enabled = true"),
             table("/elsewhere/hooks.json:stop:0:0", 'trusted_hash = "other-file"'),
@@ -126,9 +126,9 @@ class InstalledHookCleanupTests(TempHomeTestCase):
 
         self.assertEqual(install_hooks.install_hook("codex"), "installed")
         after = self._read_settings("codex")
-        self.assertEqual(after["hooks"]["UserPromptSubmit"], [{"hooks": [user]}, *intake_groups])
+        self.assertEqual(after["hooks"]["UserPromptSubmit"], [{"hooks": [unmanaged_hook]}, *intake_groups])
         state = tomllib.loads(config.read_text())["hooks"]["state"]
-        self.assertEqual(state[key("UserPromptSubmit", 0)], {"trusted_hash": user_hash, "enabled": False})
+        self.assertEqual(state[key("UserPromptSubmit", 0)], {"trusted_hash": unmanaged_hook_hash, "enabled": False})
         self.assertEqual(state[key("UserPromptSubmit", 1)], {"trusted_hash": intake_hash, "enabled": True})
         self.assertNotIn(key("Stop", 7), state)
         self.assertEqual(state["/elsewhere/hooks.json:stop:0:0"], {"trusted_hash": "other-file"})
@@ -136,26 +136,26 @@ class InstalledHookCleanupTests(TempHomeTestCase):
                      for g, group in enumerate(groups) for h, _ in enumerate(group["hooks"])}
         self.assertLessEqual({k for k in state if k.startswith(hooks_file.as_posix() + ":")}, positions)
 
-    def test_codex_uninstall_drops_ghost_alice_trust_and_moves_user_trust(self):
+    def test_codex_uninstall_drops_ghost_alice_trust_and_moves_unmanaged_hook_trust(self):
         self._create_platform_dir("codex")
         self.assertEqual(install_hooks.install_hook("codex"), "installed")
         hooks_file = self._config_file("codex")
         settings = self._read_settings("codex")
-        user = {"type": "command", "command": "echo user-prompt"}
-        settings["hooks"]["UserPromptSubmit"].append({"hooks": [user]})
+        unmanaged_hook = {"type": "command", "command": "echo unmanaged-prompt"}
+        settings["hooks"]["UserPromptSubmit"].append({"hooks": [unmanaged_hook]})
         settings["hooks"]["SessionStart"].append({"hooks": self.retired_forms("codex")[:1]})
         self._write_settings("codex", settings)
-        user_key = install_hooks._codex_hook_state_key(
+        unmanaged_hook_state_key = install_hooks._codex_hook_state_key(
             hooks_file, "UserPromptSubmit", len(settings["hooks"]["UserPromptSubmit"]) - 1, 0)
-        user_hash = install_hooks._codex_command_hook_hash("UserPromptSubmit", {"hooks": [user]}, user)
+        unmanaged_hook_hash = install_hooks._codex_command_hook_hash("UserPromptSubmit", {"hooks": [unmanaged_hook]}, unmanaged_hook)
         config = self._codex_config_toml()
-        config.write_text(config.read_text() + f"\n[hooks.state.{json.dumps(user_key)}]\ntrusted_hash = \"{user_hash}\"\n")
+        config.write_text(config.read_text() + f"\n[hooks.state.{json.dumps(unmanaged_hook_state_key)}]\ntrusted_hash = \"{unmanaged_hook_hash}\"\n")
 
         self.assertEqual(install_hooks.uninstall_hook("codex"), "removed")
-        self.assertEqual(_commands(self._read_settings("codex")), ["echo user-prompt"])
+        self.assertEqual(_commands(self._read_settings("codex")), ["echo unmanaged-prompt"])
         state = tomllib.loads(config.read_text()).get("hooks", {}).get("state", {})
         self.assertEqual(state, {install_hooks._codex_hook_state_key(hooks_file, "UserPromptSubmit", 0, 0):
-                                 {"trusted_hash": user_hash}})
+                                 {"trusted_hash": unmanaged_hook_hash}})
 
     def test_codex_trusts_no_retired_marker_command(self):
         for marker in install_hooks.RETIRED_HOOK_MARKERS:

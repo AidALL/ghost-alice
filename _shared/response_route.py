@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Response-route validation and receipt-bound API in Core code.
 
-Dependencies: Python 3.11+ standard library. SQLite authority belongs to the ledger.
+Dependencies: Python 3.11+ standard library. The intent ledger owns its SQLite database, the primary store.
 """
 from __future__ import annotations
 
@@ -28,7 +28,8 @@ except ImportError as exc:
         raise
     ledger = None
 
-SCHEMA_VERSION = "response-route.v1"
+SCHEMA_VERSION = "response-route.v2"
+SUPPORTED_SCHEMAS = {"response-route.v1", SCHEMA_VERSION}
 ROUTING_ENUMS = {
     "response_mode": {"normal"},
     "boundary_contract": {"required", "n/a"},
@@ -38,9 +39,9 @@ RETIRED_RESPONSE_MODES = {"clarification-only", "direct-response"}
 ROUTING_TEXT = {"reason"}
 ROUTING_CONTROLS = {"response_mode", "boundary_contract"}
 CANDIDATE_KEYS = {"schema_version", "routing_surface", "work_units", "selected_work_unit_ids", "selected_criteria"}
-UNIT_KEYS = {"work_unit_id", "contract_revision", "kind", "admitted", "owner"}
+UNIT_KEYS = {"work_unit_id", "contract_revision", "kind", "selectable", "owner"}
 REFERENCE_KEYS = {"work_unit_id", "contract_revision", "criterion_id"}
-CRITERION_KEYS = {"id", "summary", "source", "admitted", "work_unit_id", "contract_revision"}
+CRITERION_KEYS = {"id", "summary", "source", "selectable", "work_unit_id", "contract_revision"}
 
 
 class ResponseRouteError(ValueError):
@@ -53,6 +54,73 @@ class RouteBindingError(ResponseRouteError):
 
 class RouteSchemaError(ResponseRouteError):
     code = "route-schema"
+
+
+def selection_view(row):
+    """Read the flag the response model or Core code wrote without changing its source; true does not prove human approval."""
+    if not isinstance(row, dict):
+        raise RouteSchemaError('selection row must be an object')
+    result = deepcopy(row)
+    try:
+        value = ledger.selectable_value(row)
+    except ValueError as error:
+        raise RouteSchemaError(str(error)) from error
+    if 'selectable' in row or 'admitted' in row:
+        result.pop('admitted', None)
+        result['selectable'] = value
+    return result
+
+
+def _declared_work_view(value):
+    if not isinstance(value, dict):
+        raise RouteSchemaError('declared remaining work must be an object')
+    result = deepcopy(value)
+    if result.get('schema_version') == 'continuation-feedback.v1':
+        result['schema_version'] = 'declared-remaining-work.v1'
+    if result.get('control') == 'human-stop':
+        result['control'] = 'model-reported-human-stop'
+    if 'required_unprocessed' in result:
+        if ('items' in result and json.dumps(result['items'], sort_keys=True)
+                != json.dumps(result['required_unprocessed'], sort_keys=True)):
+            raise RouteSchemaError('conflicting remaining work items')
+        result['items'] = result.pop('required_unprocessed')
+    return result
+
+
+def route_comparison_view(route):
+    """Normalize supported aliases for validation/comparison, never stored authentication."""
+    if (not isinstance(route, dict) or not isinstance(route.get('schema_version'), str)
+            or route['schema_version'] not in SUPPORTED_SCHEMAS):
+        raise RouteSchemaError('unsupported response route schema')
+    result = deepcopy(route)
+    result['schema_version'] = SCHEMA_VERSION
+    for key in ('work_units', 'selected_criteria'):
+        if isinstance(result.get(key), list):
+            result[key] = [selection_view(row) for row in result[key]]
+    declarations = [_declared_work_view(result[key]) for key in
+                    ('declared_remaining_work', 'continuation_feedback') if key in result]
+    if declarations:
+        if (len(declarations) == 2 and json.dumps(declarations[0], sort_keys=True)
+                != json.dumps(declarations[1], sort_keys=True)):
+            raise RouteSchemaError('conflicting remaining work declarations')
+        result.pop('continuation_feedback', None)
+        result['declared_remaining_work'] = declarations[0]
+    return result
+
+
+def declared_work_view(route):
+    """Read declarations and issue coordinates from old or new route outputs."""
+    # The Stop renderer also accepts declaration-only route mappings without a schema header.
+    view = route_comparison_view(dict(route, schema_version=route.get('schema_version', SCHEMA_VERSION)))
+    issues = {}
+    for key in ('declared_remaining_work_issues', 'continuation_feedback_issues'):
+        for entry in route.get(key, []):
+            pointer = entry['pointer'].replace('/continuation_feedback/', '/declared_remaining_work/').replace(
+                '/required_unprocessed/', '/items/')
+            if pointer in issues and issues[pointer] != entry['issue']:
+                raise RouteSchemaError('conflicting remaining work source issues')
+            issues[pointer] = entry['issue']
+    return view.get('declared_remaining_work'), issues
 
 
 def _load_installed_ledger(platform):
@@ -122,6 +190,7 @@ def validate_routing_surface(value, *, stored=False):
 
 
 def _criterion(value, *, resolved=False):
+    value = selection_view(value)
     required = CRITERION_KEYS | ({"criterion_id"} if resolved else set())
     if not isinstance(value, dict) or not required <= set(value):
         raise RouteSchemaError("owned criterion fields are incomplete")
@@ -130,8 +199,8 @@ def _criterion(value, *, resolved=False):
         raise RouteSchemaError("owned criterion summary must be a nonempty string")
     if not isinstance(value["source"], str) or ledger.canonical_source(value["source"], "") not in ledger.ACCEPTANCE_CRITERIA_SOURCES:
         raise RouteSchemaError("owned criterion source is invalid")
-    if type(value["admitted"]) is not bool:
-        raise RouteSchemaError("owned criterion admission must be boolean")
+    if type(value["selectable"]) is not bool:
+        raise RouteSchemaError("owned criterion selectable flag must be boolean")
     if resolved and value["criterion_id"] != key[2]:
         raise RouteSchemaError("stored criterion local-ID alias is inconsistent")
     return key
@@ -147,7 +216,7 @@ def _owned_criteria(value):
         key = _criterion(criterion)
         if key in owned:
             raise RouteSchemaError("stored owned criterion is ambiguous")
-        owned[key] = criterion
+        owned[key] = selection_view(criterion)
     return owned
 
 
@@ -155,24 +224,24 @@ def _require_execution_criteria(units, selected, owned):
     for unit_id in selected:
         unit = units[unit_id]
         if unit['kind'] == 'execution' and not any(
-                key[:2] == (unit_id, unit['contract_revision']) and criterion.get('admitted') is True
+                key[:2] == (unit_id, unit['contract_revision']) and criterion.get('selectable') is True
                 for key, criterion in owned.items()):
-            raise RouteSchemaError('selected execution work needs an admitted owned criterion; record the actual task condition before routing')
+            raise RouteSchemaError('selected execution work needs a selectable owned criterion; record the actual task condition before routing')
 
 
 
-def _validate_continuation_feedback(value, selected, *, resolved=False):
-    _object(value, {'schema_version', 'control', 'required_unprocessed'}, 'continuation feedback')
-    if (value['schema_version'] != 'continuation-feedback.v1'
-        or not isinstance(value['control'], str) or value['control'] not in {'active', 'human-stop'}):
-        raise RouteSchemaError('Unknown current continuation feedback control')
-    if not isinstance(value['required_unprocessed'], list):
-        raise RouteSchemaError('Current required-unprocessed work must be an explicit list')
-    admitted = {(row['work_unit_id'], row['contract_revision'], row['criterion_id']) for row in selected}
+def _validate_declared_remaining_work(value, selected, *, resolved=False):
+    _object(value, {'schema_version', 'control', 'items'}, 'declared remaining work')
+    if (value['schema_version'] != 'declared-remaining-work.v1'
+        or not isinstance(value['control'], str) or value['control'] not in {'active', 'model-reported-human-stop'}):
+        raise RouteSchemaError('Unknown current declared remaining work control')
+    if not isinstance(value['items'], list):
+        raise RouteSchemaError('Current declared remaining work items must be an explicit list')
+    selectable = {(row['work_unit_id'], row['contract_revision'], row['criterion_id']) for row in selected}
     seen = set()
-    for row in value['required_unprocessed']:
+    for row in value['items']:
         _object(row, {'criterion_refs', 'reason', 'next_information', 'source_refs', 'prerequisite'},
-                'required-unprocessed condition')
+                'declared remaining condition')
         if not isinstance(row['prerequisite'], str) or row['prerequisite'] not in {'ready', 'missing'}:
             raise RouteSchemaError('A current prerequisite disposition is required')
         if any(not isinstance(row[key], str) or not row[key].strip() for key in ('reason', 'next_information')):
@@ -182,8 +251,8 @@ def _validate_continuation_feedback(value, selected, *, resolved=False):
         for ref in row['criterion_refs']:
             _object(ref, REFERENCE_KEYS, 'required criterion reference')
             key = (*_unit_key(ref), _identifier(ref['criterion_id'], 'criterion_id'))
-            if key not in admitted or key in seen:
-                raise RouteSchemaError('Required work must be selected, admitted and nonoverlapping')
+            if key not in selectable or key in seen:
+                raise RouteSchemaError('Required work must be selected, selectable and nonoverlapping')
             seen.add(key)
         if not isinstance(row['source_refs'], list):
             raise RouteSchemaError('Needed original selectors must be an explicit list')
@@ -202,7 +271,7 @@ def _validate_continuation_feedback(value, selected, *, resolved=False):
                 if (not isinstance(source, dict) or source.get('source_id') != selector['source_id']
                     or source.get('storage') not in {'source-reference.v1', 'core-source-reference.v1'}
                     or 'text' in source or 'bytes_base64' in source):
-                    raise RouteSchemaError('Feedback retains authenticated source coordinates, never another body')
+                    raise RouteSchemaError('Declared remaining work retains authenticated source coordinates, never another body')
     return value
 
 
@@ -239,35 +308,38 @@ def _continuation_original(selector, root, owner, connection):
     return deepcopy(core_source_reference(original, root, owner, selector['candidate_reference']))
 
 
-def authenticate_continuation_feedback(projection, root, connection):
+def authenticate_declared_remaining_work(projection, root, connection):
     """Authenticate the declared originals in the existing route transaction."""
-    if 'continuation_feedback' not in projection:
+    if 'declared_remaining_work' not in projection:
         return projection
     result = deepcopy(projection)
     owner = {key:result[key] for key in ('platform', 'session_id')}
-    for row in result['continuation_feedback']['required_unprocessed']:
+    for row in result['declared_remaining_work']['items']:
         for selector in row['source_refs']:
             selector['source'] = _continuation_original(selector, root, owner, connection)
     return result
 
 
-def refresh_continuation_feedback(projection, root, connection):
-    """Unavailable originals suppress only dependent feedback, retaining proof."""
-    if projection.get('status') != 'ready' or 'continuation_feedback' not in projection:
+def refresh_declared_remaining_work(projection, root, connection):
+    """Unavailable originals hold only dependent declared work, retaining proof."""
+    if projection.get('status') != 'ready':
+        return projection
+    declaration, _ = declared_work_view(projection)
+    if declaration is None:
         return projection
     owner = {key:projection[key] for key in ('platform', 'session_id')}
     issues = []
-    for index, row in enumerate(projection['continuation_feedback']['required_unprocessed']):
+    for index, row in enumerate(declaration['items']):
         try:
             for selector in row['source_refs']:
                 if _continuation_original(selector, root, owner, connection) != selector['source']:
                     raise RouteBindingError('source-unverified')
         except RouteBindingError as error:
-            issues.append(dict(pointer='/continuation_feedback/required_unprocessed/'+str(index),
+            issues.append(dict(pointer='/declared_remaining_work/items/'+str(index),
                                issue=str(error)))
     if issues:
         result = deepcopy(projection)
-        result['continuation_feedback_issues'] = issues
+        result['declared_remaining_work_issues'] = issues
         return result
     return projection
 
@@ -275,7 +347,8 @@ def refresh_continuation_feedback(projection, root, connection):
 def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
                             boundary_ref: str | None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Validate current selection against owned criteria and immutable contracts."""
-    _object(candidate, CANDIDATE_KEYS, "candidate", optional={"continuation_feedback"})
+    candidate = route_comparison_view(candidate)
+    _object(candidate, CANDIDATE_KEYS, "candidate", optional={"declared_remaining_work"})
     if candidate["schema_version"] != SCHEMA_VERSION:
         raise RouteSchemaError("unsupported response route schema")
     surface = validate_routing_surface(candidate["routing_surface"])
@@ -288,6 +361,7 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
     registry = deepcopy(state.get("work_units", []))
     if not isinstance(registry, list):
         raise RouteSchemaError("stored work unit registry is invalid")
+    registry = [selection_view(unit) for unit in registry]
     units = {}
     owned = _owned_criteria(state.get("acceptance_criteria", []))
     for raw in candidate["work_units"]:
@@ -295,8 +369,8 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
         key = _unit_key(unit)
         if key[0] in units:
             raise RouteSchemaError("a current projection must name each work unit once")
-        if unit["kind"] not in ("execution", "nonexecution") or type(unit["admitted"]) is not bool:
-            raise RouteSchemaError("unit kind or admission is invalid")
+        if unit["kind"] not in ("execution", "nonexecution") or type(unit["selectable"]) is not bool:
+            raise RouteSchemaError("unit kind or selectable flag is invalid")
         owner = _object(unit["owner"], {"platform", "session_id"}, "unit owner")
         if owner != {"platform": state.get("platform"), "session_id": state.get("session_id")}:
             raise RouteSchemaError("unit owner must match the authoritative session")
@@ -310,7 +384,7 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
         if prior:
             if any(prior[0].get(k) != unit[k] for k in ("kind", "owner")) or prior[0].get("criteria") != definitions:
                 raise RouteSchemaError("same work unit revision cannot change kind, owner or criterion definition")
-            prior[0]["admitted"] = unit["admitted"]
+            prior[0]["selectable"] = unit["selectable"]
         else:
             revisions = [u["contract_revision"] for u in registry if u.get("work_unit_id") == key[0]]
             if revisions and key[1] <= max(revisions):
@@ -327,8 +401,8 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
         _identifier(unit_id, "selected work unit")
     _unique(selected_ids, "selected_work_unit_ids")
     for unit_id in selected_ids:
-        if unit_id not in units or units[unit_id]["admitted"] is not True:
-            raise RouteSchemaError("selected work unit must be explicitly present and admitted")
+        if unit_id not in units or units[unit_id]["selectable"] is not True:
+            raise RouteSchemaError("selected work unit must be explicitly present and selectable")
     _require_execution_criteria(units, selected_ids, owned)
     references = candidate["selected_criteria"]
     if not isinstance(references, list):
@@ -343,8 +417,8 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
         unit = units.get(key[0])
         criterion = owned.get(key)
         if (key[0] not in selected_ids or unit is None or unit["contract_revision"] != key[1]
-                or criterion is None or criterion.get("admitted") is not True):
-            raise RouteSchemaError("selected criterion needs an admitted current owner and admitted ledger condition")
+                or criterion is None or criterion.get("selectable") is not True):
+            raise RouteSchemaError("selected criterion needs a selectable current owner and selectable ledger condition")
         resolved.append(dict({field: criterion[field] for field in CRITERION_KEYS}, criterion_id=key[2]))
     projection = {
         "schema_version": SCHEMA_VERSION, "status": "ready", "platform": state["platform"],
@@ -353,9 +427,9 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
         "work_units": list(units.values()), "selected_work_unit_ids": deepcopy(selected_ids),
         "selected_criteria": resolved,
     }
-    if 'continuation_feedback' in candidate:
-        projection['continuation_feedback'] = deepcopy(_validate_continuation_feedback(
-            candidate['continuation_feedback'], resolved))
+    if 'declared_remaining_work' in candidate:
+        projection['declared_remaining_work'] = deepcopy(_validate_declared_remaining_work(
+            candidate['declared_remaining_work'], resolved))
     return projection, registry
 
 
@@ -363,15 +437,16 @@ def project_stored_response_route(state, expected_input_event_id=None):
     current = state.get("latest_input_event_id")
     if expected_input_event_id is not None and expected_input_event_id != current:
         raise RouteBindingError("read receipt does not match the current input event")
-    stored = state.get("response_route")
-    if stored is None:
+    original = state.get("response_route")
+    if original is None:
         return None
+    stored = route_comparison_view(original)
     if (not isinstance(stored, dict) or stored.get("schema_version") != SCHEMA_VERSION
             or stored.get("status") not in ("ready", "stale")
             or stored.get("platform") != state.get("platform") or stored.get("session_id") != state.get("session_id")):
         raise RouteSchemaError("stored response route schema or owner is invalid")
     _object(stored, CANDIDATE_KEYS | {"status", "platform", "session_id", "input_event_id", "boundary_ref"},
-            "stored response route", optional={"continuation_feedback"})
+            "stored response route", optional={"declared_remaining_work"})
     validate_routing_surface(stored["routing_surface"], stored=True)
     if not isinstance(stored["input_event_id"], str) or not stored["input_event_id"]:
         raise RouteSchemaError("stored route input event is invalid")
@@ -386,8 +461,8 @@ def project_stored_response_route(state, expected_input_event_id=None):
     for unit in stored["work_units"]:
         _object(unit, UNIT_KEYS, "stored unit")
         key = _unit_key(unit)
-        if key[0] in units or unit["kind"] not in ("execution", "nonexecution") or type(unit["admitted"]) is not bool:
-            raise RouteSchemaError("stored unit identity, kind or admission is invalid")
+        if key[0] in units or unit["kind"] not in ("execution", "nonexecution") or type(unit["selectable"]) is not bool:
+            raise RouteSchemaError("stored unit identity, kind or selectable flag is invalid")
         if unit["owner"] != {"platform": state["platform"], "session_id": state["session_id"]}:
             raise RouteSchemaError("stored unit owner is invalid")
         units[key[0]] = unit
@@ -395,27 +470,28 @@ def project_stored_response_route(state, expected_input_event_id=None):
     for unit_id in selected:
         _identifier(unit_id, "selected work unit")
     _unique(selected, "stored selected_work_unit_ids")
-    if any(u not in units or units[u]["admitted"] is not True for u in selected):
-        raise RouteSchemaError("stored selected unit is not admitted")
+    if any(u not in units or units[u]["selectable"] is not True for u in selected):
+        raise RouteSchemaError("stored selected unit is not selectable")
     owned = _owned_criteria(state.get("acceptance_criteria", []))
     _require_execution_criteria(units, selected, owned)
     seen = set()
     for criterion in stored["selected_criteria"]:
         key = _criterion(criterion, resolved=True)
         if (key in seen or key[0] not in selected or units[key[0]]["contract_revision"] != key[1]
-                or criterion.get("id") != key[2] or criterion.get("admitted") is not True):
+                or criterion.get("id") != key[2] or criterion.get("selectable") is not True):
             raise RouteSchemaError("stored selected criterion binding is invalid")
         seen.add(key)
-    if 'continuation_feedback' in stored:
-        _validate_continuation_feedback(stored['continuation_feedback'], stored['selected_criteria'], resolved=True)
-    route = deepcopy(stored)
+    if 'declared_remaining_work' in stored:
+        _validate_declared_remaining_work(stored['declared_remaining_work'], stored['selected_criteria'], resolved=True)
+    route = deepcopy(original)
+    # canonical_input_event_id identifies the current input Core recorded; current_context_input_event_id names an SDK-started context input.
     if (route.get("input_event_id") != current or state.get("canonical_input_event_id") != current
         or state.get('current_context_input_event_id')
         or route["routing_surface"]["response_mode"] in RETIRED_RESPONSE_MODES):
         route["status"] = "stale"
-    for selected_criterion in route["selected_criteria"]:
+    for selected_criterion in stored["selected_criteria"]:
         criterion = owned.get(_criterion(selected_criterion, resolved=True))
-        if criterion is None or any(criterion[k] != selected_criterion[k] for k in ("summary", "source", "admitted")):
+        if criterion is None or any(criterion[k] != selected_criterion[k] for k in ("summary", "source", "selectable")):
             route["status"] = "stale"
     route["current_input_event_id"] = current
     return route
@@ -425,6 +501,7 @@ def record_response_route(root, platform, session_id, expected_input_event_id, c
                           legacy_criteria_binding=None, expected_revision=None,
                           context_selection=None, context_source=None, context_use_judgments=None,
                           context_selection_mode='replace'):
+    """Bind selected snapshots to frozen ownership and record the candidate atomically; the response model or Core code wrote the selection flag."""
     if not isinstance(context_selection_mode, str) or context_selection_mode not in {'replace', 'update'}:
         raise RouteSchemaError('Context selection mode must be replace or update')
     if context_selection_mode == 'update':
@@ -485,7 +562,7 @@ def main(argv=None):
     parser.add_argument("--boundary-ref")
     parser.add_argument("--expected-revision", type=int, help="Current ledger revision required for ownership binding")
     parser.add_argument("--bind-legacy-criteria-json",
-        help="Core code binds existing admitted criterion snapshots to frozen ownership, records the candidate atomically, and returns the ready route")
+        help="Core code binds existing selectable criterion snapshots to frozen ownership, records the candidate atomically, and returns the ready route")
     parser.add_argument('--context-selection-json',
         help='Current use conclusions and remaining needs; resolved and committed with this work selection')
     parser.add_argument('--context-selection-mode', choices=('replace', 'update'), default='replace',

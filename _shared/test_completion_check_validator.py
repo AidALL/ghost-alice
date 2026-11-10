@@ -122,7 +122,7 @@ class TestCompletionTextFinalSurfaceOrder(unittest.TestCase):
             self.assertIn(expected, result)
 
     def test_retired_printed_blocks_after_completion_check_are_ordinary_text(self):
-        # Decisions 7 and 14 retired the printed [io-trace] and [gate-state] blocks; neither has a placement rule.
+        # The human user removed the printed [io-trace] and [gate-state] blocks; neither has a placement rule.
         self.assertIsNone(v.validate_completion_text(_final_text("completion", "summary", "gate", "io")))
 
     def test_control_fields_follow_only_printed_control_blocks(self):

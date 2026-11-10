@@ -19,6 +19,7 @@ from test_completion_skill_evidence import assert_stop_observation
 
 HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
 NOTICE_FILE = "GHOST_ALICE_STOP_NOTICE_FILE"
+# The test writes source labels as the response model's origin claims, not as sender authentication.
 COMPLETE = """Result: the report is ready.
 
 [completion-check]
@@ -57,7 +58,7 @@ PARTIAL = """Result: the report is generated; its check waits for the checker.
 
 
 def declared(control="active", criterion="c2"):
-    return {"schema_version": "continuation-feedback.v1", "control": control, "required_unprocessed": [{
+    return {"schema_version": "declared-remaining-work.v1", "control": control, "items": [{
         "criterion_refs": [{"work_unit_id": "first", "contract_revision": 1, "criterion_id": criterion}],
         "reason": "the summary still needs the reviewer's numbers",
         "next_information": "Ask the reviewer for the final numbers.",
@@ -71,10 +72,10 @@ class StopNoticeCase(unittest.TestCase):
         if ledger:
             evidence.StopHookSkillEvidenceTests._review_format_fixture(root, "codex", text, env, **fixture)
         if new_input is not None:
-            # The user sent another input after the route was registered, so that route is stale.
+            # Another input is recorded through the intake hook path after the route was registered, so that route is stale.
             import test_response_route as fixtures
             fixtures.ledger.record_turn(root=root / "ledger", platform="codex", session_id="fixture-stop",
-                                        raw_user_input=new_input, source="hook")
+                                        raw_input=new_input, recording_path="hook")
         if notice_file is not None:
             env[NOTICE_FILE] = str(notice_file)
         result = subprocess.run([sys.executable, "-B", str(HOOK), "--platform", "codex"],
@@ -133,24 +134,24 @@ class StopNoticeMessageTests(StopNoticeCase):
         ])
 
     def test_declared_remaining_work_is_listed_as_declared(self):
-        payload = self.run_stop(COMPLETE, continuation_feedback=declared())
+        payload = self.run_stop(COMPLETE, declared_remaining_work=declared())
         assert_stop_observation(self, payload)
         work = payload["stop_notice"]["remaining_work"]
         self.assertEqual((work["declared"], work["control"]), (True, "active"))
         self.assertEqual(work["items"], [{"criteria": ["c2"], "reason": "the summary still needs the reviewer's numbers",
             "next_information": "Ask the reviewer for the final numbers.", "prerequisite": "missing"}])
         self.assertEqual(self.lines(payload), [
-            "Ghost-ALICE Stop notice: 1 declared remaining work item.",
-            "- Declared remaining work (criterion c2): the summary still needs the reviewer's numbers",
+            "Ghost-ALICE Stop notice: 1 remaining work item the response model declared.",
+            "- Remaining work the response model declared (criterion c2): the summary still needs the reviewer's numbers",
             "  Next needed information: Ask the reviewer for the final numbers.",
             "  Prerequisite: not available yet",
         ])
 
     def test_work_the_user_stopped_is_marked_stopped(self):
-        payload = self.run_stop(COMPLETE, continuation_feedback=declared("human-stop"))
-        self.assertEqual(payload["stop_notice"]["remaining_work"]["control"], "human-stop")
+        payload = self.run_stop(COMPLETE, declared_remaining_work=declared("model-reported-human-stop"))
+        self.assertEqual(payload["stop_notice"]["remaining_work"]["control"], "model-reported-human-stop")
         self.assertEqual(self.lines(payload)[1:], [
-            "- Declared remaining work, stopped by the user (criterion c2): the summary still needs the reviewer's numbers",
+            "- Remaining work the response model declared, the response model reports the human user's stop instruction (criterion c2): the summary still needs the reviewer's numbers",
             "  Next needed information: Ask the reviewer for the final numbers.",
         ])
 
@@ -160,18 +161,38 @@ class StopNoticeMessageTests(StopNoticeCase):
             next_information="Check the report again.", prerequisite="ready", source_issue="source-changed")])
         message = dict(claims=None, unsupported_claims=[], issues=[], unresolved_criteria=[], remaining_work=work)
         self.assertEqual(stop_notice.render(message).splitlines(), [
-            "Ghost-ALICE Stop notice: 1 declared remaining work item.",
-            "- Declared remaining work (criterion c2): the numbers come from the report",
+            "Ghost-ALICE Stop notice: 1 remaining work item the response model declared.",
+            "- Remaining work the response model declared (criterion c2): the numbers come from the report",
             "  Next needed information: Check the report again.",
             "  On hold: its original source changed",
         ])
 
     def test_a_row_the_route_holds_carries_its_source_issue(self):
         import stop_notice
-        route = dict(status="ready", continuation_feedback=declared(), continuation_feedback_issues=[
-            dict(pointer="/continuation_feedback/required_unprocessed/0", issue="source-changed")])
+        route = dict(status="ready", declared_remaining_work=declared(), declared_remaining_work_issues=[
+            dict(pointer="/declared_remaining_work/items/0", issue="source-changed")])
         work = stop_notice._remaining_work(dict(response_route=route, completion_route=dict(route_binding="current")))
         self.assertEqual([item.get("source_issue") for item in work["items"]], ["source-changed"])
+
+    def test_legacy_issue_coordinates_map_once_to_the_correct_declared_row(self):
+        import copy
+        import stop_notice
+        from response_route import RouteSchemaError
+        current = declared(criterion='c1')
+        current['items'] += declared(criterion='c2')['items']
+        legacy = copy.deepcopy(current)
+        legacy['schema_version'] = 'continuation-feedback.v1'
+        legacy['required_unprocessed'] = legacy.pop('items')
+        route = dict(status='ready', declared_remaining_work=current, continuation_feedback=legacy,
+            declared_remaining_work_issues=[dict(pointer='/declared_remaining_work/items/1', issue='source-changed')],
+            continuation_feedback_issues=[dict(pointer='/continuation_feedback/required_unprocessed/1', issue='source-changed')])
+        context = dict(response_route=route, completion_route=dict(route_binding='current'))
+        work = stop_notice._remaining_work(context)
+        self.assertEqual([row.get('source_issue') for row in work['items']], [None, 'source-changed'])
+        self.assertEqual([row['criteria'] for row in work['items']], [['c1'], ['c2']])
+        route['continuation_feedback_issues'][0]['issue'] = 'source-unavailable'
+        with self.assertRaises(RouteSchemaError):
+            stop_notice._remaining_work(context)
 
     def test_an_empty_declaration_says_none_remains(self):
         import stop_notice
@@ -217,7 +238,7 @@ class StopNoticeMessageTests(StopNoticeCase):
         self.assertEqual(message["unsupported_claims"], [{"criteria": ["c2"], "claim": "the report was checked"}])
 
     def test_a_declaration_in_a_route_for_an_earlier_input_is_not_shown(self):
-        payload = self.run_stop("", record_review=False, continuation_feedback=declared(criterion="c1"),
+        payload = self.run_stop("", record_review=False, declared_remaining_work=declared(criterion="c1"),
                                 new_input="A new request.")
         self.assertEqual((payload["stop_notice"]["state"], payload["stop_notice"]["remaining_work"]), ("quiet", {"declared": False}))
         self.assertNotIn("systemMessage", payload)
@@ -233,7 +254,7 @@ class StopNoticeMessageTests(StopNoticeCase):
         self.assertEqual(stop_notice.render(message).splitlines(), [
             "Ghost-ALICE Stop notice: 3 issues found while checking this answer.",
             "- Issue: the completion block is missing or malformed",
-            "- Issue: a recorded review covers this input but not this exact answer",
+            "- Issue: the response model's recorded response review covers this input but not this exact answer",
             "- Issue: Core code could not check this answer (owner-mismatch)",
             "- Remaining work: unknown; the response model made no declaration for this input",
         ])
@@ -245,13 +266,13 @@ class StopNoticeMessageTests(StopNoticeCase):
 
     def test_an_empty_answer_still_shows_the_declared_remaining_work(self):
         # An empty answer has no claims or block to compare; the declaration in the current route still stands.
-        payload = self.run_stop("", record_review=False, continuation_feedback=declared(criterion="c1"))
+        payload = self.run_stop("", record_review=False, declared_remaining_work=declared(criterion="c1"))
         message = payload["stop_notice"]
         self.assertEqual((message["state"], message["claims"], message["issues"]), ("notice", None, []))
         self.assertIsNotNone(message["input_event_id"])
         self.assertEqual(self.lines(payload), [
-            "Ghost-ALICE Stop notice: 1 declared remaining work item.",
-            "- Declared remaining work (criterion c1): the summary still needs the reviewer's numbers",
+            "Ghost-ALICE Stop notice: 1 remaining work item the response model declared.",
+            "- Remaining work the response model declared (criterion c1): the summary still needs the reviewer's numbers",
             "  Next needed information: Ask the reviewer for the final numbers.",
             "  Prerequisite: not available yet",
         ])

@@ -108,9 +108,9 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
 
     def native_fixture(self, session="native-intake"):
         coords = dict(root=self.ledger_root, platform='claude', session_id=session)
-        ledger_api.record_turn(**coords, raw_user_input='Do the authorized work.', source='hook')
+        ledger_api.record_turn(**coords, raw_input='Do the authorized work.', recording_path='hook')
         before = ledger_api.read_session_state(**coords)
-        candidate = dict(schema_version='response-route.v1',
+        candidate = dict(schema_version='response-route.v2',
             routing_surface=dict(response_mode='normal', boundary_contract='n/a', reason='Existing human request'),
             work_units=[], selected_work_unit_ids=[], selected_criteria=[])
         ledger_api.record_response_route(**coords, expected_input_event_id=before['latest_input_event_id'],
@@ -333,7 +333,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         state = ledger_api.read_session_state(**coords)
         # One native row cannot become two canonical user observations.
         self.assertEqual(len(state['pending_native_inputs']), 1)
-        self.assertEqual(sum(e['event'] == 'user-input-observed' for e in ledger_api.read_session_events(**coords)), 2)
+        self.assertEqual(sum(e['event'] == 'input-observed' for e in ledger_api.read_session_events(**coords)), 2)
 
     def test_normal_receipt_has_no_instruction_footer(self):
         first = json.loads(self.run_hook({'session_id': 'receipt-diet', 'prompt': 'first'}).stdout)['systemMessage']
@@ -586,7 +586,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
             paths = real_record_turn(**kwargs)
             real_record_turn(
                 root=self.ledger_root, platform="codex", session_id="concurrent-session",
-                raw_user_input="unrelated input", intent_delta=None, source="hook",
+                raw_input="unrelated input", intent_delta=None, recording_path="hook",
             )
             return paths
 
@@ -612,7 +612,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         message = json.loads(result.stdout)["systemMessage"]
         self.assertIn("could not write this input to the ledger", message)
-        self.assertIn("continues the user's work without recording it", message)
+        self.assertIn("continues the work that the human user's instructions authorize without recording it", message)
         self.assertNotIn(RECEIPT_START, message)
 
     def test_hook_decodes_utf8_stdin_before_hashing_korean_prompt(self) -> None:
@@ -649,7 +649,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertTrue(rows)
         text = json.dumps(rows)
         row = rows[0]
-        self.assertEqual(row["event"], "user-input-observed")
+        self.assertEqual(row["event"], "input-observed")
         self.assertIn("input_digest", row)
         self.assertNotIn("secret-token", text)
         self.assertNotIn("ignore previous", text)
@@ -711,7 +711,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertTrue(rows)
         text = json.dumps(rows)
         row = rows[0]
-        self.assertEqual(row["event"], "user-input-observed")
+        self.assertEqual(row["event"], "input-observed")
         self.assertEqual(row["session_id"], "s-camel")
         self.assertEqual(row["input_char_count"], len("do not store this raw secret-token"))
         self.assertNotIn("secret-token", text)
@@ -750,7 +750,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         state = self.state(receipt["session_id"], receipt["platform"])
         self.assertEqual(state["current_goal"], "native goal")
         events = self.events(receipt["session_id"], receipt["platform"])
-        observed_events = [row for row in events if row["event"] == "user-input-observed"]
+        observed_events = [row for row in events if row["event"] == "input-observed"]
         self.assertEqual(observed_events[-1]["event_id"], receipt["input_event_id"])
 
     def test_payload_identity_precedes_native_thread_for_hook_observation(self) -> None:
@@ -860,7 +860,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         message = json.loads(result.stdout)["systemMessage"]
         self.assertIn("cannot load the ledger dependency", message)
-        self.assertIn("continues the user's work without recording it", message)
+        self.assertIn("continues the work that the human user's instructions authorize without recording it", message)
         self.assertNotIn("module exists but the intake hook could not load it", message)
         self.assertNotIn(RECEIPT_START, message)
 
@@ -870,7 +870,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         message = json.loads(result.stdout)["systemMessage"]
         self.assertIn("module exists but the intake hook could not load it", message)
-        self.assertIn("continues the user's work without recording it", message)
+        self.assertIn("continues the work that the human user's instructions authorize without recording it", message)
         self.assertNotIn("cannot load the ledger dependency", message)
         self.assertNotIn(RECEIPT_START, message)
 

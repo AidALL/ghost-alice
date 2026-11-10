@@ -83,7 +83,7 @@ def ensure_claude_bootstrap(ctx: "Context") -> bool:
     return _merge_block(["claude-merge", "--source", str(claude_bootstrap_source()),
                          "--dest", str(rules), "--proposed", f"{rules}.ghost-alice-proposed"],
                         "Claude CLAUDE.md block merge failed; aborting install",
-                        "Claude CLAUDE.md is user-owned; wrote proposed file instead",
+                        "Claude CLAUDE.md has no Ghost-ALICE block; wrote proposed file instead",
                         "Claude CLAUDE.md bootstrap block updated")
 
 
@@ -96,7 +96,7 @@ def ensure_codex_bootstrap(ctx: "Context") -> bool:
                          "--loader", str(codex_loader_source()),
                          "--dest", str(agents), "--proposed", f"{agents}.ghost-alice-proposed"],
                         "Codex AGENTS.md block merge failed; aborting install",
-                        "Codex AGENTS.md is user-owned; wrote proposed file instead",
+                        "Codex AGENTS.md has no Ghost-ALICE block; wrote proposed file instead",
                         "Codex AGENTS.md bootstrap block updated")
 
 
@@ -124,7 +124,7 @@ def remove_claude_bootstrap(ctx: "Context", require_change: bool = False) -> boo
         return not require_change
     return _remove_block(["claude-remove", "--dest", str(rules)], "Claude CLAUDE.md block removal failed",
                          "Claude CLAUDE.md bootstrap removed",
-                         "Claude CLAUDE.md Ghost-ALICE block removed; user content preserved", require_change)
+                         "Claude CLAUDE.md Ghost-ALICE block removed; content outside the block preserved", require_change)
 
 
 def remove_claude_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool:
@@ -146,7 +146,7 @@ def remove_codex_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool:
         return False
     return _remove_block(["codex-remove", "--dest", str(agents)], "Codex AGENTS.md block removal failed",
                          "Codex AGENTS.md bootstrap removed",
-                         "Codex AGENTS.md Ghost-ALICE block removed; user content preserved", True)
+                         "Codex AGENTS.md Ghost-ALICE block removed; content outside the block preserved", True)
 
 
 def sync_commands(ctx: "Context", mode: str = "sync", target: str = "all") -> int:

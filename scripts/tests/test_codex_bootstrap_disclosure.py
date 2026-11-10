@@ -66,7 +66,7 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             self.assertTrue(body.endswith(project_rules))
             self.assertIn("Common Ghost-ALICE governance comes from", body)
             self.assertIn("Project instruction files supply project-specific rules", body)
-            self.assertIn("Explicit user instructions take precedence", body)
+            self.assertIn("An instruction that the human user enters in the conversation takes precedence over this loading procedure", body)
             self.assertIn("without reading the common governance file", body)
             self.assertNotIn("If trusted project instructions already supply the complete", body)
 
@@ -80,7 +80,7 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             dest.with_name("ghost-alice-governance.md").unlink()
             self.assertIn("codex-governance: absent", self.doctor(dest).stdout)
 
-    def test_doctor_does_not_treat_user_appendix_as_managed_dependency(self):
+    def test_doctor_does_not_treat_text_outside_managed_block_as_managed_dependency(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "AGENTS.md"
             dest.write_text(
@@ -118,7 +118,7 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             self.assertIn((ROOT / "platforms/common-governance.md").read_text().strip(), fallback.read_text())
             self.assertNotIn("## Codex Hookless Fallback", dest.read_text())
 
-    def test_user_owned_fallback_blocks_loader_installation(self):
+    def test_markerless_fallback_blocks_loader_installation(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "AGENTS.md"
             fallback = dest.with_name("ghost-alice-governance.md")
@@ -161,11 +161,11 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             fallback = dest.with_name("ghost-alice-governance.md")
             dest.unlink()
             with patch.object(uninstall_cleanup, "_codex_home", return_value=Path(tmp)):
-                dry = uninstall_cleanup._global_rule_items("codex", confirm=False)
+                dry = uninstall_cleanup._global_rule_items("codex", apply_changes=False)
                 self.assertEqual(dry[-1]["path"], fallback.as_posix())
                 self.assertEqual(dry[-1]["action"], "would-remove-global-rule")
                 self.assertTrue(fallback.exists())
-                result = uninstall_cleanup._global_rule_items("codex", confirm=True)
+                result = uninstall_cleanup._global_rule_items("codex", apply_changes=True)
             self.assertEqual(result[-1]["action"], "removed-global-rule")
             self.assertFalse(fallback.exists())
 
@@ -179,8 +179,8 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             self.assertEqual(self.merge(dest).returncode, 0)
             dest.write_text("user-owned primary\n")
             with patch.object(uninstall_cleanup, "_codex_home", return_value=Path(tmp)):
-                dry = uninstall_cleanup._global_rule_items("codex", confirm=False)
-                result = uninstall_cleanup._global_rule_items("codex", confirm=True)
+                dry = uninstall_cleanup._global_rule_items("codex", apply_changes=False)
+                result = uninstall_cleanup._global_rule_items("codex", apply_changes=True)
             self.assertEqual([x["action"] for x in dry], ["unchanged", "would-remove-global-rule"])
             self.assertEqual([x["action"] for x in result], ["unchanged", "removed-global-rule"])
             self.assertEqual(dest.read_text(), "user-owned primary\n")
@@ -195,8 +195,8 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             fallback.mkdir()
             (fallback / "user.txt").write_text("preserve\n")
             with patch.object(uninstall_cleanup, "_codex_home", return_value=Path(tmp)):
-                for confirm in (False, True):
-                    result = uninstall_cleanup._global_rule_items("codex", confirm=confirm)
+                for apply_changes in (False, True):
+                    result = uninstall_cleanup._global_rule_items("codex", apply_changes=apply_changes)
                     self.assertEqual(result[-1]["action"], "manual-review")
             self.assertEqual((fallback / "user.txt").read_text(), "preserve\n")
 

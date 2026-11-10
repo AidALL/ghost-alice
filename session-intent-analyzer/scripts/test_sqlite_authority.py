@@ -24,7 +24,7 @@ class SQLiteAuthorityTests(unittest.TestCase):
         self.args = dict(root=self.root, platform="codex", session_id="session-a")
 
     def seed(self):
-        ledger.record_turn(**self.args, raw_user_input="first request")
+        ledger.record_turn(**self.args, raw_input="first request")
         return ledger.read_session_state(**self.args)
 
     def test_first_wal_transition_retries_busy_before_any_mutation(self):
@@ -99,7 +99,7 @@ class SQLiteAuthorityTests(unittest.TestCase):
         other = self.root / "other"
         with ledger.storage_transaction(other) as transaction:
             with self.assertRaisesRegex(ValueError, "root|database"):
-                ledger.record_turn(**self.args, raw_user_input="wrong root", transaction=transaction)
+                ledger.record_turn(**self.args, raw_input="wrong root", transaction=transaction)
 
     def test_migration_preserves_source_and_history_and_is_idempotent(self):
         self.assertTrue(hasattr(ledger, "migrate_session"), "legacy import API required")
@@ -114,6 +114,35 @@ class SQLiteAuthorityTests(unittest.TestCase):
         self.assertEqual(ledger.migrate_session(**self.args), state)
         self.assertEqual(ledger.migrate_session(**self.args), state)
         self.assertEqual(ledger.read_session_events(**self.args), [event])
+        self.assertEqual({key: paths[key].read_bytes() for key in originals}, originals)
+
+    def test_v1_input_history_survives_read_import_and_v2_write(self):
+        paths = ledger.session_paths(**self.args)
+        paths["dir"].mkdir(parents=True)
+        digest = ledger.text_digest("legacy input")
+        event_id = ledger.json_digest({"event": "user-input-observed", "input_digest": digest})
+        state = ledger.default_state("codex", "session-a")
+        state.update(schema_version="session-intent-ledger.v1", ledger_revision=1,
+                     latest_input_event_id=event_id, latest_input_digest=digest,
+                     latest_input_char_count=len("legacy input"))
+        event = dict(event="user-input-observed", platform="codex", session_id="session-a",
+                     event_id=event_id, input_event_id=event_id, input_digest=digest,
+                     input_char_count=len("legacy input"), ledger_revision=1,
+                     mutation_id="original-mutation", source="agent", ts="2026-01-01T00:00:00Z")
+        paths["state"].write_text(json.dumps(state))
+        paths["events"].write_text(json.dumps(event) + "\n")
+        originals = {key: paths[key].read_bytes() for key in ("state", "events")}
+        self.assertEqual(ledger.read_session_state(**self.args), state)
+        self.assertFalse(ledger.storage_database_path(self.root).exists())
+        ledger.migrate_session(**self.args)
+        with ledger.storage_transaction(self.root) as transaction:
+            self.assertEqual(ledger._current_observation_sequence(transaction, state), 1)
+        ledger.record_turn(**self.args, expected_input_event_id=event_id,
+                           intent_delta={"current_goal": "Continue the existing work"})
+        current = ledger.read_session_state(**self.args)
+        self.assertEqual(current["schema_version"], "session-intent-ledger.v2")
+        self.assertEqual(current["latest_input_event_id"], event_id)
+        self.assertEqual(ledger.read_session_events(**self.args)[0], event)
         self.assertEqual({key: paths[key].read_bytes() for key in originals}, originals)
 
     def test_corrupt_database_never_revives_legacy_export(self):
@@ -133,7 +162,7 @@ class SQLiteAuthorityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing|restore"):
             ledger.read_session_state(**self.args)
         with self.assertRaisesRegex(ValueError, "missing|restore"):
-            ledger.record_turn(**self.args, raw_user_input="must not reset history")
+            ledger.record_turn(**self.args, raw_input="must not reset history")
 
     def test_invalid_migration_does_not_create_partial_session(self):
         self.assertTrue(hasattr(ledger, "migrate_session"), "legacy import API required")

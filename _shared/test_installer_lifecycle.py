@@ -103,7 +103,7 @@ class UninstallTests(LifecycleCase):
         rc, out = self.captured(lifecycle.uninstall, self.ctx, ["--addon", "noop", "--addon", "known", "--addon", "gone", "--addon", "kept"])
         self.assertEqual(rc, 1)
         self.assertIn("[WARN] Addon gone: not installed (nothing to remove)", out)
-        self.assertIn("[WARN] Addon kept: uninstall left items for manual review", out)
+        self.assertIn("[WARN] Addon kept: uninstall left items for the human user to review", out)
         self.assertIn("[OK] 2 addon(s) removed.", out)
         self.assertEqual(self.calls.count("resume_pending_uninstalls"), 1)
         self.assertNotIn("run_full_uninstall", self.calls)
@@ -201,7 +201,7 @@ class FullUninstallTests(LifecycleCase):
         self.patches.enter_context(mock.patch("installer.addons.uninstall_all_before_full", return_value=False))
         rc, out = self.captured(lifecycle.run_full_uninstall, self.ctx)
         self.assertEqual(rc, 1)
-        self.assertIn("[ERROR] Full uninstall stopped because one or more addon targets need manual review.", out)
+        self.assertIn("[ERROR] Full uninstall stopped because one or more addon targets need the human user's review.", out)
 
     def test_run_uninstall_cleanup_arguments(self):
         # uninstall.sh:440-455
@@ -211,7 +211,7 @@ class FullUninstallTests(LifecycleCase):
             self.assertEqual(lifecycle.run_uninstall_cleanup(self.ctx), 1)
         self.assertEqual(runner.tool_calls("uninstall_cleanup.py")[0],
                          ["--platform", "claude", "--install-state-manifest", str(self.ghost / "install-state" / "claude.json"),
-                          "--confirm"])
+                          "--apply"])
 
 
 class RepairTests(LifecycleCase):

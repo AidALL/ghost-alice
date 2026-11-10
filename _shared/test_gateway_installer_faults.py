@@ -214,7 +214,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         current = json.loads((self.state / 'state.json').read_bytes())
         self.assertEqual((current['port'], current['scope']), (state['port'], state['scope']))
-        result, body = self.run_cli(arguments=['detach', '--user-home', str(self.home), '--confirm'])
+        result, body = self.run_cli(arguments=['detach', '--user-home', str(self.home), '--apply'])
         self.assertEqual((result.returncode, body['action']), (0, 'detached'))
         self.assertEqual((self.codex / 'config.toml').read_text(), 'model="native"\n')
         self.assertFalse(self.agent.exists())
@@ -358,7 +358,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
             environment = dict(self.environment, FAULT_CASE=fault)
             with mock.patch.dict(os.environ, environment, clear=True), \
                     mock.patch.object(gateway.sys, 'platform', 'darwin'):
-                return gateway_participant.removal(self.ghost, removing, remove_codex=False, confirm=True)
+                return gateway_participant.removal(self.ghost, removing, remove_codex=False, apply_changes=True)
 
         result = removal([self.root / 'independent-claude'])
         self.assertEqual(result['action'], 'unchanged')

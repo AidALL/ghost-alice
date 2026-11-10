@@ -43,7 +43,7 @@ Negatives to avoid:
 
 ## Judgment rules
 
-- Evaluate both missed intended triggers and new false triggers against the accepted discovery criteria. Higher recall alone does not establish a successful revision.
+- Evaluate both missed intended triggers and new false triggers against the discovery criteria of the affected evaluation that the response model defined before editing. Higher recall alone does not establish a successful revision.
 - If it triggers often on near-miss negatives, the description is exaggerated.
 
 ## Simple result-record example

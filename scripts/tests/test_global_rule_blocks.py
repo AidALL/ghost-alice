@@ -29,7 +29,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
         self.assertFalse('## First-Entry Contract' in body, 'project loader duplicates the common procedure')
         self.assertIn('installed common contract', body)
 
-    def test_platform_install_composes_one_common_source_and_preserves_user_rules(self):
+    def test_platform_install_composes_one_common_source_and_preserves_rules_outside_managed_block(self):
         blocks = _load_global_rule_blocks()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -89,7 +89,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
             self.assertIn(blocks.CLAUDE_MANAGED_BLOCK_BEGIN, proposed_body)
             self.assertIn("managed v2", proposed_body)
 
-    def test_existing_claude_managed_block_is_replaced_and_user_text_is_preserved(self) -> None:
+    def test_existing_claude_managed_block_is_replaced_and_text_outside_it_is_preserved(self) -> None:
         blocks = _load_global_rule_blocks()
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -113,7 +113,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
             self.assertNotIn("managed v1", body)
             self.assertIn("# user appendix\nkeep me\n", body)
 
-    def test_remove_claude_managed_block_preserves_user_text(self) -> None:
+    def test_remove_claude_managed_block_preserves_text_outside_it(self) -> None:
         blocks = _load_global_rule_blocks()
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -153,7 +153,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
             self.assertIn(blocks.CODEX_MANAGED_BLOCK_BEGIN, proposed_body)
             self.assertIn("managed v2", proposed_body)
 
-    def test_existing_codex_managed_block_is_replaced_and_user_text_is_preserved(self) -> None:
+    def test_existing_codex_managed_block_is_replaced_and_text_outside_it_is_preserved(self) -> None:
         blocks = _load_global_rule_blocks()
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -206,7 +206,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
             self.assertNotIn("managed v1", body)
             self.assertIn("# user appendix\nkeep me\n", body)
 
-    def test_remove_codex_managed_block_preserves_user_text(self) -> None:
+    def test_remove_codex_managed_block_preserves_text_outside_it(self) -> None:
         blocks = _load_global_rule_blocks()
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

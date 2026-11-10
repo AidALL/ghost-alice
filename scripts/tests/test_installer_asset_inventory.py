@@ -58,13 +58,13 @@ class InstallerAssetInventoryTest(unittest.TestCase):
         (path / "SKILL.md").write_text(body, encoding="utf-8")
         return path
 
-    def test_markerless_custom_skill_is_user_owned(self) -> None:
+    def test_markerless_custom_skill_is_unclaimed(self) -> None:
         custom = self._skill(self.skills, "my-local-skill")
 
         result = classify_skill_root(custom)
 
         self.assertEqual(result.asset_id, "my-local-skill")
-        self.assertEqual(result.ownership, "user-owned")
+        self.assertEqual(result.ownership, "unclaimed")
         self.assertEqual(result.reason, "no-ghost-alice-marker")
 
     def test_expected_markerless_target_is_legacy_no_baseline(self) -> None:
@@ -92,7 +92,7 @@ class InstallerAssetInventoryTest(unittest.TestCase):
         self.assertEqual(result.reason, "marker-and-hash-match")
         self.assertEqual(result.marker["asset_id"], "task-router")
 
-    def test_marker_hash_mismatch_is_user_modified_managed(self) -> None:
+    def test_marker_hash_mismatch_is_managed_with_external_change(self) -> None:
         managed = self._skill(self.skills, "task-router", "# original\n")
         write_ownership_marker(
             managed,
@@ -106,7 +106,7 @@ class InstallerAssetInventoryTest(unittest.TestCase):
 
         result = classify_skill_root(managed, expected_asset_id="task-router")
 
-        self.assertEqual(result.ownership, "user-modified-managed")
+        self.assertEqual(result.ownership, "externally-modified-managed")
         self.assertEqual(result.reason, "content-hash-mismatch")
 
     def test_symlink_to_repo_is_managed_and_broken_symlink_is_conflict(self) -> None:
@@ -137,7 +137,7 @@ class InstallerAssetInventoryTest(unittest.TestCase):
         self.assertEqual(broken_result.ownership, "ownership-conflict")
         self.assertEqual(broken_result.reason, "broken-symlink")
 
-    def test_markerless_global_rule_file_is_user_owned(self) -> None:
+    def test_markerless_global_rule_file_is_unmanaged(self) -> None:
         agents = self.root / ".codex" / "AGENTS.md"
         agents.parent.mkdir()
         agents.write_text("# my local rules\n", encoding="utf-8")
@@ -149,7 +149,7 @@ class InstallerAssetInventoryTest(unittest.TestCase):
 
         self.assertEqual(result.asset_id, "AGENTS.md")
         self.assertEqual(result.kind, "global-rule")
-        self.assertEqual(result.ownership, "user-owned")
+        self.assertEqual(result.ownership, "unclaimed")
         self.assertEqual(result.reason, "markerless-existing-rule-file")
 
     def test_inventory_includes_expected_absent_and_non_ascii_paths(self) -> None:
@@ -162,7 +162,7 @@ class InstallerAssetInventoryTest(unittest.TestCase):
         )
 
         by_asset = {item.asset_id: item for item in results}
-        self.assertEqual(by_asset["my-skill"].ownership, "user-owned")
+        self.assertEqual(by_asset["my-skill"].ownership, "unclaimed")
         self.assertEqual(by_asset["task-router"].ownership, "absent")
         self.assertEqual(by_asset["task-router"].reason, "expected-target-absent")
 

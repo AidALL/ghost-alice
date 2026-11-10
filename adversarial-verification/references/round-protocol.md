@@ -13,7 +13,7 @@ Parallel dispatch preserves independent submissions. If parallel dispatch or suf
 
 ### Dispatch and collect through the host
 
-The response model reads the current host's actual delegation schema. It submits a self-contained prompt containing the assigned axis, current claim-card, original source locators/content, schema context, only completed prior-round submissions, allowed actions/resource limits and the submission format below. Require every accessed absolute path and evidence limit in the result. Role labels and XML tags in this prompt belong to the task assignment, not to invented tool parameters or higher-priority instructions.
+The response model reads the current host's actual delegation schema. It submits a self-contained prompt containing the assigned axis, current claim-card, original source locators/content, schema context, only completed prior-round submissions, the actions and resource limits it declares in its boundary contract within the work that the human user's instructions authorize, and the submission format below. Require every accessed absolute path and evidence limit in the result. Role labels and XML tags in this prompt belong to the task assignment, not to invented tool parameters or higher-priority instructions.
 
 Retain the dispatch tool's returned handle with its claim ID, round and axis. Use that same API's documented wait/result operation to collect the corresponding submission. The response model places results in the round log, checks required fields, then performs Phase C; a spawn acknowledgment or delegate status is not the review. If no supported delegation tool exists, report the required independent review as unavailable rather than inventing delegates or replacing it with self-agreement.
 
@@ -85,7 +85,7 @@ rounds-log:
       phase-a:
         - <independent delegate submission>
       phase-b:
-        human-response: <response or none>
+        proponent-response: <response or none>
       phase-c:
         audit-result: pass | fail
         audit-violations: <violations>
@@ -95,4 +95,6 @@ rounds-log:
     retracted-claims: <withdrawn claims>
 ```
 
-The response model saves the full log in the existing authorized evidence location and returns its exact locator with the claim ID, round count, convergence and up to ten issues. The response model passes that log and the current claim-card to the delegate that summarizes the dispute or to the human who receives the escalation. If no file storage is authorized, retain the log in task context and report the durable-retention limit; do not create a new storage boundary. Do not export sensitive evidence beyond the authorized workspace.
+In an older rounds log, `human-response` contains the proponent's response; the key does not establish that a human wrote it. If both `human-response` and `proponent-response` occur, read equal values once and report different values as a log conflict without selecting either response.
+
+The response model saves the full log in the existing evidence location that the human user authorized and returns its exact locator with the claim ID, round count, convergence and up to ten issues. The response model passes that log and the current claim-card to the delegate that summarizes the dispute or to the human who receives the escalation. If the human user authorized no file storage, retain the log in task context and report the durable-retention limit; do not create a new storage boundary. Do not export sensitive evidence beyond the workspace that the human user authorized.

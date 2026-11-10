@@ -15,7 +15,7 @@ Before editing, identify the exact skill decision that is wrong or ambiguous. Re
 
 Write a reusable technique, pattern or reference when repeated work benefits from it. Keep one-off project rules in project instructions. Do not create a skill merely because a regular expression or existing automation can enforce the constraint.
 
-Define the affected evaluation before editing. Include only cases whose outcomes can change acceptance or the next correction. For executable behavior, the response model follows test-driven-development for the code and test being changed.
+Define the affected evaluation before editing. Include only cases whose outcomes can change the response model's judgment of an acceptance criterion or the next correction. For executable behavior, the response model follows test-driven-development for the code and test being changed.
 
 ## Author the package
 
@@ -33,7 +33,7 @@ Do not add hypothetical defenses or repeat a prohibition merely to increase emph
 2. Edit the affected body, callers and references to remove the demonstrated contradiction.
 3. Run the affected pressure, application or source-contract check required by the task and record the actual outcome and limits.
 4. If an observation contradicts a requirement, follow the [diagnostic procedure](references/bulletproofing-skills.md#procedure) to select and apply the justified correction, then repeat only the affected checks.
-5. Distribute or commit only under the user's existing authorization and after required validation succeeds.
+5. Distribute or commit only under the human user's existing authorization and after required validation succeeds.
 
 Coordinated changes may span packages; each changed package still needs its own disposition.
 
@@ -55,6 +55,6 @@ Verification-before-completion defines useful-check selection, evidence reuse, o
 | Pressure dimensions for a case | [persuasion-principles.md](references/persuasion-principles.md) |
 | A post-evaluation contradiction | [review-loop.md](references/review-loop.md) |
 | Test method by skill type | [skill-testing-guide.md](references/skill-testing-guide.md) |
-| Authorized delegate evaluation | [testing-skills-with-subagents.md](references/testing-skills-with-subagents.md) |
+| Delegate evaluation that the human user authorized | [testing-skills-with-subagents.md](references/testing-skills-with-subagents.md) |
 | Trigger precision and recall | [trigger-eval.md](references/trigger-eval.md) |
 | Discovery scenario example | [CLAUDE_MD_TESTING.md](references/examples/CLAUDE_MD_TESTING.md) |

@@ -219,7 +219,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                           "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); "
                           "import session_intent_ledger as ledger; "
                           "ledger.record_turn(root=Path(sys.argv[2]), platform=sys.argv[3], session_id=sys.argv[4], "
-                          "raw_user_input='Synthetic isolated admission case.', source='cli')",
+                          "raw_input='Synthetic isolated admission case.', recording_path='cli')",
                           str(self.ledger.parent), str(self.ledger_root), platform, session])
         state = self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
                                   "--platform", platform, "--session-id", session, "--snapshot"])
@@ -297,8 +297,8 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                                     extra={"last_assistant_message": bad, "prompt_response": valid_text()}))
 
     def test_last_reply_only_after_meta_tool_results_and_ask_answers(self):
-        boundaries = (prompt("A real subsequent question."),
-                      prompt([{ "type": "text", "text": "A real subsequent question."}]),
+        boundaries = (prompt("A subsequent prompt."),
+                      prompt([{ "type": "text", "text": "A subsequent prompt."}]),
                       prompt("Stop hook feedback: [completion-gate] previous defect", isMeta=True),
                       prompt("Other meta feedback", isMeta=True),
                       prompt([{"type": "tool_result", "tool_use_id": "synthetic-read", "content": "Read result"}]),
@@ -318,16 +318,16 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
 
     def test_claude_review_is_independent_of_skill_call_display(self):
         good = valid_text()
-        for boundary in (prompt('Real new input'), prompt('meta', isMeta=True),
+        for boundary in (prompt('New prompt'), prompt('meta', isMeta=True),
                          prompt([{'type':'tool_result', 'content':'answer'}])):
             with self.subTest(boundary=boundary):
                 self.assert_allow(self.stop('claude', None,
                     entries=[prompt(), skill(), reply(good), boundary, reply(good)]))
 
 
-    def test_no_current_reply_after_real_input_cannot_revalidate_previous_answer(self):
-        boundaries = ((True, prompt("A real new user input.")),
-                      (True, prompt([{"type": "text", "text": "A real new user input."}])),
+    def test_no_current_reply_after_new_prompt_cannot_revalidate_previous_answer(self):
+        boundaries = ((True, prompt("A new prompt.")),
+                      (True, prompt([{"type": "text", "text": "A new prompt."}])),
                       (False, prompt("Meta feedback", isMeta=True)),
                       (False, prompt([{"type": "tool_result", "tool_use_id": "read", "content": "tool result"}])),
                       (False, prompt([{"type": "tool_result", "tool_use_id": "ask", "content": "Option A"}])))
@@ -419,7 +419,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 bad = good.replace("    evidence: synthetic calculation subprocess exited 0\n", "")
                 scenarios = ((True, good, [prompt(), skill(), reply(good)]),
                              (False, bad, [prompt(), skill(), reply(bad)]),
-                             (True, "", [prompt(), skill(), reply(bad), prompt("Real new user input.")]))
+                             (True, "", [prompt(), skill(), reply(bad), prompt("New prompt.")]))
                 for index, (allowed, direct, entries) in enumerate(scenarios):
                     with self.subTest(platform=platform, profile=profile, scenario=index):
                         transcript = home / f"synthetic-completion-{index}.jsonl"
@@ -460,18 +460,18 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 self.assertNotIn("permissionDecision", json.loads(row["stdout"]).get("hookSpecificOutput", {}))
                 # Current work admission remains a separate owning Core check.
                 # A checkpoint or broader focus cannot admit the prohibited unit.
-                criterion = dict(id="protected-resource", summary="Protected target requires admission",
-                                 source="user-said", admitted=False,
+                criterion = dict(id="protected-resource", summary="Core code must not select this criterion while selectable is false",
+                                 source="user-said", selectable=False,
                                  work_unit_id="protected-unit", contract_revision=1)
                 self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
                     "--platform", platform, "--session-id", session, "--expected-input-event-id", event_id,
-                    "--delta-json", json.dumps({"constraints":["Do not use the protected target without admission."],
+                    "--delta-json", json.dumps({"constraints":["Do not use the protected target without the human user's authorization."],
                                                 "acceptance_criteria":[criterion]})])
                 protected = json.loads(self.run_process(state_command).stdout)
-                candidate = dict(schema_version="response-route.v1", routing_surface={
+                candidate = dict(schema_version="response-route.v2", routing_surface={
                     "response_mode":"normal", "boundary_contract":"required",
                     "reason":"Focus cannot grant resource authority"},
-                    work_units=[dict(work_unit_id="protected-unit", contract_revision=1, kind="execution", admitted=True,
+                    work_units=[dict(work_unit_id="protected-unit", contract_revision=1, kind="execution", selectable=True,
                                      owner=dict(platform=platform, session_id=session))],
                     selected_work_unit_ids=["protected-unit"],
                     selected_criteria=[dict(work_unit_id="protected-unit", contract_revision=1, criterion_id="protected-resource")])
@@ -483,7 +483,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 self.assertEqual(rejected.returncode, 1, rejected.stdout + rejected.stderr)
                 diagnostic = json.loads(rejected.stderr)
                 self.assertEqual(diagnostic["error"], "route-schema")
-                self.assertIn("admitted owned criterion", diagnostic["message"])
+                self.assertIn("selectable owned criterion", diagnostic["message"])
                 self.assertEqual(json.loads(self.run_process(state_command).stdout), protected)
                 self.assertIsNone(protected["response_route"])
                 # New input changes the input lineage.

@@ -38,7 +38,7 @@ Common commands:
   --agent-visibility strict|dynamic|minimal
                           Alias for --visibility
   --doctor               Run install diagnostics
-  --repair               Re-provision missing managed targets (never overwrites user-owned slots)
+  --repair               Re-provision missing managed targets (never overwrites an occupied slot that is not a clean managed target)
   --verbose, -v          Show per-target install details
 
 Removal commands:
@@ -46,7 +46,7 @@ Removal commands:
   --platform PLAT --uninstall SKILL_NAMES
                           Remove selected skills from one platform
 
-Advanced/operator commands:
+Advanced commands:
   SKILL_NAMES            Install specified skills only
   --list, -l             List available skills
   --cleanup-pending      Clean false-positive pending entries
@@ -645,7 +645,7 @@ class PostMergeTests(DispatchCase):
         self.assertNotIn("acquire", self.names())
 
     def test_another_checkout_reports_one_line_and_installs_nothing(self):
-        # A recorded source that no longer exists is replaced only by an install the user runs, never by a merge.
+        # A recorded source that no longer exists is replaced only by a direct install run, never by the post-merge hook after a merge.
         for recorded in (self.other, self.home.parent / "removed-clone"):
             with self.subTest(recorded=recorded.name):
                 self.calls.clear()

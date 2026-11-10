@@ -38,7 +38,7 @@ class ManifestError(Exception):
 @contextlib.contextmanager
 def _exclusive_lock(path: Path):
     """The lock on the sibling .lock file. The manifest itself is replaced by rename, so a lock on it would not guard
-    the version that replaces it. An entry points at a backed-up user edit, so a lock the file system refuses raises
+    the version that replaces it. An entry points at a backed-up external change, so a lock the file system refuses raises
     instead of letting the writer go on."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with file_lock.exclusive(path.with_suffix(path.suffix + ".lock"), wait=MANIFEST_LOCK_WAIT_S, must_lock=True):
@@ -116,8 +116,11 @@ def append_entry_if_absent(path: Path, entry: dict, unique_keys: list[str]) -> b
 
 
 def mark_decided(path: Path, entry_id: str, decision: str) -> None:
-    """Update an entry to a decided state.
+    """Record the caller's supplied merge, discard or defer outcome.
 
+    The response model records the human user's choice after carrying it out;
+    a caller the human user authorized may also record deferral in a non-interactive run.
+    This function checks neither who chose nor who called it, and the entry records neither.
     decision must be one of "merged" | "discarded" | "deferred".
     Raises ManifestError when entry_id is not found.
     """
@@ -135,6 +138,9 @@ def mark_decided(path: Path, entry_id: str, decision: str) -> None:
 
 
 def list_pending(path: Path) -> list[dict]:
-    """Return entries where decided=False."""
+    """Return entries where decided=False, including recorded deferrals.
+
+    The outcome keys do not identify who wrote them or prove that the human user chose.
+    """
     data = read_manifest(path)
     return [e for e in data["entries"] if not e.get("decided", False)]

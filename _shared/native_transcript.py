@@ -1,7 +1,8 @@
 """Native transcript boundaries shared by intake and completion consumers.
 
-Dependencies: Python standard library. Native metadata, never message wording,
-identifies the actor. Unresolved transport never becomes user authority.
+Dependencies: Python standard library. Core code classifies rows by the host's
+delivery and origin markers, which do not prove a human sender. Unresolved
+transport never becomes the current input that Core code recorded.
 """
 from __future__ import annotations
 
@@ -96,7 +97,7 @@ def is_task_notification(entry):
             and message.get('commandMode') == 'task-notification'))
 
 
-def is_actual_user_prompt(entry):
+def is_user_role_prompt(entry):
     if entry.get('type') != 'user' or entry.get('isMeta') or is_task_notification(entry):
         return False
     message = entry.get('message')
@@ -138,12 +139,12 @@ def is_queued_human_prompt(entry):
 
 
 def is_prompt_row(entry):
-    """Row that starts the current input's turn, for intake and completion consumers alike."""
-    return is_actual_user_prompt(entry) or is_queued_human_prompt(entry)
+    """Start a turn at a user-role prompt row or a queued prompt carrying the host's human-origin marker."""
+    return is_user_role_prompt(entry) or is_queued_human_prompt(entry)
 
 
 def assistant_text_this_turn(entries):
-    """Select the last Claude assistant message after the latest human input."""
+    """Select the last Claude assistant message after the latest turn-starting prompt row."""
     start = next((i for i in range(len(entries) - 1, -1, -1)
                   if is_prompt_row(entries[i])), -1)
     for entry in reversed(entries[start + 1:]):
@@ -158,13 +159,13 @@ def assistant_text_this_turn(entries):
     return ''
 
 
-def stop_response_text(native_input):
+def stop_response_text(hook_payload):
     """Select one native Stop body for both Core and its completion consumer.
 
     Inline event text outranks a transcript that can lag behind that event.
     Transcript fallback retains native session and turn boundaries.
     """
-    data = native_input if isinstance(native_input, dict) else {}
+    data = hook_payload if isinstance(hook_payload, dict) else {}
     for key in ('last_assistant_message', 'lastAssistantMessage', 'prompt_response', 'promptResponse'):
         value = data.get(key)
         if isinstance(value, str) and value.strip():
@@ -201,8 +202,8 @@ def stop_response_text(native_input):
         if row.get('sessionId') == session and not row.get('isSidechain')])
 
 
-def native_tool_activity(platform, session_id, native_input, *, input_observation=None):
-    """Observe calls after the current human input; unavailable evidence is not absence.
+def native_tool_activity(platform, session_id, hook_payload, *, input_observation=None):
+    """Observe calls after the turn's latest prompt row; unavailable evidence is not absence.
 
     This establishes native activity only. It neither judges the response's
     meaning nor substitutes for the current Core route or authenticated review.
@@ -210,7 +211,7 @@ def native_tool_activity(platform, session_id, native_input, *, input_observatio
     def result(status, reason):
         return dict(status=status, reason=reason)
 
-    data = native_input if isinstance(native_input, dict) else {}
+    data = hook_payload if isinstance(hook_payload, dict) else {}
     if (platform not in {'claude', 'codex'} or not isinstance(session_id, str) or not session_id
             or (data.get('session_id') or data.get('sessionId')) != session_id):
         return result('unavailable', 'native-owner-mismatch')
@@ -233,10 +234,11 @@ def native_tool_activity(platform, session_id, native_input, *, input_observatio
                     if row.get('type') == 'turn_context' and isinstance(row.get('payload'), dict)]
         if not isinstance(turn_id, str) or not turn_id or not contexts or contexts[-1] != turn_id:
             return result('unavailable', 'native-turn-unavailable')
-        # A host turn can contain several human inputs. Native actor metadata
-        # locates the latest human message; the ledger observation binds its
-        # content to this input independently of tool or hook message wording.
-        human = None
+        # A Codex turn can contain several messages under the user role. Core code
+        # locates the latest one in the current turn by the content kind `user.text`
+        # that Codex writes on a message; the ledger observation binds its content
+        # to the current input that Core code recorded, independently of tool or hook message wording.
+        user_text_message = None
         for index, row in enumerate(rows):
             payload = row.get('payload')
             if (row.get('type') != 'response_item' or not isinstance(payload, dict)
@@ -246,10 +248,10 @@ def native_tool_activity(platform, session_id, native_input, *, input_observatio
             if (isinstance(metadata, dict) and metadata.get('turn_id') == turn_id
                     and isinstance(metadata.get('content_item_kinds'), list)
                     and 'user.text' in metadata['content_item_kinds']):
-                human = (index, payload)
-        if human is None:
+                user_text_message = (index, payload)
+        if user_text_message is None:
             return result('unavailable', 'native-user-boundary-unavailable')
-        content = human[1].get('content')
+        content = user_text_message[1].get('content')
         texts = [part.get('text') for part in content
                  if isinstance(part, dict) and part.get('type') == 'input_text'] if isinstance(content, list) else []
         if not texts or any(not isinstance(text, str) for text in texts):
@@ -258,7 +260,7 @@ def native_tool_activity(platform, session_id, native_input, *, input_observatio
         if not matches_input(text, input_observation):
             return result('unavailable', 'native-input-observation-mismatch')
         active_turn = turn_id
-        for row in rows[human[0] + 1:]:
+        for row in rows[user_text_message[0] + 1:]:
             payload = row.get('payload')
             if not isinstance(payload, dict):
                 continue
@@ -325,10 +327,10 @@ def native_input_actor(entry):
     if is_queued_human_prompt(entry):
         return 'human'
     origin = entry.get('origin')
-    if (is_actual_user_prompt(entry) and isinstance(origin, dict) and origin.get('kind') == 'human'
+    if (is_user_role_prompt(entry) and isinstance(origin, dict) and origin.get('kind') == 'human'
             and entry.get('promptSource') != 'system' and entry.get('turnOrigin') in (None, 'human')):
         return 'human'
-    if (is_actual_user_prompt(entry) and origin is None
+    if (is_user_role_prompt(entry) and origin is None
         and entry.get('entrypoint') in SDK_ENTRYPOINTS and entry.get('userType') == 'external'
         and entry.get('promptSource') == 'sdk' and entry.get('turnOrigin') == 'sdk'
         and (entry.get('isMeta') is None or entry.get('isMeta') is False)

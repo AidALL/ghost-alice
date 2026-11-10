@@ -16,8 +16,8 @@ GHOST_ALICE_MANAGED_BY = "Ghost-ALICE"
 
 OWNERSHIP_ABSENT = "absent"
 OWNERSHIP_GHOST_ALICE_MANAGED = "ghost-alice-managed"
-OWNERSHIP_USER_MODIFIED_MANAGED = "user-modified-managed"
-OWNERSHIP_USER_OWNED = "user-owned"
+OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED = "externally-modified-managed"
+OWNERSHIP_UNCLAIMED = "unclaimed"
 OWNERSHIP_LEGACY_NO_BASELINE = "legacy-no-baseline"
 OWNERSHIP_CONFLICT = "ownership-conflict"
 
@@ -153,7 +153,7 @@ def _classify_repo_link(
         path=path,
         kind=KIND_SKILL_ROOT,
         asset_id=asset_id,
-        ownership=OWNERSHIP_USER_OWNED,
+        ownership=OWNERSHIP_UNCLAIMED,
         reason=f"{link_kind}-outside-repo",
         link_target=str(target),
     )
@@ -238,7 +238,7 @@ def classify_skill_root(
                 OWNERSHIP_LEGACY_NO_BASELINE,
                 "expected-ghost-alice-target-without-marker",
             )
-        return AssetClassification(path, KIND_SKILL_ROOT, asset_id, OWNERSHIP_USER_OWNED, "no-ghost-alice-marker")
+        return AssetClassification(path, KIND_SKILL_ROOT, asset_id, OWNERSHIP_UNCLAIMED, "no-ghost-alice-marker")
 
     marker_asset_id = marker.get("asset_id")
     if expected_asset_id and marker_asset_id != expected_asset_id:
@@ -256,7 +256,7 @@ def classify_skill_root(
             path,
             KIND_SKILL_ROOT,
             marker_asset_id or asset_id,
-            OWNERSHIP_USER_MODIFIED_MANAGED,
+            OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED,
             "content-hash-mismatch",
             marker,
         )
@@ -297,7 +297,7 @@ def classify_global_rule_file(
     if managed_block_begin and managed_block_end and managed_block_begin in body and managed_block_end in body:
         return AssetClassification(path, KIND_GLOBAL_RULE, asset_id, OWNERSHIP_GHOST_ALICE_MANAGED, "managed-block-present")
 
-    return AssetClassification(path, KIND_GLOBAL_RULE, asset_id, OWNERSHIP_USER_OWNED, "markerless-existing-rule-file")
+    return AssetClassification(path, KIND_GLOBAL_RULE, asset_id, OWNERSHIP_UNCLAIMED, "markerless-existing-rule-file")
 
 
 def inventory_skill_roots(

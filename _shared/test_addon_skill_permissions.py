@@ -41,7 +41,7 @@ class AddonSkillPermissionTest(unittest.TestCase):
     def detach(self,settings,**kwargs):
         return permissions.detach(self.record,self.settings,settings,{'task-router'},self.write,**kwargs)
 
-    def test_added_rule_removed_without_changing_core_or_user_grants(self):
+    def test_added_rule_removed_without_changing_core_or_preexisting_rules(self):
         before=['Skill(task-router)','Bash(user-command)']
         settings=self.prepare(before,before+['Skill(pilot)'])
         rows=self.detach(settings)
@@ -49,7 +49,7 @@ class AddonSkillPermissionTest(unittest.TestCase):
         self.assertEqual(rows[0]['action'],'removed')
         self.assertFalse(permissions._state_path().exists())
 
-    def test_preexisting_identical_rule_and_duplicate_user_rule_preserved(self):
+    def test_preexisting_identical_rule_and_later_duplicate_rule_preserved(self):
         before=['Skill(task-router)','Skill(pilot)']
         settings=self.prepare(before,before[:])
         self.assertEqual(self.detach(settings)[0]['action'],'preserved-existing')
@@ -75,7 +75,7 @@ class AddonSkillPermissionTest(unittest.TestCase):
         import addon_uninstall
         self.prepare([],['Skill(pilot)'])
         self.settings.unlink()
-        addon_uninstall._skill_permission_items(self.record,platform='claude',confirm=True)
+        addon_uninstall._skill_permission_items(self.record,platform='claude',apply_changes=True)
         self.assertFalse(permissions._state_path().exists())
 
     def test_dry_run_preserves_settings_and_ownership(self):
@@ -139,7 +139,7 @@ class AddonSkillPermissionTest(unittest.TestCase):
         self.assertEqual(resumed.returncode,2,resumed.stderr)
         self.assertEqual(json.loads(resumed.stdout)['resumed'][0]['status'],'error')
 
-    def test_codex_owned_addon_hook_trust_removed_preserving_core_and_user_tables(self):
+    def test_codex_owned_addon_hook_trust_removed_preserving_core_and_unmanaged_tables(self):
         import install_hooks
         import tomllib
         marker='[addon:demo] continue'
@@ -173,7 +173,7 @@ class AddonSkillPermissionTest(unittest.TestCase):
         settings_file.write_text(json.dumps(settings))
         key=install_hooks._codex_hook_state_key(settings_file,'Stop',0,0)
         config=self.settings.parent/'config.toml'
-        config.write_text(install_hooks._merge_codex_hook_trust_state('',{key:'user-changed-hash'})[0])
+        config.write_text(install_hooks._merge_codex_hook_trust_state('',{key:'changed-hash'})[0])
         install_hooks.remove_addon_hook(marker,platform_key='codex')
         self.assertEqual(tomllib.loads(config.read_text()).get('hooks',{}).get('state',{}),{})
         settings_file.write_text(json.dumps(settings))

@@ -67,7 +67,7 @@ class TestAgentVisibilityPolicy(unittest.TestCase):
 
     def test_block_output_is_forced(self):
         decision = self._decide("minimal", hook_id="completion", event="Stop",
-                                stdout='{"decision": "block", "reason": "Continue the approved work."}')
+                                stdout='{"decision": "block", "reason": "Continue the current work."}')
 
         self.assertEqual(decision, {"visible_decision": "force_show", "reason": "forced-verification"})
 

@@ -118,7 +118,7 @@ class SourceHealthTests(SourceCase):
         self.assertFalse(ok)
         self.assertIn("[ERROR] Source branch is behind its upstream; refusing to install from stale source.", out)
         self.assertIn("Run git fetch origin, inspect git status, then fast-forward or otherwise reconcile this checkout "
-                      "before installing. If this local source is intentional, rerun with --skip-source-health.", out)
+                      "before installing. If the human user decided to install from this local source, rerun with --skip-source-health.", out)
         self.assertIn("To preserve source-local changes while updating, run bash install.sh --update-source.", out)
         with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_COMMAND": ".\\install.cmd"}):
             _, out = self.check(clone)
@@ -162,7 +162,7 @@ class SourceHealthTests(SourceCase):
         (repo / "tracked.txt").write_text("changed\n", encoding="utf-8")
         ok, out = self.check(repo)
         self.assertTrue(ok)
-        self.assertIn("[WARN] Source tree has tracked local changes; continuing. Installed target user edits remain "
+        self.assertIn("[WARN] Source tree has tracked local changes; continuing. External changes to installed targets remain "
                       "protected by pending-merges backup and manifest checks.", out)
 
 
@@ -351,7 +351,7 @@ STOP_HINT = ("Rerun this command from the install source, or add --adopt-source 
 class InstallSourceTests(SourceCase):
     """The install record names the checkout the installation came from (`source.root`). Before an install or a
     repair changes anything, the installer compares that folder with the checkout it runs from, both with links
-    followed: no record or no source goes on, the same folder goes on, another folder asks at a terminal and
+    followed: no record or no source goes on, the same folder goes on, the installer asks at a terminal for another folder and
     stops elsewhere."""
 
     def setUp(self):
@@ -457,7 +457,7 @@ class InstallSourceTests(SourceCase):
         self.assertIn(f"[WARN]   Install source: {self.other}\n", out)
         self.assertIn(f"[WARN]   This checkout:  {self.here.resolve()}\n", out)
         self.assertIn(f"[INFO] Install source: this checkout replaces {self.other}", out)
-        # The answer travels with the command, so the auto mode's children do not ask again.
+        # The yes typed at the installer's terminal question travels as --adopt-source, so the auto mode's children do not ask again. The installer does not check who typed it.
         self.assertTrue(self.ctx.options.adopt_source)
         for answer in ("", "n", "no", "maybe", EOFError()):
             with self.subTest(answer=answer):

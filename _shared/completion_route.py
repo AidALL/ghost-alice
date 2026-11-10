@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from response_route import RouteSchemaError, validate_routing_surface
+from response_route import RouteSchemaError, route_comparison_view, validate_routing_surface
 
 
 def _mapping(value):
@@ -16,7 +16,9 @@ def _bound_selection(context):
     route = context.get("response_route")
     if route is None:
         return "missing"
-    if not isinstance(route, dict) or route.get("schema_version") != "response-route.v1":
+    try:
+        route = route_comparison_view(route)
+    except RouteSchemaError:
         return "invalid"
     if route.get("status") != "ready":
         return "stale"
@@ -42,10 +44,10 @@ def _bound_selection(context):
         unit_id, revision = unit.get("work_unit_id"), unit.get("contract_revision")
         if (not isinstance(unit_id, str) or not unit_id or unit_id in by_id
                 or type(revision) is not int or revision < 1 or unit.get("owner") != owner
-                or unit.get("kind") not in ("execution", "nonexecution") or type(unit.get("admitted")) is not bool):
+                or unit.get("kind") not in ("execution", "nonexecution") or type(unit.get("selectable")) is not bool):
             return "invalid"
         by_id[unit_id] = unit
-    if (not all(isinstance(u, str) and u in by_id and by_id[u]["admitted"] is True for u in selected)
+    if (not all(isinstance(u, str) and u in by_id and by_id[u]["selectable"] is True for u in selected)
             or len(selected) != len(set(selected))):
         return "invalid"
     seen = set()
@@ -54,7 +56,7 @@ def _bound_selection(context):
         if (not isinstance(criterion, dict) or not isinstance(key[0], str) or key[0] not in selected
                 or type(key[1]) is not int or key[1] != by_id[key[0]]["contract_revision"]
                 or not isinstance(key[2], str) or not key[2] or key[2] != criterion.get("id")
-                or criterion.get("admitted") is not True or key in seen):
+                or criterion.get("selectable") is not True or key in seen):
             return "invalid"
         seen.add(key)
     return "current"

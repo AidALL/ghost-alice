@@ -1,4 +1,4 @@
 {
   "tool-checkpoint": "tool-checkpoint: Follow the common contract's io-trace Transparency Rule for a decision-relevant checkpoint before this tool call.",
-  "session-intent": "session-intent-analyzer: The hook records digest-only intake for the native session. The response model retrieves stored intent only when it affects a decision or a semantic update, using the exact receipt. Core code validates canonical state for dependent writes and authority. Intent records must exclude raw prompts, conversation/tool output, system instructions and secrets."
+  "session-intent": "session-intent-analyzer: The hook records digest-only intake for the native session. The response model retrieves its interpreted-as record only when it affects a decision or a semantic update, using the exact session metadata. Core code validates canonical state and the binding to the current input that Core code recorded before dependent writes. The response model's interpreted-as record must exclude raw prompts, conversation/tool output, system instructions and secrets."
 }

@@ -186,10 +186,11 @@ class GatewayParticipant:
         self.stopped = False
 
 
-def removal(ghost_root: Path | str, removing, *, remove_codex: bool = False, confirm: bool = True, effects=None,
+def removal(ghost_root: Path | str, removing, *, remove_codex: bool = False, apply_changes: bool = True, effects=None,
             platform: str | None = None) -> dict:
     """Judge a removal of `removing` and detach the registered service when it is touched.
 
+    The caller's apply_changes selects detachment over a preview; the installer records no person's confirmation.
     Returns the gateway item of the removal report: `missing` (no service), `unchanged` (independent),
     `would-detach` (a preview) or `detached`. Raises GatewayBlocked, GatewayServiceError or GatewayFailure
     with the exit code of the cause.
@@ -207,7 +208,7 @@ def removal(ghost_root: Path | str, removing, *, remove_codex: bool = False, con
         return _unregistered(io, removing, platform)
     if not affects(service, removing, remove_codex=remove_codex):
         return dict(kind="context-gateway", action="unchanged", reason="independent-gateway-runtime")
-    result = gateway.detach(confirm=confirm, home=ghost_root.parent, io=io, host_platform=platform)
+    result = gateway.detach(apply_changes=apply_changes, home=ghost_root.parent, io=io, host_platform=platform)
     return {"kind": "context-gateway", **result}
 
 
@@ -275,7 +276,7 @@ def guard(ghost_root: Path | str, removing, *, effects=None, platform: str | Non
     """`removal` as an exit code for the selected removal: 0 to go on, else the cause's code with its
     diagnostic on stderr."""
     try:
-        removal(ghost_root, removing, remove_codex=False, confirm=True, effects=effects, platform=platform)
+        removal(ghost_root, removing, remove_codex=False, apply_changes=True, effects=effects, platform=platform)
     except (GatewayBlocked, GatewayServiceError, GatewayFailure) as exc:
         print(json.dumps(dict(status=exc.outcome, error_code=exc.code, phase=exc.phase, detail=str(exc))), file=sys.stderr)
         return exc.exit_code

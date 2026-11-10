@@ -101,7 +101,7 @@ class TransactionTests(unittest.TestCase):
 
     def observed_id(self):
         rows = self.events()
-        return [x["event_id"] for x in rows if x["event"] == "user-input-observed"][-1]
+        return [x["event_id"] for x in rows if x["event"] == "input-observed"][-1]
 
     def criterion(self):
         return self.state()["acceptance_criteria"][0]
@@ -141,16 +141,16 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(self.state(), before)
 
     def test_active_input_requires_explicit_expected_input(self):
-        self.write(raw_user_input="first request")
+        self.write(raw_input="first request")
         before = self.state()
         with self.assertRaisesRegex(ValueError, "expected.input"):
             self.write(intent_delta={"current_goal": "unbound"})
         self.assertEqual(self.state(), before)
 
     def test_stale_input_is_rejected_after_new_intake(self):
-        self.write(raw_user_input="first request")
+        self.write(raw_input="first request")
         old_id = self.observed_id()
-        self.write(raw_user_input="revised request")
+        self.write(raw_input="revised request")
         before = self.state()
         with self.assertRaisesRegex(ValueError, "stale"):
             self.write(intent_delta={"current_goal": "old goal"}, expected_input_event_id=old_id)
@@ -159,7 +159,7 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(self.state()["current_goal"], "new goal")
 
     def test_a_stored_field_the_ledger_does_not_define_never_blocks_later_writes(self):
-        self.write(raw_user_input="first request")
+        self.write(raw_input="first request")
         state = self.state()
         state["undefined_field"] = {"value": 1}
         self.write_database_state(state)
@@ -179,11 +179,11 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(self.state()["current_goal"], "next goal")
         self.write(intent_delta={"acceptance_criteria": [dict(self.criterion(), summary="Validate revision two")]})
         self.assertEqual(self.state()["acceptance_criteria"], [
-            {"id": "report", "summary": "Validate revision two", "source": "user-said", "admitted": True},
-            {"id": "other", "summary": "Keep the other row", "source": "user-said", "admitted": True}])
+            {"id": "report", "summary": "Validate revision two", "source": "user-said", "selectable": True},
+            {"id": "other", "summary": "Keep the other row", "source": "user-said", "selectable": True}])
 
     def test_a_write_checks_the_stored_identity(self):
-        self.write(raw_user_input="request")
+        self.write(raw_input="request")
         state = self.state()
         anchor = self.observed_id()
         state["platform"] = "claude"
@@ -291,7 +291,7 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
         self.assertEqual(failures, [])
 
     def test_semantic_history_records_corrections_as_digests_without_raw_fields(self):
-        self.write(raw_user_input="RAW_USER_PROMPT", intent_delta={"current_goal": "Inspect configuration"})
+        self.write(raw_input="RAW_USER_PROMPT", intent_delta={"current_goal": "Inspect configuration"})
         anchor = self.observed_id()
         self.write(expected_input_event_id=anchor, intent_delta={
             "current_goal": "Repair the diagnosed configuration",
@@ -359,7 +359,7 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
         self.assertEqual(list(self.root.rglob("*")), [])
 
     def test_legacy_valid_header_migrates_input_anchor_with_cas(self):
-        self.write(raw_user_input="legacy input")
+        self.write(raw_input="legacy input")
         anchor = self.observed_id()
         legacy = self.state()
         original_events = self.events()
@@ -377,7 +377,7 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
         self.assertEqual(self.state()["ledger_revision"], 1)
 
     def test_one_legacy_import_reader_serves_the_writer_and_the_import_check(self):
-        self.write(raw_user_input="legacy input")
+        self.write(raw_input="legacy input")
         legacy = self.state()
         original_events = self.events()
         self.root = self.root / "legacy-import"
@@ -403,7 +403,7 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
         self.assertEqual(len(events), len(original_events) + 1)
 
     def test_an_import_that_also_attested_an_unread_file_keeps_its_event_count(self):
-        self.write(raw_user_input="legacy input")
+        self.write(raw_input="legacy input")
         anchor = self.observed_id()
         legacy = self.state()
         original_events = self.events()
@@ -428,7 +428,7 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
         self.assertEqual(count, len(original_events))
 
     def test_an_import_that_attested_only_an_unread_file_counts_no_imported_events(self):
-        self.write(raw_user_input="current input")
+        self.write(raw_input="current input")
         self.assertFalse(self.paths["state"].exists() or self.paths["events"].exists())
         with self.ledger.storage_transaction(self.root) as connection:
             state = self.ledger._stored_state(connection, "codex", "session-a")
@@ -441,7 +441,7 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
             self.assertIsNone(self.ledger._imported_event_count(connection, self.root, state))
 
     def test_delayed_subprocess_cannot_apply_old_input_after_new_intake(self):
-        self.write(raw_user_input="first input")
+        self.write(raw_input="first input")
         old = self.observed_id()
         worker = '''import importlib.util, pathlib, sys, time
 spec=importlib.util.spec_from_file_location("ledger", sys.argv[1])
@@ -462,7 +462,7 @@ sys.exit(7)
                 if time.monotonic() > deadline:
                     self.fail("worker did not capture its old-input operation")
                 time.sleep(0.01)
-            self.write(raw_user_input="replacement input")
+            self.write(raw_input="replacement input")
             (self.root / "release").touch()
             out, err = process.communicate(timeout=10)
             self.assertEqual(process.returncode, 0, err)
@@ -475,9 +475,9 @@ sys.exit(7)
                 process.communicate()
 
     def test_attached_raw_input_cannot_bypass_semantic_cas(self):
-        self.write(raw_user_input="current request")
+        self.write(raw_input="current request")
         with self.assertRaisesRegex(ValueError, "expected.input"):
-            self.write(raw_user_input="replayed request", intent_delta={"current_goal": "unbound"})
+            self.write(raw_input="replayed request", intent_delta={"current_goal": "unbound"})
         self.assertEqual(self.state()["ledger_revision"], 1)
 
     def test_legacy_strict_reads_do_not_invent_changing_timestamps(self):
@@ -505,7 +505,7 @@ sys.exit(7)
         self.assertEqual(len(self.events()), 2)
 
     def test_consumer_snapshot_exposes_persisted_cas_coordinates(self):
-        self.write(raw_user_input="active request")
+        self.write(raw_input="active request")
         snapshot = self.ledger.consumer_snapshot(self.paths["state"])
         self.assertEqual(snapshot["platform"], "codex")
         self.assertEqual(snapshot["session_id"], "session-a")
@@ -525,12 +525,12 @@ sys.exit(7)
         self.assertEqual(snapshot["constraints"], [])
 
     def test_custom_observation_count_requires_exact_nonnegative_integer(self):
-        self.write(raw_user_input="original input")
+        self.write(raw_input="original input")
         before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
-        observation = self.ledger.build_input_observation(platform="codex", session_id="session-a", raw_user_input="x")
+        observation = self.ledger.build_input_observation(platform="codex", session_id="session-a", raw_input="x")
         for count in (True, False, 1.0, -1, "1", None, 2, 2 ** 53):
             with self.subTest(count=count), self.assertRaises(ValueError):
-                self.write(raw_user_input="x", observation=dict(observation, input_char_count=count))
+                self.write(raw_input="x", observation=dict(observation, input_char_count=count))
             self.assertEqual(before, {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()})
 
     def test_invalid_observation_does_not_even_import_pending_legacy_audit(self):
@@ -540,14 +540,14 @@ sys.exit(7)
                                           "mutation_id": "pending-legacy", "event": "intent-updated"}
         self.ledger.write_json(self.paths["state"], pending)
         before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
-        observation = self.ledger.build_input_observation(platform="codex", session_id="session-a", raw_user_input="x")
+        observation = self.ledger.build_input_observation(platform="codex", session_id="session-a", raw_input="x")
         with self.assertRaises(ValueError):
-            self.write(raw_user_input="x", observation=dict(observation, input_char_count=-1))
+            self.write(raw_input="x", observation=dict(observation, input_char_count=-1))
         self.assertEqual(before, {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()})
         self.assertFalse(self.ledger.storage_database_path(self.root).exists())
 
     def test_persisted_anchor_number_schema_rejects_unsafe_values(self):
-        self.write(raw_user_input="original input")
+        self.write(raw_input="original input")
         valid = self.state()
         for key in ("latest_input_char_count", "ledger_revision"):
             for value in (True, False, -1, 1.5, "1", None, 2 ** 53):
@@ -557,11 +557,11 @@ sys.exit(7)
                     with self.assertRaises(ValueError):
                         self.ledger.read_session_state(**self.identity, recover_audit=False)
                     with self.assertRaises(ValueError):
-                        self.write(raw_user_input="replacement")
+                        self.write(raw_input="replacement")
                     self.assertEqual(before, self.database_dump())
 
     def test_partial_database_anchor_cannot_be_treated_as_legacy(self):
-        self.write(raw_user_input="original input")
+        self.write(raw_input="original input")
         valid = self.state()
         for key in ("latest_input_char_count", "latest_input_event_id", "latest_input_digest", "ledger_revision"):
             with self.subTest(key=key):

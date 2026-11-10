@@ -95,9 +95,9 @@ class RemovalDecisionTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
-    def removal(self, reg, removing, *, remove_codex=False, confirm=True, effects=None, platform="darwin"):
+    def removal(self, reg, removing, *, remove_codex=False, apply_changes=True, effects=None, platform="darwin"):
         return gateway_participant.removal(reg.ghost, [Path(p) for p in removing], remove_codex=remove_codex,
-                                           confirm=confirm, effects=effects, platform=platform)
+                                           apply_changes=apply_changes, effects=effects, platform=platform)
 
     def test_removing_codex_skills_leaves_a_registered_service_alone(self):
         reg = gateway_testing.registered_home(self, self.root)
@@ -130,7 +130,7 @@ class RemovalDecisionTests(unittest.TestCase):
     def test_a_preview_judges_but_changes_nothing(self):
         reg = gateway_testing.registered_home(self, self.root)
         effects = gateway_testing.FakeEffects(self.root, running=True, agent=reg.agent)
-        result = self.removal(reg, [reg.ghost / "runtime"], confirm=False, effects=effects)
+        result = self.removal(reg, [reg.ghost / "runtime"], apply_changes=False, effects=effects)
         self.assertEqual((result["status"], result["action"]), ("dry-run", "would-detach"))
         self.assertEqual(effects.service_calls(), [])
         self.assertTrue(reg.agent.exists())

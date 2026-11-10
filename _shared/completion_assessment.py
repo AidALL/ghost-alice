@@ -17,10 +17,19 @@ from completion_check_validator import (extract_original_proof, parse_original_c
 import ledger_access
 from source_reference import canonical_json, json_digest, text_digest
 from timestamps import parse_timestamp
+from response_route import route_comparison_view, selection_view, RouteSchemaError
 
 _SEAL = object()
-_DEFINITION = ('work_unit_id', 'contract_revision', 'id', 'summary', 'source', 'admitted')
+_DEFINITION = ('work_unit_id', 'contract_revision', 'id', 'summary', 'source', 'selectable')
 _SOURCE_RESPONSE_KIND = 'source-response-review.v2'
+
+
+def _contract_view(contract):
+    """Compare authenticated proof contracts across the selection-flag rename."""
+    try:
+        return dict(contract, criteria=[selection_view(row) for row in contract['criteria']])
+    except RouteSchemaError as error:
+        raise CompletionAssessmentError('assessment-invalid', str(error)) from error
 
 
 class CompletionAssessmentError(ValueError):
@@ -112,9 +121,14 @@ def _current_contract(core, root, owner, connection, work_unit_id=None):
     _require(len(units) == 1 and units[0]['owner'] == owner, 'criterion-unbound', 'Select exactly one owned work unit')
     unit = units[0]
     selected_ids = {r['criterion_id'] for r in route['selected_criteria'] if r['work_unit_id'] == unit['work_unit_id']}
-    rows = [{k: c[k] for k in _DEFINITION} for c in state['acceptance_criteria']
-            if (c.get('work_unit_id'), c.get('contract_revision')) == (unit['work_unit_id'], unit['contract_revision'])
-            and c['id'] in selected_ids]
+    rows = []
+    for criterion in state['acceptance_criteria']:
+        if ((criterion.get('work_unit_id'), criterion.get('contract_revision'))
+                != (unit['work_unit_id'], unit['contract_revision']) or criterion['id'] not in selected_ids):
+            continue
+        criterion_view = selection_view(criterion)
+        rows.append({key: criterion_view[key] for key in _DEFINITION})
+    # The response model records decisions; only each optional source records who decided, and Core does not require it.
     contract = dict(work_unit_id=unit['work_unit_id'], contract_revision=unit['contract_revision'], owner=owner,
         criteria=rows, relevant_context={k: state.get(k, {} if k == 'latest_scope' else [])
             for k in ('constraints', 'non_goals', 'decisions', 'latest_scope')})
@@ -123,6 +137,36 @@ def _current_contract(core, root, owner, connection, work_unit_id=None):
 
 def _lookup_key(contract, proof, verified_at):
     return json_digest(dict(contract=contract, proof_digest=text_digest(proof), verified_at=verified_at))
+
+
+def _matching_assessments(connection, root, owner, contract, proof, verified_at):
+    """Authenticate historical payloads before comparing the supported flag aliases."""
+    rows = connection.execute('''SELECT a.reference FROM core_completion_assessments a
+        JOIN core_completion_candidates c ON c.reference=json_extract(a.payload_json, '$.candidate_reference')
+        WHERE json_extract(c.payload_json, '$.intent_root')=?
+        AND json_extract(c.payload_json, '$.contract.owner.platform')=?
+        AND json_extract(c.payload_json, '$.contract.owner.session_id')=?
+        AND json_extract(c.payload_json, '$.contract.work_unit_id')=?
+        AND json_extract(c.payload_json, '$.proof_digest')=?
+        AND json_extract(c.payload_json, '$.verified_at')=?''',
+        (str(root), owner['platform'], owner['session_id'], contract['work_unit_id'],
+         text_digest(proof), verified_at)).fetchall()
+    matches = []
+    for reference, in rows:
+        payload = _stored(connection, 'core_completion_assessments', reference)
+        candidate = _stored(connection, 'core_completion_candidates', payload['candidate_reference'])
+        _require('candidate' not in payload or payload['candidate'] == candidate,
+                 'assessment-invalid', 'Embedded candidate differs from its authenticated reference')
+        if (candidate['proof'] == proof and candidate['verified_at'] == verified_at
+                and _contract_view(candidate['contract']) == _contract_view(contract)):
+            matches.append((reference, payload, candidate))
+    return matches
+
+
+def _binding_comparison(binding):
+    view = dict(binding, criterion=selection_view(binding['criterion']))
+    view.pop('binding_id', None)
+    return view
 
 
 def _source_issues(candidate, source_ids=None):
@@ -189,7 +233,7 @@ def response_input_binding(source, expected_input_event_id=None, *, transaction=
         if not protected:
             imported = core._imported_event_count(connection, root, state)
             _require(imported is not None and sequence > imported,
-                'input-unavailable', 'Copied legacy input cannot establish native review authority')
+                'input-unavailable', 'Copied legacy input cannot be the original input that a response review binds to')
     binding = dict(owner, input_event_id=expected_input_event_id, input_digest=digest, input_char_count=count)
     return binding
 
@@ -214,9 +258,13 @@ def _response_review_context(route):
     """Bind review to its task, not later planning or proof-recording labels.
 
     The full original route remains immutable in the candidate. Current route
-    validation still authenticates admission, ownership and the input before
+    validation still checks the selection flags the response model or Core wrote, ownership and the recorded input before
     this projection is compared; the optional reason does not change answer bytes.
     """
+    try:
+        route = route_comparison_view(route)
+    except RouteSchemaError as error:
+        raise CompletionAssessmentError('response-unbound', str(error)) from error
     selected = set(route['selected_work_unit_ids'])
     return dict(
         **{key: route.get(key) for key in ('schema_version', 'platform', 'session_id',
@@ -323,7 +371,7 @@ def prepare_response_review(source, *, response_text, source_paths, verified_at=
         response = dict(text=response_text, purpose='explanation')
         response['binding_id'] = json_digest(response)
         candidate = dict(kind=_SOURCE_RESPONSE_KIND, intent_root=str(root), owner=owner,
-            route=route, sources=_reference_sources(source_paths),
+            route=route_comparison_view(route), sources=_reference_sources(source_paths),
             bindings=bindings, response_binding=response)
         _schema(connection)
         key = _response_review_key(root, owner, route, response_text)
@@ -379,7 +427,7 @@ def record_response_review(source, candidate_reference, review, *, context_use_j
         _require(_valid_judgment(judgment, candidate['response_binding']['binding_id'],
             {s['source_id'] for s in candidate['sources']}), 'response-assessment-required',
             'Review the complete explanation against identified sources with an explicit rationale')
-        # These judgments concern the immutable bytes shown to both reviewers.
+        # The response model makes per-claim and whole-response judgments of these immutable bytes; Core records them.
         # Current lookup independently checks whether their live sources changed.
         payload = dict(kind=candidate['kind'], candidate_reference=candidate_reference,
             judgments=review['claims'], judgment=judgment)
@@ -435,7 +483,7 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
     """Snapshot explicit observation paths and canonical conditions for review.
 
     Native answer producers use prepare_response_review and record_response_review;
-    proof-only records do not approve a complete native answer.
+    proof-only records do not satisfy the check that Core code's Stop script runs on a complete answer.
     Reuse copies a prior candidate's actual bytes/time for recording correction;
     it never reads a changed file and presents it as the original observation.
     """
@@ -475,7 +523,7 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
         bindings = []
         for index, entry in enumerate(parsed['claims']):
             for criterion_id in re.split(r'[,;\s]+', entry['criterion']):
-                _require(criterion_id in rows and criterion_id in selected_ids and rows[criterion_id]['admitted'],
+                _require(criterion_id in rows and criterion_id in selected_ids and rows[criterion_id]['selectable'],
                     'criterion-unbound', 'Proof must bind a current selected canonical criterion')
                 binding = dict(criterion=rows[criterion_id], claim_index=index,
                     claim=entry['claim'], evidence=entry['evidence'], declared_verdict=entry['verdict'])
@@ -488,7 +536,7 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
         if response_text is not None:
             response = dict(text=response_text, proof_digest=text_digest(proof))
             if report_only:
-                _require(bool(reuse_candidate) and old['proof'] == proof and old['contract'] == contract,
+                _require(bool(reuse_candidate) and old['proof'] == proof and _contract_view(old['contract']) == _contract_view(contract),
                     'response-unbound', 'An explanation must reuse an original reviewed proof under its current owned contract')
                 original = lookup_assessment(source, contract, proof, verified_at, transaction=connection)
                 _require(all(j['verdict'] == 'supported' for j in original.judgments),
@@ -553,7 +601,8 @@ def record_assessment(source, candidate_reference, judgments, *, response_judgme
         # Recording a judgment preserves its original snapshots; it does not
         # attest that the same proof satisfies the latest work or source state.
         key = _lookup_key(contract, candidate['proof'], candidate['verified_at'])
-        previous = connection.execute('SELECT reference FROM core_completion_assessments WHERE lookup_key=?', (key,)).fetchall()
+        previous = _matching_assessments(connection, root, owner, contract, candidate['proof'], candidate['verified_at'])
+        _require(len(previous) <= 1, 'assessment-conflict', 'One original claim review is required')
         if previous:
             old = _stored(connection, 'core_completion_assessments', previous[0][0])
             original_candidate = _stored(connection, 'core_completion_candidates', old['candidate_reference'])
@@ -563,13 +612,16 @@ def record_assessment(source, candidate_reference, judgments, *, response_judgme
                 _require(old['candidate_reference'] == candidate_reference and old['judgments'] == judgments,
                          'assessment-conflict', 'An immutable assessment already exists for this original proof')
             else:
-                # A later response review retains the accepted observations and
-                # proof verdicts. Its new rationale/wording is a separate record.
-                def decisions(rows):
-                    return {j['binding_id']: (j['verdict'], sorted(j['source_ids'])) for j in rows}
+                # A later response review retains the response model's original per-claim observations and verdicts.
+                # Core records its new whole-response rationale and wording separately.
+                def decisions(bindings, rows):
+                    names = {b['binding_id']: json_digest(_binding_comparison(b)) for b in bindings}
+                    return {names[j['binding_id']]: (j['verdict'], sorted(j['source_ids'])) for j in rows}
                 _require(_same_sources(original_candidate['sources'], candidate['sources'])
-                    and original_candidate['bindings'] == candidate['bindings']
-                    and decisions(old['judgments']) == decisions(judgments),
+                    and [_binding_comparison(b) for b in original_candidate['bindings']]
+                        == [_binding_comparison(b) for b in candidate['bindings']]
+                    and decisions(original_candidate['bindings'], old['judgments'])
+                        == decisions(candidate['bindings'], judgments),
                     'assessment-conflict', 'Response review cannot replace original observations or proof judgments')
             reference = previous[0][0]
         else:
@@ -613,13 +665,12 @@ def lookup_assessment(source, contract, proof, verified_at, *, transaction=None)
         _require(connection is not None and connection.execute(
             "SELECT 1 FROM sqlite_master WHERE name='core_completion_assessments'").fetchone(),
             'assessment-required', 'The response model must review the original proof and record its judgments through completion_assessment.py')
-        rows = connection.execute('SELECT reference FROM core_completion_assessments WHERE lookup_key=?',
-            (_lookup_key(contract, proof, verified_at),)).fetchall()
+        rows = _matching_assessments(connection, root, owner, contract, proof, verified_at)
         _require(len(rows) == 1, 'assessment-required', 'One exact original claim review is required')
         payload = _stored(connection, 'core_completion_assessments', rows[0][0])
         candidate = _stored(connection, 'core_completion_candidates', payload['candidate_reference'])
         _require(('candidate' not in payload or candidate == payload['candidate']) and candidate['intent_root'] == str(root),
-                 'assessment-invalid', 'Review candidate authority differs')
+                 'assessment-invalid', 'Review candidate differs from its stored record or the intent ledger root')
         issues = _source_issues(candidate, {sid for j in payload['judgments'] for sid in j['source_ids']})
         result = VerifiedAssessment(payload, _SEAL, issues, candidate=candidate)
         coverage = assessment_coverage(result, contract, proof, verified_at)
@@ -651,7 +702,7 @@ def lookup_current_proof(source, proof, *, transaction=None, work_unit_id=None):
             for reference, in rows:
                 assessment = _stored(connection, 'core_completion_assessments', reference)
                 candidate = _stored(connection, 'core_completion_candidates', assessment['candidate_reference'])
-                if candidate['contract'] != contract:
+                if _contract_view(candidate['contract']) != _contract_view(contract):
                     continue
                 if candidate['proof'].strip() == proof.strip():
                     exact.append(candidate)
@@ -707,7 +758,7 @@ def lookup_current_response(source, text, *, transaction=None):
             # Only a matching completion-backed review needs an execution contract.
             contract, _, _ = _current_contract(core, root, owner, connection,
                 work_unit_id=candidate['contract']['work_unit_id'])
-            _require(candidate['contract'] == contract and candidate.get('reuse_candidate'),
+            _require(_contract_view(candidate['contract']) == _contract_view(contract) and candidate.get('reuse_candidate'),
                 'response-unbound', 'The explanation must retain the current owned original proof')
             assessment = lookup_assessment(source, contract, candidate['proof'], candidate['verified_at'],
                 transaction=connection)
@@ -715,7 +766,7 @@ def lookup_current_response(source, text, *, transaction=None):
         _require(response == reviewed['response_binding']
             and review_comparison_text(response['text']) == review_comparison_text(text)
             and reviewed['assessment_reference'] == assessment.reference
-            and candidate['contract'] == assessment.candidate['contract']
+            and _contract_view(candidate['contract']) == _contract_view(assessment.candidate['contract'])
             and candidate['proof'] == assessment.candidate['proof']
             and candidate['verified_at'] == assessment.candidate['verified_at']
             and _same_sources(candidate['sources'], assessment.candidate['sources']),
@@ -731,7 +782,7 @@ def _assessed_bindings(assessment, contract, proof, verified_at):
     _require(isinstance(assessment, VerifiedAssessment) and assessment._seal is _SEAL,
              'assessment-required', 'Only authenticated claim reviews can establish coverage')
     candidate = assessment.candidate
-    _require(candidate['contract'] == contract and candidate['proof'] == proof
+    _require(_contract_view(candidate['contract']) == _contract_view(contract) and candidate['proof'] == proof
         and candidate['proof_digest'] == text_digest(proof) and candidate['verified_at'] == verified_at,
         'assessment-invalid', 'Assessment does not bind these canonical conditions, proof and original time')
     judgments = {j['binding_id']: j for j in assessment.judgments}

@@ -23,9 +23,9 @@ class GateSurfaceDesignTest(unittest.TestCase):
         body = (ROOT / 'task-router/SKILL.md').read_text()
         self.assertIn('references/routing-details.md', body)
         owner = (ROOT / 'task-router/references/routing-details.md').read_text()
-        self.assertIn('current human instructions', owner)
+        self.assertIn("the human user's current instructions", owner)
         self.assertIn('bounded change without formal revocation wording', owner)
-        self.assertIn("The response model interprets the user's input under the common contract's Session Intent section, and that contract's Work Selection section sends work to this skill", body)
+        self.assertIn("The response model interprets the input the response model is answering under the common contract's Session Intent section, and that contract's Work Selection section sends work to this skill", body)
         self.assertIn('Core code validates the submitted response route', body)
         self.assertNotIn('skill-call: session-intent-analyzer (this turn)', body)
 

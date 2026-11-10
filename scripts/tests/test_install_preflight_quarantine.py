@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "merge-companion" / "scripts"))
 from installer_assets import write_ownership_marker
-from file_walker import walk_user_files
+from file_walker import walk_installed_copy_files
 from installer_testing import checkout_copy
 
 
@@ -94,9 +94,9 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
 
-            self.assertEqual(walk_user_files(skills_dir), [])
+            self.assertEqual(walk_installed_copy_files(skills_dir), [])
 
-    def test_install_sh_backs_up_user_edit_before_copy_replacement(self) -> None:
+    def test_install_sh_backs_up_external_change_before_copy_replacement(self) -> None:
         bash_exe = _find_test_bash()
         if not bash_exe:
             self.skipTest("No non-WSL bash executable available for install.sh integration test")
@@ -104,9 +104,9 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
         # A root this install replaces is checked even after its install marker disappears.
         for remove_marker in (False, True):
             with self.subTest(remove_marker=remove_marker):
-                self._assert_install_sh_backs_up_user_edit(bash_exe, remove_marker)
+                self._assert_install_sh_backs_up_external_change(bash_exe, remove_marker)
 
-    def _assert_install_sh_backs_up_user_edit(self, executable: str, remove_marker: bool) -> None:
+    def _assert_install_sh_backs_up_external_change(self, executable: str, remove_marker: bool) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_home = Path(temp_dir)
             env = os.environ.copy()

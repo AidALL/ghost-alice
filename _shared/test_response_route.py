@@ -30,6 +30,43 @@ def load_routes():
 
 
 class ResponseRouteTests(unittest.TestCase):
+    def test_legacy_and_equal_selection_aliases_write_only_current_route_names(self):
+        self.event = self.setup_owned()
+        candidate = self.candidate()
+        candidate['schema_version'] = 'response-route.v1'
+        candidate['work_units'][0]['admitted'] = candidate['work_units'][0].pop('selectable')
+        result = self.record(candidate)
+        self.assertEqual(result['schema_version'], 'response-route.v2')
+        self.assertNotIn('admitted', json.dumps(result))
+        candidate['work_units'][0]['selectable'] = True
+        self.assertEqual(self.record(candidate), result)
+        before = ledger.read_session_state(**self.coords)
+        events = ledger.read_session_events(**self.coords)
+        candidate['work_units'][0]['admitted'] = False
+        with self.assertRaises(self.api.RouteSchemaError):
+            self.record(candidate)
+        self.assertEqual(ledger.read_session_state(**self.coords), before)
+        self.assertEqual(ledger.read_session_events(**self.coords), events)
+
+    def test_stored_v1_route_reads_without_rewriting_shape_or_accepting_conflicts(self):
+        self.event = self.setup_owned()
+        self.record()
+        state = ledger.read_session_state(**self.coords)
+        route = state['response_route']
+        route['schema_version'] = 'response-route.v1'
+        for row in route['work_units'] + route['selected_criteria']:
+            row['admitted'] = row.pop('selectable')
+        with ledger.storage_transaction(self.root) as tx:
+            tx.execute('UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?',
+                       (json.dumps(state), 'codex', 'current'))
+        before = ledger.read_session_state(**self.coords)
+        result = self.api.read_response_route(**self.coords)
+        self.assertEqual({k: v for k, v in result.items() if k != 'current_input_event_id'}, route)
+        self.assertEqual(ledger.read_session_state(**self.coords), before)
+        route['selected_criteria'][0]['selectable'] = False
+        with self.assertRaises(self.api.RouteSchemaError):
+            self.api.project_stored_response_route(dict(state, canonical_input_event_id=self.event))
+
     def test_minimal_surface_round_trips_without_invented_judgments(self):
         self.event = self.setup_owned()
         for mode, units, boundary in (("normal", (), "n/a"), ("normal", ("first",), "required")):
@@ -91,7 +128,7 @@ class ResponseRouteTests(unittest.TestCase):
         self.bind_legacy(before)
         self.record()
         before = ledger.read_session_state(**self.coords)
-        for reason in ("continuing authorized work", "registering the same selection again"):
+        for reason in ("continuing selected work", "registering the same selection again"):
             with self.subTest(reason=reason):
                 candidate = self.candidate(); candidate["routing_surface"]["reason"] = reason
                 self.record(candidate)
@@ -126,21 +163,22 @@ class ResponseRouteTests(unittest.TestCase):
         self.coords = dict(root=self.root, platform="codex", session_id="current")
 
     def intake(self, text="implement first"):
-        ledger.record_turn(**self.coords, raw_user_input=text, source="hook")
+        ledger.record_turn(**self.coords, raw_input=text, recording_path="hook")
         return ledger.read_session_state(**self.coords)["latest_input_event_id"]
 
-    def criterion(self, unit="first", revision=1, admitted=True, summary=None):
+    def criterion(self, unit="first", revision=1, selectable=True, summary=None):
+        # The test writes user-said as the response model's source claim; Core's default for it does not check the sender.
         return dict(id="AC1", summary=summary or f"verify {unit}", source="user-said",
-                    admitted=admitted, work_unit_id=unit, contract_revision=revision)
+                    selectable=selectable, work_unit_id=unit, contract_revision=revision)
 
     def candidate(self, units=("first",), selected=None):
         return {
-            "schema_version": "response-route.v1",
+            "schema_version": "response-route.v2",
             "routing_surface": {
                 "response_mode": "normal", "boundary_contract": "required",
-                "reason": "current authorized implementation",
+                "reason": "current selected implementation",
             },
-            "work_units": [dict(work_unit_id=u, contract_revision=1, kind="execution", admitted=True,
+            "work_units": [dict(work_unit_id=u, contract_revision=1, kind="execution", selectable=True,
                                 owner={"platform": "codex", "session_id": "current"}) for u in units],
             "selected_work_unit_ids": list(units),
             "selected_criteria": [dict(work_unit_id=u, contract_revision=1, criterion_id="AC1")
@@ -148,6 +186,7 @@ class ResponseRouteTests(unittest.TestCase):
         }
 
     def setup_owned(self):
+        # The test records the response model's interpreted-as update; source labels are its origin claims, not sender proof.
         event = self.intake()
         ledger.record_turn(**self.coords, expected_input_event_id=event, intent_delta={
             "acceptance_criteria": [self.criterion("first"), self.criterion("second"),
@@ -160,11 +199,12 @@ class ResponseRouteTests(unittest.TestCase):
                                              candidate=candidate or self.candidate(), boundary_ref="boundary-1", **extra)
 
     def legacy_registered(self, *, duplicate=False, foreign=False, superseded=False, collision=False, native=True):
-        row = dict(id="AC1", summary="verify first", source="user-explicit", admitted=True,
+        # user-explicit is the legacy form of the response model's user-said claim, which this test writes as fixture data.
+        row = dict(id="AC1", summary="verify first", source="user-explicit", selectable=True,
                    status="met", met_completion_check_digest="a" * 64, met_at="2026-10-01T12:00:00Z")
         state = ledger.default_state("codex", "current")
         state["acceptance_criteria"] = [row, dict(id="extra", summary="Unselected condition",
-            source="user-explicit", admitted=False, status="unmet")]
+            source="user-explicit", selectable=False, status="unmet")]
         if duplicate:
             state["acceptance_criteria"].append(deepcopy(row))
         if collision:
@@ -214,6 +254,20 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertEqual(event["criterion_ids"], ["AC1"])
         self.assertNotIn("proof", event)
 
+    def test_legacy_binding_snapshot_compares_flag_aliases_but_preserves_other_fields(self):
+        before = self.legacy_registered()
+        snapshot = deepcopy(before['acceptance_criteria'][0])
+        snapshot['admitted'] = snapshot.pop('selectable')
+        events = ledger.read_session_events(**self.coords)
+        for invalid in (dict(snapshot, selectable=False), dict(snapshot, met_at='changed')):
+            with self.subTest(snapshot=invalid), self.assertRaises(ValueError):
+                self.bind_legacy(before, expected_criteria=[invalid])
+            self.assertEqual(ledger.read_session_state(**self.coords), before)
+            self.assertEqual(ledger.read_session_events(**self.coords), events)
+        bound = self.bind_legacy(before, expected_criteria=[snapshot])['acceptance_criteria'][0]
+        self.assertEqual({k:v for k,v in bound.items() if k not in ('work_unit_id', 'contract_revision')},
+                         before['acceptance_criteria'][0])
+
     def test_stored_legacy_source_survives_a_later_criterion_write(self):
         before = self.legacy_registered()
         with ledger.storage_transaction(self.root) as connection:
@@ -231,7 +285,7 @@ class ResponseRouteTests(unittest.TestCase):
         cases = [dict(expected_input_event_id="old"), dict(expected_revision=before["ledger_revision"] + 1),
                  dict(expected_revision=None), dict(expected_revision=True),
                  dict(expected_criteria=[dict(before["acceptance_criteria"][0], met_at="changed")]),
-                 dict(expected_criteria=[dict(before["acceptance_criteria"][0], admitted=False)]),
+                 dict(expected_criteria=[dict(before["acceptance_criteria"][0], selectable=False)]),
                  dict(contract_revision=2)]
         for change in cases:
             events = ledger.read_session_events(**self.coords)
@@ -324,23 +378,23 @@ class ResponseRouteTests(unittest.TestCase):
         rebound = self.record()
         self.assertEqual(rebound["status"], "ready")
         self.assertEqual(set(rebound["selected_criteria"][0]),
-                         {"id", "summary", "source", "admitted", "work_unit_id", "contract_revision", "criterion_id"})
+                         {"id", "summary", "source", "selectable", "work_unit_id", "contract_revision", "criterion_id"})
 
-    def test_an_unadmitted_criterion_cannot_be_selected(self):
+    def test_an_unselectable_criterion_cannot_be_selected(self):
         self.event = self.setup_owned()
         ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
             "acceptance_criteria": [dict(self.criterion("first"), id="AC2", summary="an assumption", source="interpreted-as",
-                                         admitted=False)]})
+                                         selectable=False)]})
         candidate = self.candidate()
         candidate["selected_criteria"][0]["criterion_id"] = "AC2"
-        with self.assertRaisesRegex(self.api.RouteSchemaError, "admitted ledger condition"):
+        with self.assertRaisesRegex(self.api.RouteSchemaError, "selectable ledger condition"):
             self.record(candidate)
 
     def test_a_changed_definition_makes_the_route_stale(self):
         self.event = self.setup_owned()
         ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
             "acceptance_criteria": [dict(self.criterion("first"), id="AC2", summary="verify first again")]})
-        for change in (dict(summary="verify first, revised"), dict(source="system-doc"), dict(admitted=False)):
+        for change in (dict(summary="verify first, revised"), dict(source="system-doc"), dict(selectable=False)):
             with self.subTest(change=change):
                 self.record()
                 self.assertEqual(self.api.read_response_route(**self.coords)["status"], "ready")
@@ -389,7 +443,7 @@ class ResponseRouteTests(unittest.TestCase):
         cases = []
         candidate = self.candidate(); candidate["routing_surface"]["response_mode"] = "chat"; cases.append(candidate)
         candidate = self.candidate(); candidate["work_units"][0]["owner"]["session_id"] = "other"; cases.append(candidate)
-        candidate = self.candidate(); candidate["work_units"][0]["admitted"] = False; cases.append(candidate)
+        candidate = self.candidate(); candidate["work_units"][0]["selectable"] = False; cases.append(candidate)
         candidate = self.candidate(); candidate["selected_criteria"] *= 2; cases.append(candidate)
         candidate = self.candidate(); candidate["selected_work_unit_ids"] *= 2; cases.append(candidate)
         candidate = self.candidate(); candidate["selected_work_unit_ids"] = [{}]; cases.append(candidate)
@@ -401,7 +455,7 @@ class ResponseRouteTests(unittest.TestCase):
                 with self.assertRaises(self.api.RouteSchemaError):
                     self.record(candidate)
         ledger.record_turn(**self.coords, expected_input_event_id=self.event,
-            intent_delta={"acceptance_criteria": [self.criterion(admitted=False)]})
+            intent_delta={"acceptance_criteria": [self.criterion(selectable=False)]})
         with self.assertRaises(self.api.RouteSchemaError):
             self.record()
 
@@ -519,7 +573,7 @@ class ResponseRouteTests(unittest.TestCase):
             self.api.record_response_route(**coords, expected_input_event_id=self.event,
                 candidate=self.candidate(), boundary_ref="boundary-1")
         self.assertEqual(self.api.read_response_route(**coords)["status"], "stale")
-        ledger.record_turn(**coords, raw_user_input="continue approved work", source="hook")
+        ledger.record_turn(**coords, raw_input="continue approved work", recording_path="hook")
         fresh = ledger.read_session_state(**coords)["latest_input_event_id"]
         self.assertEqual(self.api.record_response_route(**coords, expected_input_event_id=fresh,
             candidate=self.candidate(), boundary_ref="boundary-1")["status"], "ready")
@@ -551,7 +605,7 @@ class ResponseRouteTests(unittest.TestCase):
         paths["events"].write_text("".join(json.dumps(e) + "\n" for e in ledger.read_session_events(**self.coords)))
         coords = dict(root=copied, platform="codex", session_id="current")
         ledger.migrate_session(**coords)
-        ledger.record_turn(**coords, raw_user_input="real older canonical input", source="hook")
+        ledger.record_turn(**coords, raw_input="real older canonical input", recording_path="hook")
         fresh = ledger.read_session_state(**coords)["latest_input_event_id"]
         self.api.record_response_route(**coords, expected_input_event_id=fresh,
             candidate=self.candidate(), boundary_ref="boundary-1")
@@ -618,7 +672,7 @@ class ResponseRouteTests(unittest.TestCase):
         before = ledger.read_session_state(**self.coords)
         with self.assertRaisesRegex(RuntimeError, "rollback native intake"):
             with ledger.storage_transaction(self.root) as tx:
-                ledger.record_turn(**self.coords, raw_user_input="new input to roll back", transaction=tx)
+                ledger.record_turn(**self.coords, raw_input="new input to roll back", transaction=tx)
                 row = tx.execute("SELECT input_event_id FROM canonical_intakes WHERE platform=? AND session_id=?",
                                  ("codex", "current")).fetchone()
                 self.assertNotEqual(row[0], self.event)
@@ -672,7 +726,7 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "True")
 
-    def test_copied_skill_and_shared_helper_use_the_same_authority(self):
+    def test_copied_skill_and_shared_helper_use_the_same_intent_ledger(self):
         self.event = self.setup_owned()
         install = Path(self.tmp.name) / "isolated-skills"
         (install / "session-intent-analyzer" / "scripts").mkdir(parents=True)

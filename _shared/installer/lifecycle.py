@@ -72,7 +72,7 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
                 report.warn(f"Addon {addon_id}: not installed (nothing to remove)")
         else:
             failed += 1
-            report.warn(f"Addon {addon_id}: uninstall left items for manual review")
+            report.warn(f"Addon {addon_id}: uninstall left items for the human user to review")
     if not skills:
         if addon_ids:
             if removed > 0:
@@ -126,10 +126,10 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
 
 
 def run_uninstall_cleanup(ctx: "Context") -> int:
-    """`uninstall_cleanup.py --platform --install-state-manifest --confirm`."""
+    """`uninstall_cleanup.py --platform --install-state-manifest --apply`."""
     return runner.run_tool("_shared/uninstall_cleanup.py", "--platform", ctx.platform,
                            "--install-state-manifest", str(locations.install_state_path(ctx.platform)),
-                           "--confirm").returncode
+                           "--apply").returncode
 
 
 def run_full_uninstall(ctx: "Context") -> int:
@@ -137,7 +137,7 @@ def run_full_uninstall(ctx: "Context") -> int:
     report.info("Full uninstall: removing Ghost-ALICE managed hooks, bootstrap, support state, and install targets.")
     addons.resume_pending_uninstalls(ctx)
     if not addons.uninstall_all_before_full(ctx):
-        report.error("Full uninstall stopped because one or more addon targets need manual review.")
+        report.error("Full uninstall stopped because one or more addon targets need the human user's review.")
         return 1
     return run_uninstall_cleanup(ctx)
 

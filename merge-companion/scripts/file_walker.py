@@ -44,14 +44,14 @@ def _is_reparse_point(path: Path) -> bool:
     return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
-def walk_user_files(skills_dir: Path, targets: Iterable[str] = ()) -> list[Path]:
+def walk_installed_copy_files(skills_dir: Path, targets: Iterable[str] = ()) -> list[Path]:
     """Return files in Ghost-ALICE copy-mode skill roots, excluding generated/cache files.
 
     A root with the install marker holds Ghost-ALICE files that the installer replaces. So does a
     root the current install names in targets, even after its marker disappears. Any other root,
-    such as the Claude app's synced folder or the user's own skill, is never replaced, so its files
+    such as the Claude app's synced folder or a skill outside the current install's targets, is never replaced, so its files
     never enter the pending-merge store. Symlink and junction roots point at the source checkout,
-    where git keeps the user's edits.
+    where git tracks local changes without recording who made them.
     """
     replaced = set(targets)
     files: list[Path] = []

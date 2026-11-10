@@ -44,7 +44,7 @@ cd ~/ghost-alice
 bash install.sh --update-source
 ```
 
-인스톨러는 이 명령에서 소스의 추적·미추적 변경을 `git stash`에 저장하고 체크아웃을 fast-forward합니다. 저장한 stash는 사용자가 직접 확인할 수 있도록 보관합니다.
+인스톨러는 이 명령에서 체크아웃의 추적·미추적 로컬 변경을 `git stash`에 저장하고 체크아웃을 fast-forward합니다. 저장한 stash는 인간 사용자가 검토하도록 보관합니다. 변경한 주체를 git이 기록하지 않습니다.
 
 Windows에서는 같은 업데이트에 `.\install.cmd`를 실행합니다. PowerShell이 `cannot be loaded because running scripts is disabled`를 표시하면 래퍼가 `-NoProfile -ExecutionPolicy Bypass`로 PowerShell을 호출하고 사용자 또는 컴퓨터의 실행 정책을 변경하지 않습니다.
 
@@ -65,7 +65,7 @@ git config --global user.email "you@example.com"
 git config --global user.name "your-name"
 ```
 
-병합 충돌이 이미 시작됐다면 신원을 설정한 직후 `git pull`을 반복하지 마세요. 먼저 2단계에서 상태를 확인하고, 로컬 변경을 버려도 되는지에 따라 3단계 또는 4단계를 선택해 주세요.
+병합 충돌이 이미 시작됐다면 신원을 설정한 직후 `git pull`을 반복하지 마세요. 먼저 2단계에서 상태를 확인하고, 인간 사용자가 체크아웃의 로컬 변경을 버릴지 보존할지 결정한 결과에 따라 3단계 또는 4단계를 실행해 주세요.
 
 ### 2. 현재 상태 조회
 
@@ -74,11 +74,11 @@ git status --short --branch
 git diff --name-only --diff-filter=U
 ```
 
-`UU` 또는 `AA`가 보이면 체크아웃은 이미 병합 충돌 상태입니다. 로컬 변경을 보존할지 버릴지 먼저 결정합니다.
+`UU` 또는 `AA`가 보이면 체크아웃은 이미 병합 충돌 상태입니다. 인간 사용자가 체크아웃의 로컬 변경을 보존할지 버릴지 먼저 결정합니다.
 
 ### 3. 로컬 변경을 버려도 될 때
 
-배포용 복제본, 인스톨러 전용 복제본, 개인 수정이 없는 체크아웃처럼 로컬 변경을 버려도 되는 경우에만 이 절차를 사용합니다.
+배포용 복제본이나 인스톨러 전용 복제본 등에서 인간 사용자가 체크아웃의 로컬 변경을 버려도 된다고 결정한 경우에만 이 절차를 사용합니다.
 
 `git status --short`에 이미 `UU` 또는 `AA`가 있으면 먼저 병합을 중단합니다.
 
@@ -100,7 +100,7 @@ git pull --ff-only
 
 - `git reset --hard origin/main`은 현재 브랜치를 `origin/main`으로 이동하고 추적 파일의 내용을 그 커밋의 내용으로 교체합니다.
 - `git clean -nd`는 삭제 미리보기입니다.
-- `git clean -fd`는 미추적 파일과 디렉터리를 실제로 삭제합니다. 미리보기에 보존할 항목이 있으면 실행하지 않습니다.
+- `git clean -fd`는 미추적 파일과 디렉터리를 실제로 삭제합니다. 미리보기에 인간 사용자가 보존하려는 항목이 있으면 실행하지 않습니다.
 
 ### 4. 로컬 변경을 보존해야 할 때
 
@@ -117,7 +117,7 @@ git stash show -p stash@{0}
 
 로컬 인스톨러에 업데이트 옵션이 없으면 위 [Git 업데이트 복구](#git-업데이트-복구)의 부트스트랩 업데이트를 사용해 주세요.
 
-stash에 저장한 로컬 변경이 여전히 의도한 변경일 때만 stash를 다시 적용합니다.
+인스톨러의 `--update-source`가 stash에 저장한 로컬 변경을 인간 사용자가 여전히 원할 때만 stash를 다시 적용합니다.
 
 ```bash
 git stash pop stash@{0}
@@ -144,7 +144,7 @@ bash install.sh --doctor
 bash install.sh --status
 ```
 
-`Doctor` 또는 `Status`가 병합 대기(`pending-merge`) 경고를 표시하면, 인스톨러가 설치 중에 보호용 백업을 생성했다는 뜻입니다. 새 Claude/Codex 세션에서 백업된 변경의 검토를 요청해 주세요. merge-companion 절차가 선택지를 설명하면 사용자가 무엇을 유지할지 결정합니다.
+`Doctor` 또는 `Status`가 병합 대기(`pending-merge`) 경고를 표시하면, 인스톨러가 설치 중에 보호용 백업을 생성했다는 뜻입니다. 새 Claude Code/Codex 세션에서 백업된 변경의 검토를 요청해 주세요. 응답 모델이 merge-companion을 따라 선택지를 설명하면 인간 사용자가 무엇을 유지할지 결정합니다.
 
 ### 6. 운영 원칙
 
@@ -155,18 +155,18 @@ bash install.sh --status
 
 ## 네이티브 훅 신뢰와 재로드
 
-설치 상태, 네이티브 신뢰 상태와 실행 중인 호스트의 반영을 따로 확인해 주세요. 설치된 스크립트와 등록 명령이 일치해도 호스트가 이전 명령이나 신뢰 결정을 유지할 수 있습니다. 네이티브 훅의 `modified` 상태는 신뢰 불일치를 가리킵니다.
+설치 상태, Codex의 훅 신뢰 항목과 실행 중인 호스트의 적용을 따로 확인해 주세요. 인스톨러는 설치할 때마다 관리하는 훅 명령에 Codex의 훅 신뢰 항목을 기록합니다. Codex의 훅 신뢰 항목 확인에 훅의 새 해시를 신뢰한다는 답이 입력된 뒤 Codex가 항목을 기록할 수도 있습니다. 설치된 스크립트와 등록 명령이 일치해도 실행 중인 Codex가 이전 명령이나 훅 신뢰 항목을 유지할 수 있습니다. 네이티브 훅의 `modified` 상태는 신뢰 불일치를 가리킵니다.
 
-1. 로컬 설정을 보존한 뒤 Core 인스톨러로 관리되는 훅 명령과 네이티브 신뢰 항목을 함께 맞춥니다. 새 해시를 신뢰하기 전에 실제로 바뀐 명령을 검토합니다. 다른 신뢰 항목과 각 훅의 활성화·비활성화 선택은 유지합니다.
+1. 로컬 설정을 보존한 뒤 Core 인스톨러를 실행합니다. 인스톨러는 설치할 때마다 인스톨러가 관리하는 훅 명령을 기록하고, 그 명령의 새 신뢰 해시(`trusted_hash`)를 Codex의 훅 신뢰 항목에 기록합니다. 다른 훅 신뢰 항목과 각 훅의 활성화·비활성화 선택은 유지합니다.
 2. 호스트의 재로드 기능을 사용합니다. 실행 중인 호스트가 이전 명령이나 신뢰 항목을 계속 사용하면 앱을 완전히 종료한 뒤 다시 엽니다. 새 대화를 만드는 것만으로 재로드가 입증되지는 않습니다.
 3. 해당 세션의 다음 실제 입력과 라우팅을 관측합니다. 설치 파일과 별도 진단 프로세스만으로 현재 호스트가 무엇을 호출했는지 판단하지 않습니다.
 
-Ghost-ALICE 훅과 감사 기록을 끄지 말고 영향받은 등록과 신뢰 항목을 복구해 주세요. 완료된 업무 검증은 다시 실행하지 말고 [근거 재사용 규칙](../../../architecture_ko.md#근거와-네이티브-표시)대로 재사용해 주세요.
+Ghost-ALICE 훅과 감사 기록을 끄지 말고 1단계의 Core 인스톨러를 다시 실행해 주세요. 인스톨러는 설치할 때마다 영향받은 훅 등록과 Codex의 훅 신뢰 항목을 복구합니다. 완료된 업무 검증은 다시 실행하지 말고 [근거 재사용 규칙](../../../architecture_ko.md#근거와-네이티브-표시)대로 재사용해 주세요.
 
 ## 입력 경고와 doctor 목록
 
-Claude Code에 `Ghost-ALICE intake: records that need a confirmed input (intent, route and completion) are paused in this session because ...`가 표시될 수 있습니다. Core가 이 세션의 최근 입력 출처를 확인하지 못했다는 뜻입니다. 예를 들어 다른 세션이 보낸 메시지이거나 대화 기록에서 행을 찾지 못한 입력이며, 세션은 사용자가 다음에 직접 입력하는 내용을 기다립니다. 작업은 계속되지만, 그때까지 Core는 의도·응답 경로·완료를 기록하지 않습니다. 경고는 같은 세션·같은 원인으로 한 번 표시되며, 같은 원인의 이후 대기는 기록만 됩니다. [표시 프로필](./installation.md#에이전트-표시-프로필)에 따라 훅의 빈 결과가 일반 텍스트 줄로 변경될 수 있습니다. 그 훅은 경고를 전달하지 못하므로, 경고는 다음 PreToolUse 또는 Stop에 표시됩니다.
+Claude Code에 ``Ghost-ALICE intake: records that need an input that Core code matched to the host's transcript row (the response model's `interpreted-as` record, the response route and the completion records) are paused in this session because <reason> (<cause>). They resume at your next input in this session. Later waits with this cause are only recorded; `bash install.sh --doctor` lists them.``가 표시될 수 있습니다. Core 코드가 이 세션의 최근 프롬프트를 호스트가 사람 입력 표지를 기록한 대화 기록 행과 대조하지 못했다는 뜻입니다. 예를 들어 다른 세션이 보낸 메시지이거나 대화 기록에서 행을 찾지 못한 프롬프트입니다. 세션은 호스트가 대화 기록 행에 사람 입력 표지를 기록한 다음 입력을 기다립니다. 인간 사용자의 지시가 허가한 작업은 계속되지만, 그때까지 Core 코드는 응답 모델이 작성한 입력 해석·작업 선택 기록·완료를 저장하지 않습니다. 경고는 같은 세션·같은 원인으로 한 번 표시되며, 같은 원인의 이후 대기는 기록만 됩니다. [표시 프로필](./installation.md#에이전트-표시-프로필)에 따라 훅의 빈 결과가 일반 텍스트 줄로 변경될 수 있습니다. 그 훅은 경고를 전달하지 못하므로, 경고는 다음 PreToolUse 또는 Stop에 표시됩니다.
 
-1. 그 세션에서 평소처럼 다음 입력을 보내 주세요. Core가 그 입력을 확인하고 기록을 다시 시작합니다.
+1. 그 세션에서 평소처럼 다음 입력을 보내 주세요. Core 코드가 프롬프트의 다이제스트와 문자 수를 호스트가 사람 입력 표지를 기록한 대화 기록 행과 대조하면, 그 입력을 현재 입력으로 기록하고 의존 기록 작성을 다시 시작합니다.
 2. `bash install.sh --doctor`(Windows: `.\install.cmd --doctor`)를 실행해 주세요. `native-intake-waits`는 아직 기다리는 세션과 그 원인을 보이고, `native-intake-failures`는 Core의 입력 판정이 실패한 세션과 그 예외 종류·횟수·마지막 시각을 보입니다. 훅은 각 실패 뒤에도 계속되었습니다.
 3. 직접 입력을 보낸 뒤에도 세션이 계속 기다리거나 `native-intake-failures`가 계속 늘면, 그 doctor 줄을 관리자에게 전달해 주세요. 원장은 직접 수정하지 마세요.

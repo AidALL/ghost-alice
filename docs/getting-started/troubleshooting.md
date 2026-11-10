@@ -44,7 +44,7 @@ cd ~/ghost-alice
 bash install.sh --update-source
 ```
 
-This command saves source-local tracked and untracked changes in `git stash`, fast-forwards the checkout, and leaves the stash for explicit review.
+This command saves local tracked and untracked changes in the checkout in `git stash`, fast-forwards the checkout, and leaves the stash for the human user to review. Git does not record who made those changes.
 
 On Windows, use `.\install.cmd` for the same installer path. If PowerShell shows `cannot be loaded because running scripts is disabled`, the wrapper invokes PowerShell with `-NoProfile -ExecutionPolicy Bypass` and does not change the user or machine execution policy.
 
@@ -65,7 +65,7 @@ git config --global user.email "you@example.com"
 git config --global user.name "your-name"
 ```
 
-If a conflict has already started, do not repeat `git pull` immediately after setting identity. Inspect the current state in step 2, then choose step 3 or step 4 according to whether local changes must be preserved.
+If a conflict has already started, do not repeat `git pull` immediately after setting identity. Inspect the current state in step 2, then use step 3 or step 4 according to the human user's decision to discard or preserve the local changes in the checkout.
 
 ### 2. Inspect Current State
 
@@ -74,11 +74,11 @@ git status --short --branch
 git diff --name-only --diff-filter=U
 ```
 
-If `UU` or `AA` appears, the checkout is already in a merge conflict. Decide first whether local changes must be preserved or can be discarded.
+If `UU` or `AA` appears, the checkout is already in a merge conflict. The human user first decides whether to preserve or discard the local changes in the checkout.
 
 ### 3. When Local Changes Are Not Needed
 
-Use this path only for deployment clones, installer-only clones, or checkouts with no personal edits where local changes can be discarded.
+Use this path only when the human user has decided that the local changes in the checkout can be discarded, such as for a deployment clone or an installer-only clone.
 
 If `git status --short` already shows `UU` or `AA`, abort the merge first.
 
@@ -100,7 +100,7 @@ Cautions:
 
 - `git reset --hard origin/main` moves tracked-file content and the local commit position to `origin/main`.
 - `git clean -nd` is a delete preview.
-- `git clean -fd` actually deletes untracked files and directories. Do not run it if the preview lists anything that must be kept.
+- `git clean -fd` actually deletes untracked files and directories. Do not run it if the preview lists anything the human user wants to keep.
 
 ### 4. When Local Changes Must Be Preserved
 
@@ -117,7 +117,7 @@ git stash show -p stash@{0}
 
 If the local installer lacks the update option, use the bootstrap path in [Git Update Recovery](#git-update-recovery).
 
-Only reapply the stash if those source-local changes are still intentional:
+Only reapply the stash if the human user still wants the local changes that the installer's `--update-source` saved in it:
 
 ```bash
 git stash pop stash@{0}
@@ -144,7 +144,7 @@ bash install.sh --doctor
 bash install.sh --status
 ```
 
-If `Doctor` or `Status` reports a pending merge warning, the installer created a protective backup during install. Open a fresh Claude/Codex session and ask it to review backed-up changes. The merge-companion flow explains the choices, and you decide what to keep.
+If `Doctor` or `Status` reports a pending merge warning, the installer created a protective backup during install. Open a fresh Claude Code/Codex session and ask it to review backed-up changes. The response model follows merge-companion to explain the choices, and the human user decides what to keep.
 
 ### 6. Operating Principles
 
@@ -155,18 +155,18 @@ If `Doctor` or `Status` reports a pending merge warning, the installer created a
 
 ## Native Hook Trust And Reload
 
-Check installation, native trust and running-host adoption separately. The installed script and registered command can match while the host retains a previous command or trust decision. A native `modified` hook state identifies a trust mismatch.
+Check installation, Codex's hook trust entries and running-host adoption separately. The installer writes Codex's hook trust entries for managed hook commands on every install run; Codex can also record an entry after an answer that trusts the hook's new hash is entered at Codex's check of its hook trust entries. The installed script and registered command can match while the running Codex retains a previous command or hook trust entry. A native `modified` hook state identifies a trust mismatch.
 
-1. Preserve local configuration, then use the Core installer to synchronize the managed hook command and its native trust entry. Review the exact changed command before accepting its new hash. Keep unrelated trust entries and each hook's enabled/disabled choice unchanged.
+1. Preserve local configuration, then run the Core installer: on every install run it writes the managed hook command and writes the command's new trusted hash (`trusted_hash`) into Codex's hook trust entry. Keep unrelated hook trust entries and each hook's enabled/disabled choice unchanged.
 2. Use the host's available reload controls. If the active host still uses an older command or trust entry, fully exit and reopen it; starting another conversation alone is not proof of reload.
 3. Observe the next actual input and routing in that session. Installed files and a separate diagnostic process do not establish what the active host invoked.
 
-Keep Ghost-ALICE hooks and audit records enabled, and restore the affected registration or trust entry. Reuse completed business checks under the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery) instead of replaying them.
+Keep Ghost-ALICE hooks and audit records enabled, and run the Core installer of step 1 again, which on every install run restores the affected hook registration and Codex's hook trust entry. Reuse completed business checks under the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery) instead of replaying them.
 
 ## Intake Warning And Doctor Lists
 
-Claude Code can show `Ghost-ALICE intake: records that need a confirmed input (intent, route and completion) are paused in this session because ...`. Core could not confirm the origin of the session's latest input, for example a message another session sent or an input whose transcript row it could not find, and the session waits for your next typed input. Your work continues, but Core records no intent, route or completion until then. The warning appears once per session and cause; later waits with the same cause are only recorded. An [agent visibility profile](./installation.md#agent-visibility-profile) can turn a hook's empty result into a plain-text line; that hook cannot carry the warning, so the warning appears with the next PreToolUse or Stop.
+Claude Code can show ``Ghost-ALICE intake: records that need an input that Core code matched to the host's transcript row (the response model's `interpreted-as` record, the response route and the completion records) are paused in this session because <reason> (<cause>). They resume at your next input in this session. Later waits with this cause are only recorded; `bash install.sh --doctor` lists them.``. Core code could not match the session's latest prompt to a transcript row carrying the host's human-origin markers, for example for a message another session sent or a prompt whose transcript row it could not find. The session waits for the next input whose transcript row carries the host's human-origin markers. The work that your instructions authorize continues, but Core code stores no `interpreted-as` record that the response model writes, response route or completion until then. The warning appears once per session and cause; later waits with the same cause are only recorded. An [agent visibility profile](./installation.md#agent-visibility-profile) can turn a hook's empty result into a plain-text line; that hook cannot carry the warning, so the warning appears with the next PreToolUse or Stop.
 
-1. Send your next input in that session as usual. Core confirms it and resumes recording.
+1. Send your next input in that session as usual. When Core code matches the prompt's digest and character count to a transcript row carrying the host's human-origin markers, it records that input as the current input and resumes the dependent recording.
 2. Run `bash install.sh --doctor` (Windows: `.\install.cmd --doctor`). `native-intake-waits` lists the sessions that still wait, with the cause. `native-intake-failures` lists the sessions where Core's intake step failed, with the error type, the count and the last time; the hook continued past each failure.
 3. If a session still waits after your own typed input, or `native-intake-failures` keeps growing, share those doctor lines with the maintainer. Do not edit the ledger by hand.

@@ -7,7 +7,7 @@ from typing import Any
 
 from runtime_config import canonical_agent_visibility_profile
 
-# Profiles are user/runtime preferences: strict, dynamic, minimal.
+# Profiles are visibility levels from the config file or runtime environment: strict, dynamic, minimal.
 # Decisions are per-message UI actions after the hook has already run and the
 # strict session log has already captured output.
 VISIBLE_DECISIONS = {"show", "hide", "force_show"}

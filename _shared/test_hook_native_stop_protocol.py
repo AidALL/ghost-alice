@@ -15,8 +15,8 @@ import unittest
 RUNNER = Path(__file__).with_name("hook_profile_gate.py")
 HOST_FIELDS = {"continue", "suppressOutput", "systemMessage", "hookSpecificOutput", "additionalContext"}
 HOST_CONTROLS = {"decision", "reason", "stopReason"}
-ACTIONABLE = "Recording is parked. Preserve the supported answer and continue eligible authorized work."
-NOT_BLOCKING = "does not block the host"
+ACTIONABLE = "Recording is parked. Preserve the supported answer and continue eligible work that the human user's instructions authorize."
+NOT_BLOCKING = "the hook runner removed that request before the host saw it"
 
 
 class NativeEnvelopeTests(unittest.TestCase):

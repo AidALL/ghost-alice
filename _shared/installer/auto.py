@@ -46,8 +46,7 @@ def child_command(ctx: "Context", platform: str, *, uninstall: bool = False) -> 
     """`python cli.py --platform P [--skip-source-health] [--adopt-source] [--visibility V] [--verbose]
     [--addon-source S]... [--addon-tag T]... [--addon-skip] ARGS...`; tags are
     dropped after the parent prepared git sources.
-    `--adopt-source` carries the parent's install source decision, so a child
-    never asks again."""
+    `--adopt-source` carries the source replacement the parent installer performs: its own --adopt-source, a yes typed at its terminal question (sender unchecked), or replacement without a question when the recorded checkout is missing. A child never asks again."""
     argv = [sys.executable, str(runner.REPO_ROOT / "_shared" / "installer" / "cli.py"), "--platform", platform]
     if uninstall:
         return argv + ["--uninstall"]

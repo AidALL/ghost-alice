@@ -3,8 +3,9 @@ import unittest
 
 import completion_check_validator as validator
 import test_completion_skill_evidence as skill_evidence
-from test_completion_skill_evidence import assert_stop_observation, user, skill_call, reply
+from test_completion_skill_evidence import assert_stop_observation, user_role_row, skill_call, reply
 
+# The test writes these source labels as the response model's claims about the criteria's origin.
 PARTIAL_BODY = """[partial-check]
 - scope: partial
 - acceptance-criteria:
@@ -23,7 +24,7 @@ PARTIAL_BODY = """[partial-check]
 PARTIAL = "Targeted tests passed. Clippy and console warnings remain unresolved.\n\n" + PARTIAL_BODY
 
 
-# Exact first response supplied by the user; this fixture exercises the evidence
+# Exact first answer a response model wrote and the human user supplied; this fixture exercises the evidence
 # protocol only and neither reruns nor re-verifies its historical business work.
 SUPPLIED_KOREAN_ANSWER = """수정 후 Xcode에서 다시 빌드했고, **이슈 목록은 No Issues**입니다. 경고를 숨기는 설정은 넣지 않았습니다.
 - Rust 컴파일 경고, 보안 상태 복원, 앱 내부 레이아웃 재진입·음수 높이 문제를 수정했습니다.
@@ -31,6 +32,7 @@ SUPPLIED_KOREAN_ANSWER = """수정 후 Xcode에서 다시 빌드했고, **이슈
 - autoShortcut은 말씀하신 대로 서명 문제로 남겨뒀습니다.
 - 남은 레이아웃 메시지는 기본 메뉴 막대 아이콘만 있는 별도 앱에서도 재현되는 AppKit 문제입니다.
 다만 엄격한 Clippy 검사는 아직 실패하므로 전체 검증이 모두 통과한 상태는 아닙니다. 자동 완료 기록도 보류했습니다."""
+# The test writes this [partial-check] block and its source claims. The human user supplied only SUPPLIED_KOREAN_ANSWER, an answer that a response model wrote.
 SUPPLIED_PARTIAL_EVIDENCE = """[partial-check]
 - scope: partial
 - acceptance-criteria:
@@ -185,13 +187,13 @@ class PartialStopTests(unittest.TestCase):
         assert_stop_observation(self, self.run_hook(platform='codex', message=PARTIAL))
 
     def test_claude_partial_uses_review_independently_of_skill_call(self):
-        assert_stop_observation(self, self.run_hook([user('Check it'), reply(PARTIAL)]))
-        assert_stop_observation(self, self.run_hook([user('Check it'), skill_call(), reply(PARTIAL)]))
+        assert_stop_observation(self, self.run_hook([user_role_row('Check it'), reply(PARTIAL)]))
+        assert_stop_observation(self, self.run_hook([user_role_row('Check it'), skill_call(), reply(PARTIAL)]))
 
     def test_skill_call_and_partial_marker_cannot_replace_response_review(self):
         body = PARTIAL_BODY.replace('targeted tests passed', 'checked the targeted behavior')
         assert_stop_observation(self,
-            self.run_hook([user('Check it'), skill_call(), reply(body)], record_review=False),
+            self.run_hook([user_role_row('Check it'), skill_call(), reply(body)], record_review=False),
             issue='assessment-required:', repair_target='completion_metadata')
 
 

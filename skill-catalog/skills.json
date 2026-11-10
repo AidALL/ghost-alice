@@ -1,6 +1,6 @@
 {
   "version": "2.0.0",
-  "generated_at": "2026-11-06T15:22:13Z",
+  "generated_at": "2026-11-10T05:06:46Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -18,7 +18,7 @@
     {
       "name": "adversarial-verification",
       "path": "adversarial-verification/SKILL.md",
-      "description": "Assigns independent delegates to try to refute a claim and its evidence and returns a verdict with the part that survives, when the user or another skill calls for an adversarial review or fact-check of a numeric, legal, novelty or prior-art claim.",
+      "description": "Assigns independent delegates to try to refute a claim and its evidence and returns a verdict with the part that survives, when the human user or another skill calls for an adversarial review or fact-check of a numeric, legal, novelty or prior-art claim.",
       "family": "domain",
       "compatibility": [
         "Python 3.11+ standard library"
@@ -27,7 +27,7 @@
     {
       "name": "agent-security-scan",
       "path": "agent-security-scan/SKILL.md",
-      "description": "Scans the host's settings, hooks, skills, Model Context Protocol config and credential files for exposed secrets, remote fetches and side-effecting shell commands, after any of them changes or governance rules from another project are adopted, or when the user asks to check them.",
+      "description": "Scans the host's settings, hooks, skills, Model Context Protocol config and credential files for exposed secrets, remote fetches and side-effecting shell commands, after any of them changes or governance rules from another project are adopted, or when the human user asks to check them.",
       "family": "domain",
       "compatibility": [
         "Python 3.11+ standard library"
@@ -45,7 +45,7 @@
     {
       "name": "brainstorming",
       "path": "coding-convention/brainstorming/SKILL.md",
-      "description": "Resolves open design decisions, including expected behavior, with the user and writes the accepted design before implementation.",
+      "description": "Resolves open design decisions, including expected behavior, asking the human user for each decision only the human user can make, and writes the design the human user accepted before implementation.",
       "family": "coding-convention",
       "compatibility": [
         "Python 3.11+ standard library"
@@ -79,7 +79,7 @@
     {
       "name": "executing-plans",
       "path": "coding-convention/executing-plans/SKILL.md",
-      "description": "Executes an accepted plan with the response model doing every task itself, when inline execution is chosen.",
+      "description": "Executes a plan that the response model saved under writing-plans, with the response model doing every task itself, when the human user chose inline execution.",
       "family": "coding-convention",
       "compatibility": [
         "Python 3.11+ standard library"
@@ -98,7 +98,7 @@
     {
       "name": "finishing-a-development-branch",
       "path": "coding-convention/finishing-a-development-branch/SKILL.md",
-      "description": "For a branch ready to integrate, runs its locally runnable CI jobs before any push or merge and carries out the user's choice, asking if undecided: merge locally, open or merge a pull request, keep, or delete the branch.",
+      "description": "For a branch ready to integrate, runs its locally runnable CI jobs before any push or merge and carries out the human user's choice, asking the human user if undecided: merge locally, open or merge a pull request, keep, or delete the branch.",
       "family": "coding-convention",
       "compatibility": [
         "Python 3.11+ standard library"
@@ -117,7 +117,7 @@
     {
       "name": "merge-companion",
       "path": "merge-companion/SKILL.md",
-      "description": "Reviews the user's backed-up edits to installed skills and merges each into the new skill version, discards or defers it as the user chooses, before a task changes or reinstalls an installed skill, or when the user asks for that review.",
+      "description": "Reviews the installer's backups of external changes to installed skills and merges each into the new skill version, discards or defers it as the human user chooses, before a task changes or reinstalls an installed skill, or when the human user asks for that review.",
       "family": "domain",
       "compatibility": [
         "Python 3.11+ standard library",
@@ -127,7 +127,7 @@
     {
       "name": "necessity-gate",
       "path": "necessity-gate/SKILL.md",
-      "description": "Approves, rescopes or rejects new work (a task, follow-up, skill, file, tool, audit or verification cycle, or skill edit) when the response model proposes it or the user asks whether to do it.",
+      "description": "Judges whether proposed work is justified, needs a narrower scope or is unjustified, when the response model proposes new work or the human user asks whether to do it.",
       "family": "domain",
       "compatibility": [
         "Python 3.11+ standard library"
@@ -136,7 +136,7 @@
     {
       "name": "receiving-code-review",
       "path": "coding-convention/receiving-code-review/SKILL.md",
-      "description": "When code review findings arrive, judges each against the requirements, code and tests before changing code.",
+      "description": "When code review findings arrive, judges each against the requirements that the human user set, code and tests before changing code.",
       "family": "coding-convention",
       "compatibility": [
         "Python 3.11+ standard library"
@@ -154,7 +154,7 @@
     {
       "name": "session-intent-analyzer",
       "path": "session-intent-analyzer/SKILL.md",
-      "description": "Records the response model's new or changed interpretation of a request as its `interpreted-as` record before the first tool call of work, and reads that record when it can change the objective, constraints, work choice or whether earlier work continues.",
+      "description": "Records the response model's new or changed interpretation of the input the response model is answering as its `interpreted-as` record before the first tool call of work, and reads that record when it can change the objective, constraints, work choice or whether earlier work continues.",
       "family": "system",
       "compatibility": [
         "Python 3.11+ standard library",
@@ -171,7 +171,7 @@
     {
       "name": "skill-evolution",
       "path": "skill-evolution/SKILL.md",
-      "description": "Recommends skill changes from recorded tool-call patterns and corrections of the response model's behavior, when the user asks for such recommendations or their pending backlog, or authorizes that analysis.",
+      "description": "Recommends skill changes from recorded tool-call patterns and conduct corrections asserted by the human user or observed by the response model, when the human user asks for such recommendations or their pending backlog, or authorizes that analysis.",
       "family": "domain",
       "compatibility": [
         "Python 3.11+ standard library"
@@ -180,7 +180,7 @@
     {
       "name": "subagent-driven-development",
       "path": "coding-convention/subagent-driven-development/SKILL.md",
-      "description": "Executes an accepted plan in this session by giving each task, one at a time, to a new delegate and reviewing the result, when the user chose delegate execution and each task is self-contained.",
+      "description": "Executes a plan that the response model saved under writing-plans in this session by giving each task, one at a time, to a new delegate and reviewing the result, when the human user chose delegate execution and each task is self-contained.",
       "family": "coding-convention",
       "compatibility": [
         "Python 3.11+ standard library"
@@ -231,7 +231,7 @@
     {
       "name": "using-git-worktrees",
       "path": "coding-convention/using-git-worktrees/SKILL.md",
-      "description": "Reuses or creates a git worktree when an authorized development task must run separately from the current checkout.",
+      "description": "Reuses or creates a git worktree when a development task that the human user's instructions authorize must run separately from the current checkout.",
       "family": "coding-convention",
       "compatibility": [
         "Python 3.11+ standard library"
@@ -249,7 +249,7 @@
     {
       "name": "writing-plans",
       "path": "coding-convention/writing-plans/SKILL.md",
-      "description": "Writes an implementation plan that breaks accepted requirements into tasks a newcomer to the project can carry out, after design decisions are settled and before implementation.",
+      "description": "Writes an implementation plan that breaks requirements the human user accepted into tasks a newcomer to the project can carry out, after the human user settles decisions only the human user can make and the response model settles technical choices within what the human user's instructions authorize, before implementation.",
       "family": "coding-convention",
       "compatibility": [
         "Python 3.11+ standard library"

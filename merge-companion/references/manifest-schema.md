@@ -2,7 +2,7 @@
 
 ## Schema v1
 
-The installer Python code and the response model reviewing a merge use the importable functions in `../scripts/manifest_io.py`; this module has no command-line interface. The helper writes the manifest and takes the locks stated below. The response model asks for the user's choice, writes the staged content and applies it to the live file.
+The installer Python code and the response model reviewing a merge use the importable functions in `../scripts/manifest_io.py`; this module has no command-line interface. The helper writes the manifest and takes the locks stated below. The response model asks for the human user's choice, writes the staged content and applies it to the live file.
 
 ```json
 {
@@ -24,18 +24,20 @@ The installer Python code and the response model reviewing a merge use the impor
 }
 ```
 
+The `decided` and `decision` fields record an outcome on the pending-merge entry. They do not record who wrote that outcome or who made the choice. The lifecycle below identifies the writer for registration and for the response model's record of the human user's choice; `merge-flow.md` identifies the caller that records a non-interactive deferral.
+
 ## Entry lifecycle
 
-1. `diff_collector.register_changes_in_manifest` creates the entry with `decided=false` and `decision=null`.
-2. After the approved staged merge is applied, the response model calls `manifest_io.mark_decided` with merged; the entry becomes decided=true.
-3. After the approved staged change and backup are discarded, the response model records discarded with decided=true.
-4. When the user chooses later, the response model records deferred and retains decided=false, so the next session can show the entry again.
+1. The installer's diff collector, run by the installer's preflight, calls `diff_collector.register_changes_in_manifest` to create an entry for each backed-up external change with `decided=false` and `decision=null`. No outcome is recorded yet; the entry waits for the human user's merge, discard or defer choice.
+2. After the staged merge that the human user approved is applied, the response model calls `manifest_io.mark_decided` with `merged`; the entry becomes `decided=true` as the response model's record of that outcome.
+3. After the staged change and backup are discarded as the human user approved, the response model records `discarded` with `decided=true`.
+4. When the human user chooses later, the response model records `deferred` and retains `decided=false`, so the next session can show the entry again. These values do not record who chose.
 
 ## Apply and record a decision
 
-The response model takes the actual manifest path from the current host's pending-merge result, the exact `id`, `source_path` and `backup_path` from the inspected entry, and the decision from the user's authorized choice. Resolve `SCRIPTS` to the loaded merge-companion skill's absolute `scripts` directory. Before applying staged content through the host's file tool, check the Safety boundary below and retain the approved staged result and the inspected live version. A changed live file requires reconciling that change with the approved proposal before applying it.
+The response model takes the actual manifest path from the current host's pending-merge result, the exact `id`, `source_path` and `backup_path` from the inspected entry, and the decision from the human user's choice. Resolve `SCRIPTS` to the loaded merge-companion skill's absolute `scripts` directory. Before applying staged content through the host's file tool, check the Safety boundary below and retain the staged result that the human user approved and the inspected live version. A changed live file requires reconciling that change with the proposal that the human user approved before applying it.
 
-After the file tool confirms approved integration, use `merged`; after the approved discard completes, use `discarded`; for an explicit defer, use `deferred` without applying a live change. Bind `MANIFEST`, `ENTRY_ID` and `DECISION` to those exact values, then invoke the importable helper through the host's shell tool:
+After the file tool reports that the integration the human user approved completed, use `merged`; after the discard the human user approved completes, use `discarded`; when the human user explicitly defers, use `deferred` without applying a live change. Bind `MANIFEST`, `ENTRY_ID` and `DECISION` to those exact values, then invoke the importable helper through the host's shell tool:
 
 ```bash
 python3 - "$SCRIPTS" "$MANIFEST" "$ENTRY_ID" "$DECISION" <<'PY'
@@ -56,6 +58,6 @@ The helper writes through a temporary file and a rename. `append_entry`, `append
 
 ## Safety boundary
 
-Before applying the approved change, the response model verifies resolved path containment: `backup_path` belongs to the actual pending-merge directory of the current host, and `source_path` belongs to the installed skills root supplied by trusted installation context or a host configuration root the user authorized. Example host configuration roots are `~/.codex/` and `~/.claude/`. The entry ID uses timestamp-skill-safe_filename; safe_filename removes slash, backslash and double-dot traversal components.
+Before applying the change that the human user approved, the response model verifies resolved path containment: `backup_path` belongs to the actual pending-merge directory of the current host, and `source_path` belongs to the installed skills root of the installation identified under the common contract's Prohibitions or a host configuration root the human user authorized. Example host configuration roots are `~/.codex/` and `~/.claude/`. The entry ID uses timestamp-skill-safe_filename; safe_filename removes slash, backslash and double-dot traversal components.
 
 The snapshot_hash and current_hash fields identify artifacts. They do not determine which behavior is correct or authorize applying a result.

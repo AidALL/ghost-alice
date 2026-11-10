@@ -12,7 +12,7 @@ The response model uses this skill when a long conversation, a transfer to anoth
 
 ## Record the handoff
 
-The response model fills the following block from the retained task state and the original evidence. When an authorized handoff file already exists, it writes the block there and invokes `python3 <loaded-skill-directory>/scripts/compact_handoff.py <absolute-handoff-file> --json` through the host's shell tool. Otherwise it keeps the block in the host's handoff or task context and sends that same text to `python3 <loaded-skill-directory>/scripts/compact_handoff.py - --json` on stdin; it does not create a report only to obtain a filename. The validator returns `status`, `errors` and `warnings`. On `status=fail` or exit 1, the response model corrects the named fields before submitting the handoff; a pass confirms only the block's structure.
+The response model fills the following block from the retained task state and the original evidence. When a handoff file that the human user authorized already exists, it writes the block there and invokes `python3 <loaded-skill-directory>/scripts/compact_handoff.py <absolute-handoff-file> --json` through the host's shell tool. Otherwise it keeps the block in the host's handoff or task context and sends that same text to `python3 <loaded-skill-directory>/scripts/compact_handoff.py - --json` on stdin; it does not create a report only to obtain a filename. The validator returns `status`, `errors` and `warnings`. On `status=fail` or exit 1, the response model corrects the named fields before submitting the handoff; a pass confirms only the block's structure.
 
 ```text
 [compact-handoff]
@@ -25,6 +25,8 @@ The response model fills the following block from the retained task state and th
 - forbidden-surface: <paths or actions not to touch>
 - rollback: <nearest concrete rollback path>
 ```
+
+The response model writes `objective` from the retained task state; the block carries no source label showing whether the objective came from the human user's input, the response model's `interpreted-as` record or the assignment from the parent session or parent agent that started the delegate. Under the host's compaction, the generative backend writes the summary, which also carries no such source label. The response model writes `forbidden-surface` from the human user's prohibitions, the project instructions and its self-declared narrower limits. Neither this field nor the boundary contract's `prohibited-surface` shows each item's origin. A recorded item alone therefore does not show whether only the human user can lift the boundary or the response model may renew its narrower limit; where the source is established, name it with `user-said`, `system-doc` or `interpreted-as` under boundary-contract's Source rules.
 
 For an unresolved repair, the response model carries the failure, the affected acceptance criterion, the stage, the target, the cumulative failed rounds, the status of the reassessment after five failed rounds, the cause hypothesis and any stopping condition in `in-progress` or `next-step`. It keeps the original evidence with its source and time. It applies systematic-debugging's incident accounting to those values; the handoff does not create a new incident.
 

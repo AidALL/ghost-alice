@@ -30,13 +30,13 @@ class ContextLifecycleTests(unittest.TestCase):
         self.home = Path(f.tmp.name) / 'codex'
         self.log = self.home / 'sessions' / 'rollout-current.jsonl'
         self.log.parent.mkdir(parents=True)
-        self.user = dict(type='message', role='user', content=[dict(type='input_text', text='implement first')])
+        self.first_prompt = dict(type='message', role='user', content=[dict(type='input_text', text='implement first')])
         self.call = dict(type='custom_tool_call', call_id='consumed', name='exec', input='read original')
         self.output = dict(type='custom_tool_call_output', call_id='consumed', output=[
             dict(type='input_text', text='consumed navigation body ' * 5000),
             dict(type='input_text', text='required long source ' * 10000)])
         self.rows = [dict(type='session_meta', payload={'id': 'current'}),
-                     dict(type='response_item', payload=self.user),
+                     dict(type='response_item', payload=self.first_prompt),
                      dict(type='response_item', payload=self.call),
                      dict(type='response_item', payload=self.output)]
         self.write_rows()
@@ -45,7 +45,7 @@ class ContextLifecycleTests(unittest.TestCase):
                            GHOST_ALICE_CODEX_DIR=str(self.home))
         self.selection = dict(record=4, block_index=0, summary='Navigation used; source owner established.',
                               next_need='Retrieve the original only when source selection changes.')
-        self.request = dict(prompt_cache_key='current', input=[self.user, self.call, self.output], model='test')
+        self.request = dict(prompt_cache_key='current', input=[self.first_prompt, self.call, self.output], model='test')
 
     def write_rows(self):
         self.log.write_text(''.join(json.dumps(row) + '\n' for row in self.rows))
@@ -91,7 +91,7 @@ class ContextLifecycleTests(unittest.TestCase):
         self.assertIs(result.request, self.request)
 
     def test_declared_use_reaches_gateway_without_a_manual_publication(self):
-        changed = dict(self.request, input=[self.user])
+        changed = dict(self.request, input=[self.first_prompt])
         selection = lifecycle.RequestSelection(changed, 'selected', 'response-use', ({'reference':'use'},))
         adapter = types.SimpleNamespace(select_uses=lambda *a, **k: selection)
         with patch.dict(sys.modules, {'response_context_use':adapter}):
@@ -183,11 +183,11 @@ class ContextLifecycleTests(unittest.TestCase):
         self.assertEqual(forwarded['input'][2], dict(self.output, output=''))
         self.record([dict(self.selection, kind='exchange', disposition='omit')])
         forwarded, observations = self.select()
-        self.assertEqual(forwarded['input'], [self.user])
+        self.assertEqual(forwarded['input'], [self.first_prompt])
         self.assertEqual(observations[0]['kind'], 'exchange')
         self.assertEqual(observations[0]['disposition'], 'omit')
-        for request in (dict(self.request, input=[self.user, self.output]),
-                        dict(self.request, input=[self.user, self.call, self.call, self.output])):
+        for request in (dict(self.request, input=[self.first_prompt, self.output]),
+                        dict(self.request, input=[self.first_prompt, self.call, self.call, self.output])):
             result = lifecycle.select_request(request, self.fixture.root, self.home)
             self.assertEqual(result.request, request)
             self.assertEqual(result.observations, ())
@@ -209,25 +209,25 @@ class ContextLifecycleTests(unittest.TestCase):
         self.assertTrue(all(o['forwarded_item_digest'] == lifecycle.json_digest(forwarded['input'][0])
                             for o in observations))
 
-    def test_omit_prior_whole_text_keep_reopens_and_next_humans_remain_intact(self):
+    def test_omit_prior_whole_text_keep_reopens_and_next_inputs_remain_intact(self):
         prior = dict(type='message', role='user', content=[dict(type='input_text', text='old used body')])
         self.rows.insert(1, dict(type='response_item', payload=prior)); self.write_rows()
         self.request['input'].insert(0, prior)
         choice = dict(self.selection, record=2, kind='message', disposition='omit')
         self.record([choice])
         self.assertEqual(self.select()[0]['input'], self.request['input'][1:])
-        for text in ('next human', 'third human'):
+        for text in ('next user-role prompt', 'third user-role prompt'):
             event = self.fixture.intake(text)
-            human = dict(self.user, content=[dict(type='input_text', text=text)])
-            self.rows.append(dict(type='response_item', payload=human)); self.write_rows()
-            self.request['input'].append(human)
+            next_prompt = dict(self.first_prompt, content=[dict(type='input_text', text=text)])
+            self.rows.append(dict(type='response_item', payload=next_prompt)); self.write_rows()
+            self.request['input'].append(next_prompt)
             forwarded, _ = self.select()
-            self.assertEqual(forwarded['input'][-1], human)
+            self.assertEqual(forwarded['input'][-1], next_prompt)
             self.assertNotIn(prior, forwarded['input'])
         self.record([dict(choice, disposition='keep')], event=event)
         self.assertEqual(self.select()[0], self.request)
 
-    def test_omit_unknown_metadata_signed_text_and_current_human_are_protected(self):
+    def test_omit_unknown_metadata_signed_text_and_current_input_are_protected(self):
         prior = dict(type='message', role='assistant', opaque_metadata={'retain': True},
                      content=[dict(type='output_text', text='opaque metadata body')])
         self.rows.insert(1, dict(type='response_item', payload=prior)); self.write_rows()
@@ -259,7 +259,7 @@ class ContextLifecycleTests(unittest.TestCase):
         self.record([dict(self.selection, disposition='omit')])
         for call in (dict(self.call, input='different executed arguments'),
                      dict(self.call, opaque_metadata='unknown changed envelope')):
-            request = dict(self.request, input=[self.user, call, self.output])
+            request = dict(self.request, input=[self.first_prompt, call, self.output])
             result = lifecycle.select_request(request, self.fixture.root, self.home)
             self.assertEqual(result.state, 'preserved')
             self.assertEqual(result.observations, ())
@@ -289,7 +289,7 @@ class ContextLifecycleTests(unittest.TestCase):
         self.assertNotIn('procedure body already applied', json.dumps(forwarded))
         self.assertEqual(forwarded['input'][2:], self.request['input'])
 
-    def test_current_user_input_cannot_be_replaced_by_a_prior_use_judgment(self):
+    def test_current_input_message_cannot_be_replaced_by_a_prior_use_judgment(self):
         with self.assertRaisesRegex(ValueError, 'current|before'):
             self.record([dict(kind='message', record=2, block_index=0,
                               summary='Current request', next_need='None')])
@@ -384,12 +384,12 @@ class ContextLifecycleTests(unittest.TestCase):
         self.assertNotIn('completed write with original answer', serialized)
         self.assertNotIn('consumed navigation body', serialized)
         self.assertNotIn('required long source', serialized)
-        self.assertEqual(forwarded['input'][0], self.user)
+        self.assertEqual(forwarded['input'][0], self.first_prompt)
         self.assertIn('Navigation used; source owner established.', serialized)
         self.assertEqual(len(changes), 1)
         self.assertEqual(self.log.read_bytes(), before)
 
-    def test_prior_answer_can_be_selected_but_current_answer_and_user_cannot(self):
+    def test_prior_answer_can_be_selected_but_current_answer_and_user_role_message_cannot(self):
         prior = dict(type='message', role='assistant', content=[dict(type='output_text', text='already delivered detail ' * 4000)])
         self.rows.insert(1, dict(type='response_item', payload=prior))
         self.rows.append(dict(type='response_item', payload=dict(prior, content=[dict(type='output_text', text='current answer')])))
@@ -417,8 +417,8 @@ class ContextLifecycleTests(unittest.TestCase):
 
     def test_partial_or_changed_exchange_is_preserved_without_orphaning(self):
         self.record_context_kind([dict(self.selection, kind='exchange')])
-        for items in ([self.user, self.output], [self.user,self.call],
-                      [self.user,dict(self.call,input='changed'),self.output]):
+        for items in ([self.first_prompt, self.output], [self.first_prompt,self.call],
+                      [self.first_prompt,dict(self.call,input='changed'),self.output]):
             request = dict(self.request,input=items)
             self.assertEqual(self.select(request),(request,[]))
 
@@ -432,16 +432,16 @@ class ContextLifecycleTests(unittest.TestCase):
     def test_new_input_carries_consumed_state_and_preserves_explicit_original_relookup(self):
         self.record()
         self.fixture.intake('read the original again')
-        new_user = dict(self.user, content=[dict(type='input_text', text='read the original again')])
-        self.rows.append(dict(type='response_item', payload=new_user))
+        next_prompt = dict(self.first_prompt, content=[dict(type='input_text', text='read the original again')])
+        self.rows.append(dict(type='response_item', payload=next_prompt))
         self.write_rows()
-        request = dict(self.request, input=[new_user,self.call,self.output,
+        request = dict(self.request, input=[next_prompt,self.call,self.output,
             dict(type='function_call', call_id='relookup', name='read', arguments='{}'),
             dict(type='function_call_output', call_id='relookup', output='required original wording ' * 10000)])
         actual, changes = self.select(request)
         self.assertEqual(len(changes), 1)
         self.assertEqual(actual['input'][-1], request['input'][-1])
-        self.assertEqual(actual['input'][0], new_user)
+        self.assertEqual(actual['input'][0], next_prompt)
         self.assertNotIn('consumed navigation body', actual['input'][2]['output'][0]['text'])
         with self.assertRaises(ValueError):
             self.record()
@@ -466,15 +466,15 @@ class ContextLifecycleTests(unittest.TestCase):
     def test_unclassified_requests_and_unpaired_outputs_are_preserved(self):
         self.record()
         for changed in (dict(self.request, prompt_cache_key='other'),
-                        dict(self.request, input=[self.user, self.output]),
-                        dict(self.request, input=[dict(self.user, content='unknown format'), self.call, self.output])):
+                        dict(self.request, input=[self.first_prompt, self.output]),
+                        dict(self.request, input=[dict(self.first_prompt, content='unknown format'), self.call, self.output])):
             with self.subTest(request=changed):
                 self.assertEqual(self.select(changed), (changed, []))
 
     def test_unknown_blocks_and_ambiguous_native_inputs_cannot_be_selected(self):
         with self.assertRaises(ValueError):
             self.record([dict(self.selection, block_index=9)])
-        self.rows.append(dict(type='response_item', payload=dict(self.user, content=[dict(type='input_text', text='different input')])))
+        self.rows.append(dict(type='response_item', payload=dict(self.first_prompt, content=[dict(type='input_text', text='different input')])))
         self.write_rows()
         with self.assertRaises(ValueError):
             self.record()
@@ -484,7 +484,7 @@ class ContextLifecycleTests(unittest.TestCase):
         self.output = dict(type='function_call_output', call_id='consumed', output='consumed body ' * 1000)
         self.rows[2]['payload'] = self.call
         self.rows[3]['payload'] = self.output
-        self.request['input'] = [self.user, self.call, self.output]
+        self.request['input'] = [self.first_prompt, self.call, self.output]
         self.write_rows()
         self.record()
         forwarded, changes = self.select()
@@ -875,7 +875,7 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
         self.assertEqual((result.state, result.reason), ('unavailable', 'intake-storage-unavailable'))
         self.assertEqual(result.request, request)
 
-    def test_current_desktop_human_block_preserves_host_guidance_in_entire_wire_identity(self):
+    def test_current_desktop_input_block_preserves_host_guidance_in_entire_wire_identity(self):
         self.rows[4]['message']['content'] = [dict(type='text', text='host guidance retained'),
                                             dict(type='text', text='continue actual work')]
         self.write_rows()
@@ -1057,7 +1057,7 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
         self.assertEqual(result.request['messages'][2]['content'][0]['cache_control'], {'type':'ephemeral'})
         self.assertEqual(result.request['messages'][2]['content'][1], self.necessary)
 
-    def test_disposition_carries_forward_under_next_actual_human_and_exact_binding(self):
+    def test_disposition_carries_forward_under_next_input_and_exact_binding(self):
         receipt = self.record()
         next_event = self.fixture.intake('continue source analysis')
         self.rows.append(self.row('user', 'continue source analysis', promptSource='sdk', turnOrigin='sdk'))
@@ -1071,7 +1071,7 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.record()
 
-    def test_changed_current_human_and_missing_explicit_session_preserve_request(self):
+    def test_changed_current_input_and_missing_explicit_session_preserve_request(self):
         self.record()
         request = self.request()
         request['messages'][4]['content'] += '\nchanged input'
@@ -1081,15 +1081,15 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
                 self.assertEqual(result.request, candidate)
                 self.assertEqual(result.observations, ())
 
-    def test_latest_native_human_does_not_fall_back_to_an_old_matching_input(self):
+    def test_latest_user_role_prompt_row_does_not_fall_back_to_an_old_matching_input(self):
         self.record()
-        self.rows.append(self.row('user', 'another actual human', promptSource='sdk', turnOrigin='sdk'))
+        self.rows.append(self.row('user', 'another SDK prompt', promptSource='sdk', turnOrigin='sdk'))
         self.write_rows()
         self.assertEqual(self.select().state, 'preserved')
         with self.assertRaises(ValueError):
             self.record()
 
-    def test_current_human_cannot_be_substituted_when_prior_equal_text_is_absent(self):
+    def test_current_input_cannot_be_substituted_when_prior_equal_text_is_absent(self):
         self.rows[0]['message']['content'] = 'continue actual work'
         self.write_rows()
         self.record([dict(self.choice, kind='message', record=1)])
@@ -1111,7 +1111,7 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
                 self.assertEqual(result.request, candidate)
                 self.assertEqual(result.observations, ())
 
-    def test_current_turn_call_cannot_move_before_its_human_while_result_stays_after(self):
+    def test_current_turn_call_cannot_move_before_its_input_while_result_stays_after(self):
         call = dict(type='tool_use', id='current-turn-read', name='Read', input={'file_path':'/fixture/current'})
         output = dict(type='tool_result', tool_use_id=call['id'], content='consumed current result')
         self.rows.extend([self.row('assistant', [call]), self.row('user', [output])])

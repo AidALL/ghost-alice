@@ -44,9 +44,9 @@ except Exception:
     _LEDGER_IMPORT_BROKEN = True
 
 
-LEDGER_UNAVAILABLE_DEGRADE = "The intake hook cannot load the ledger dependency, so Ghost-ALICE cannot record this input. The response model continues the user's work without recording it and tells the user once per session and cause that Ghost-ALICE is not recording inputs. It does not claim intake was recorded and does not substitute another ledger."
-LEDGER_WRITE_FAILED_DEGRADE = "The intake hook could not write this input to the ledger, so Ghost-ALICE cannot record it. The response model continues the user's work without recording it and tells the user once per session and cause that Ghost-ALICE is not recording inputs. It does not claim persistence and does not use an old input binding."
-LEDGER_BROKEN_DEGRADE = "The ledger module exists but the intake hook could not load it, so Ghost-ALICE cannot record this input. The response model continues the user's work without recording it and tells the user once per session and cause that Ghost-ALICE is not recording inputs. It does not claim intake was recorded and does not substitute another ledger."
+LEDGER_UNAVAILABLE_DEGRADE = "The intake hook cannot load the ledger dependency, so Ghost-ALICE cannot record this input. The response model continues the work that the human user's instructions authorize without recording it and tells the human user once per session and cause that Ghost-ALICE is not recording inputs. It does not claim intake was recorded and does not substitute another ledger."
+LEDGER_WRITE_FAILED_DEGRADE = "The intake hook could not write this input to the ledger, so Ghost-ALICE cannot record it. The response model continues the work that the human user's instructions authorize without recording it and tells the human user once per session and cause that Ghost-ALICE is not recording inputs. It does not claim persistence and does not use an old input binding."
+LEDGER_BROKEN_DEGRADE = "The ledger module exists but the intake hook could not load it, so Ghost-ALICE cannot record this input. The response model continues the work that the human user's instructions authorize without recording it and tells the human user once per session and cause that Ghost-ALICE is not recording inputs. It does not claim intake was recorded and does not substitute another ledger."
 DEGRADE_MARKER_FILE = "ledger-degraded.json"
 
 
@@ -212,7 +212,7 @@ def _session_coordinates(paths: dict[str, Path]) -> dict[str, str]:
 
 
 def observation_receipt(paths: dict[str, Path], observation: dict[str, Any] | None) -> str:
-    """Expose canonical intake identity only after native actor reconciliation."""
+    """Expose the recorded input's identity; Claude Code supplies it after Core matches the transcript's host markers."""
     receipt = {
         "schema_version": "session-intent-observation-receipt.v1" if observation else "session-intent-transport-receipt.v1",
         "intake_status": "observed" if observation else "pending-native-origin",
@@ -284,7 +284,7 @@ def render_payload(output_format: str, message: str, ledger_root: Path, *, routi
         return ""
     return "\n".join([
         f"Internal instruction: {message}",
-        "User: Session intent tracking does not store raw prompts.",
+        "For the human user: Session intent tracking does not store raw prompts.",
         f"Tech: Configured ledger root: {ledger_root}.",
         "",
     ])
@@ -347,15 +347,15 @@ def main(argv: list[str] | None = None) -> int:
                 observation = build_input_observation(
                     platform=args.platform,
                     session_id=session_id,
-                    raw_user_input=prompt,
+                    raw_input=prompt,
                 )
                 paths = record_turn(
                     root=ledger_root,
                     platform=args.platform,
                     session_id=session_id,
-                    raw_user_input=prompt,
+                    raw_input=prompt,
                     intent_delta=None,
-                    source="hook",
+                    recording_path="hook",
                     observation=observation,
                 )
                 _clear_degrade_marker(ledger_root, args.platform, payload)

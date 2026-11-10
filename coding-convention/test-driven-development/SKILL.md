@@ -7,13 +7,13 @@ compatibility:
 
 # Test-Driven Development
 
-The response model establishes a meaningful failing test for accepted behavior, implements that behavior, and observes the resulting pass. The test's expected result comes from the user's requirement and source contract.
+The response model establishes a meaningful failing test for accepted behavior, implements that behavior, and observes the resulting pass. The test's expected result comes from the human user's requirement and source contract.
 
 ## Applicability
 
 Apply RED-first when the required behavior is known, its expected result can be stated independently of the proposed implementation, and an automated test can exercise the relevant production path.
 
-If the premise, data flow, target or behavior is unknown, use bounded discovery or an implementation proof first. When that work establishes a testable production contract, apply RED-first to the subsequent implementation. Configuration, generated output and instruction changes without a meaningful behavioral test use their accepted source or runtime validation instead. Follow an explicit user instruction about implementation and verification order.
+If the premise, data flow, target or behavior is unknown, use bounded discovery or an implementation proof first. When that work establishes a testable production contract, apply RED-first to the subsequent implementation. Configuration, generated output and instruction changes without a meaningful behavioral test use their accepted source or runtime validation instead. Follow an explicit instruction that the human user enters in the conversation about implementation and verification order, under the common contract's instruction precedence rule.
 
 Before starting, the response model identifies the expected failure, the production path and the independent basis for the assertion. Unknown answers require discovery under systematic-debugging or the accepted design workflow; they do not justify inventing a test.
 
@@ -25,7 +25,7 @@ Invoke the project's actual runner with the exact test target. Retain the origin
 
 If the test passes, determine whether the behavior already exists or the test misses the intended condition. If the test errors, correct the fixture or prerequisite and observe the affected result. Follow systematic-debugging to count failed repair rounds.
 
-For applicable work, observe this intended failure before writing production code. If the response model prematurely wrote production code, remove only its own authorized premature change before rebuilding from the test. Preserve pre-existing user changes and retained original failure evidence.
+For applicable work, observe this intended failure before writing production code. If the response model prematurely wrote production code, remove only its own authorized premature change before rebuilding from the test. Preserve local changes already present in the checkout that this work did not make and retained original failure evidence; git does not record who made the change.
 
 ## GREEN: satisfy the behavior
 
@@ -37,7 +37,7 @@ Use verification-before-completion's [Evidence selection and stop gate](../verif
 
 ## REFACTOR
 
-Once required behavior passes, simplify duplication, names or interfaces only within the accepted task. Preserve behavior and check the affected paths under the same evidence-selection procedure. Begin another RED step only for another required behavior.
+Once required behavior passes, simplify duplication, names or interfaces only within the task being implemented. Preserve behavior and check the affected paths under the same evidence-selection procedure. Begin another RED step only for another required behavior.
 
 ## Worked example
 
@@ -77,4 +77,4 @@ The example covers success on the third attempt. If the contract also requires p
 
 Do not replace an unknown requirement with an implementation-shaped assertion, count mock configuration as production behavior, or treat RED-first order alone as proof of coverage. When setup is difficult, inspect the actual dependencies before prescribing interface changes or asking the user for an implementation detail.
 
-Return the behavior covered, original RED and GREEN observations, changed production target and any unresolved requirement. Verification-before-completion defines the completion judgment, including how this evidence supports the whole requested result.
+Return the behavior covered, original RED and GREEN observations, changed production target and any unresolved requirement. Verification-before-completion defines the completion judgment, including how this evidence supports the whole result that the human user requested.

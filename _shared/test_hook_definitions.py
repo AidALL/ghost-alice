@@ -121,6 +121,7 @@ class HookNameTests(unittest.TestCase):
 
     def test_resolve_hook_event_maps_the_shared_intents_for_both_hosts(self):
         expected = {
+            "on_prompt_submit": "UserPromptSubmit",
             "on_user_prompt": "UserPromptSubmit", "pre_tool_use": "PreToolUse", "post_tool_use": "PostToolUse",
             "on_agent_stop": "Stop", "on_session_start": "SessionStart",
         }

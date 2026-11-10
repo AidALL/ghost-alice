@@ -30,7 +30,7 @@ file_hash opens and reads the target. Symlinks are followed (correct: we hash
 content). Filtering of which paths to include in the snapshot is the caller's
 responsibility (see snapshot_cli.py). Callers that walk an installed skills
 directory must skip entries that are symlinks pointing into the repo, otherwise
-repo updates pollute the user-change baseline.
+repo updates distort the baseline for detecting external changes to installed copies.
 """
 from __future__ import annotations
 import hashlib, json

@@ -62,7 +62,7 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['session-intent-an
                                 'open-questions',
                                 'stop-conditions',
                                 'next-allowed-actions',
-                                'human-owned',
+                                'a boundary the human user set',
                                 'self-declared'],
  '_shared/install_hooks.py': ['TOOL_CHECKPOINT_MARKER',
                               'TOOL_CHECKPOINT_INTERNAL',
@@ -127,7 +127,7 @@ OWNER_SECTIONS = (
         "coding-convention/verification-before-completion/SKILL.md",
         "session-intent-analyzer's `references/ledger-schema.md`, section Core Response Projection",
         "session-intent-analyzer/references/ledger-schema.md", "Core Response Projection",
-        ("response-route.v1", "record_response_route"),
+        ("response-route.v2", "record_response_route"),
     ),
     OwnerSection(
         "coding-convention/verification-before-completion/SKILL.md",

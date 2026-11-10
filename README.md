@@ -4,7 +4,7 @@
 
 ![Ghost-ALICE OS logo](imgs/Ghost-ALICE_logo.png)
 
-Ghost-ALICE OS is an agent governance layer for AI work. It keeps intent, boundaries, evidence, and runtime state inspectable across supported agent runtimes.
+Ghost-ALICE OS is an agent governance layer for AI work. It keeps the response model's `interpreted-as` record, boundaries, evidence, and runtime state inspectable across supported agent runtimes.
 
 It is not a prompt library, a chatbot wrapper, or a standalone agent runtime. It runs on top of existing agent runtimes as the operating layer that makes agent work auditable before the agent claims completion.
 
@@ -16,7 +16,7 @@ Core 0.5.1 uses the current response-route and completion contract. Apache-2.0.
 
 ## How governed work proceeds
 
-The response model keeps the user's objective and constraints, performs authorized work, and judges whether contrary evidence affects a required result or dependency. It corrects affected work when needed and preserves supported results and unresolved requirements.
+The response model keeps the human user's objective and constraints, performs the work that the human user's instructions authorize, and judges whether contrary evidence affects a required result or dependency. It corrects affected work when needed and preserves supported results and unresolved requirements.
 
 See the [Core architecture](./architecture.md) for the standalone flow and [session gate matrix](./docs/policies/session-gate-matrix.md) for the detailed contract.
 
@@ -47,7 +47,7 @@ The [documentation index](./docs/README.md) links the paired English and Korean 
 ## Project Guarantees
 
 - Ghost-ALICE OS is a governance operating layer for agent sessions, not a general-purpose operating system.
-- User intent, boundaries, verification criteria, and install state are first-class surfaces.
+- The response model's `interpreted-as` record, boundaries, verification criteria, and install state are first-class surfaces.
 - The installer tracks managed surfaces and avoids broad deletion when ownership cannot be proven.
 
 The [agent visibility profile](./docs/getting-started/installation.md#agent-visibility-profile) controls how much governance output the user sees; the installation guide gives its default and each platform's command.

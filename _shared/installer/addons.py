@@ -194,7 +194,7 @@ def repair_missing(ctx: "Context") -> bool:
 def _uninstall_args(ctx: "Context") -> list[str]:
     return ["--addons-dir", str(locations.addons_dir(ctx.platform)), "--skills-dir", str(ctx.skills_dir),
             "--skills-dir", str(locations.claude_commands_dir()),
-            "--skills-dir", str(locations.resources_dir(ctx.platform)), "--platform", ctx.platform, "--confirm"]
+            "--skills-dir", str(locations.resources_dir(ctx.platform)), "--platform", ctx.platform, "--apply"]
 
 
 def resume_pending_uninstalls(ctx: "Context") -> None:
@@ -211,7 +211,7 @@ def resume_pending_uninstalls(ctx: "Context") -> None:
 
 
 def uninstall_addon(ctx: "Context", addon_id: str) -> int:
-    """`addon_uninstall.py --addon-id ... --confirm`; the child's exit code."""
+    """`addon_uninstall.py --addon-id ... --apply`; the child's exit code."""
     return runner.run_tool("_shared/addon_uninstall.py", "--addon-id", addon_id, *_uninstall_args(ctx)).returncode
 
 
@@ -235,7 +235,7 @@ def uninstall_all_before_full(ctx: "Context") -> bool:
                                  capture=True)
         if not result.ok:
             failed = True
-            report.warn(f"Full uninstall preserved addon {addon_id}; manual review is required before sidecar cleanup")
+            report.warn(f"Full uninstall preserved addon {addon_id}; the human user must review its preserved files before sidecar cleanup")
     return not failed
 
 

@@ -1,6 +1,6 @@
 ---
 name: writing-plans
-description: Writes an implementation plan that breaks accepted requirements into tasks a newcomer to the project can carry out, after design decisions are settled and before implementation.
+description: Writes an implementation plan that breaks requirements the human user accepted into tasks a newcomer to the project can carry out, after the human user settles decisions only the human user can make and the response model settles technical choices within what the human user's instructions authorize, before implementation.
 calls:
   - "union:subagent-driven-development:plan-execution"
   - "union:executing-plans:plan-execution"
@@ -10,19 +10,19 @@ compatibility:
 
 # Writing Plans
 
-The response model turns accepted requirements into tasks that can be executed without prior project context. Brainstorming resolves open design decisions; this skill does not silently settle a human-owned requirement.
+The response model turns requirements that the human user accepted into tasks that can be executed without prior project context. Under brainstorming, the response model asks the human user for each open design decision only the human user can make and settles technical choices within what the human user's instructions authorize. This skill does not silently settle a requirement only the human user can decide.
 
 ## Define the plan
 
-Use the authorized checkout and apply using-git-worktrees only when isolation is needed. Save the plan by default to `.tmp/implementation-plans/YYYY-MM-DD-<feature-name>.md`; obey a user-selected location or prohibition on task artifacts. The plan is an execution handoff, not canonical policy. Promote policy content separately only when authorized.
+Use the checkout that the human user authorized and apply using-git-worktrees only when isolation is needed. Save the plan by default to `.tmp/implementation-plans/YYYY-MM-DD-<feature-name>.md`; obey a location that the human user selected or the human user's prohibition on task artifacts. The plan is an execution handoff, not canonical policy. Promote policy content separately only when the human user authorized that promotion.
 
-Map each required behavior to its files, dependencies, implementation task and verification. For several independent subsystems, define separate executable plans while preserving the overall objective and dependency order. Follow existing repository organization; propose a structural change only when it addresses the requested work.
+Map each required behavior to its files, dependencies, implementation task and verification. For several independent subsystems, define separate executable plans while preserving the overall objective and dependency order. Follow existing repository organization; propose a structural change only when it addresses the work that the human user requested.
 
-Each task must deliver a coherent result. Divide it into executable steps, such as writing a known-contract failing test, observing its failure, implementing the behavior, observing the pass and committing when the task's commit policy permits it. Use sufficient implementation depth; do not mistake a small diff for a complete correction.
+Each task must deliver a coherent result. Divide it into executable steps, such as writing a known-contract failing test, observing its failure, implementing the behavior, observing the pass and committing when the commit policy in the human user's instructions authorizes it. Use sufficient implementation depth; do not mistake a small diff for a complete correction.
 
 ## Plan format
 
-Start with the feature name, one-sentence goal, architecture, technologies and selected execution workflow. Use checkboxes for steps.
+Start with the feature name, one-sentence goal, architecture, technologies and execution workflow that the human user selected. Use checkboxes for steps.
 
 For every task include:
 
@@ -36,13 +36,13 @@ Do not leave placeholder implementation text, unspecified validation, undefined 
 
 ## Review and correction
 
-Compare the whole plan with the accepted specification. Locate the task satisfying each requirement, check commands and interfaces across tasks, and remove contradictions and unsupported features. When evidence disproves a file mapping or implementation assumption, revise that task within actual authority. Boundary-contract governs a change to the user's objective or explicit constraints.
+Compare the whole plan with the specification that the human user accepted. Locate the task satisfying each requirement, check commands and interfaces across tasks, and remove contradictions and unsupported features. When evidence disproves a file mapping or implementation assumption, revise that task within what the human user's instructions authorize. Boundary-contract governs a change to the human user's objective or explicit constraints.
 
 Use brainstorming's [references/document-reviewer-prompt.md](../brainstorming/references/document-reviewer-prompt.md) for an independent plan review only when it can resolve a remaining planning uncertainty. Retain valid checks after a localized correction rather than repeating the entire review without cause.
 
 ## Execution handoff
 
-Continue the already authorized execution choice after saving or correcting the plan. When the choice is genuinely unresolved, present subagent-driven-development for task-specific delegates and executing-plans for inline execution. Invoke the selected skill.
+Continue the execution choice that the human user already authorized after saving or correcting the plan. When the human user's choice remains unresolved, present subagent-driven-development for task-specific delegates and executing-plans for inline execution to the human user. Invoke the skill for the workflow that the human user chose.
 
 ## Failure modes and result
 

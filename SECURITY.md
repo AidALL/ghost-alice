@@ -31,7 +31,7 @@ Include as much of the following as possible:
 Please treat these areas as security-sensitive:
 
 - Hook execution and hook ordering
-- `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, and `SessionStart` behavior
+- Behavior of the host's prompt-submit event (`UserPromptSubmit`, whose name does not show who sent the prompt), `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, and `SessionStart`
 - Secret helpers under `_shared/secrets/`
 - Installer writes to `~/.claude`, `~/.codex`, `~/.agents`, and `~/.ghost-alice`
 - Session intent ledgers

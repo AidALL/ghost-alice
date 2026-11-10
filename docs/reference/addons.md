@@ -2,7 +2,7 @@
 
 [🇺🇸 English](./addons.md) | [🇰🇷 한국어](../ko/reference/addons.md)
 
-Addons extend a Ghost-ALICE OS install with optional capability packages on top of the core skills. This page is the contributor and operator reference for addon sources: repositories, tenant packages, and local development checkouts. They all enter through the same installer entrypoint.
+Addons extend a Ghost-ALICE OS install with optional capability packages on top of the core skills. This page guides the human user in choosing an addon install source among repositories, tenant packages and local development checkouts. They all enter through the same installer entrypoint.
 
 For the full install command surface, read [installation](../getting-started/installation.md). For how to package an addon you build or bring in, read the [addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/Addon-Authoring).
 
@@ -26,7 +26,7 @@ bash install.sh --addon-source https://github.com/your-org/your-addon.git
 ```
 
 - Custom repositories: install an addon you maintain or fork by pointing `--addon-source` at its repository URL. The installer reads the addon manifest from that source.
-- Tenant packages: the tenant operator selects a bundle authorized for that organization or customer and passes its location through `--addon-source`. The installer reads that source’s addon manifest; choosing a source does not itself grant entitlement.
+- Tenant packages: the human user selects the bundle for that organization or customer, and whoever runs the installer (the human user, the response model or a script) passes its location through `--addon-source`. The installer reads that source’s addon manifest; choosing a source does not itself grant entitlement.
 - Local development addons: while authoring an addon, point `--addon-source` at the working checkout on disk (for example `/path/to/addon-repo`) to install and re-test it without publishing first.
 
 ## Where To Go Next

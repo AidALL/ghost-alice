@@ -46,7 +46,7 @@ class CoordinatesTests(unittest.TestCase):
 
     def test_each_rejection_carries_its_reason(self):
         cases = {
-            'authority-unavailable': dict(GHOST_ALICE_PLATFORM='claude', GHOST_ALICE_SESSION_ID='s'),
+            'ledger-root-unavailable': dict(GHOST_ALICE_PLATFORM='claude', GHOST_ALICE_SESSION_ID='s'),
             'owner-mismatch': dict(GHOST_ALICE_SESSION_INTENT_ROOT='/tmp', GHOST_ALICE_PLATFORM='agent', GHOST_ALICE_SESSION_ID='s'),
         }
         cases['owner-mismatch (empty session)'] = dict(GHOST_ALICE_SESSION_INTENT_ROOT='/tmp', GHOST_ALICE_PLATFORM='codex', GHOST_ALICE_SESSION_ID='')

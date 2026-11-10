@@ -325,10 +325,10 @@ class ClaudeNativeReadinessTests(unittest.TestCase):
         self.assertEqual([observation['tool_use_id'] for observation in result.observations],['read-existing'])
         self.assertFalse(core.read_session_state(**f.coords)['pending_native_inputs'])
 
-    def test_selected_result_moved_across_current_input_does_not_wait(self):
+    def test_selected_result_moved_across_current_context_input_does_not_wait(self):
         f = self.fixture; request = f.request(); request['messages'].append(self.publication_result()['message'])
         messages = request['messages']; request['messages'] = [messages[0],messages[3],messages[1],messages[2],*messages[4:]]
-        with patch('time.sleep',side_effect=AssertionError('A selected result crossed current input')):
+        with patch('time.sleep',side_effect=AssertionError("A selected result crossed the SDK-started turn's current context input")):
             self.assertEqual(self.prepare(request).state,'preserved')
 
     def test_selected_result_moved_across_pending_sdk_does_not_wait(self):
@@ -338,10 +338,10 @@ class ClaudeNativeReadinessTests(unittest.TestCase):
         with patch('time.sleep',side_effect=AssertionError('A selected result crossed prospective input')):
             self.assertEqual(self.prepare(request).state,'preserved')
 
-    def test_selected_call_moved_before_its_current_input_does_not_wait(self):
+    def test_selected_call_moved_before_its_current_context_input_does_not_wait(self):
         f = self.fixture; _, row = self.producer_fixture('omit'); request = f.request(); request['messages'].append(row['message'])
         messages = request['messages']; request['messages'] = [*messages[:3],messages[4],messages[3],*messages[5:]]
-        with patch('time.sleep',side_effect=AssertionError('A selected call crossed current input')):
+        with patch('time.sleep',side_effect=AssertionError("A selected call crossed the SDK-started turn's current context input")):
             self.assertEqual(self.prepare(request).state,'preserved')
 
     def test_unsigned_combined_scope_without_native_beta_does_not_wait(self):

@@ -96,7 +96,7 @@ def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
                 agg["failure_pattern"] = str(entry["failure_pattern"])
             if entry.get("corrective_rule"):
                 agg["corrective_rule"] = str(entry["corrective_rule"])
-            agg["sources"].add(load_ledger().canonical_source(entry.get("source"), "user-said"))
+            agg["sources"].add(load_ledger().canonical_source(entry.get("source"), "") or "unknown")
             agg["sessions"].add(session)
             agg["occurrence_count"] += positive_int(entry.get("occurrence_count"), 1)
             agg["statuses"].append(str(entry.get("status") or "open"))
@@ -128,7 +128,7 @@ def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
             "first_seen": format_timestamp(agg["first_seen"], microseconds=True) if agg["first_seen"] else None,
             "last_seen": format_timestamp(agg["last_seen"], microseconds=True) if agg["last_seen"] else None,
             "days_since_last": days_since_last,
-            "decision": "necessity-gate",
+            "suggested_next_step": "necessity-gate",
         })
 
     # Objective default ordering only: most recurring first, then most recent, then id. No fabricated composite weight. The consuming model judges priority by reasoning over the signals (occurrences, sessions, recency).
@@ -154,12 +154,15 @@ def render_text(report: dict[str, Any]) -> str:
     if not report["recommendations"]:
         lines.append("  (none yet; backlog accumulates as conduct_feedback is recorded)")
     for rec in report["recommendations"]:
+        if "suggested_next_step" in rec and "decision" in rec and rec["suggested_next_step"] != rec["decision"]:
+            raise ValueError("conflicting suggested_next_step and legacy decision")
+        suggested_next_step = rec["suggested_next_step"] if "suggested_next_step" in rec else rec["decision"]
         label = rec["corrective_rule"] or rec["summary"] or rec["failure_pattern"]
         lines.append(
             f"- {rec['id']}: {label} "
             f"(sessions={rec['session_count']}, occurrences={rec['occurrence_count']}, "
             f"sources={'/'.join(rec['sources'])}, last_seen={rec['last_seen']}, "
-            f"days_since_last={rec['days_since_last']}) -> {rec['decision']}"
+            f"days_since_last={rec['days_since_last']}) -> {suggested_next_step}"
         )
     return "\n".join(lines)
 

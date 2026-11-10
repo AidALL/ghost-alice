@@ -48,6 +48,33 @@ import install_hooks
 from test_completion_skill_evidence import assert_stop_observation
 
 
+def setUpModule():
+    temporary = tempfile.TemporaryDirectory()
+    unittest.addModuleCleanup(temporary.cleanup)
+    isolated_env = {key: value for key, value in os.environ.items()
+                    if not key.startswith("GHOST_ALICE_") and key not in
+                    {"CODEX_THREAD_ID", "CODEX_HOME", "CLAUDE_CONFIG_DIR"}}
+    isolated_env.update(HOME=temporary.name, USERPROFILE=temporary.name,
+                        GHOST_ALICE_SESSION_INTENT_ROOT=str(Path(temporary.name) / "intent-ledger"))
+    isolated_env[install_hooks.HOOK_SHARED_DIR_ENV] = str(Path(install_hooks.__file__).parent)
+    environment = patch.dict(os.environ, isolated_env, clear=True)
+    environment.start()
+    unittest.addModuleCleanup(environment.stop)
+    # Import-time commands may contain the invoking session's paths. Build the
+    # commands this module executes from the isolated source and ledger instead.
+    commands = {
+        "SESSION_INTENT_COMMAND": install_hooks._session_intent_analyzer_command(platform="claude", output_format="text") + f" # {install_hooks.SESSION_INTENT_MARKER}",
+        "STOP_HOOK_COMMAND": install_hooks._claude_stop_hook_command(),
+        "STOP_HOOK_COMMAND_CODEX": install_hooks._stop_hook_command("codex"),
+        "SESSION_START_COMMAND": install_hooks._session_start_command(platform="claude", output_format="text"),
+        "SESSION_START_COMMAND_CODEX": install_hooks._session_start_command(platform="codex", output_format="json"),
+    }
+    for name, command in commands.items():
+        command_patcher = patch.object(install_hooks, name, command)
+        command_patcher.start()
+        unittest.addModuleCleanup(command_patcher.stop)
+
+
 LEGACY_PROMPT_PENDING_MERGE_ENTRY = {
     "matcher": "",
     "hooks": [{"type": "command", "command": "echo legacy # " + install_hooks.PROMPT_PENDING_MERGE_MARKER}],
@@ -260,7 +287,7 @@ def _write_session_intent_preflight(
     events_path.write_text(
         json.dumps({
             "ts": "2026-01-01T00:00:00Z",
-            "event": "user-input-observed",
+            "event": "input-observed",
             "platform": platform,
             "session_id": session_id,
             "source": "hook",
@@ -547,7 +574,7 @@ class TestMessageLanguage(unittest.TestCase):
                 self.assertNotIn("Internal instruction:", result.stdout)
                 continue
             self.assertIn("Internal instruction:", result.stdout)
-            self.assertIn("User:", result.stdout)
+            self.assertIn("For the human user:", result.stdout)
             self.assertIn("Tech:", result.stdout)
 
     def test_session_intent_hook_command_uses_repo_tmp_root(self):
@@ -592,7 +619,7 @@ class TestMessageLanguage(unittest.TestCase):
     def test_session_intent_reminder_preserves_receipt_and_data_minimization(self):
         self.assertIn("digest-only intake", install_hooks.SESSION_INTENT_INTERNAL)
         self.assertIn("only when it affects a decision or a semantic update", install_hooks.SESSION_INTENT_INTERNAL)
-        self.assertIn("using the exact receipt", install_hooks.SESSION_INTENT_INTERNAL)
+        self.assertIn("using the exact session metadata", install_hooks.SESSION_INTENT_INTERNAL)
         self.assertIn("exclude raw prompts, conversation/tool output, system instructions and secrets", install_hooks.SESSION_INTENT_INTERNAL)
 
     def test_completion_reminder_delegates_evidence_review_and_preserves_original_time(self):
@@ -785,7 +812,7 @@ class TestMessageLanguage(unittest.TestCase):
         assert_stop_observation(self, payload, issue='claim-evidence-map', repair_target='completion_metadata')
 
     def test_claude_stop_hook_validates_only_final_response(self):
-        # AskUserQuestion answers and tool results are not user prompts and do not reset the turn boundary. Validate only the final response in the span; earlier completion-checks cannot establish its closure.
+        # AskUserQuestion answers and tool results arrive as tool_result rows, not prompt rows that open a turn, and do not reset the turn boundary. Validate only the final response in the span; earlier completion-checks cannot establish its closure.
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -806,7 +833,7 @@ class TestMessageLanguage(unittest.TestCase):
                             "    verdict: pass\n"
                             "- unverified:\n"
                             "  - none")}]}}),
-                    # an AskUserQuestion answer returns as a tool_result user entry (NOT a real prompt)
+                    # An AskUserQuestion answer returns as a tool_result row of type user, not a prompt row that opens a turn.
                     json.dumps({"type": "user", "message": {"role": "user", "content": [
                         {"type": "tool_result", "tool_use_id": "abc", "content": "option A"}]}}),
                     # FINAL response: a fully valid completion-check
@@ -936,11 +963,12 @@ class TempHomeTestCase(unittest.TestCase):
         self.fake_home = Path(self.temp_dir)
         self._patcher = patch.object(install_hooks, "_home", return_value=self.fake_home)
         self._patcher.start()
-        self._hook_shared_patcher = patch.dict(
-            os.environ,
-            {install_hooks.HOOK_SHARED_DIR_ENV: str(Path(install_hooks.__file__).parent)},
-            clear=False,
-        )
+        self._hook_shared_patcher = patch.dict(os.environ, {
+            "HOME": str(self.fake_home), "USERPROFILE": str(self.fake_home),
+            "GHOST_ALICE_SESSION_INTENT_ROOT": str(self.fake_home / "intent-ledger"),
+            "GHOST_ALICE_GHOST_ROOT": str(self.fake_home / ".ghost-alice"),
+            install_hooks.HOOK_SHARED_DIR_ENV: str(Path(install_hooks.__file__).parent),
+        })
         self._hook_shared_patcher.start()
         # Platform detect functions use the patched _home, so no separate patch is needed.
 
@@ -2096,7 +2124,7 @@ class TestInstallHook(TempHomeTestCase):
             with self.subTest(skill_name=skill_name):
                 self.assertIn(f"Skill({skill_name})", allow)
 
-    def test_user_prompt_routing_has_one_owner(self):
+    def test_prompt_submit_routing_has_one_owner(self):
         """Intake owns routing; no retired input hook is installed beside it."""
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
@@ -2105,7 +2133,7 @@ class TestInstallHook(TempHomeTestCase):
                 self.assertEqual(result, "installed")
 
                 settings = self._read_settings(platform)
-                event = hook_definitions.resolve_hook_event("on_user_prompt", platform)
+                event = hook_definitions.resolve_hook_event("on_prompt_submit", platform)
                 hooks = settings["hooks"][event]
                 marker_order = []
                 for entry in hooks:
@@ -2441,7 +2469,7 @@ class TestInstallHook(TempHomeTestCase):
                     self.assertEqual(json.loads(results[-1].stdout), {})
 
     def test_agent_visibility_env_does_not_change_generated_hook_command(self):
-        hook_key = hook_definitions.resolve_hook_event("on_user_prompt", "claude")
+        hook_key = hook_definitions.resolve_hook_event("on_prompt_submit", "claude")
         with patch.dict(os.environ, {"GHOST_ALICE_AGENT_VISIBILITY": "strict"}):
             strict_command = install_hooks._entry_command(install_hooks._platform_session_intent_entry("claude", hook_key))
         with patch.dict(os.environ, {"GHOST_ALICE_AGENT_VISIBILITY": "minimal"}):
@@ -2714,7 +2742,7 @@ class TestIoTraceFailedCallEvent(TempHomeTestCase):
         "is_interrupt": False,
         "duration_ms": 22,
     }
-    USER_HOOK = {"matcher": "", "hooks": [{"type": "command", "command": "echo keep-me"}]}
+    UNMANAGED_HOOK = {"matcher": "", "hooks": [{"type": "command", "command": "echo keep-me"}]}
 
     def _audit_commands(self, platform: str, event: str) -> list[str]:
         groups = self._read_settings(platform)["hooks"].get(event, [])
@@ -2768,11 +2796,11 @@ class TestIoTraceFailedCallEvent(TempHomeTestCase):
         self.assertEqual((row["platform"], row["session"], row["tool"], row["pattern"]),
                          ("claude", "s-failed-call", "Bash", self.FAILED_CALL["tool_input"]["command"]))
 
-    def test_an_update_adds_the_event_once_and_keeps_a_user_hook(self):
+    def test_an_update_adds_the_event_once_and_keeps_an_unmanaged_hook(self):
         self._write_settings("claude", {})
         install_hooks.install_hook("claude")
         settings = self._read_settings("claude")
-        settings["hooks"]["PostToolUseFailure"] = [self.USER_HOOK]
+        settings["hooks"]["PostToolUseFailure"] = [self.UNMANAGED_HOOK]
         self._write_settings("claude", settings)
         self.assertEqual(install_hooks.check_status("claude"), "missing")
 
@@ -2799,8 +2827,8 @@ class TestIoTraceFailedCallEvent(TempHomeTestCase):
         self.assertEqual(self._audit_commands("claude", "PostToolUseFailure"),
                          self._audit_commands("claude", "PostToolUse"))
 
-    def test_uninstall_removes_the_audit_hook_from_both_events_and_keeps_a_user_hook(self):
-        self._write_settings("claude", {"hooks": {"PostToolUseFailure": [self.USER_HOOK]}})
+    def test_uninstall_removes_the_audit_hook_from_both_events_and_keeps_an_unmanaged_hook(self):
+        self._write_settings("claude", {"hooks": {"PostToolUseFailure": [self.UNMANAGED_HOOK]}})
         install_hooks.install_hook("claude")
         self.assertEqual(len(self._audit_commands("claude", "PostToolUseFailure")), 1)
 
@@ -2869,7 +2897,7 @@ class TestCheckStatus(TempHomeTestCase):
             for hook in entry.get("hooks", []):
                 command = hook.get("command", "")
                 if install_hooks.SESSION_INTENT_MARKER in command:
-                    hook["command"] = command + " --local-user-edit"
+                    hook["command"] = command + " --external-change"
         self._write_settings("claude", settings)
 
         status = install_hooks.check_status_detail("claude")
@@ -3062,16 +3090,17 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         ):
             matching = [cmd for cmd in cmds if marker in cmd]
             self.assertEqual(len(matching), 1)
-            result = _run_hook_command(matching[0])
+            input_text = json.dumps({"session_id": "installer-no-prompt"}) if marker == install_hooks.SESSION_INTENT_MARKER else None
+            result = _run_hook_command(matching[0], input_text=input_text)
             self.assertEqual(result.returncode, 0)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["continue"], True)
-            if marker == install_hooks.SESSION_RECEIPT_MARKER:
-                # A session start without host identity adds no message.
+            if marker in {install_hooks.SESSION_RECEIPT_MARKER, install_hooks.SESSION_INTENT_MARKER}:
+                # A session start without host identity and intake without prompt text add no message.
                 self.assertNotIn("systemMessage", payload)
                 continue
-            self.assertIn("systemMessage", payload)
-            self.assertNotIn("User:", payload["systemMessage"])
+            self.assertIn("systemMessage", payload, marker)
+            self.assertNotIn("For the human user:", payload["systemMessage"])
             self.assertNotIn("Tech:", payload["systemMessage"])
 
         config_toml = self._codex_config_toml()
@@ -3441,7 +3470,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["continue"], True)
             self.assertNotIn("Internal instruction:", result.stdout)
-            self.assertNotIn("User:", payload.get("systemMessage", ""))
+            self.assertNotIn("For the human user:", payload.get("systemMessage", ""))
             self.assertNotIn("Tech:", payload.get("systemMessage", ""))
 
     def test_install_codex_replaces_markerless_hook_runner_wrappers(self):
@@ -3454,7 +3483,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
                 hook["command"] = re.sub(r"\s+# .*\[hook-runner:[^\]]+\].*$", "", command)
             return cloned
 
-        user_prompt = hook_definitions.resolve_hook_event("on_user_prompt", "codex")
+        prompt_submit = hook_definitions.resolve_hook_event("on_prompt_submit", "codex")
         pre_tool = hook_definitions.resolve_hook_event("pre_tool_use", "codex")
         post_tool = hook_definitions.resolve_hook_event("post_tool_use", "codex")
         stop = hook_definitions.resolve_hook_event("on_agent_stop", "codex")
@@ -3464,8 +3493,8 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
 
         self._write_settings("codex", {
             "hooks": {
-                user_prompt: [
-                    markerless(install_hooks._platform_session_intent_entry("codex", user_prompt)),
+                prompt_submit: [
+                    markerless(install_hooks._platform_session_intent_entry("codex", prompt_submit)),
                     markerless(install_hooks._hook_runner_command_entry(
                         "web-search-first", "echo old", install_hooks.WEB_SEARCH_FIRST_MARKER, platform_key="codex")),
                 ],
@@ -3481,7 +3510,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
 
         settings = self._read_settings("codex")
         expected = {
-            user_prompt: [
+            prompt_submit: [
                 install_hooks.SESSION_INTENT_MARKER,
             ],
             pre_tool: [install_hooks.TOOL_CHECKPOINT_MARKER],
@@ -3862,7 +3891,7 @@ class TestSessionStartHook(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("has 1 undecided entry", result.stdout)
         self.assertIn("Unrelated read-only work may continue", result.stdout)
-        self.assertIn("an explicit defer leaves entries undecided", result.stdout)
+        self.assertIn("a deferral that the human user states explicitly leaves entries undecided", result.stdout)
         self.assertNotIn("Check the current platform pending-merge manifest", result.stdout)
 
     def test_claude_prompt_hooks_use_json_payloads_to_avoid_answer_text_leakage(self):
@@ -3967,7 +3996,7 @@ class TestExternalEvidenceHookRemoval(TempHomeTestCase):
 class TestForegroundHookPayloads(TempHomeTestCase):
     """Installed foreground hooks preserve their platform payload contracts."""
 
-    def test_user_prompt_hooks_emit_non_json_prefixed_text(self):
+    def test_prompt_submit_hooks_emit_non_json_prefixed_text(self):
         for cmd, env in (
             (install_hooks.SESSION_INTENT_COMMAND, None),
         ):
@@ -4119,7 +4148,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
                     self.assertEqual(receipt["undecided_count"], 0)
                     self.assertEqual(Path(receipt["manifest_path"]), self.fake_home / ".ghost-alice/pending-merges/codex/manifest.json")
                 self.assertIsNone(re.search(r"[\uac00-\ud7a3]", payload["systemMessage"]))
-                self.assertNotIn("User:", payload["systemMessage"])
+                self.assertNotIn("For the human user:", payload["systemMessage"])
                 self.assertNotIn("Tech:", payload["systemMessage"])
 
     def test_codex_pending_merge_hooks_emit_explicit_hook_verified_clean_contract(self):
@@ -4173,7 +4202,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
             result = _run_hook_command_via_cmd(cmd, env=env)
             self.assertEqual(result.returncode, 0)
             self.assertIn("Internal instruction:", result.stdout)
-            self.assertIn("User:", result.stdout)
+            self.assertIn("For the human user:", result.stdout)
             self.assertIn("Tech:", result.stdout)
 
     def test_claude_stop_hook_runs_under_cmd_exe(self):

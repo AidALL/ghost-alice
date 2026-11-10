@@ -59,21 +59,50 @@ class RegisteredHomeCase(unittest.TestCase):
         """The record without its service section: the gateway is not registered in the record."""
         installed_payload.update(self.reg.ghost, {"service": None})
 
+class ApplySelectionTests(RegisteredHomeCase):
+    def test_detach_defaults_and_apply_aliases_preserve_preview(self):
+        before = self.reg.config.read_bytes()
+        for selection in ({}, {"apply_changes": False}, {"confirm": False},
+                          {"apply_changes": False, "confirm": False}):
+            with self.subTest(selection=selection):
+                self.assertEqual(gateway.detach(**selection)['action'], 'would-detach')
+                self.assertEqual(self.reg.config.read_bytes(), before)
+                self.assertEqual(self.stops, 0)
+
+    def test_conflicting_detach_aliases_fail_before_lock_or_service_work(self):
+        before = self.reg.config.read_bytes()
+        with patch.object(gateway.platform, 'operation_lock') as lock:
+            with self.assertRaisesRegex(ValueError, 'apply_changes.*confirm.*conflict'):
+                gateway.detach(apply_changes=False, confirm=True)
+        lock.assert_not_called()
+        self.assertEqual(self.reg.config.read_bytes(), before)
+        self.assertEqual(self.stops, 0)
+
+    def test_matching_true_aliases_detach_once(self):
+        self.assertEqual(gateway.detach(apply_changes=True, confirm=True)['action'], 'detached')
+        self.assertEqual(self.stops, 1)
+        self.assertNotIn('service', installed_payload.read(self.reg.ghost))
+
+    def test_legacy_true_alias_detaches(self):
+        self.assertEqual(gateway.detach(confirm=True)['action'], 'detached')
+        self.assertEqual(self.stops, 1)
+
+
 
 class GatewayUninstallTests(RegisteredHomeCase):
     def setUp(self):
         super().setUp()
         self.targets = []
 
-    def report(self, *, platform='codex', confirm=True, target=None):
+    def report(self, *, platform='codex', apply_changes=True, target=None):
         manifest = self.root / '.ghost-alice/install-state' / (platform + '.json')
         manifest.parent.mkdir(parents=True, exist_ok=True)
         target = self.reg.shared if target is None else target
         manifest.write_text(json.dumps(dict(platform=platform, targets=[dict(target_name='_shared', dest_path=str(target))])))
-        args = argparse.Namespace(platform=platform, confirm=confirm, install_state_manifest=manifest)
+        args = argparse.Namespace(platform=platform, apply_changes=apply_changes, install_state_manifest=manifest)
 
         def remove(*_args, **_kwargs):
-            if not _kwargs.get('confirm'):
+            if not _kwargs.get('apply_changes'):
                 return dict(action='would-remove', path=str(target))
             self.targets.append(dict(active=self.active, config=self.reg.config.read_text()))
             return dict(action='unchanged')
@@ -129,7 +158,7 @@ class GatewayUninstallTests(RegisteredHomeCase):
         self.assertIn('prior configuration/service retained', result['items'][0]['detail'])
         self.assertIsNotNone(self.reg.service())
 
-    def test_user_modified_provider_blocks_are_preserved_and_block_removal(self):
+    def test_externally_changed_provider_blocks_are_preserved_and_block_removal(self):
         config = self.reg.config
         changed = config.read_text().replace('wire_api = "responses"', 'wire_api = "user-choice"')
         config.write_text(changed)
@@ -151,7 +180,7 @@ class GatewayUninstallTests(RegisteredHomeCase):
         self.assertEqual((item['action'], item['reason']), ('unchanged', 'independent-gateway-runtime'))
 
     def test_dry_run_keeps_provider_service_and_record(self):
-        result, _ = self.report(confirm=False)
+        result, _ = self.report(apply_changes=False)
         self.assertEqual(self.stops, 0)
         self.assertTrue(self.reg.agent.exists())
         self.assertIn('ghost_alice_context', self.reg.config.read_text())
@@ -224,7 +253,7 @@ class GatewayUninstallTests(RegisteredHomeCase):
         with patch.object(gateway, '_service_state', return_value='absent') as service, \
              patch.object(gateway, '_write', wraps=gateway._write) as write:
             with self.assertRaisesRegex(ValueError, '[Ss]ymlinked Codex config'):
-                gateway.detach(confirm=True)
+                gateway.detach(apply_changes=True)
         service.assert_not_called()
         write.assert_not_called()
         self.assertEqual(self.stops, 0)
@@ -336,7 +365,7 @@ class GatewayUninstallTests(RegisteredHomeCase):
         body = dict(targets=[dict(target_name='_shared', dest_path=str(shared))])
         for platform in ('codex', 'claude'):
             (manifests / (platform + '.json')).write_text(json.dumps(dict(body, platform=platform)))
-        args = argparse.Namespace(platform='claude', confirm=True, install_state_manifest=manifests / 'claude.json')
+        args = argparse.Namespace(platform='claude', apply_changes=True, install_state_manifest=manifests / 'claude.json')
         with patch.object(cleanup, '_claude_home', return_value=self.root / '.claude'), \
              patch.object(cleanup, '_hook_item', return_value=dict(action='unchanged')), \
              patch.object(cleanup, '_global_rule_items', return_value=[]), \
@@ -358,7 +387,7 @@ class DetachCommandTests(RegisteredHomeCase):
         config = self.reg.config
         config.write_text(config.read_text(encoding='utf-8') + '\n[features]\nhooks=true\n', encoding='utf-8')
         installed_payload.update(self.reg.ghost, {"service": gateway_testing.service_section(self.reg)})
-        result = gateway.detach(confirm=True)
+        result = gateway.detach(apply_changes=True)
         self.assertEqual(result['action'], 'detached')
         self.assertEqual(self.stops, 1)
         self.assertFalse(self.active)
@@ -373,14 +402,14 @@ class DetachCommandTests(RegisteredHomeCase):
         self.unregister()
         before = {p: p.read_bytes() for p in (self.reg.agent, self.reg.config, installed_payload.path(self.reg.ghost))}
         with patch.object(gateway, '_service_state') as service:
-            result = gateway.detach(confirm=True)
+            result = gateway.detach(apply_changes=True)
         service.assert_not_called()
         self.assertEqual((result['action'], result['reason']), ('missing', 'gateway-not-registered'))
         self.assertEqual({p: p.read_bytes() for p in before}, before)
 
     def test_detach_preview_changes_nothing(self):
         before = {p: p.read_bytes() for p in (self.reg.agent, self.reg.config, installed_payload.path(self.reg.ghost))}
-        result = gateway.detach(confirm=False)
+        result = gateway.detach(apply_changes=False)
         self.assertEqual((result['status'], result['action']), ('dry-run', 'would-detach'))
         self.assertEqual([step['phase'] for step in result['plan']['steps']],
                          ['prepare', 'stop', 'verify-absence', 'stage', 'commit', 'retire'])
@@ -390,19 +419,20 @@ class DetachCommandTests(RegisteredHomeCase):
         self.assertEqual({p: p.read_bytes() for p in before}, before)
 
     def test_detach_cli(self):
-        stdout = io.StringIO()
-        with patch.object(gateway, 'detach', return_value=dict(action='detached')) as run, \
-             contextlib.redirect_stdout(stdout):
-            self.assertEqual(gateway.main(['detach', '--confirm']), 0)
-        self.assertEqual(run.call_args.kwargs, dict(confirm=True))
-        self.assertEqual(json.loads(stdout.getvalue()), dict(action='detached'))
+        for flags in (['--apply'], ['--confirm'], ['--apply', '--confirm']):
+            stdout = io.StringIO()
+            with self.subTest(flags=flags), patch.object(gateway, 'detach', return_value=dict(action='detached')) as run, \
+                 contextlib.redirect_stdout(stdout):
+                self.assertEqual(gateway.main(['detach', *flags]), 0)
+            self.assertEqual(run.call_args.kwargs, dict(apply_changes=True))
+            self.assertEqual(json.loads(stdout.getvalue()), dict(action='detached'))
         with patch.object(gateway, 'detach', return_value=dict(action='missing')) as run, \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(gateway.main(['detach', '--user-home', str(self.root)]), 0)
-        self.assertEqual(run.call_args.kwargs, dict(confirm=False, home=self.root))
+        self.assertEqual(run.call_args.kwargs, dict(apply_changes=False, home=self.root))
         with patch.object(gateway, 'detach', side_effect=GatewayBlocked('changed')), \
              contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(gateway.main(['detach', '--confirm']), 2)
+            self.assertEqual(gateway.main(['detach', '--apply']), 2)
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as stop:
             gateway.main(['detach', '--root', '/x'])

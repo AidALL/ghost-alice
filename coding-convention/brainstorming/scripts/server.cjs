@@ -212,7 +212,7 @@ function handleMessage(text) {
     return;
   }
   touchActivity();
-  console.log(JSON.stringify({ source: 'user-event', ...event }));
+  console.log(JSON.stringify({ source: 'websocket-message', ...event }));
   if (event.choice) {
     const eventsFile = path.join(STATE_DIR, 'events');
     fs.appendFileSync(eventsFile, JSON.stringify(event) + '\n');

@@ -4,15 +4,15 @@ The response model uses this reference when boundary reconciliation is uncertain
 
 ## Boundary reconciliation
 
-The response model compares current human instructions and supplied event/conversation evidence with retained goals, scope, decisions and constraints. A clear current instruction can authorize a bounded change without formal revocation wording. A decision timestamp does not date an undated restriction; admission, prior edits or a compressed goal do not establish replacement chronology.
+The response model compares the human user's current instructions and supplied event/conversation evidence with the objective (`current_goal`), scope (`latest_scope`), decisions and constraints that the response model recorded in the intent ledger. The objective has no source label; scope items and decisions have one only when the response model supplied it, and the history projection keeps only a scope item's ID and summary. Name an item's origin from its source label or state that no origin is recorded. A clear current instruction from the human user can authorize a bounded change without formal revocation wording. A decision timestamp does not date an undated restriction; admission, prior edits or a compressed goal do not establish replacement chronology.
 
-If only conflicting snapshot fields remain, the response model leaves the conflict unresolved and asks for the exact contested decision. It must not call one field obsolete without evidence. Missing task files do not resolve authority.
+If only conflicting snapshot fields remain, the response model leaves the conflict unresolved and asks the human user for the exact contested decision. It must not call one field obsolete without evidence. Missing task files do not resolve authority.
 
 ## Direct answer and confirmation conditions
 
 The common contract's Work Selection section carries task-router's direct-answer rule and its no-tool action; its Session Intent section defines confirmation questions. Use the examples below when a supplied phrase leaves the next action uncertain.
 
-A general why/how premise remains an explanation topic unless the user identifies a workspace, supplies workspace evidence, requests exact diagnosis, or the conversation establishes the inspected referent. First-person wording, past tense, technical-state vocabulary and an open project do not independently establish inspection authority. An established referent permits inspection but does not require it when retained evidence answers the question.
+A general why/how premise remains an explanation topic unless the human user identifies a workspace, supplies workspace evidence, requests exact diagnosis, or the conversation establishes the inspected referent. First-person wording, past tense, technical-state vocabulary and an open project do not independently establish inspection authority. An established referent permits inspection but does not require it when retained evidence answers the question.
 
 ## The visibility level
 
@@ -22,15 +22,15 @@ For work, task-router defines response route registration and verification-befor
 
 | Supplied situation | Decision and next action |
 | --- | --- |
-| An authorized parser fix is unfinished; the user asks for status | Answer from retained evidence in commentary, then implement/test under existing authority |
-| One provider's fixed quota blocks its smoke test, but an authorized local path remains | Preserve the provider-specific gap, continue independent work and do not probe the unchanged quota |
-| The user says “Stop editing and explain the existing result” | Stop edits and answer from retained evidence; historical open flags do not restart work |
+| A parser fix that the human user's instructions authorize is unfinished; the human user asks for status | Answer from retained evidence in commentary, then implement/test within what the human user's instructions already authorize |
+| One provider's fixed quota blocks its smoke test, but a local path that the human user's instructions authorize remains | Preserve the provider-specific gap, continue independent work and do not probe the unchanged quota |
+| The human user says “Stop editing and explain the existing result” | Stop edits and answer from retained evidence; historical open flags do not restart work |
 | “I cannot get it to work” with no established referent | Ask the minimum question about the error/context; do not inspect the ambient project |
 | A stable compile-only how-to with no version-specific claim | Give the bounded method directly |
 | A general question about a past process state without an established inspected artifact | Explain common causes without diagnosing the ambient workspace |
 | “Check the requirements table against the body” | Normal verification; when the purpose is established and both targets are known, the read-only comparison needs no new boundary contract |
 | “Build only the Android login mockup; do not touch auth/API/DI/navigation; verify a screenshot” | Normal development; boundary-contract preserves prohibited surfaces and the visual acceptance criterion before coding |
-| “Schedule a meeting tomorrow at 3” | Normal operations; boundary-contract captures the external side effect before scheduling |
+| The human user asks “Schedule a meeting tomorrow at 3” | Normal operations; boundary-contract captures the external side effect before scheduling |
 
 The examples illustrate classification, not findings about any current tool or workspace.
 

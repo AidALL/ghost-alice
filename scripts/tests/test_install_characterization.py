@@ -172,10 +172,10 @@ class InstallCharacterizationTest(unittest.TestCase):
                 return
             self.assertEqual(snapshot, expected)
 
-    def test_uninstall_preserves_user_file_and_removes_markers(self) -> None:
+    def test_uninstall_preserves_unmanaged_file_and_removes_markers(self) -> None:
         """Assert install/uninstall cleanup behavior.
 
-        Non-managed user files survive full uninstall and managed ownership
+        Non-managed files survive full uninstall and managed ownership
         markers are removed from the selected skill root.
         """
 
@@ -184,8 +184,8 @@ class InstallCharacterizationTest(unittest.TestCase):
             home = Path(temp_dir)
             skills_dir = home / ".claude" / "skills"
             skills_dir.mkdir(parents=True)
-            user_file = skills_dir / "user-note.txt"
-            user_file.write_text("keep me", encoding="utf-8")
+            unmanaged_file = skills_dir / "user-note.txt"
+            unmanaged_file.write_text("keep me", encoding="utf-8")
 
             install_result = _run_install(
                 source, home, "--platform", "claude", "--skip-source-health", "task-router"
@@ -204,10 +204,10 @@ class InstallCharacterizationTest(unittest.TestCase):
             )
 
             self.assertTrue(
-                user_file.exists(),
-                msg="non-managed user file was removed by uninstall",
+                unmanaged_file.exists(),
+                msg="non-managed file was removed by uninstall",
             )
-            self.assertEqual(user_file.read_text(encoding="utf-8"), "keep me")
+            self.assertEqual(unmanaged_file.read_text(encoding="utf-8"), "keep me")
             self.assertEqual(_markers_under_skills(home), [])
 
 

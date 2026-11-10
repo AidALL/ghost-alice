@@ -90,6 +90,77 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.addCleanup(identity.stop)
         self.ledger = load_module()
 
+    def test_input_keyword_aliases_preserve_fingerprints_without_storing_text(self) -> None:
+        coordinates = dict(root=self.tmpdir / "aliases", platform="codex", session_id="aliases")
+        for arguments in ({"raw_input": "private input"}, {"raw_user_input": "private input"},
+                          {"raw_input": "private input", "raw_user_input": "private input"}):
+            with self.subTest(arguments=arguments):
+                observation = self.ledger.build_input_observation(platform="codex", session_id="aliases", **arguments)
+                self.ledger.record_turn(**coordinates, **arguments, observation=observation, recording_path="cli")
+                state = self.ledger.read_session_state(**coordinates)
+                event = self.ledger.read_session_events(**coordinates)[-1]
+                self.assertEqual(state["latest_input_digest"], self.ledger.text_digest("private input"))
+                self.assertEqual(state["latest_input_char_count"], len("private input"))
+                self.assertEqual(state["latest_input_event_id"], observation["input_event_id"])
+                self.assertEqual(event["event"], "input-observed")
+                self.assertEqual(event["recording_path"], "cli")
+                self.assertNotIn("source", event)
+                self.assertNotIn("private input", json.dumps([state, event]))
+
+    def test_public_keyword_conflicts_leave_the_ledger_unchanged(self) -> None:
+        coordinates = dict(root=self.tmpdir / "conflicts", platform="codex", session_id="conflicts")
+        self.ledger.record_turn(**coordinates, raw_user_input="original")
+        before = authority_dump(self.ledger, coordinates["root"])
+        for arguments in ({"raw_input": "new", "raw_user_input": "different"},
+                          {"raw_input": None, "raw_user_input": "different"},
+                          {"raw_input": "new", "source": "hook", "recording_path": "cli"}):
+            with self.subTest(arguments=arguments), self.assertRaisesRegex(ValueError, "conflict"):
+                self.ledger.record_turn(**coordinates, **arguments)
+            self.assertEqual(authority_dump(self.ledger, coordinates["root"]), before)
+        with self.assertRaisesRegex(ValueError, "conflict"):
+            self.ledger.build_input_observation(platform="codex", session_id="conflicts",
+                                                raw_input=None, raw_user_input="different")
+
+    def test_recording_path_alias_and_unspecified_default_do_not_claim_an_actor(self) -> None:
+        for arguments, expected in (({}, "unspecified"), ({"source": "hook"}, "hook"),
+                                    ({"recording_path": "cli", "source": "cli"}, "cli")):
+            coordinates = dict(root=self.tmpdir / expected, platform="codex", session_id=expected)
+            self.ledger.record_turn(**coordinates, raw_input="input", **arguments)
+            event = self.ledger.read_session_events(**coordinates)[-1]
+            self.assertEqual(event["recording_path"], expected)
+            self.assertNotIn("source", event)
+
+    def test_selectable_criterion_preserves_defaults_and_explicit_withdrawal(self) -> None:
+        for fields in ({"selectable": True}, {"admitted": True}, {"selectable": True, "admitted": True}):
+            normalized = self.ledger.normalize_acceptance_criterion(
+                {"id": "criterion", "summary": "Required result", "source": "interpreted-as", **fields})
+            self.assertIs(normalized["selectable"], True)
+            self.assertNotIn("admitted", normalized)
+        prior = [{"id": "criterion", "summary": "Required result", "source": "interpreted-as", "admitted": True}]
+        for fields, expected in (({}, True), ({"selectable": None}, True), ({"selectable": False}, False),
+                                 ({"admitted": False}, False)):
+            merged = self.ledger.merge_acceptance_criteria(prior,
+                [{"id": "criterion", "summary": "Required result", "source": "interpreted-as", **fields}])
+            self.assertIs(merged[0]["selectable"], expected)
+        for source, expected in (("user-said", True), ("previous-tool", True), ("system-doc", True),
+                                 ("interpreted-as", False), ("user-explicit", True), ("inferred", False)):
+            normalized = self.ledger.normalize_acceptance_criterion(
+                {"id": "criterion", "summary": "Required result", "source": source})
+            self.assertIs(normalized["selectable"], expected)
+
+    def test_conflicting_selectable_aliases_reject_the_entire_write(self) -> None:
+        coordinates = dict(root=self.tmpdir / "selection-conflict", platform="codex", session_id="selection-conflict")
+        self.ledger.record_turn(**coordinates, raw_input="original")
+        before = authority_dump(self.ledger, coordinates["root"])
+        current = self.ledger.read_session_state(**coordinates)["latest_input_event_id"]
+        for old_value, new_value in ((True, False), (False, True), (1, True), (None, False)):
+            with self.subTest(old=old_value, new=new_value), self.assertRaisesRegex(ValueError, "selectable"):
+                self.ledger.record_turn(**coordinates, expected_input_event_id=current, intent_delta={
+                    "current_goal": "must not change",
+                    "acceptance_criteria": [{"id": "criterion", "summary": "Required result",
+                                             "admitted": old_value, "selectable": new_value}]})
+            self.assertEqual(authority_dump(self.ledger, coordinates["root"]), before)
+
     def run_cli(self, root, *args, identity=None):
         env = dict(os.environ)
         env.update(identity or {})
@@ -200,7 +271,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
                 {
                     "id": "report-instead-of-execute",
                     "failure_pattern": "reported findings instead of executing the instruction",
-                    "corrective_rule": "an explicit remove/do/fix is an execution order",
+                    "corrective_rule": "the human user's explicit remove/do/fix instruction requests execution",
                     "source": "user-said",
                     "status": "open",
                 }
@@ -211,7 +282,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertEqual(entry["id"], "report-instead-of-execute")
         self.assertEqual(entry["source"], "user-said")
         self.assertEqual(entry["status"], "open")
-        self.assertEqual(entry["corrective_rule"], "an explicit remove/do/fix is an execution order")
+        self.assertEqual(entry["corrective_rule"], "the human user's explicit remove/do/fix instruction requests execution")
         state = self.ledger.apply_delta(state, {
             "conduct_feedback": [
                 {"id": "report-instead-of-execute", "status": "encoded"}
@@ -253,7 +324,8 @@ class SessionIntentLedgerTests(unittest.TestCase):
             "conduct_feedback": [
                 {
                     "id": "report-instead-of-execute",
-                    "corrective_rule": "an explicit do/fix request is an execution order",
+                    "corrective_rule": "the human user's explicit do/fix instruction requests execution",
+                    "source": "user-said",
                     "status": "open",
                 }
             ]
@@ -268,8 +340,8 @@ class SessionIntentLedgerTests(unittest.TestCase):
 
     def test_retired_feedback_keeps_only_audit_identity(self):
         coords = dict(root=self.tmpdir / 'feedback', platform='codex', session_id='feedback')
-        self.ledger.record_turn(**coords, raw_user_input='Apply the correction', intent_delta={
-            'conduct_feedback': [{'id': 'done-rule', 'corrective_rule': 'Current correction', 'status': 'open'}]})
+        self.ledger.record_turn(**coords, raw_input='Apply the correction', intent_delta={
+            'conduct_feedback': [{'id': 'done-rule', 'corrective_rule': 'Current correction', 'source': 'user-said', 'status': 'open'}]})
         before = self.ledger.read_session_state(**coords)
         self.ledger.record_turn(**coords, expected_input_event_id=before['latest_input_event_id'],
             intent_delta={'conduct_feedback': [{'id': 'done-rule', 'status': 'encoded'}]})
@@ -291,9 +363,9 @@ class SessionIntentLedgerTests(unittest.TestCase):
             root=root,
             platform="codex",
             session_id="session-1",
-            raw_user_input=raw_prompt,
+            raw_input=raw_prompt,
             intent_delta=delta,
-            source="agent",
+            recording_path="unspecified",
         )
 
         state = authority_state(self.ledger, paths["state"])
@@ -331,7 +403,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             platform="codex",
             session_id="session-jsonl",
             intent_delta=delta,
-            source="agent",
+            recording_path="unspecified",
         )
 
         rows = authority_events(self.ledger, paths["events"])
@@ -358,15 +430,15 @@ class SessionIntentLedgerTests(unittest.TestCase):
             root=root,
             platform="codex",
             session_id="session-dupe",
-            raw_user_input="",
-            source="hook",
+            raw_input="",
+            recording_path="hook",
         )
         paths = self.ledger.record_turn(
             root=root,
             platform="codex",
             session_id="session-dupe",
-            raw_user_input="",
-            source="hook",
+            raw_input="",
+            recording_path="hook",
         )
 
         rows = authority_events(self.ledger, paths["events"])
@@ -498,7 +570,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
                     "id": "AC1",
                     "summary": "completion claims must map to fresh evidence",
                     "source": "user-said",
-                    "admitted": True,
+                    "selectable": True,
                 }
             ],
         )
@@ -595,9 +667,9 @@ class SessionIntentLedgerTests(unittest.TestCase):
         state = authority_state(self.ledger, paths["state"])
         by_id = {c["id"]: c for c in state["acceptance_criteria"]}
 
-        # Contract-bound sources are admitted; interpreted-as is not admitted until promoted.
-        self.assertTrue(by_id["c-user"]["admitted"])
-        self.assertFalse(by_id["c-inf"]["admitted"])
+        # Core code's source-label default permits selection; interpreted-as requires an explicit true flag.
+        self.assertTrue(by_id["c-user"]["selectable"])
+        self.assertFalse(by_id["c-inf"]["selectable"])
 
     def test_a_recorded_criterion_carries_only_its_definition(self) -> None:
         paths = self.ledger.record_turn(
@@ -609,19 +681,19 @@ class SessionIntentLedgerTests(unittest.TestCase):
             ]},
         )
         self.assertEqual(authority_state(self.ledger, paths["state"])["acceptance_criteria"], [
-            {"id": "AC1", "summary": "do X", "source": "user-said", "admitted": True},
-            {"id": "AC2", "summary": "do Y", "source": "user-said", "admitted": True,
+            {"id": "AC1", "summary": "do X", "source": "user-said", "selectable": True},
+            {"id": "AC2", "summary": "do Y", "source": "user-said", "selectable": True,
              "work_unit_id": "fix", "contract_revision": 1},
         ])
 
     def test_legacy_criterion_sources_are_kept_and_read_as_current_labels(self) -> None:
-        for legacy, current, admitted in (("user-explicit", "user-said", True), ("inferred", "interpreted-as", False)):
+        for legacy, current, selectable in (("user-explicit", "user-said", True), ("inferred", "interpreted-as", False)):
             with self.subTest(legacy=legacy):
                 criterion = self.ledger.normalize_acceptance_criterion(
                     {"id": "legacy", "summary": "kept meaning", "source": legacy})
                 self.assertEqual(criterion["source"], legacy)
                 self.assertEqual(self.ledger.canonical_source(criterion["source"], "interpreted-as"), current)
-                self.assertIs(criterion["admitted"], admitted)
+                self.assertIs(criterion["selectable"], selectable)
 
     def test_recording_the_same_id_replaces_the_summary(self) -> None:
         root = self.tmpdir / "ledger"
@@ -638,7 +710,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         ac1 = next(c for c in state["acceptance_criteria"] if c["id"] == "AC1")
         self.assertEqual(ac1["summary"], "do X (clarified)")
 
-    def test_inferred_criterion_is_admitted_only_after_explicit_promotion(self) -> None:
+    def test_inferred_criterion_is_selectable_only_after_explicit_promotion(self) -> None:
         root = self.tmpdir / "ledger"
         base = {"id": "AC-inf", "summary": "maybe Z", "source": "interpreted-as"}
         paths = self.ledger.record_turn(
@@ -647,15 +719,15 @@ class SessionIntentLedgerTests(unittest.TestCase):
         )
         state = authority_state(self.ledger, paths["state"])
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-inf")
-        self.assertFalse(ac["admitted"])
+        self.assertFalse(ac["selectable"])
 
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
-            intent_delta={"acceptance_criteria": [dict(base, admitted=True)]},
+            intent_delta={"acceptance_criteria": [dict(base, selectable=True)]},
         )
         state = authority_state(self.ledger, paths["state"])
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-inf")
-        self.assertTrue(ac["admitted"])
+        self.assertTrue(ac["selectable"])
 
     def test_an_explicit_false_withdraws_admission(self) -> None:
         root = self.tmpdir / "ledger"
@@ -666,26 +738,26 @@ class SessionIntentLedgerTests(unittest.TestCase):
         )
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
-            intent_delta={"acceptance_criteria": [dict(base, admitted=False)]},
+            intent_delta={"acceptance_criteria": [dict(base, selectable=False)]},
         )
         state = authority_state(self.ledger, paths["state"])
-        self.assertFalse(next(c for c in state["acceptance_criteria"] if c["id"] == "AC1")["admitted"])
+        self.assertFalse(next(c for c in state["acceptance_criteria"] if c["id"] == "AC1")["selectable"])
 
-    def test_invalid_admitted_field_preserves_prior_admission(self) -> None:
+    def test_invalid_selectable_field_preserves_prior_selection_flag(self) -> None:
         root = self.tmpdir / "ledger"
         base = {"id": "AC-inf", "summary": "maybe Z", "source": "interpreted-as"}
         self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
-            intent_delta={"acceptance_criteria": [dict(base, admitted=True)]},
+            intent_delta={"acceptance_criteria": [dict(base, selectable=True)]},
         )
-        # A present-but-invalid admitted field must not silently drop the admission.
+        # A present-but-invalid selectable field must not silently withdraw selection.
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
-            intent_delta={"acceptance_criteria": [dict(base, admitted=None)]},
+            intent_delta={"acceptance_criteria": [dict(base, selectable=None)]},
         )
         state = authority_state(self.ledger, paths["state"])
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-inf")
-        self.assertTrue(ac["admitted"])
+        self.assertTrue(ac["selectable"])
 
     def test_recording_inferred_criterion_with_contract_source_admits_it(self) -> None:
         root = self.tmpdir / "ledger"
@@ -694,14 +766,14 @@ class SessionIntentLedgerTests(unittest.TestCase):
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(base)]},
         )
-        # Re-recording with a contract-bound source admits the criterion even without an explicit admitted field (source-based admission, matching first-record behavior).
+        # Core code's source-label default makes the criterion selectable, matching first-record behavior.
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(base, source="user-said")]},
         )
         state = authority_state(self.ledger, paths["state"])
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-up")
-        self.assertTrue(ac["admitted"])
+        self.assertTrue(ac["selectable"])
 
     def test_current_session_pointer_tracks_latest_real_session(self) -> None:
         root = self.tmpdir / "ledger"
@@ -710,9 +782,9 @@ class SessionIntentLedgerTests(unittest.TestCase):
             root=root,
             platform="codex",
             session_id="session-real",
-            raw_user_input="do not store this raw secret-token",
+            raw_input="do not store this raw secret-token",
             intent_delta={"current_goal": "consumer reads the same session ledger"},
-            source="hook",
+            recording_path="hook",
         )
 
         self.assertEqual(self.ledger.read_current_session_pointer(root, "codex"), "session-real")
@@ -834,7 +906,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             platform="codex",
             session_id="s-snapshot",
             intent_delta={"current_goal": "read the current snapshot only"},
-            source="agent",
+            recording_path="unspecified",
         )
         state_before = authority_state(self.ledger, paths["state"])
         state_before["updated_at"] = "2026-01-01T00:00:00Z"
@@ -905,7 +977,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         root = self.tmpdir / "ledger"
         raw_input = "record this without persisting raw secret-token"
 
-        self.ledger.record_turn(root=root, platform="codex", session_id="s-input", raw_user_input=raw_input, source="cli")
+        self.ledger.record_turn(root=root, platform="codex", session_id="s-input", raw_input=raw_input, recording_path="cli")
 
         state_path = root / "codex" / "s-input" / "intent-state.json"
         events_path = root / "codex" / "s-input" / "intent-events.jsonl"
@@ -913,7 +985,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         events_text = authority_event_text(self.ledger, events_path)
         row = json.loads(events_text.splitlines()[0])
 
-        self.assertEqual(row["event"], "user-input-observed")
+        self.assertEqual(row["event"], "input-observed")
         self.assertIn("input_digest", row)
         self.assertNotIn(raw_input, state_text)
         self.assertNotIn(raw_input, events_text)
@@ -928,19 +1000,19 @@ class IntentEventLabelTests(unittest.TestCase):
     def test_record_turn_labels_delta_only_event_as_intent_updated(self) -> None:
         root = pathlib.Path(tempfile.mkdtemp(prefix="evt-label-"))
         self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
-        # user input -> user-input-observed (carries lineage)
+        # The input-observed event binds the recorded prompt's fingerprint; it does not identify the sender.
         input_paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s-evt",
-            raw_user_input="hello", source="hook",
+            raw_input="hello", recording_path="hook",
         )
         # delta-only (no raw input) -> intent-updated; must not displace the input event
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s-evt",
-            intent_delta={"current_goal": "updated goal"}, source="cli",
+            intent_delta={"current_goal": "updated goal"}, recording_path="cli",
             expected_input_event_id=authority_state(self.ledger, input_paths["state"])["latest_input_event_id"],
         )
         rows = authority_events(self.ledger, paths["events"])
-        self.assertEqual(rows[0]["event"], "user-input-observed")
+        self.assertEqual(rows[0]["event"], "input-observed")
         self.assertIn("event_id", rows[0])
         self.assertEqual(rows[1]["event"], "intent-updated")
         self.assertNotIn("event_id", rows[1])

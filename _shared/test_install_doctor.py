@@ -82,7 +82,7 @@ class AddonRegistryAuditTest(unittest.TestCase):
     def test_missing_target_is_warning(self):
         dest = self._install("noop")
         import shutil
-        shutil.rmtree(dest)  # user deleted the installed skill
+        shutil.rmtree(dest)  # the test deletes the installed skill; the installer does not record its deleter
         status, findings = install_doctor._addon_registry_audit(self.gar, "claude")
         self.assertEqual(findings[0]["status"], install_doctor.STATUS_WARNING)
         self.assertEqual(status, install_doctor.STATUS_WARNING)
@@ -126,12 +126,12 @@ class LiveDirOwnershipTest(unittest.TestCase):
         (dest / "SKILL.md").write_text(body, encoding="utf-8")
         return dest
 
-    def test_classifies_core_addon_domain_user(self):
+    def test_classifies_core_addon_domain_unclaimed(self):
         self._skill("task-router")                 # core (name in core set)
         addon_dest = self._skill("noop")           # addon (sidecar-owned)
         reg.write_record(_sidecar("noop", addon_dest, content_hash="h"), addons_dir=self.addons)
         self._skill("my-domain-skill")             # domain (SKILL.md, unmanaged)
-        (self.skills / "random-dir").mkdir()       # user (no SKILL.md)
+        (self.skills / "random-dir").mkdir()       # unclaimed (no SKILL.md)
         (self.skills / "_shared").mkdir()          # support dir -> excluded
 
         findings = install_doctor._live_dir_ownership(self.skills, {"task-router"}, self.addons)
@@ -139,7 +139,7 @@ class LiveDirOwnershipTest(unittest.TestCase):
         self.assertEqual(owner["task-router"], "core")
         self.assertEqual(owner["noop"], "addon")
         self.assertEqual(owner["my-domain-skill"], "domain")
-        self.assertEqual(owner["random-dir"], "user")
+        self.assertEqual(owner["random-dir"], "unclaimed")
         self.assertNotIn("_shared", owner)
 
     def test_absent_skills_dir_is_empty(self):
@@ -1356,7 +1356,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
         self.assertEqual(status, install_doctor.STATUS_WARNING)
         self.assertEqual(detail, "ledger-unavailable-degraded")
 
-    def test_session_intent_golden_reconciles_real_claude_human_observation(self):
+    def test_session_intent_golden_reconciles_doctor_written_claude_transcript_row(self):
         source_shared = Path(__file__).resolve().parent
         result = install_doctor._runtime_session_intent_golden_status(
             source_shared, "claude", repo_root=source_shared.parent)
@@ -1513,7 +1513,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
 
 class RuntimeValidatorGoldenSampleTest(unittest.TestCase):
     def test_golden_sample_carries_no_retired_printed_fields(self):
-        # Decisions 6, 7 and 14 retired the printed [gate-state] block and its skill-call and
+        # The human user decided to retire the printed [gate-state] block and its skill-call and
         # skills-loaded fields, so the doctor's golden answer must not depend on them.
         with tempfile.TemporaryDirectory() as tmp:
             runtime = Path(tmp)

@@ -16,7 +16,7 @@ Follow writing-skills' [Author the package](../SKILL.md#author-the-package) requ
 
 ## Workflow and output examples
 
-For an operational handoff, apply [the authoring contract](../SKILL.md#author-the-package). For example, the response model filling a form reads the actual field schema from the exposed form tool, maps user-supplied values into that schema, submits the validated mapping with the tool's documented arguments, and inspects its returned document or validation errors. A mapping failure requires correcting that mapping.
+For an operational handoff, apply [the authoring contract](../SKILL.md#author-the-package). For example, the response model filling a form reads the actual field schema from the exposed form tool, maps the values the human user supplied into that schema, submits the validated mapping with the tool's documented arguments, and inspects its returned document or validation errors. A mapping failure requires correcting that mapping.
 
 Use an exact template when an output consumer requires a schema. For narrative work, give a default structure with the conditions under which the response model may adapt it. One complete input/output example should demonstrate the expected content and level of detail.
 
@@ -30,7 +30,7 @@ Writing-skills' [Validate and evaluate](../SKILL.md#validate-and-evaluate) proce
 
 Document dependencies and use the actual host's installed tools and permissions. Package metadata does not establish that a library, network capability or MCP server is available. Use the exact tool name and schema exposed by the host; provider-specific examples are not portable invocation contracts.
 
-A utility script should validate inputs and return actionable errors for expected failure conditions. Do not silently invent data, create files or replace denied access with empty content unless that behavior is the operation's accepted contract. Explain configuration bounds such as timeouts and retries from the task's requirements.
+A utility script should validate inputs and return actionable errors for expected failure conditions. Do not silently invent data, create files or replace denied access with empty content unless that behavior is the operation's contract that the human user accepted. Explain configuration bounds such as timeouts and retries from the task's requirements.
 
 Prefer a maintained deterministic helper when it implements an established repeated operation. State its inputs, command, outputs and error behavior. For batch or consequential operations, validate a structured proposed change before applying it when that mapping is a live source of error.
 

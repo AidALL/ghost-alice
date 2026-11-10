@@ -12,6 +12,6 @@ Use these patterns after applying the main skill's evidence selection and reuse 
 | Source guidance corrected | Changed instruction and its affected source-contract validation. |
 | Host behavior corrected | Observation of the relevant host execution, beyond source or installation evidence. |
 
-Do not reverse a valid fix solely to recreate existing RED evidence. If the required original failure proof is unavailable, follow test-driven-development’s applicability and RED-evidence instructions within the authorized target, and report which required observation is missing.
+Do not reverse a valid fix solely to recreate existing RED evidence. If the required original failure proof is unavailable, follow test-driven-development’s applicability and RED-evidence instructions within the target that the human user authorized, and report which required observation is missing.
 
 The main skill defines [useful-check selection](../SKILL.md#evidence-selection-and-stop-gate).

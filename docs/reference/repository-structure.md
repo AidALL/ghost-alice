@@ -51,9 +51,9 @@ For the full installer architecture, read [installer architecture](./installer-a
 
 | Path | Role |
 | --- | --- |
-| [session-intent-analyzer/](https://github.com/AidALL/ghost-alice/tree/main/session-intent-analyzer) | Records compressed user-intent facts and decisions through the session intake procedure |
-| [task-router/](https://github.com/AidALL/ghost-alice/tree/main/task-router) | Consumes exact session intent and selects current work and skills |
-| [boundary-contract/](https://github.com/AidALL/ghost-alice/tree/main/boundary-contract) | Gate that writes the work's boundary contract: objective, allowed and prohibited paths and actions, done conditions, phase and stop conditions |
+| [session-intent-analyzer/](https://github.com/AidALL/ghost-alice/tree/main/session-intent-analyzer) | Guides the response model in recording its `interpreted-as` record and the objective, scope, constraints, decisions, open questions and acceptance criteria in the intent ledger; each item's source label names its origin, and an item without a source label has no recorded origin |
+| [task-router/](https://github.com/AidALL/ghost-alice/tree/main/task-router) | Guides the response model in reading its exact `interpreted-as` record and selecting current work and skills |
+| [boundary-contract/](https://github.com/AidALL/ghost-alice/tree/main/boundary-contract) | Guides the response model in writing its boundary contract: the objective that the human user's instructions set; the allowed targets and actions, phase and resource limits that the response model declares within the work that those instructions authorize; the prohibited paths, layers and actions, whether the human user prohibited them, the project instructions prohibit them or the response model excluded them as its self-declared narrower limit; acceptance criteria and stop conditions |
 | [coding-convention/](https://github.com/AidALL/ghost-alice/tree/main/coding-convention) | Development workflow family |
 | [skill-catalog/](https://github.com/AidALL/ghost-alice/tree/main/skill-catalog) | The skill catalog `skills.json` generated from each `SKILL.md` frontmatter and its schema `schema.json`, and the addon manifest schema `addon-schema.json` |
 | [_shared/native_completion.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/native_completion.py) | Single Core assessment the Stop script calls |
@@ -74,7 +74,7 @@ These paths live outside the repository under the user's home directory.
 | Path | Role |
 | --- | --- |
 | `~/.ghost-alice/install-state/` | Platform install-state manifests |
-| `~/.ghost-alice/pending-merges/` | Protected queue for user-modified installed files |
+| `~/.ghost-alice/pending-merges/` | The installer's protected backups of external changes: changes it finds in installed targets after install that its records do not hold; the installer does not record who made the changes |
 | `~/.ghost-alice/uninstall-reports/` | Uninstall reports |
 | `~/.ghost-alice/secrets.env` | Standard credential helper storage |
 | `~/.agents/skills/` | Codex user skill copy install target |

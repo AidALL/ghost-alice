@@ -118,12 +118,12 @@ def _shell_print_json(payload: dict[str, Any], *, payload_mode: bool = False) ->
 
 def _localized_bridge(
     internal_instruction: str,
-    user_en: str,
+    human_guidance_en: str,
     tech_en: str,
 ) -> str:
     return "\n".join([
         f"Internal instruction: {internal_instruction}",
-        f"User: {user_en}",
+        f"For the human user: {human_guidance_en}",
         f"Tech: {tech_en}",
     ])
 
@@ -233,10 +233,10 @@ def _default_destination(platform_key: str) -> install_destination.InstallDestin
 
 
 def _retained_installed_ledger(platform_key):
-    """Retain a single explicit authority from the selected installed hook chain.
+    """Retain one ledger root from the selected installed hook chain.
 
     Reads only the chosen platform settings, never discovery/latest-checkout state.
-    Multiple managed roots require an explicit choice instead of mixed authority.
+    Multiple managed roots require GHOST_ALICE_SESSION_INTENT_ROOT, --ledger-root or --destination-file to identify the ledger root. The installer does not check who supplies the value.
     """
     import shlex
     path=(_resolve_codex_dir()/"hooks.json" if platform_key=="codex" else _resolve_claude_dir()/"settings.json")
@@ -263,7 +263,7 @@ def _retained_installed_ledger(platform_key):
                             root=inner[inner.index(flag)+1]
                             if Path(root).is_absolute(): roots.add(root)
     if len(roots)>1:
-        raise ValueError("installed managed hooks contain conflicting ledger roots; supply an explicit binding")
+        raise ValueError("installed managed hooks contain conflicting ledger roots; identify one with GHOST_ALICE_SESSION_INTENT_ROOT, --ledger-root or --destination-file")
     return next(iter(roots),None)
 
 
@@ -434,7 +434,7 @@ STOP_HOOK_ENTRY_CODEX = {
 
 # 3. Session-start hook: automatic merge-companion check (pending-merge-session-start layer).
 SESSION_START_MARKER = "[merge-companion] session-check"
-SESSION_START_INTERNAL = "merge-companion session-check: This hook checks the current platform's pending-merge manifest. The response model applies merge-companion to undecided entries when the user asks to review them or the selected work changes an affected skill. Missing, empty, fully decided or unparsable manifests pass silently under the current contract; a clean hook result requires no second shell inspection."
+SESSION_START_INTERNAL = "merge-companion session-check: This hook checks the current platform's pending-merge manifest. The response model applies merge-companion to undecided entries when the human user asks to review them or the selected work changes an affected skill. Missing, empty, fully decided or unparsable manifests pass silently under the current contract; a clean hook result requires no second shell inspection."
 
 
 def _session_start_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
@@ -524,8 +524,7 @@ def _print_addon_target_summary(addon_sources: list[str], platform: str | None =
 def _ghost_alice_installed_skill_names() -> list[str]:
     """Return Core skill names from the managed catalog.
 
-    Arbitrary directories under an installed skills root do not authorize
-    Claude Skill permissions.
+    On every install run the installer writes Skill(...) allow rules into Claude Code settings only for these Core names. Arbitrary directories under an installed skills root get no rule.
     """
     return _discover_ghost_alice_skill_names_from_catalog()
 
@@ -947,7 +946,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
         "name": "Claude Code",
         "config_dir": _resolve_claude_dir,
         "hook_file": lambda: _resolve_claude_dir() / "settings.json",
-        "hook_intent": "on_user_prompt",
+        "hook_intent": "on_prompt_submit",
         "stop_hook_intent": "on_agent_stop",
         "stop_hook_entry": STOP_HOOK_ENTRY,
         "session_start_intent": "on_session_start",
@@ -959,7 +958,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
         "name": "Codex",
         "config_dir": _resolve_codex_dir,
         "hook_file": lambda: _resolve_codex_dir() / "hooks.json",
-        "hook_intent": "on_user_prompt",
+        "hook_intent": "on_prompt_submit",
         "stop_hook_intent": "on_agent_stop",
         "stop_hook_entry": STOP_HOOK_ENTRY_CODEX,
         "session_start_intent": "on_session_start",
@@ -1063,7 +1062,7 @@ def _restore_settings_snapshot(
 
 
 def _pending_merges_root() -> list[Path]:
-    """The pending-merges folder: user-change copies there are never rotated."""
+    """The pending-merges folder: the installer's backups of external changes are never rotated; the installer does not record who made each change."""
     try:
         return [(install_destination.ghost_root(_home()) / "pending-merges").resolve()]
     except OSError:
@@ -1967,7 +1966,7 @@ def install_hook(
         _log(f"  Removed {removed} retired hook(s)")
         changed = True
 
-    # Install the session-intent-analyzer hook (updates the session intent ledger for every user input).
+    # Install the session-intent-analyzer hook (updates the session intent ledger for every prompt the host submits under the user role).
     session_intent_entry = _platform_session_intent_entry(platform_key, hook_key)
     session_intent_command = _entry_command(session_intent_entry)
     removed = _remove_stale_hook_entries(
@@ -2150,7 +2149,7 @@ def install_hook(
             _log("  io_trace_hook.py not found. Skipping io-trace hook")
 
     # Trust only exact event/command pairs produced by verified addon sources in
-    # this install; marker text in pre-existing user hooks is not authority.
+    # this install; marker text in pre-existing hooks this installer did not write is not ownership evidence.
     verified_addon_commands: set[tuple[str, str]] = set()
     # Wire observational addon hooks after the Core suite. Empty addon_sources leaves the hook configuration unchanged.
     for addon_id, hook_id, event_intent, script_path in _resolve_addon_hooks(addon_sources, platform_key):
@@ -2165,7 +2164,7 @@ def install_hook(
         if event_name not in hooks_obj:
             hooks_obj[event_name] = []
         ev_list = hooks_obj[event_name]
-        # Prune only a STALE prior version of THIS managed addon hook -- proven by the exact marker + [hook-runner:] token + matching runner argv, the same ownership predicate remove_addon_hook uses. A user hook that merely contains the marker substring (no runner proof) is never deleted here.
+        # Prune only a STALE prior version of THIS managed addon hook -- proven by the exact marker + [hook-runner:] token + matching runner argv, the same ownership predicate remove_addon_hook uses. An unmanaged hook that merely contains the marker substring (no runner proof) is never deleted here.
         if _remove_hook_commands_by_command(
             ev_list,
             lambda cmd, m=marker, exp=command: cmd != exp and _is_exact_addon_hook_command(cmd, m),
@@ -2490,7 +2489,7 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
     hooks_obj = settings.get("hooks", {})
     if not isinstance(hooks_obj, dict):
         return 0
-    # Ownership proof: remove only the command generated by _hook_runner_command(). A user hook can contain the marker text, or even a fake [hook-runner:] token; it is not ours unless the comment carries the exact generated marker/runner signature and argv invokes the same normalized hook id.
+    # Ownership proof: remove only the command generated by _hook_runner_command(). An unmanaged hook can contain the marker text, or even a fake [hook-runner:] token; it is not ours unless the comment carries the exact generated marker/runner signature and argv invokes the same normalized hook id.
     before = _hook_positions(settings_file, hooks_obj)
     total = _remove_hook_settings_commands(hooks_obj, lambda command: _is_exact_addon_hook_command(command, marker))
     if total and not dry_run:

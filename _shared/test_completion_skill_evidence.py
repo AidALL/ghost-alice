@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native completion eligibility comes from Core's authenticated response review."""
+"""Core records the response model's per-claim and whole-response judgments and checks their original bindings."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import completion_check_validator as validator
 
 HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
+# These source labels are the test's fixtures for the response model's claims about the criteria's origin.
 BODY = """[completion-check]
 - acceptance-criteria:
   - c1: recompute the operating time [source: user-said]
@@ -28,7 +29,7 @@ BODY = """[completion-check]
 - evidence: python check.py exited 0
 """
 WITHOUT_SELF_REPORT = f"Business result: 82 hours 40 minutes.\n\n{BODY}"
-# Decisions 7 and 14 retired these printed self-report lines; the guards below keep them powerless.
+# The human user retired printed skill-loading self-reports; the guards below keep those lines from establishing completion.
 SELF_REPORT_LINES = (
     "- verification-before-completion: done\n"
     "- skill-call: verification-before-completion (this turn)\n"
@@ -38,7 +39,8 @@ WITH_SELF_REPORT = WITHOUT_SELF_REPORT.replace(
 ) + "[io-trace]\n- skills-loaded: [verification-before-completion]\n"
 
 
-def user(text):
+def user_role_row(text):
+    """A host transcript user-role row; the role does not authenticate its sender."""
     return {"type": "user", "message": {"role": "user", "content": text}}
 
 
@@ -131,13 +133,13 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
     def _review_format_fixture(root, platform, text, env, review_verdict="supported", *,
                                session_id="fixture-stop", ledger_root=None, core_root=None,
                                record_review=True, input_text='Synthetic protocol fixture',
-                               claim_verdicts=None, continuation_feedback=None):
+                               claim_verdicts=None, declared_remaining_work=None):
         """Give native protocol cases explicit synthetic reviewed observations.
 
         These cases isolate host protocol, not semantic review quality. Missing,
         unsupported and changed reviews are exercised by NativeProofBindingTests.
         No original application checks or real session records are touched.
-        claim_verdicts sets each claim's verdict in binding order; continuation_feedback
+        claim_verdicts sets each claim's verdict in binding order; declared_remaining_work
         is stored with the route as the response model's declared remaining work.
         """
         try:
@@ -150,19 +152,20 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
         from completion_assessment import prepare_response_review, record_response_review
         owner = dict(platform=platform, session_id=session_id)
         coords = dict(root=ledger_root or root / 'ledger', **owner)
-        fixtures.ledger.record_turn(**coords, raw_user_input=input_text, source='hook')
+        fixtures.ledger.record_turn(**coords, raw_input=input_text, recording_path='hook')
         event = fixtures.ledger.read_session_state(**coords)['latest_input_event_id']
         ids = validator.extract_acceptance_criteria_ids(proof) if proof else ['c1']
+        # The test writes the response model's source claims and interpreted-as update; Core's source default does not check the sender.
         criteria = [dict(id=key, summary='Synthetic criterion ' + key, source='user-said',
-                        admitted=True, work_unit_id='first', contract_revision=1) for key in ids]
+                        selectable=True, work_unit_id='first', contract_revision=1) for key in ids]
         fixtures.ledger.record_turn(**coords, expected_input_event_id=event,
             intent_delta={'acceptance_criteria': criteria})
         route = fixtures.ResponseRouteTests().candidate()
         route['work_units'][0]['owner'] = owner
         route['selected_criteria'] = [dict(work_unit_id='first', contract_revision=1,
                                           criterion_id=key) for key in ids]
-        if continuation_feedback is not None:
-            route['continuation_feedback'] = continuation_feedback
+        if declared_remaining_work is not None:
+            route['declared_remaining_work'] = declared_remaining_work
         fixtures.ledger.record_response_route(**coords, expected_input_event_id=event,
             candidate=route, boundary_ref='synthetic-protocol')
         source = dict(GHOST_ALICE_CORE_ROOT=str(core_root or HOOK.parent.parent),
@@ -191,24 +194,24 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
         return observation
 
     def test_claude_allows_a_block_without_self_report_when_the_skill_was_called(self):
-        payload = self.run_hook([user("Compute it."), skill_call(), reply(WITHOUT_SELF_REPORT)])
+        payload = self.run_hook([user_role_row("Compute it."), skill_call(), reply(WITHOUT_SELF_REPORT)])
         assert_stop_observation(self, payload)
 
     def test_claude_still_allows_the_old_self_report_lines(self):
-        payload = self.run_hook([user("Compute it."), skill_call(), reply(WITH_SELF_REPORT)])
+        payload = self.run_hook([user_role_row("Compute it."), skill_call(), reply(WITH_SELF_REPORT)])
         assert_stop_observation(self, payload)
 
     def test_claude_accepts_authenticated_response_without_skill_call(self):
-        payload = self.run_hook([user("Compute it."), reply(WITH_SELF_REPORT)])
+        payload = self.run_hook([user_role_row("Compute it."), reply(WITH_SELF_REPORT)])
         assert_stop_observation(self, payload)
 
     def test_first_claude_stop_accepts_review_without_procedural_markers(self):
-        payload = self.run_hook([user("Compute it."), reply(WITHOUT_SELF_REPORT)])
+        payload = self.run_hook([user_role_row("Compute it."), reply(WITHOUT_SELF_REPORT)])
         assert_stop_observation(self, payload)
 
     def test_claude_records_missing_evidence_as_unaccepted_without_continuation(self):
         broken = WITHOUT_SELF_REPORT.replace("    evidence: python check.py exited 0\n", "")
-        payload = self.run_hook([user("Compute it."), skill_call(), reply(broken)])
+        payload = self.run_hook([user_role_row("Compute it."), skill_call(), reply(broken)])
         assert_stop_observation(self, payload, issue='evidence', repair_target='completion_metadata')
 
     def test_first_codex_stop_accepts_review_without_procedural_markers(self):

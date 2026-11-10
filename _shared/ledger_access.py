@@ -65,7 +65,7 @@ def coordinates(source):
     root = source.get("GHOST_ALICE_SESSION_INTENT_ROOT")
     owner = {key: source.get("GHOST_ALICE_" + key.upper()) for key in ("platform", "session_id")}
     if not (isinstance(root, str) and Path(root).is_absolute()):
-        raise CoordinateError("authority-unavailable", "Exact ledger root is required")
+        raise CoordinateError("ledger-root-unavailable", "Exact ledger root is required")
     if owner["platform"] not in PLATFORMS or not isinstance(owner["session_id"], str) or not owner["session_id"]:
         raise CoordinateError("owner-mismatch", "Exact native owner is required")
     if owner["platform"] == "codex" and source.get("CODEX_THREAD_ID") not in (None, "", owner["session_id"]):

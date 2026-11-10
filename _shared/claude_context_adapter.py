@@ -99,8 +99,8 @@ def _ordered_items(items):
     raise NativeContextRejected('Ordered native messages are required')
 
 
-def human_input(items, binding):
-    """Bind the latest real human message to the canonical intake text identity."""
+def bound_input_message(items, binding):
+    """Bind the latest user-role prompt message to the input identity that Core code recorded."""
     if (not isinstance(binding, dict) or not isinstance(binding.get('input_digest'), str)
         or type(binding.get('input_char_count')) is not int):
         raise NativeContextRejected('The canonical input digest and character count are required')
@@ -118,7 +118,7 @@ def human_input(items, binding):
             continue
         latest = normalized
     if latest is None:
-        raise NativeContextRejected('The current native human input is unavailable')
+        raise NativeContextRejected('The user-role message for the bound input is unavailable')
     from native_transcript import matches_input_text
     if not matches_input_text(latest['content'], binding):
         raise NativeContextRejected('Native input differs from the canonical intake receipt')
@@ -268,7 +268,7 @@ def request_apply(request, originals, selections, *, _inspect=None):
         _validate_choice(choice)
     wire_blocks = list(_blocks(request['messages']))
     changes, positions = [], set()
-    latest_human = max((n for n, message in enumerate(request['messages'])
+    latest_user_role_prompt_index = max((n for n, message in enumerate(request['messages'])
                         if isinstance(message, dict) and message.get('role') == 'user'
                         and not (isinstance(message.get('content'), list) and any(
                             isinstance(block, dict) and block.get('type') == 'tool_result'
@@ -308,7 +308,7 @@ def request_apply(request, originals, selections, *, _inspect=None):
         if choice.get('disposition') == 'omit':
             if choice['kind'] != 'output':
                 wire_message = request['messages'][target[0]]
-                if (target[0] == latest_human or set(target[3]) - {'type', 'text', 'cache_control'}
+                if (target[0] == latest_user_role_prompt_index or set(target[3]) - {'type', 'text', 'cache_control'}
                     or set(wire_message) - {'role', 'content', 'type'}):
                     continue
             elif isinstance(value, list) and any(part.get('type') != 'text'

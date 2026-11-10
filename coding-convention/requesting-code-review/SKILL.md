@@ -30,7 +30,7 @@ A review listed below is required, or worth requesting, only when its outcome ca
 
 □ 1. Establish the review target
 
-Use the accepted task's starting commit and current head for committed work. Identify any uncommitted diff separately; a commit range cannot include it. Do not guess the base from HEAD~1 or a commit-message match.
+Use the starting commit of the task under review and the current head for committed work. Identify any uncommitted diff separately; a commit range cannot include it. Do not guess the base from HEAD~1 or a commit-message match.
 
 □ 2. Dispatch a delegate to review the code
 
@@ -39,7 +39,7 @@ Use the host's exposed agent API and the actual `references/code-reviewer.md` te
 Values to supply
 
 - The implemented behavior.
-- The accepted plan or requirements.
+- The requirements that the human user accepted, and the plan that the response model saved under writing-plans or the boundary contract. The boundary contract's acceptance criteria and locked decisions carry source labels (`[source: ...]`); its prohibited paths, layers and actions carry no per-item source label.
 - The SHA of the starting commit.
 - The SHA of the current head.
 
@@ -49,7 +49,7 @@ For publication review, the response model supplies the preflight matrix produce
 
 - Evaluate each finding through receiving-code-review before changing code.
 - Fix valid critical and important findings before the dependent integration.
-- Retain minor advisory findings without silently adding them to the accepted scope.
+- Retain minor advisory findings without silently adding them to the requirements that the human user accepted, the plan or the boundary contract.
 - Reject incorrect findings with code or test evidence.
 
 ## Remote Pull Request Review Gate
@@ -58,11 +58,11 @@ When the work has a pull request, perform this gate before integration, includin
 
 1. Read the PR's current head SHA and the configured or requested review sources. Fetch every page of submitted reviews, inline comments, PR conversation summaries, and review threads with their resolution state. Include automation results delivered as comments or reactions, not only formal approvals. Read relevant outstanding findings from earlier PRs in this change's lineage, including merged PRs, when their affected code is still present; do not turn this into an unrelated repository-wide audit.
 2. Bind the review result to the current head. Record each source's reviewed commit, completion state, and findings. Pending, unavailable, stale, or unidentifiable results are not a clean review. An empty comment list is not proof that a requested reviewer finished. If no remote reviewer is configured or requested, record that fact after inspection rather than inventing a new required service.
-3. Reconcile each finding with the current implementation and the user's actual requirements. Reproduce a plausible bug, fix an accepted finding, report an unresolved one, or record evidence for rejecting an incorrect or superseded finding. A bot's priority label is not authority to override user instructions. Unresolved threads require an explicit disposition; a dismissed review, resolved thread, or merged earlier PR does not by itself prove that its underlying issue was fixed.
-4. After a fix, amend, rebase, or squash changes the head, reread the remote state and obtain the required review for that head. Preserve earlier findings until current code and evidence resolve them. Request or retrigger a review through the configured workflow when needed and already authorized; this skill does not independently authorize posting comments or messages. Report an unavailable review honestly instead of silently substituting CI or local review.
-5. Immediately before integration, read the head, review state, and applicable remote CI results again. Integrate only the reconciled head, with no unaddressed valid blocking findings, all required reviews complete, and successful applicable remote CI for that exact head. Local equivalents, an older green SHA, pending jobs, or silently skipped required jobs do not satisfy remote CI. If the head moved, return to step 2 and repeat affected local preflight before another push. Follow any explicit user decision to waive or change review requirements, but report the resulting limitation and never label an unperformed review clean.
+3. Reconcile each finding with the current implementation and the human user's actual requirements. Reproduce a plausible bug, fix an accepted finding, report an unresolved one, or record evidence for rejecting an incorrect or superseded finding. A bot's priority label is not authority to override the human user's instructions; the common contract defines instruction precedence. Unresolved threads require an explicit disposition; a dismissed review, resolved thread, or merged earlier PR does not by itself prove that its underlying issue was fixed.
+4. After a fix, amend, rebase, or squash changes the head, reread the remote state and obtain the required review for that head. Preserve earlier findings until current code and evidence resolve them. Request or retrigger a review through the configured workflow when needed and when the human user already authorized that review request; this skill does not independently authorize posting comments or messages. Report an unavailable review honestly instead of silently substituting CI or local review.
+5. Immediately before integration, read the head, review state, and applicable remote CI results again. Integrate only the reconciled head, with no unaddressed valid blocking findings, all required reviews complete, and successful applicable remote CI for that exact head. Local equivalents, an older green SHA, pending jobs, or silently skipped required jobs do not satisfy remote CI. If the head moved, return to step 2 and repeat affected local preflight before another push. Follow any explicit decision by the human user to waive or change review requirements, but report the resulting limitation and never label an unperformed review clean.
 
-Record a compact result with the PR URL, head SHA, review sources and completion evidence, finding dispositions with code/test evidence, unresolved items, and integration decision. A provider's successful merge response is not retrospective evidence that this gate ran.
+Record a compact result with the PR URL, head SHA, review sources and completion evidence, finding dispositions with code/test evidence, unresolved items, the integration path the human user chose and the gate result that the response model recorded for the current head. A provider's successful merge response is not retrospective evidence that this gate ran.
 
 ## Failure modes and result
 

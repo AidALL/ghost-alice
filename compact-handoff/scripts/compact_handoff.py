@@ -21,6 +21,7 @@ from secret_patterns import SECRET_PATTERNS as SHARED_SECRET_PATTERNS
 from text_lines import split_lines
 
 
+# The response model writes forbidden-surface without per-item sources; the field alone does not identify who set a boundary.
 REQUIRED_FIELDS = [
     "objective",
     "completed",

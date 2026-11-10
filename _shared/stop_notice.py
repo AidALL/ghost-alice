@@ -49,7 +49,7 @@ ISSUE_LABELS = {
 # An explanation whose input has a recorded review of another answer text reports route-unavailable or
 # response-assessment-required with this phrase in its detail.
 OTHER_TEXT_REVIEW = 'binds this input but not this exact answer'
-# Why a declared row is on hold, for each feedback issue the route records against the row's original source.
+# Why a declared row is on hold, for each issue the route records against the row's original source.
 HELD_ROW_LABELS = {
     'source-unverified': 'its original source could not be verified',
     'source-owner-unbound': 'its original source is not bound to this session',
@@ -58,29 +58,29 @@ HELD_ROW_LABELS = {
 }
 
 
-def native_session(native_input: Mapping[str, Any]) -> str:
+def native_session(hook_payload: Mapping[str, Any]) -> str:
     """The session the host named in the payload; an unnamed session stays empty, never guessed from the environment."""
-    return next((value for value in session_candidates(None, dict(native_input))
+    return next((value for value in session_candidates(None, dict(hook_payload))
                  if isinstance(value, str) and value.strip()), '')
 
 
-def notice_path(env: Mapping[str, str], native_input: Mapping[str, Any], platform: str) -> Path:
+def notice_path(env: Mapping[str, str], hook_payload: Mapping[str, Any], platform: str) -> Path:
     """The notice file in the session folder, next to the hook log."""
-    session = strict_session_log.session_id_from_payload(dict(native_input), dict(env), platform=platform)
+    session = strict_session_log.session_id_from_payload(dict(hook_payload), dict(env), platform=platform)
     return strict_session_log.log_path(install_destination.home_directory(env), platform, session).parent / FILE_NAME
 
 
-def build_stop_notice(platform: str, native_input: Mapping[str, Any], env: Mapping[str, str]) -> dict[str, Any]:
+def build_stop_notice(platform: str, hook_payload: Mapping[str, Any], env: Mapping[str, str]) -> dict[str, Any]:
     """Build this Stop's message from the recorded review and the declared remaining work."""
-    text = stop_response_text(dict(native_input)) if native_input else ''
-    session = native_session(native_input)
+    text = stop_response_text(dict(hook_payload)) if hook_payload else ''
+    session = native_session(hook_payload)
     message = dict(schema_version=SCHEMA_VERSION, platform=platform, session_id=session, input_event_id=None,
                    body_digest='sha256:' + hashlib.sha256(text.encode()).hexdigest(), state='quiet', control=None,
                    claims=None, unsupported_claims=[], issues=[], unresolved_criteria=[],
                    remaining_work={'declared': False}, text='')
     source = ledger_access.source_environment(platform, session, environment=env)
     # An empty answer has no claims or block to compare; the declaration in the current route still stands.
-    assessment = assess_native_completion(source, text=text, native_input=dict(native_input))
+    assessment = assess_native_completion(source, text=text, hook_payload=dict(hook_payload))
     control = _control(text)
     block = extract_control_block(text, control) if control else ''
     message.update(input_event_id=assessment['input_event_id'], control=control,
@@ -110,10 +110,10 @@ def build_stop_notice(platform: str, native_input: Mapping[str, Any], env: Mappi
     return message
 
 
-def ensure_stop_notice(platform: str, native_input: Mapping[str, Any], env: Mapping[str, str],
+def ensure_stop_notice(platform: str, hook_payload: Mapping[str, Any], env: Mapping[str, str],
                        path: str | Path | None = None) -> dict[str, Any]:
     """Return this Stop's message; with a path, keep the recorded message when it equals this one, otherwise record this one there."""
-    message = build_stop_notice(platform, native_input, env)
+    message = build_stop_notice(platform, hook_payload, env)
     if path is None:
         return message
     path = Path(path)
@@ -136,7 +136,7 @@ def render(message: Mapping[str, Any]) -> str:
     unsupported, unresolved = message['unsupported_claims'], message['unresolved_criteria']
     issues = [issue for issue in message['issues'] if issue['code'] != 'assessment-unsupported']
     work = message['remaining_work']
-    items, stopped = work.get('items') or [], work.get('control') == 'human-stop'
+    items, stopped = work.get('items') or [], work.get('control') in {'model-reported-human-stop', 'human-stop'}
     summary = []
     if unsupported:
         reviewed = (message['claims'] or {}).get('reviewed', len(unsupported))
@@ -146,12 +146,12 @@ def render(message: Mapping[str, Any]) -> str:
     if unresolved:
         summary.append('partial completion with ' + _count(len(unresolved), 'unresolved criterion', 'unresolved criteria'))
     if items:
-        summary.append(_count(len(items), 'declared remaining work item') + (', stopped by the user' if stopped else ''))
+        summary.append(_count(len(items), 'remaining work item', 'remaining work items') + ' the response model declared' + (", the response model reports the human user's stop instruction" if stopped else ''))
     lines = ['Ghost-ALICE Stop notice: ' + '; '.join(summary) + '.']
     lines += [f"- Not supported ({_criteria(claim['criteria'])}): {claim['claim']}" for claim in unsupported]
     lines += [f'- Issue: {_issue_label(issue)}' for issue in issues]
     lines += [f"- Unresolved ({_criteria([entry['criterion']])}): {entry['reason']}" for entry in unresolved]
-    label = 'Declared remaining work, stopped by the user' if stopped else 'Declared remaining work'
+    label = "Remaining work the response model declared, the response model reports the human user's stop instruction" if stopped else 'Remaining work the response model declared'
     for item in items:
         # Continuation lines keep a row's reason, its next needed information and its state apart.
         lines += [f"- {label} ({_criteria(item['criteria'])}): {item['reason']}",
@@ -183,15 +183,15 @@ def _remaining_work(assessment: Mapping[str, Any]) -> dict[str, Any]:
     if (not route or route.get('status') != 'ready'
             or (assessment.get('completion_route') or {}).get('route_binding') != 'current'):
         return {'declared': False}
-    feedback = route.get('continuation_feedback')
+    from response_route import declared_work_view
+    feedback, issues = declared_work_view(route)
     if not feedback:
         return {'declared': False}
-    issues = {entry['pointer']: entry['issue'] for entry in route.get('continuation_feedback_issues', [])}
     items = []
-    for index, row in enumerate(feedback['required_unprocessed']):
+    for index, row in enumerate(feedback['items']):
         item = dict(criteria=[ref['criterion_id'] for ref in row['criterion_refs']], reason=row['reason'],
                     next_information=row['next_information'], prerequisite=row['prerequisite'])
-        if issue := issues.get(f'/continuation_feedback/required_unprocessed/{index}'):
+        if issue := issues.get(f'/declared_remaining_work/items/{index}'):
             item['source_issue'] = issue
         items.append(item)
     return dict(declared=True, control=feedback['control'], items=items)
@@ -199,7 +199,7 @@ def _remaining_work(assessment: Mapping[str, Any]) -> dict[str, Any]:
 
 def _issue_label(issue: Mapping[str, Any]) -> str:
     if OTHER_TEXT_REVIEW in str(issue['detail']):
-        return 'a recorded review covers this input but not this exact answer'
+        return "the response model's recorded response review covers this input but not this exact answer"
     if issue['code'] in ISSUE_LABELS:
         return ISSUE_LABELS[issue['code']]
     return f"Core code could not check this answer ({issue['code']})"

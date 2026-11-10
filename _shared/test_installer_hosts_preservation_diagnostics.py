@@ -105,7 +105,7 @@ class HookRegistrationTests(HostCase):
         with proposed.patch():
             ok, out = self.captured(hosts.ensure_claude_bootstrap, ctx)
         self.assertTrue(ok)
-        self.assertIn(f"[WARN] Claude CLAUDE.md is user-owned; wrote proposed file instead: {rules}.ghost-alice-proposed", out)
+        self.assertIn(f"[WARN] Claude CLAUDE.md has no Ghost-ALICE block; wrote proposed file instead: {rules}.ghost-alice-proposed", out)
         codex = FakeRunner()
         with codex.patch():
             ok, out = self.captured(hosts.ensure_codex_bootstrap, ctx)
@@ -143,7 +143,7 @@ class HookRegistrationTests(HostCase):
         with updated.patch():
             ok, out = self.captured(hosts.remove_claude_bootstrap, ctx, True)
         self.assertTrue(ok)
-        self.assertIn("[OK] Claude CLAUDE.md Ghost-ALICE block removed; user content preserved", out)
+        self.assertIn("[OK] Claude CLAUDE.md Ghost-ALICE block removed; content outside the block preserved", out)
         unchanged = FakeRunner()
         unchanged.respond_to("global_rule_blocks.py", ToolResult(0, "unchanged\n", ""))
         with unchanged.patch():
@@ -344,7 +344,7 @@ class InspectTests(HostCase):
         with again.patch():
             rc, out = self.captured(diagnostics.run_doctor, ctx)
         self.assertEqual(rc, 1)
-        self.assertIn("[WARN] A pending addon uninstall could not complete (manual review needed); see .removing markers "
+        self.assertIn("[WARN] A pending addon uninstall could not complete (the human user must review the kept items); see .removing markers "
                       "under ~/.ghost-alice/addons", out)
         self.assertNotIn("--resume-pending", [a for _, args, _ in again.calls for a in args])
         # uninstall.sh:264-265: the doctor's own code propagates; a hook status failure is 1

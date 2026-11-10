@@ -42,7 +42,7 @@ class CompletionLifecycleContractTests(unittest.TestCase):
         for phrase in ('unresolved acceptance criterion or competing explanation',
                        'why the method distinguishes the alternatives',
                        'which attainable outcomes would change a specific next action',
-                       'Mandatory checks are those that the user or the project requires; they remain required',
+                       'Mandatory checks are those that the human user or the project instructions require; they remain required',
                        'Preserve unchanged valid proof with its original source and time'):
             self.assertIn(phrase, selection)
 

@@ -6,7 +6,7 @@ Tool results distinguish an observation, an authenticated review, and an execute
 
 ## Host and hook responsibilities
 
-The native host validates tool arguments and enforces permission, the role that [Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns to it. A reported argument error determines the correction to an authorized call. Governance hooks inspect work authority and evidence; they do not infer tool capabilities from serialized text.
+The host validates tool arguments and enforces its permission rules, the role that [Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns to it. The response model uses a reported argument error to correct the call it sends within what the human user's instructions authorize. Governance hooks read the records that Core code stores in the intent ledger (the fingerprint of the input the host delivered, the acceptance criteria with their source labels, and the response route) and the evidence. Those records do not by themselves establish the human user's grant; governance hooks do not infer tool capabilities from serialized text.
 
 Hook status distinguishes a matching installation, configuration drift, disabled hooks and missing components. Drift requires examining the affected installed binding; it does not mean that every hook is absent. The [platform compatibility contract](installer-platform-compatibility-matrix.md) owns installation decisions.
 

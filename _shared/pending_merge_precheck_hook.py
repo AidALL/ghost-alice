@@ -46,7 +46,7 @@ def _pending_line(platform: str, count: int) -> str:
     return (
         f"merge-companion precheck: ~/.ghost-alice/pending-merges/{platform}/manifest.json "
         f"has {count} undecided entr{'y' if count == 1 else 'ies'}. "
-        "Apply merge-companion before changing affected skills or when the user requests backup review. Unrelated read-only work may continue; an explicit defer leaves entries undecided."
+        "Apply merge-companion before changing affected skills or when the human user requests backup review. Unrelated read-only work may continue; a deferral that the human user states explicitly leaves entries undecided."
     )
 
 

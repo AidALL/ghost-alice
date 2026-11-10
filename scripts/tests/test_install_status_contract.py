@@ -668,7 +668,7 @@ class InstallStatusContractTest(unittest.TestCase):
             self.assertNotIn("global-rule: ok", result.stdout)
             self.assertIn("global-rule: warning", result.stdout)
             self.assertIn("claude-bootstrap", result.stdout)
-            self.assertIn("user-owned markerless-existing-rule-file", result.stdout)
+            self.assertIn("unclaimed markerless-existing-rule-file", result.stdout)
 
     def test_installers_write_empty_pending_merge_manifest_after_snapshot(self) -> None:
         transaction_py = (REPO_ROOT / "_shared" / "installer" / "transaction.py").read_text(encoding="utf-8")

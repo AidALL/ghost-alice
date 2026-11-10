@@ -31,6 +31,7 @@ from context_gateway_model import (GatewayBlocked, GatewayFailure, GatewayServic
     TABLE_END, TOP_BEGIN, TOP_END)
 from context_gateway_plan import render_provider, remove_provider  # noqa: F401
 from context_gateway_transaction import execute
+from installer.config import APPLY_UNSET, resolve_apply_changes
 from hook_definitions import PROVIDER  # noqa: F401
 
 _write = platform.write
@@ -82,7 +83,8 @@ def _runtime_root(record):
     return Path(found[0]).parent
 
 
-def install(codex_dir, ledger_root, state_dir, launch_agent, claude_dir=None, *, confirm=True):
+def install(codex_dir, ledger_root, state_dir, launch_agent, claude_dir=None, *, apply_changes=APPLY_UNSET, confirm=APPLY_UNSET):
+    apply_changes = resolve_apply_changes(apply_changes, confirm, default=True)
     _require_gateway_runtime()
     supplied = [codex_dir, ledger_root, state_dir, launch_agent]
     if claude_dir is not None:
@@ -109,7 +111,7 @@ def install(codex_dir, ledger_root, state_dir, launch_agent, claude_dir=None, *,
         plan = planning.install_plan(request, observed, prior, service, port=port, scope=scope,
             interpreter=sys.executable, stamp=now.strftime('%Y%m%dT%H%M%S%fZ'), now=now.isoformat(),
             domain=platform.service_domain(request.platform))
-        result = execute(plan, io, confirm=confirm)
+        result = execute(plan, io, apply_changes=apply_changes)
         if result.get('status') == 'installed':
             _keep_recent_backups(home, request.state_dir / 'backups')
         return result
@@ -126,8 +128,9 @@ def _keep_recent_backups(home, backups):
     state_retention.apply('gateway-config-backups', backups, protect=[recorded] if recorded else [])
 
 
-def detach(*, confirm=False, home=None, io=None, host_platform=None):
+def detach(*, apply_changes=APPLY_UNSET, confirm=APPLY_UNSET, home=None, io=None, host_platform=None):
     """Unregister the service the install record names; `missing` when it names none."""
+    apply_changes = resolve_apply_changes(apply_changes, confirm, default=False)
     home = Path.home() if home is None else Path(home)
     io = _effects() if io is None else io
     host_platform = sys.platform if host_platform is None else host_platform
@@ -139,7 +142,7 @@ def detach(*, confirm=False, home=None, io=None, host_platform=None):
         request = Request('detach', home, host_platform)
         observed = inventory.registration(service, io)
         plan = planning.detach_plan(request, observed, service, domain=platform.service_domain(request.platform))
-        return execute(plan, io, confirm=confirm)
+        return execute(plan, io, apply_changes=apply_changes)
 
 
 def _print_failure(exc):
@@ -156,9 +159,9 @@ def main(argv=None):
     if argv[:1] == ['detach']:
         parser = argparse.ArgumentParser(description='Unregister the gateway service the install record names')
         parser.add_argument('--user-home', type=Path)
-        parser.add_argument('--confirm', action='store_true')
+        parser.add_argument('--apply', '--confirm', dest='apply_changes', action='store_true')
         args = parser.parse_args(argv[1:])
-        kwargs = dict(confirm=args.confirm)
+        kwargs = dict(apply_changes=args.apply_changes)
         if args.user_home is not None:
             kwargs['home'] = args.user_home
         try:
@@ -181,7 +184,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         result = install(args.codex_dir, args.ledger_root, args.state_dir, args.launch_agent,
-            claude_dir=args.claude_dir, confirm=not args.dry_run)
+            claude_dir=args.claude_dir, apply_changes=not args.dry_run)
     except (GatewayBlocked, GatewayServiceError, GatewayFailure) as exc:
         _print_failure(exc)
         return exc.exit_code

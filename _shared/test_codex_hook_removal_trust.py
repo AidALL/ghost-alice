@@ -1,4 +1,4 @@
-"""Removal must retain positional trust and active user/Core configuration."""
+"""Removal must retain positional trust and active unmanaged and Core configuration."""
 import builtins
 import copy
 import errno
@@ -68,7 +68,7 @@ class CodexHookRemovalTrustTest(unittest.TestCase):
         self.assertEqual(self.state(), {})
         self.assertEqual(tomllib.loads(self.config.read_text())['user'], {'keep': 'precious'})
 
-    def test_addon_hook_before_core_relocates_whole_trust_table_preserving_user_metadata(self):
+    def test_addon_hook_before_core_relocates_whole_trust_table_preserving_unmanaged_metadata(self):
         marker, addon = self.addon('continue')
         core = install_hooks._hook_runner_command_entry('completion', 'echo core', '[completion-reminder] AGENTS.md', platform_key='codex')
         _, entries = self.seed([addon, core])

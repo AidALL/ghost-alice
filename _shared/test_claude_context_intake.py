@@ -96,7 +96,7 @@ class ClaudeContextIntakeTests(unittest.TestCase):
         self.assertTrue(binding['context_only'])
         self.assertEqual(binding['input_digest'], observed['input_digest'])
         events = core.read_session_events(**self.coords)
-        self.assertFalse(any(event['event'] == 'user-input-observed' for event in events))
+        self.assertFalse(any(event['event'] == 'input-observed' for event in events))
         with closing(sqlite3.connect(self.fixture.root / 'ghost-state.sqlite3')) as tx:
             self.assertIsNone(tx.execute('SELECT 1 FROM canonical_intakes').fetchone())
             record = json.loads(tx.execute('SELECT payload_json FROM core_context_intakes').fetchone()[0])
@@ -140,14 +140,14 @@ class ClaudeContextIntakeTests(unittest.TestCase):
         self.stage('Human authorized implementation.', actor='human'); state = self.reconcile()
         event = state['latest_input_event_id']
         core.record_turn(**self.coords, expected_input_event_id=event, intent_delta={'acceptance_criteria':[
-            self.fixture.criterion('first'),dict(id='ownerless', summary='Original proof', source='user-said', admitted=True)]})
+            self.fixture.criterion('first'),dict(id='ownerless', summary='Original proof', source='user-said', selectable=True)]})
         candidate = self.fixture.candidate(); candidate['work_units'][0]['owner']['platform'] = 'claude'
         core.record_response_route(**self.coords, expected_input_event_id=event, candidate=candidate, boundary_ref='boundary-1')
         return event, candidate, core.read_session_state(**self.coords)
 
     def test_current_sdk_closes_old_human_semantic_route_and_completion_gates(self):
         human, candidate, before = self.setup_human_authority()
-        human_events = [e for e in core.read_session_events(**self.coords) if e['event']=='user-input-observed']
+        human_events = [e for e in core.read_session_events(**self.coords) if e['event']=='input-observed']
         self.stage(); state = self.reconcile(); sdk = self.binding()['input_event_id']
         self.assertEqual(state['latest_input_event_id'], human)
         self.assertEqual(state['canonical_input_event_id'], human)
@@ -155,7 +155,7 @@ class ClaudeContextIntakeTests(unittest.TestCase):
         self.assertEqual(state['response_route']['status'], 'stale')
         self.assertEqual(core.read_response_route(**self.coords)['status'], 'stale')
         self.assertEqual(self.fixture.api.project_stored_response_route(state)['status'], 'stale')
-        self.assertEqual([e for e in core.read_session_events(**self.coords) if e['event']=='user-input-observed'], human_events)
+        self.assertEqual([e for e in core.read_session_events(**self.coords) if e['event']=='input-observed'], human_events)
         with self.assertRaises(completion.CompletionAssessmentError):
             completion.response_input_binding(self.source, sdk)
         for identity in (human,sdk):
@@ -172,8 +172,8 @@ class ClaudeContextIntakeTests(unittest.TestCase):
     def test_generic_raw_input_cannot_clear_sdk_marker_but_positive_native_human_can(self):
         self.stage(); state = self.reconcile(); first = self.binding()
         for source in ('agent','hook'):
-            with self.subTest(source=source), self.assertRaises(ValueError):
-                core.record_turn(**self.coords, raw_user_input='Caller invented human authority.', source=source)
+            with self.subTest(recording_path=source), self.assertRaises(ValueError):
+                core.record_turn(**self.coords, raw_input='Caller invented human authority.', recording_path=source)
         self.assertEqual(core.read_session_state(**self.coords), state)
         self.stage('Genuine human transition.', actor='human'); later = self.reconcile()
         self.assertFalse(later['current_context_input_event_id'])
@@ -204,7 +204,7 @@ class ClaudeContextIntakeTests(unittest.TestCase):
         state = self.reconcile()
         self.assertFalse(state['pending_native_inputs'])
         self.assertEqual(self.binding(), first)
-        with self.assertRaises(ValueError): core.record_turn(**self.coords, raw_user_input='Not a human transition', source='hook')
+        with self.assertRaises(ValueError): core.record_turn(**self.coords, raw_input='Not a human transition', recording_path='hook')
 
     def test_app_event_does_not_clear_current_sdk_or_create_human_authority(self):
         self.stage(); self.reconcile(); first = self.binding()
@@ -217,7 +217,7 @@ class ClaudeContextIntakeTests(unittest.TestCase):
         state = self.reconcile()
         self.assertFalse(state['pending_native_inputs'])
         self.assertEqual(self.binding(), first)
-        with self.assertRaises(ValueError): core.record_turn(**self.coords, raw_user_input='Not a human transition', source='hook')
+        with self.assertRaises(ValueError): core.record_turn(**self.coords, raw_input='Not a human transition', recording_path='hook')
 
     def test_ambiguous_mismatched_or_changed_append_source_cannot_bind_context(self):
         self.stage(); self.append(copy.deepcopy(self.rows[-1]))

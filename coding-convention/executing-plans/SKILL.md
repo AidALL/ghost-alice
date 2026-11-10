@@ -1,6 +1,6 @@
 ---
 name: executing-plans
-description: Executes an accepted plan with the response model doing every task itself, when inline execution is chosen.
+description: Executes a plan that the response model saved under writing-plans, with the response model doing every task itself, when the human user chose inline execution.
 calls:
   - "hard:finishing-a-development-branch"
   - "hard:using-git-worktrees"
@@ -10,14 +10,14 @@ compatibility:
 
 # Executing Plans
 
-The response model executes an accepted plan inline, updates tasks when evidence changes the implementation, and completes the authorized integration workflow. Use subagent-driven-development when that execution choice is authorized and appropriate; tool availability alone does not replace the chosen workflow.
+The response model executes a plan that it saved under writing-plans inline, updates tasks when evidence changes the implementation, and completes the integration workflow that the human user authorized. Use subagent-driven-development when the human user authorized that execution choice and it is appropriate; tool availability alone does not replace the workflow that the human user chose.
 
 ## Procedure
 
-1. Read the accepted plan and its requirements. Identify missing prerequisites, contradictions and human-owned decisions before starting dependent tasks.
-2. Use the authorized checkout and apply using-git-worktrees only when isolation is needed. Do not implement on main/master without explicit user consent.
+1. Read the plan and its requirements. Identify missing prerequisites, contradictions and human-owned decisions before starting dependent tasks.
+2. Use the checkout that the human user authorized and apply using-git-worktrees only when isolation is needed. Do not implement on main/master without the human user's explicit consent.
 3. Create or update the host's task tracker from the plan. For each ready task, mark it in progress, execute its steps and required skills, obtain the specified evidence, then mark only the supported task complete.
-4. When an observation contradicts the plan's order, commands, behavior or file mapping, edit the affected task and update the tracker before continuing. Keep the plan as current execution instructions, without appended attempt histories. A change to the user's objective or explicit boundary requires that user's decision; an implementation correction inside the boundary does not.
+4. When an observation contradicts the plan's order, commands, behavior or file mapping, edit the affected task and update the tracker before continuing. Keep the plan as current execution instructions, without appended attempt histories. A change to the human user's objective or a boundary the human user explicitly set requires the human user's decision; an implementation correction inside the boundary does not.
 5. After all required tasks and checks satisfy the plan, invoke finishing-a-development-branch.
 
 ## Failure modes and continuation

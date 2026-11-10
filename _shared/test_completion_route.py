@@ -7,13 +7,14 @@ from completion_route import select_completion_route
 
 
 def context():
-    units = [dict(work_unit_id=u, contract_revision=1, kind=k, admitted=True,
+    units = [dict(work_unit_id=u, contract_revision=1, kind=k, selectable=True,
                   owner=dict(platform="claude", session_id="session"))
              for u, k in (("fix", "execution"), ("explain", "nonexecution"), ("backlog", "execution"))]
     criteria = [dict(work_unit_id="fix", contract_revision=1, criterion_id="AC1", id="AC1",
-                     summary="Repair the original failure", source="user-said", admitted=True)]
-    surface = dict(response_mode="normal", boundary_contract="n/a", reason="approved")
-    route = dict(schema_version="response-route.v1", status="ready", platform="claude", session_id="session",
+                     summary="Repair the original failure", source="user-said", selectable=True)]
+    # The test writes the criterion source as the response model's origin claim.
+    surface = dict(response_mode="normal", boundary_contract="n/a", reason="selected work units")
+    route = dict(schema_version="response-route.v2", status="ready", platform="claude", session_id="session",
                  input_event_id="input-new", current_input_event_id="input-new", boundary_ref=None,
                  routing_surface=surface, work_units=units,
                  selected_work_unit_ids=["fix", "explain"], selected_criteria=criteria)
@@ -26,7 +27,7 @@ class CompletionRouteTests(unittest.TestCase):
         ctx["response_route"]["routing_surface"] = dict(response_mode="normal", boundary_contract="n/a")
         self.assertEqual(select_completion_route(ctx)["route_binding"], "current")
 
-    def test_removed_or_malformed_surface_fields_cannot_authorize_completion(self):
+    def test_removed_or_malformed_surface_fields_make_the_route_binding_invalid(self):
         for field, value in (("verification_complexity", "level-2"), ("focus_layer", "micro"), ("reason", " ")):
             with self.subTest(field=field):
                 ctx = context(); ctx["response_route"]["routing_surface"][field] = value

@@ -1,4 +1,4 @@
-"""Owning review determines meaning; Core binds its exact reviewed material."""
+"""The response model makes per-claim and whole-response judgments; Core records and binds its exact reviewed material."""
 import copy
 import importlib
 import json
@@ -27,6 +27,74 @@ class ReviewReceiptTests(unittest.TestCase):
 
 
 class CompletionAssessmentTests(unittest.TestCase):
+    def test_legacy_explanation_route_reuse_authenticates_original_before_alias_comparison(self):
+        api = self.api()
+        text = 'The captured result shows the footer clear of the list.'
+        current = api.prepare_response_review(self.source, response_text=text,
+            source_paths=[str(self.observation)], claim_statements=[text])
+        legacy = self.stored_candidate(current)
+        legacy['route']['schema_version'] = 'response-route.v1'
+        for row in legacy['route']['work_units'] + legacy['route']['selected_criteria']:
+            row['admitted'] = row.pop('selectable')
+        reference = api.json_digest(legacy)
+        core, root, _ = api._coordinates(self.source)
+        with core._transaction(root) as connection:
+            connection.execute('INSERT INTO core_completion_candidates VALUES (?,?,?)',
+                (reference, reference, api.canonical_json(legacy)))
+        review = self.response_review(current)
+        recorded = api.record_response_review(self.source, reference, review)
+        self.assertEqual(api.lookup_current_response(self.source, text)['candidate_reference'], reference)
+        reused = api.prepare_response_review(self.source, response_text=text,
+            source_paths=[str(self.observation)], claim_statements=[text])
+        self.assertEqual(reused['candidate_reference'], reference)
+        self.assertEqual(self.stored_candidate(reused), legacy)
+        # A value with canonical bytes' digest cannot authenticate legacy bytes.
+        bad = copy.deepcopy(legacy); bad['observed_at'] = 'legacy-corrupt'
+        wrong_ref = api.json_digest(dict(bad, route=api.route_comparison_view(bad['route'])))
+        with core._transaction(root) as connection:
+            connection.execute('INSERT INTO core_completion_candidates VALUES (?,?,?)',
+                (wrong_ref, wrong_ref, api.canonical_json(bad)))
+        with self.assertRaisesRegex(api.CompletionAssessmentError, 'bytes do not match'):
+            api.record_response_review(self.source, wrong_ref, review)
+        self.assertEqual(recorded['status'], 'reviewed')
+        self.fixture.event = self.fixture.intake('A different input for the same work.')
+        self.fixture.record()
+        with self.assertRaises(api.CompletionAssessmentError):
+            api.lookup_current_response(self.source, text)
+
+    def test_legacy_proof_contract_reuses_original_binding_and_rejects_changed_condition(self):
+        api = self.api()
+        original = self.prepare()
+        legacy = json.loads(json.dumps({k: v for k, v in original.items() if k != 'candidate_reference'}))
+        for row in legacy['contract']['criteria']:
+            row['admitted'] = row.pop('selectable')
+        for binding in legacy['bindings']:
+            binding['criterion']['admitted'] = binding['criterion'].pop('selectable')
+            binding['binding_id'] = api.json_digest({k:v for k,v in binding.items() if k != 'binding_id'})
+        reference = api.json_digest(legacy)
+        core, root, _ = api._coordinates(self.source)
+        with core._transaction(root) as connection:
+            connection.execute('INSERT INTO core_completion_candidates VALUES (?,?,?)',
+                (reference, api._lookup_key(legacy['contract'], legacy['proof'], legacy['verified_at']), api.canonical_json(legacy)))
+        legacy['candidate_reference'] = reference
+        recorded = self.review(legacy)
+        found = api.lookup_current_proof(self.source, self.proof())
+        self.assertEqual(found.reference, recorded['assessment_reference'])
+        reply = 'The earlier observation remains recorded.'
+        prepared = api.prepare_response_review(self.source, response_text=reply, source_paths=[], reuse_candidate=reference)
+        api.record_response_review(self.source, prepared['candidate_reference'], self.response_review(prepared))
+        self.assertEqual(api.lookup_current_response(self.source, reply).reference, found.reference)
+        for change in ('condition', 'owner', 'revision'):
+            current_contract = copy.deepcopy(found.candidate['contract'])
+            if change == 'condition':
+                current_contract['criteria'][0]['summary'] = 'Different required result'
+            elif change == 'owner':
+                current_contract['owner']['session_id'] = 'other'
+            else:
+                current_contract['contract_revision'] += 1
+            with self.subTest(change=change), self.assertRaises(api.CompletionAssessmentError):
+                api.lookup_assessment(self.source, current_contract, self.proof(), self.time)
+
     def test_source_use_judgment_shares_the_response_review_transaction(self):
         from unittest.mock import patch
         api = self.api()
@@ -254,7 +322,7 @@ class CompletionAssessmentTests(unittest.TestCase):
             source_paths=[str(self.observation)], claim_statements=[body])
         response = dict(binding_id=candidate['response_binding']['binding_id'],
             verdict='supported', source_ids=[candidate['sources'][0]['source_id']],
-            rationale='The answer addresses the user question and makes no completion claim.')
+            rationale='The answer addresses the question in the input the response model is answering and makes no completion claim.')
         with self.assertRaises(api.CompletionAssessmentError):
             api.record_response_review(self.source, candidate['candidate_reference'],
                 dict(claims=[], response=response))
@@ -415,6 +483,7 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.addCleanup(self.fixture.doCleanups)
         self.fixture.event = self.fixture.intake()
         self.summary = 'Fix the Folders tab footer covering other content or surfaces.'
+        # The test records the response model's interpreted-as update through the existing intent_delta API.
         fixtures.ledger.record_turn(**self.fixture.coords, expected_input_event_id=self.fixture.event,
             intent_delta={'acceptance_criteria': [self.fixture.criterion(summary=self.summary)]})
         self.fixture.record()
@@ -431,6 +500,7 @@ class CompletionAssessmentTests(unittest.TestCase):
         return importlib.import_module('completion_assessment')
 
     def proof(self, claim='폴더 탭의 푸터가 목록을 더 이상 가리지 않습니다.', declaration=None):
+        # The test writes user-said as the response model's source claim; it does not authenticate a sender.
         return '\n'.join(['[completion-check]', '- acceptance-criteria:',
             '  - AC1: ' + (declaration or self.summary) + ' [source: user-said]',
             '- claim-evidence-map:', '  - claim: ' + claim, '    criterion: AC1',

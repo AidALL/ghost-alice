@@ -51,9 +51,9 @@
 
 | 경로 | 역할 |
 | --- | --- |
-| [session-intent-analyzer/](https://github.com/AidALL/ghost-alice/tree/main/session-intent-analyzer) | 사용자 의도의 사실과 결정을 압축해 기록하는 세션 입력 접수 절차 |
-| [task-router/](https://github.com/AidALL/ghost-alice/tree/main/task-router) | 정확한 세션 의도를 읽고 현재 작업과 스킬을 선택하는 Core 절차 |
-| [boundary-contract/](https://github.com/AidALL/ghost-alice/tree/main/boundary-contract) | 작업의 목표, 허용·금지 경로와 행동, 완료 조건, 단계, 중단 조건을 경계 계약으로 작성하는 게이트 |
+| [session-intent-analyzer/](https://github.com/AidALL/ghost-alice/tree/main/session-intent-analyzer) | 응답 모델이 자신의 입력 해석과 목적·범위·제약·결정·질문·완료 조건을 의도 원장에 기록하는 절차입니다. 항목마다 응답 모델이 기록한 출처 표지로 출처를 밝히며, 출처 표지가 없는 항목은 출처가 기록되지 않습니다 |
+| [task-router/](https://github.com/AidALL/ghost-alice/tree/main/task-router) | 응답 모델이 자신의 정확한 입력 해석을 조회하고 현재 작업과 스킬을 선택하는 Core 절차입니다 |
+| [boundary-contract/](https://github.com/AidALL/ghost-alice/tree/main/boundary-contract) | 응답 모델이 작업 범위 선언을 작성하는 절차입니다. 인간 사용자의 지시가 정한 목적, 그 지시가 허가한 작업 안에서 응답 모델이 선언한 허용 대상과 행동·단계·자원 한도, 인간 사용자가 금지했거나 프로젝트 지침이 금지했거나 응답 모델이 스스로 정한 더 좁은 한도로 제외한 금지 대상과 행동, 완료 조건·중지 조건을 기록합니다 |
 | [coding-convention/](https://github.com/AidALL/ghost-alice/tree/main/coding-convention) | 개발 작업 절차를 제공하는 스킬 모음 |
 | [skill-catalog/](https://github.com/AidALL/ghost-alice/tree/main/skill-catalog) | 각 `SKILL.md` 머리말에서 생성한 스킬 카탈로그 `skills.json`과 그 스키마 `schema.json`, 애드온 매니페스트 스키마 `addon-schema.json` |
 | [_shared/native_completion.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/native_completion.py) | Stop 스크립트가 호출하는 Core의 단일 평가 |
@@ -74,7 +74,7 @@
 | 경로 | 역할 |
 | --- | --- |
 | `~/.ghost-alice/install-state/` | 인스톨러가 기록한 플랫폼별 설치 상태 |
-| `~/.ghost-alice/pending-merges/` | 인스톨러가 보호한 사용자 수정 파일의 병합 대기 자료 |
+| `~/.ghost-alice/pending-merges/` | 인스톨러가 백업한 외부 변경의 병합 대기 자료입니다. 외부 변경은 설치 뒤 인스톨러가 설치본에서 찾은, 인스톨러의 기록에 없는 변경이며, 변경한 주체를 인스톨러가 기록하지 않습니다 |
 | `~/.ghost-alice/uninstall-reports/` | 제거 명령이 작성한 결과 |
 | `~/.ghost-alice/secrets.env` | 표준 자격 증명 도우미의 저장소 |
 | `~/.agents/skills/` | Codex용 사용자 스킬 복사 설치 위치 |

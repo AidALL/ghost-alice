@@ -72,7 +72,7 @@ class ResponseContextUseTests(unittest.TestCase):
         with patch.object(adapter, '_normalize_message', side_effect=append_while_normalizing):
             native = use._native(str(path), 'claude', 'current')
         self.assertEqual(list(native.records), [1])
-        self.assertEqual(native.humans, (1,))
+        self.assertEqual(native.user_role_prompts, (1,))
         with self.assertRaises(use.ResponseUseRejected):
             use._native(str(path), 'claude', 'current')
 
@@ -88,17 +88,17 @@ class ResponseContextUseTests(unittest.TestCase):
         self.source_file.write_text(json.dumps({'needed': 'source body needed for this response',
                                                 'unleased': 'required independent source'}))
         self.observation = source_lookup.lookup(self.source_file, pointer='/needed')
-        self.user = self.human('implement first')
+        self.first_prompt = self.user_role_item('implement first')
         self.call = dict(type='custom_tool_call', call_id='lookup', name='exec', input='read selected original')
         self.rows = [dict(type='session_meta', payload={'id': 'current'}),
-                     dict(type='response_item', payload=self.user),
+                     dict(type='response_item', payload=self.first_prompt),
                      dict(type='response_item', payload=self.call)]
         self.source = dict(GHOST_ALICE_SESSION_INTENT_ROOT=str(self.fixture.root),
                            GHOST_ALICE_PLATFORM='codex', GHOST_ALICE_SESSION_ID='current',
                            CODEX_THREAD_ID='current', GHOST_ALICE_CODEX_DIR=str(self.home))
         self.write_rows()
 
-    def human(self, text):
+    def user_role_item(self, text):
         return dict(type='message', role='user', content=[dict(type='input_text', text=text)])
 
     def write_rows(self):
@@ -140,9 +140,9 @@ class ResponseContextUseTests(unittest.TestCase):
         self.append(item)
         return item
 
-    def next_human(self, text='next decision'):
+    def next_user_role_prompt(self, text='next decision'):
         self.fixture.intake(text)
-        item = self.human(text)
+        item = self.user_role_item(text)
         self.append(item)
         return item
 
@@ -170,10 +170,10 @@ class ResponseContextUseTests(unittest.TestCase):
         self.assertEqual(current.request['input'][:2], self.request()['input'][:2])
         answer = self.final()
         self.assertEqual(self.select().state, 'selected')
-        self.next_human()
-        for next_input in (None, 'another actual human'):
+        self.next_user_role_prompt()
+        for next_input in (None, 'another user-role prompt'):
             if next_input:
-                self.next_human(next_input)
+                self.next_user_role_prompt(next_input)
             before = self.log.read_bytes()
             result = self.select()
             self.assertEqual(result.state, 'selected')
@@ -191,7 +191,7 @@ class ResponseContextUseTests(unittest.TestCase):
 
     def test_same_transaction_can_resolve_current_event_without_cached_receipt(self):
         receipt = self.record(event=None)
-        self.output(receipt); self.judge(receipt); self.final(); self.next_human()
+        self.output(receipt); self.judge(receipt); self.final(); self.next_user_role_prompt()
         self.assertEqual(self.select().state, 'selected')
 
     def test_omit_nested_producer_retains_stdout_json_sdk_and_result_envelopes(self):
@@ -221,9 +221,9 @@ class ResponseContextUseTests(unittest.TestCase):
         original = self.output(first, lambda producer: [producer, dict(other, use_reference=second['reference']),
                                                        {'necessary': 'sibling'}])
         self.judge([first, second], disposition='omit')
-        for text in (None, 'second human', 'third human'):
+        for text in (None, 'second user-role prompt', 'third user-role prompt'):
             if text is not None:
-                self.next_human(text)
+                self.next_user_role_prompt(text)
             result = self.select()
             self.assertEqual(json.loads(result.request['input'][2]['output'][0]['text']),
                              [{}, {}, {'necessary': 'sibling'}])
@@ -342,7 +342,7 @@ class ResponseContextUseTests(unittest.TestCase):
                 if wrapping == 'stdout-frame':
                     output['output'][0]['text'] = 'stdout before\n' + output['output'][0]['text'] + '\nstdout after'
                     self.write_rows()
-                self.judge(receipt); self.final(); self.next_human()
+                self.judge(receipt); self.final(); self.next_user_role_prompt()
                 result = self.select()
                 self.assertEqual(result.state, 'selected')
                 text = result.request['input'][2]['output'][0]['text']
@@ -360,7 +360,7 @@ class ResponseContextUseTests(unittest.TestCase):
         self.write_rows()
         signed = dict(type='reasoning', encrypted_content='signed opaque original')
         self.append(signed)
-        self.judge(receipt); self.final(); self.next_human()
+        self.judge(receipt); self.final(); self.next_user_role_prompt()
         result = self.select()
         self.assertEqual(result.state, 'selected')
         self.assertEqual(result.request['input'][2]['output'][1:], output['output'][1:])
@@ -372,7 +372,7 @@ class ResponseContextUseTests(unittest.TestCase):
         second = self.record(second_observation, purpose='Compare the other selected original')
         self.output(first, lambda producer: [producer, dict(second_observation, use_reference=second['reference']),
                                             {'plain': 'retain independent sibling'}])
-        self.judge([first, second]); self.final(); self.next_human()
+        self.judge([first, second]); self.final(); self.next_user_role_prompt()
         result = self.select()
         self.assertEqual(result.state, 'selected')
         self.assertEqual(len(result.observations), 2)
@@ -383,10 +383,10 @@ class ResponseContextUseTests(unittest.TestCase):
         self.assertNotIn(second_observation['value'], json.dumps(result.request))
         self.assertIn('retain independent sibling', json.dumps(result.request))
 
-    def test_commentary_or_new_actual_human_without_judgment_never_infers_consumption(self):
+    def test_commentary_or_next_input_without_judgment_never_infers_consumption(self):
         receipt = self.record(); self.output(receipt)
         self.final(phase='commentary')
-        self.next_human()
+        self.next_user_role_prompt()
         self.assertEqual(self.select().state, 'preserved')
 
     def test_legacy_final_channel_is_only_an_optional_answer_locator(self):
@@ -404,7 +404,7 @@ class ResponseContextUseTests(unittest.TestCase):
                 self.judge(receipt, **{key: value})
 
     def test_stale_event_and_foreign_native_owner_cannot_record(self):
-        self.fixture.intake('new actual input')
+        self.fixture.intake('new user-role prompt')
         with self.assertRaises(ValueError):
             self.record()
         self.source['CODEX_THREAD_ID'] = 'other'
@@ -425,7 +425,7 @@ class ResponseContextUseTests(unittest.TestCase):
             self.record(call_id='absent')
 
     def test_original_call_replay_and_changed_prefix_are_preserved(self):
-        receipt = self.record(); self.output(receipt); self.judge(receipt); self.final(); self.next_human()
+        receipt = self.record(); self.output(receipt); self.judge(receipt); self.final(); self.next_user_role_prompt()
         request = self.request()
         request['input'].insert(2, copy.deepcopy(self.call))
         self.assertEqual(self.select(request).state, 'preserved')
@@ -433,9 +433,9 @@ class ResponseContextUseTests(unittest.TestCase):
         self.write_rows()
         self.assertEqual(self.select().state, 'preserved')
 
-    def test_stale_request_current_human_and_replayed_result_are_preserved(self):
+    def test_stale_request_current_input_and_replayed_result_are_preserved(self):
         receipt = self.record(); output = self.output(receipt); self.judge(receipt); self.final()
-        stale = self.request(); self.next_human()
+        stale = self.request(); self.next_user_role_prompt()
         self.assertEqual(self.select(stale).state, 'preserved')
         request = self.request(); request['input'].insert(3, copy.deepcopy(output))
         self.assertEqual(self.select(request).state, 'preserved')
@@ -445,7 +445,7 @@ class ResponseContextUseTests(unittest.TestCase):
         output = self.output(receipt, lambda producer: [producer, copy.deepcopy(producer)])
         with self.assertRaises(ValueError):
             self.judge(receipt)
-        self.final(); self.next_human()
+        self.final(); self.next_user_role_prompt()
         self.assertEqual(self.select().state, 'preserved')
         output['output'][0]['text'] = json.dumps(dict(self.observation, value='changed selected body',
                                                      use_reference=receipt['reference']))
@@ -461,11 +461,11 @@ class ResponseContextUseTests(unittest.TestCase):
         self.write_rows()
         with self.assertRaises(ValueError):
             self.judge(receipt)
-        self.final(); self.next_human()
+        self.final(); self.next_user_role_prompt()
         self.assertEqual(self.select().state, 'preserved')
 
     def test_new_relookup_body_is_independent_of_prior_use_judgment(self):
-        receipt = self.record(); self.output(receipt); self.judge(receipt); self.final(); self.next_human('read the source again')
+        receipt = self.record(); self.output(receipt); self.judge(receipt); self.final(); self.next_user_role_prompt('read the source again')
         relookup = dict(type='function_call', call_id='relookup', name='read', arguments='{}')
         current_body = dict(type='function_call_output', call_id='relookup', output=json.dumps(self.observation))
         self.append(relookup); self.append(current_body)
@@ -475,7 +475,7 @@ class ResponseContextUseTests(unittest.TestCase):
 
     def test_unavailable_storage_is_distinct_and_unexpected_bugs_propagate(self):
         self.assertIsNotNone(use)
-        receipt = self.record(); self.output(receipt); self.judge(receipt); self.final(); self.next_human()
+        receipt = self.record(); self.output(receipt); self.judge(receipt); self.final(); self.next_user_role_prompt()
         with patch.object(use, '_native', side_effect=OSError('read unavailable')):
             self.assertEqual(self.select().state, 'unavailable')
         with patch.object(use, '_native', side_effect=KeyError('unexpected processing defect')):
@@ -494,13 +494,13 @@ class ResponseContextUseTests(unittest.TestCase):
         self.output(receipt, lambda producer: [producer, dict(producer, value='different object under same reference')])
         with self.assertRaises(ValueError):
             self.judge(receipt)
-        self.final(); self.next_human()
+        self.final(); self.next_user_role_prompt()
         result = self.select()
         self.assertEqual(result.state, 'preserved')
         self.assertEqual(result.request, self.request())
 
-    def test_relocated_old_result_after_current_human_is_preserved(self):
-        receipt = self.record(); self.output(receipt); self.judge(receipt); self.final(); self.next_human()
+    def test_relocated_old_result_after_current_input_is_preserved(self):
+        receipt = self.record(); self.output(receipt); self.judge(receipt); self.final(); self.next_user_role_prompt()
         request = self.request()
         request['input'] = [request['input'][0], request['input'][3], request['input'][4],
                             request['input'][1], request['input'][2]]
@@ -512,16 +512,16 @@ class ResponseContextUseTests(unittest.TestCase):
         receipt = self.record()
         text = 'command metadata\n' + json.dumps(dict(self.observation, use_reference=receipt['reference']))
         output = dict(type='function_call_output', call_id='lookup', output=text + '\nindependent stdout')
-        self.append(output); self.judge(receipt); self.final(); self.next_human()
+        self.append(output); self.judge(receipt); self.final(); self.next_user_role_prompt()
         result = self.select()
         self.assertEqual(result.state, 'selected')
         self.assertTrue(result.request['input'][2]['output'].startswith('command metadata\n'))
         self.assertTrue(result.request['input'][2]['output'].endswith('\nindependent stdout'))
         self.assertEqual(result.request['input'][1], self.call)
 
-    def test_nonhuman_wire_context_cannot_replace_exact_current_human(self):
+    def test_host_environment_context_cannot_replace_exact_current_input(self):
         receipt = self.record(); self.output(receipt); self.judge(receipt); self.final()
-        context = self.human('environment context')
+        context = self.user_role_item('environment context')
         context['internal_chat_message_metadata_passthrough'] = {'content_item_kinds': ['environments.environment_context']}
         self.append(context)
         self.assertEqual(self.select().state, 'preserved')
@@ -533,7 +533,7 @@ class ResponseContextUseTests(unittest.TestCase):
         self.write_rows()
         lifecycle.record_disposition(self.source, self.event, [dict(record=4, block_index=1,
             summary='Sibling lookup was used for its separate comparison', next_need='Reopen the sibling if needed')])
-        self.judge(receipt); self.final(); self.next_human()
+        self.judge(receipt); self.final(); self.next_user_role_prompt()
         result = lifecycle.select_request(self.request(), self.fixture.root, self.home)
         self.assertEqual(result.state, 'selected')
         self.assertEqual(len(result.observations), 2)
@@ -543,7 +543,7 @@ class ResponseContextUseTests(unittest.TestCase):
         self.assertEqual(result.request['input'][1], self.call)
 
     def test_declared_read_purpose_and_final_without_postuse_judgment_preserve_body(self):
-        receipt = self.record(); self.output(receipt); self.final(); self.next_human()
+        receipt = self.record(); self.output(receipt); self.final(); self.next_user_role_prompt()
         result = self.select()
         self.assertEqual(result.state, 'preserved')
         self.assertIn(self.observation['value'], json.dumps(result.request))
@@ -558,7 +558,7 @@ class ResponseContextUseTests(unittest.TestCase):
         receipt = self.record(); self.output(receipt); self.judge(receipt)
         self.judge(receipt, disposition='keep', summary='The original remains necessary for the pending comparison',
                    next_need='Keep this body for the next decision')
-        self.final(); self.next_human()
+        self.final(); self.next_user_role_prompt()
         result = self.select()
         self.assertEqual(result.state, 'preserved')
         self.assertEqual(result.request, self.request())
@@ -571,7 +571,7 @@ class ResponseContextUseTests(unittest.TestCase):
         receipt = self.record(); self.output(receipt)
         summary = 'The comparison is inconclusive; source quality remains unresolved'
         next_need = 'Verify the missing independent evidence before deciding'
-        self.judge(receipt, summary=summary, next_need=next_need); self.final(); self.next_human()
+        self.judge(receipt, summary=summary, next_need=next_need); self.final(); self.next_user_role_prompt()
         request = self.request(); request['input'].pop(3)
         result = self.select(request)
         self.assertEqual(result.state, 'selected')
@@ -580,7 +580,7 @@ class ResponseContextUseTests(unittest.TestCase):
         self.assertNotIn('The selected original supports this conclusion.', json.dumps(result.request))
 
     def test_postuse_judgment_with_stale_current_input_is_rejected(self):
-        receipt = self.record(); self.output(receipt); self.final(); self.next_human()
+        receipt = self.record(); self.output(receipt); self.final(); self.next_user_role_prompt()
         with self.assertRaises(ValueError):
             self.judge(receipt)
         result = self.select()
@@ -593,7 +593,7 @@ class ResponseContextUseTests(unittest.TestCase):
             with core._transaction(root) as connection:
                 self.judge(receipt, transaction=connection)
                 raise RuntimeError('parent rollback')
-        self.final(); self.next_human()
+        self.final(); self.next_user_role_prompt()
         self.assertEqual(self.select().state, 'preserved')
 
     def test_postuse_none_event_resolves_current_canonical_in_same_transaction(self):
@@ -618,7 +618,7 @@ class ResponseContextUseTests(unittest.TestCase):
         self.assertIn(self.observation['value'], json.dumps(retained.request))
         self.assertEqual(retained.request, self.request())
 
-    def test_current_result_cannot_be_relocated_before_its_current_human(self):
+    def test_current_result_cannot_be_relocated_before_its_current_input(self):
         receipt = self.record(); self.output(receipt); self.judge(receipt)
         request = self.request()
         request['input'] = [request['input'][1], request['input'][2], request['input'][0]]
@@ -643,7 +643,7 @@ class ResponseContextUseTests(unittest.TestCase):
         receipt = self.record(); original_output = self.output(receipt)
         summary = '관찰된 근거만으로는 결론이 확정되지 않았습니다.'
         next_need = '누락된 근거를 확인할 때 원문을 다시 읽습니다.'
-        self.judge(receipt, summary=summary, next_need=next_need); self.final(); self.next_human()
+        self.judge(receipt, summary=summary, next_need=next_need); self.final(); self.next_user_role_prompt()
         original_bytes = self.log.read_bytes()
         result = self.select()
         self.assertEqual(result.state, 'selected')
@@ -725,7 +725,7 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
                                    stop_reason=stop_reason)])
         self.write_rows()
 
-    def next_human(self, text='another human decision'):
+    def next_sdk_prompt(self, text='another SDK prompt'):
         self.fixture.intake(text)
         self.rows.append(self.row('user', text, promptSource='sdk', turnOrigin='sdk'))
         self.write_rows()
@@ -745,7 +745,7 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
             disposition='keep', summary='Original wording remains necessary', next_need='Compare original wording')])
         lifecycle.record_disposition(self.source, self.event, [dict(record=4, block_index=0, kind='output',
             disposition='omit', summary='Earlier whole result was used', next_need='Retrieve if needed')])
-        self.next_human()
+        self.next_sdk_prompt()
         request = self.request(); del request['thinking']
         result = lifecycle.select_request(request, self.fixture.root, self.home, platform='claude',
             session_id=self.session, native_betas=('context-management-2025-06-27',))
@@ -763,7 +763,7 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
             disposition='keep', summary='Original wording remains necessary', next_need='Compare original wording')])
         lifecycle.record_disposition(self.source, self.event, [dict(record=4, block_index=0, kind='output',
             disposition='omit', summary='Earlier whole result was used', next_need='Retrieve if needed')])
-        self.next_human()
+        self.next_sdk_prompt()
         native_before, source_before = self.log.read_bytes(), self.source_file.read_bytes()
         request = self.request(); del request['thinking']
         request['messages'][2]['content'][0].pop('caller')
@@ -859,7 +859,7 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
         self.write_rows()
         lifecycle.record_disposition(self.source, self.event, [dict(record=record, block_index=0, kind='output',
             disposition='omit', summary='Whole result was used', next_need='Retrieve if needed') for record in (4,8)])
-        self.next_human()
+        self.next_sdk_prompt()
         request = self.request(); del request['thinking']
         result = lifecycle.select_request(request, self.fixture.root, self.home, platform='claude',
             session_id=self.session, native_betas=('context-management-2025-06-27',))
@@ -875,7 +875,7 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
         receipt = self.record(); self.close(receipt, judgment=False, signed=True)
         use.record_use_judgments(self.source, self.event, [dict(use_reference=receipt['reference'],
             disposition='omit', summary='Producer is no longer needed', next_need='Retrieve if needed')])
-        self.next_human()
+        self.next_sdk_prompt()
         request = self.request(); del request['thinking']
         result = lifecycle.select_request(request, self.fixture.root, self.home, platform='claude',
             session_id=self.session, native_betas=('context-management-2025-06-27',))
@@ -919,8 +919,8 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
                 self.setUp()
                 receipt = self.record(); self.close(receipt, reason)
                 self.assertEqual(self.select().state, 'selected')
-                for text in ('another human decision', 'second next human'):
-                    self.next_human(text)
+                for text in ('another SDK prompt', 'second SDK prompt'):
+                    self.next_sdk_prompt(text)
                     before = self.log.read_bytes()
                     result = self.select()
                     self.assertEqual(result.state, 'selected')
@@ -931,7 +931,7 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
                     self.assertEqual(self.log.read_bytes(), before)
 
     def test_explicit_replace_applies_while_answer_is_incomplete_or_tool_use_continues(self):
-        receipt = self.record(); self.close(receipt, 'max_tokens'); self.next_human()
+        receipt = self.record(); self.close(receipt, 'max_tokens'); self.next_sdk_prompt()
         self.assertEqual(self.select().state, 'selected')
         self.rows[-2]['message']['content'].append(dict(type='tool_use', id='next', name='Bash', input={}))
         self.rows[-2]['message'].pop('stop_reason'); self.write_rows()
@@ -940,7 +940,7 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
         self.assertEqual(selected.request['messages'][-2], self.request()['messages'][-2])
 
     def test_unsigned_cache_control_is_wire_metadata_and_other_blocks_are_unchanged(self):
-        receipt = self.record(); self.close(receipt); self.next_human()
+        receipt = self.record(); self.close(receipt); self.next_sdk_prompt()
         request = self.request()
         request['messages'][2]['content'][0]['cache_control'] = {'type': 'ephemeral'}
         request['messages'][3]['content'][0]['cache_control'] = {'type': 'ephemeral'}
@@ -949,20 +949,20 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
         self.assertEqual(result.request['messages'][2], request['messages'][2])
         self.assertEqual(result.request['messages'][3]['content'][0]['cache_control'], {'type': 'ephemeral'})
 
-    def test_task_notification_is_not_next_human_and_current_hash_is_not_relaxed(self):
+    def test_task_notification_is_not_next_input_and_current_hash_is_not_relaxed(self):
         receipt = self.record(); self.close(receipt)
         self.rows.append(self.row('user', '<task-notification>peer result</task-notification>',
                                   promptSource='system', turnOrigin='task_notification',
                                   origin={'kind': 'task-notification', 'producer': 'session-task'}))
         self.write_rows()
         self.assertEqual(self.select().state, 'selected')
-        self.next_human()
+        self.next_sdk_prompt()
         request = self.request()
         request['messages'][-1]['content'] += '\nmerged hook context'
         self.assertEqual(self.select(request).state, 'preserved')
 
     def test_foreign_owner_ambiguous_wire_result_and_changed_call_are_preserved(self):
-        receipt = self.record(); self.close(receipt); self.next_human()
+        receipt = self.record(); self.close(receipt); self.next_sdk_prompt()
         request = self.request(); request['messages'][3]['content'].append(copy.deepcopy(self.result_block))
         self.assertEqual(self.select(request).state, 'preserved')
         request = self.request(); request['messages'][2]['content'][0]['input']['command'] = 'other call'
@@ -971,11 +971,11 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
         self.assertEqual(self.select().state, 'preserved')
 
     def test_no_next_tool_and_no_review_never_imply_consumption(self):
-        receipt = self.record(); self.close(receipt, judgment=False); self.next_human()
+        receipt = self.record(); self.close(receipt, judgment=False); self.next_sdk_prompt()
         self.assertEqual(self.select().state, 'preserved')
         self.assertIn(self.observation['value'], json.dumps(self.select().request))
 
-    def test_same_human_prefinal_replace_and_none_event_are_functional_input_changes(self):
+    def test_same_input_prefinal_replace_and_none_event_are_functional_input_changes(self):
         receipt = self.record()
         producer = dict(self.observation, use_reference=receipt['reference'])
         output = dict(type='tool_result', tool_use_id='lookup', content=[
@@ -992,7 +992,7 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
         self.assertEqual(selected.request['messages'][:3], self.request()['messages'][:3])
 
     def test_explicit_stale_event_is_rejected_even_when_none_can_resolve_current(self):
-        receipt = self.record(); self.close(receipt, judgment=False); self.next_human()
+        receipt = self.record(); self.close(receipt, judgment=False); self.next_sdk_prompt()
         judgment = [dict(use_reference=receipt['reference'], disposition='replace', summary='Result was compared',
                          next_need='Use the conclusion for the next decision')]
         with self.assertRaises(ValueError):
@@ -1053,7 +1053,7 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
         return result
 
     def test_nested_producer_wrapper_before_later_thinking_preserves_whole_request_and_originals(self):
-        receipt = self.record(); self.close(receipt, signed=True, wrapper=True); self.next_human()
+        receipt = self.record(); self.close(receipt, signed=True, wrapper=True); self.next_sdk_prompt()
         request = self.request()
         self.assert_signed_preserved(request)
 

@@ -90,7 +90,7 @@ fi
 upstream="$(git -C "$repo_root" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
 if [ -z "$upstream" ]; then
   error "No upstream branch is configured for this checkout."
-  error "Open the checkout owner or set the branch upstream before using bootstrap update."
+  error "Set the branch upstream that the human user chose for this checkout before using bootstrap update."
   exit 1
 fi
 
@@ -143,7 +143,7 @@ if [ -n "$status_output" ]; then
   fi
   warn "Source local changes saved in git stash: ${stash_ref}"
   warn "Review: git -C \"${repo_root}\" stash show -p ${stash_ref}"
-  warn "Reapply only if intentional: git -C \"${repo_root}\" stash pop ${stash_ref}"
+  warn "Reapply only when the human user chooses to restore the stashed changes: git -C \"${repo_root}\" stash pop ${stash_ref}"
 fi
 
 info "Fast-forwarding source checkout."

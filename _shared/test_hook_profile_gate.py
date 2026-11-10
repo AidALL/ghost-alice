@@ -165,7 +165,7 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
                 outputs.append(stdout.getvalue())
             first = json.loads(outputs[0])
             self.assertIn('row-not-found', first['systemMessage'])
-            self.assertIn('ask the tool (inner decision)', first['systemMessage'])
+            self.assertIn("ask at the host's permission prompt whether to run the tool call (inner decision)", first['systemMessage'])
             self.assertEqual(first['hookSpecificOutput'], {'hookEventName': 'PreToolUse'})
             # The minimal profile renders an empty Stop envelope as plain text; neither later output warns.
             self.assertNotIn('Ghost-ALICE intake', outputs[1] + outputs[2])
@@ -294,8 +294,8 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
         self.assertEqual((code, calls), (0, 1))
         self.assertEqual(json.loads(output), {
             'hookSpecificOutput': {'hookEventName': 'PreToolUse'},
-            'systemMessage': 'tool-checkpoint asked the host to ask the tool (inner decision). '
-                             'Ghost-ALICE Core does not block the host.'})
+            'systemMessage': "tool-checkpoint asked the host to ask at the host's permission prompt whether to run the tool call (inner decision); "
+                             'the hook runner removed that request before the host saw it.'})
 
     def test_rejection_audit_uses_known_platform_without_platform_environment(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -2198,7 +2198,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
         emitted = json.loads(result.stdout)
         self.assertNotIn("decision", emitted)
         self.assertIn("completion-check required", emitted["systemMessage"])
-        self.assertIn("does not block the host", emitted["systemMessage"])
+        self.assertIn("the hook runner removed that request before the host saw it", emitted["systemMessage"])
         self.assertEqual(row["stdout"].strip(), message)
         self.assertEqual(row["visible_decision"], "force_show")
 
@@ -2494,9 +2494,9 @@ class TestHookProtocolSurface(unittest.TestCase):
                     self.assertNotIn('stopReason', emitted)
                     if denied:
                         self.assertTrue(emitted['systemMessage'].startswith(protocol['systemMessage']))
-                        self.assertIn('stop (Current gate is blocked.)', emitted['systemMessage'])
-                        self.assertIn('deny the tool (Current gate is blocked.)', emitted['systemMessage'])
-                        self.assertIn('does not block the host', emitted['systemMessage'])
+                        self.assertIn('stop the turn (Current gate is blocked.)', emitted['systemMessage'])
+                        self.assertIn('deny the tool call (Current gate is blocked.)', emitted['systemMessage'])
+                        self.assertIn('the hook runner removed that request before the host saw it', emitted['systemMessage'])
                     else:
                         self.assertNotIn('systemMessage', emitted)
                     row = json.loads(_strict_log_path(home, platform, 'pretool-audit').read_text().splitlines()[0])
@@ -2509,12 +2509,12 @@ class TestHookProtocolSurface(unittest.TestCase):
                 "hookEventName": "UserPromptSubmit",
                 "additionalContext": "[session-intent-receipt] session-a [/session-intent-receipt]",
             }},
-            {"decision": "block", "reason": "Continue the approved work."},
+            {"decision": "block", "reason": "Continue the current work."},
             {"hookSpecificOutput": {
                 "hookEventName": "PreToolUse", "permissionDecision": "deny",
                 "permissionDecisionReason": "The current gate is blocked.",
             }},
-            {"continue": False, "stopReason": "Stop requested."},
+            {"continue": False, "stopReason": "The hook requested a turn stop."},
         ]
         for protocol in protocols:
             for surface in ("hidden", "focused", "full", "forced"):

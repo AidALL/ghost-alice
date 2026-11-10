@@ -13,7 +13,7 @@ This reference is the canonical semantic contract for deciding whether a claim a
 - [Redundancy Corrections](#redundancy-corrections)
 - [Authoritative Copy](#authoritative-copy)
 - [Restatement](#restatement)
-- [Confirmed Flaw Propagation](#confirmed-flaw-propagation)
+- [Verified Flaw Propagation](#verified-flaw-propagation)
 - [Worked Cases](#worked-cases)
 - [Out Of Scope](#out-of-scope)
 
@@ -66,7 +66,7 @@ Claim scopes for a `reuse` answer: `authored-at`, `current`, `last-known`; other
 
 | Situation | Verdict | Tool call |
 | --- | --- | --- |
-| The user explicitly asks to re-inspect the current artifact | `verify` (`explicit-recheck-request`) | one minimal check |
+| The human user explicitly asks to re-inspect the current artifact | `verify` (`explicit-recheck-request`) | one minimal check |
 | `authored-at` claim, retained evidence covers the target copy | `reuse` with scope `authored-at`, even if the artifact changed later | none |
 | `authored-at` claim, evidence lost, no mutation since authoring | `verify` (`retained-evidence-lost`) | read once |
 | `authored-at` claim, evidence lost, mutation since authoring | `unverified`; the current copy is not the authored state | none |
@@ -82,7 +82,7 @@ A write by the response model re-anchors evidence when it retains the full conte
 
 ## Instruction Body Reuse
 
-Instruction loading and current-input workflow execution are separate obligations. Where the host's adapter maps a Claude Code `Skill` instruction to reading the instruction body, a retained instruction body already read in the same session may be reused; a new user input alone does not require another body read. Still execute the applicable workflow for the current input, including intent, routing and completion decisions. Metadata, a name, a prior verdict or a thin summary is not a retained body.
+Instruction loading and workflow execution for the input the response model is answering are separate obligations. Where the host's adapter maps a Claude Code `Skill` instruction to reading the instruction body, a retained instruction body already read in the same session may be reused; a new user input alone does not require another body read. Still execute the applicable workflow for the input the response model is answering, including intent, routing and completion decisions. Metadata, a name, a prior verdict or a thin summary is not a retained body.
 
 Resolve `<installed-root>`, the absolute installed directory that contains `_shared/`, from the trusted runtime binding, separately from the session metadata's `ledger_root`, as defined in [Prepare and record the response review](response-review.md#prepare-and-record-the-response-review). Through the host's shell tool, run `python3 <installed-root>/_shared/session_check_cache.py --root <ledger_root> --platform <platform> --session-id <session_id> --instruction-path <absolute-SKILL.md>`. Before invocation, replace `<ledger_root>`, `<platform>` and `<session_id>` with those fields of the current session metadata and `<absolute-SKILL.md>` with the absolute path of the skill's `SKILL.md`.
 
@@ -100,28 +100,28 @@ Current workflow execution rests on either a fresh body read or this valid reuse
 
 ## Redundancy Corrections
 
-An objection that a check was redundant asks whether an actual change path or mutation event existed; answer from the recorded authority and events, and never reinterpret it as a reason to assume hypothetical external changes. When the path was closed or agent-mediated and no event occurred, acknowledge that the check was redundant and answer from retained evidence. Record the lesson as conduct feedback in session-intent-analyzer rather than as a new verification duty.
+An objection from the human user or another agent that a check was redundant asks whether an actual change path or mutation event existed; answer from the recorded authority and events, and never reinterpret it as a reason to assume hypothetical external changes. When the path was closed or agent-mediated and no event occurred, acknowledge that the check was redundant and answer from retained evidence. Following session-intent-analyzer's [Input records and authority](../../../session-intent-analyzer/SKILL.md#input-records-and-authority), record the lesson as a conduct correction (`conduct_feedback` entry) with source `user-said` only when the human user's own assertion supports it, or `interpreted-as` for a mismatch the response model observed, rather than as a new verification duty.
 
 ## Authoritative Copy
 
-When several versions of an artifact exist, a current-state claim uses the copy the user designated (`user-designated`). Otherwise it uses the newest version backed by dates (`dated-version`) or compared content (`content-compared`). A folder named latest (`folder-name`), a copy used before (`familiarity`), or no basis (`none`) is not evidence of recency. Tied or missing evidence leaves the copy unresolved: inspect the candidates' dates or content, or ask which copy is authoritative.
+When several versions of an artifact exist, a current-state claim uses the copy the human user designated (`user-designated`). Otherwise it uses the newest version backed by dates (`dated-version`) or compared content (`content-compared`). A folder named latest (`folder-name`), a copy used before (`familiarity`), or no basis (`none`) is not evidence of recency. Tied or missing evidence leaves the copy unresolved: inspect the candidates' dates or content, or ask the human user which copy is authoritative.
 
 ## Restatement
 
-Avoid repeating an unchanged delivered explanation, status or apology when it adds no information. A user's request to restate a result can require that content again.
+Avoid repeating an unchanged delivered explanation, status or apology when it adds no information. When the human user asks to restate a result, that can require the content again.
 
-## Confirmed Flaw Propagation
+## Verified Flaw Propagation
 
-For a confirmed flaw in an authored prompt, document, plan or other requested artifact, return the corrected complete deliverable unless the user asked for diagnosis only; an explanation without the corrected deliverable is `confirmed-flaw-not-propagated`. Do not return the previous version again, and do not ask for renewed approval when the fix is safe and inside the existing scope.
+For a flaw that the response model verified against evidence in an authored prompt, document, plan or other requested artifact, return the corrected complete deliverable unless the human user asked for diagnosis only; an explanation without the corrected deliverable is `verified-flaw-not-propagated`. Do not return the previous version again, and do not ask the human user for renewed approval when the fix is safe and inside the existing scope.
 
 | Condition | Required response |
 | --- | --- |
-| Flaw confirmed, fix safe and in scope | `corrected-full-deliverable` without reapproval |
-| User asked for diagnosis only | `diagnosis-only` |
-| Fix is unsafe or outside the agreed scope | `confirm-before-fix` |
-| No flaw confirmed | `none` |
+| Flaw verified, fix safe and in scope | `corrected-full-deliverable` without reapproval |
+| The human user asked for diagnosis only | `diagnosis-only` |
+| Fix is unsafe or outside the scope that the human user agreed to | `confirm-before-fix`: ask the human user to confirm |
+| No flaw verified | `none` |
 
-Failure classes: `confirmed-flaw-not-propagated` for an explanation, a previous version, or a partial patch where the corrected complete deliverable was required; `unnecessary-reapproval` for asking permission for a safe in-scope fix; `unconfirmed-out-of-scope-change` for applying an out-of-scope fix without confirmation.
+Failure classes: `verified-flaw-not-propagated` for an explanation, a previous version, or a partial patch where the corrected complete deliverable was required; `unnecessary-reapproval` for asking permission for a safe in-scope fix; `unconfirmed-out-of-scope-change` for applying an out-of-scope fix without the human user's confirmation.
 
 ## Worked Cases
 
@@ -133,8 +133,8 @@ Failure classes: `confirmed-flaw-not-propagated` for an explanation, a previous 
 | Requirement added after authoring | `authored-at` question about inclusion | `reuse` from chronology |
 | Evidence lost to compaction | nothing retained, no mutation | read once, or `unverified` if unreachable |
 | Remote claim, local check planned | planned copy differs from target copy | `wrong-copy` |
-| Flaw confirmed in own prompt | fix safe and in scope | corrected complete deliverable |
-| User confirmed nothing changed | `externally-writable`, `writer_confirmed_unchanged`, no event | `reuse` as `current` |
+| Flaw verified in own prompt | fix safe and in scope | corrected complete deliverable |
+| The human user confirmed nothing changed | `externally-writable`, `writer_confirmed_unchanged`, no event | `reuse` as `current` |
 | Folder named latest versus a dated file | `folder-name` against `dated-version` | the dated file is authoritative |
 | Same status explained in two messages | second message repeats a delivered statement | restatement loop |
 

@@ -24,7 +24,7 @@ if str(_SHARED) not in sys.path:
 from installer_assets import (
     OWNERSHIP_ABSENT,
     OWNERSHIP_GHOST_ALICE_MANAGED,
-    OWNERSHIP_USER_OWNED,
+    OWNERSHIP_UNCLAIMED,
     classify_skill_root,
 )
 from manifest_io import read_manifest, write_manifest
@@ -194,7 +194,7 @@ def _unmanaged_root_status(
     if root.absolute() in destinations or root.name in names:
         return False, "ghost-alice-skill-root"
     ownership = classify_skill_root(root, repo_root=repo_root).ownership
-    if ownership not in {OWNERSHIP_USER_OWNED, OWNERSHIP_ABSENT}:
+    if ownership not in {OWNERSHIP_UNCLAIMED, OWNERSHIP_ABSENT}:
         return False, f"skill-root-{ownership}"
     return True, UNMANAGED_ROOT_CLEANUP_REASON
 
@@ -243,6 +243,8 @@ def cleanup_false_positive_legacy(
     cleanup_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     if apply and (cleanable or removable):
         for entry, backup, reason in cleanable:
+            # This script discards its false-positive entry without a human user's discard choice.
+            # cleanup_reason and cleanup_at distinguish this outcome from mark_decided's discard.
             entry["decided"] = True
             entry["decision"] = "discarded"
             entry["cleanup_reason"] = reason

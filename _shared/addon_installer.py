@@ -283,7 +283,7 @@ def load_addon_targets(
                     raise AddonManifestError(
                         f"{addon_manifest_path}: addon hook {hook_id!r} event {event!r} is not permitted; "
                         f"addon hooks may only observe ({', '.join(sorted(ALLOWED_ADDON_HOOK_EVENTS))}) -- "
-                        "control-flow events (Stop / on_agent_stop / UserPromptSubmit / on_user_prompt / " "pre_tool_use) are rejected")
+                        "control-flow events (Stop / on_agent_stop / UserPromptSubmit / on_prompt_submit / on_user_prompt / " "pre_tool_use) are rejected")
                 script_rel = _require_string(hook.get("script"), "hooks[].script", addon_manifest_path)
                 if "/bin/sh" in script_rel or any(ch in script_rel for ch in (";", "|", "&", "`", "$", "\n")):
                     raise AddonManifestError(
@@ -524,7 +524,7 @@ def detect_collisions(
 
     A collision is a target whose dest already exists on disk and is owned by
     something other than the installing addon. Each collision reports the owner
-    as ``core`` / ``addon`` / ``domain`` / ``user``. A dest already owned by the
+    as ``core`` / ``addon`` / ``domain`` / ``unclaimed``. A dest already owned by the
     SAME addon (reinstall/update) is not a collision.
     """
     skills_root = Path(skills_dir).resolve()
@@ -556,13 +556,13 @@ def detect_collisions(
             continue
         owner_id, recorded_hash, recorded_mode = owned.get(_norm(dest), (None, "", "missing"))
         if owner_id == target.addon_id:
-            # Same addon already owns this dest. Allow the update ONLY if the live target still matches the recorded content_hash; otherwise the user drifted it (edited copy / repointed link) and overwriting would destroy their change, so flag same-addon drift and abort.
+            # Same addon already owns this dest. Allow the update ONLY if the live target still matches the recorded content_hash; otherwise an external change occurred after install that the record does not hold. The installer does not record its writer, so preserve it and flag same-addon drift.
             if _same_addon_target_is_clean(dest, recorded_hash, recorded_mode):
                 continue
             # Copy-mode targets can be in a recoverable stale-sidecar state: the installed bytes already match the incoming addon source, but the sidecar still records an older hash. Reinstalling is then a no-op for content and lets write-sidecars repair the registry.
             if _same_addon_copy_matches_source(dest, target.source, recorded_hash, recorded_mode):
                 continue
-            # A directory link to this install source is an owned retarget; a link to another source is user drift. This permits recovery when link publication succeeded before its sidecar write.
+            # A directory link to this install source is an owned retarget; a link to another source is an external change. This permits recovery when link publication succeeded before its sidecar write.
             if _detect_install_mode(dest) in {"symlink", "junction"} and _resolves_to(dest, target.source):
                 continue
             collisions.append({
@@ -579,7 +579,7 @@ def detect_collisions(
         elif (dest / "SKILL.md").exists():
             owner = "domain"
         else:
-            owner = "user"
+            owner = "unclaimed"
         collisions.append({"name": target.name, "dest": str(dest), "owner": owner, "owner_addon_id": owner_id})
 
     # Command/resource extras share the same ownership map (their provided[] entries are in `owned`), but their dests live outside skills_dir, so they must be collision-checked here at preflight too -- BEFORE hooks/skills are mutated. A non-owned pre-existing extra dest that only fails at provision time would orphan an already-installed addon skill + hook with no sidecar.
@@ -599,7 +599,7 @@ def detect_collisions(
                 continue
             collisions.append({
                 "name": extra_name, "dest": str(dest),
-                "owner": "addon" if owner_id is not None else "user",
+                "owner": "addon" if owner_id is not None else "unclaimed",
                 "owner_addon_id": owner_id,
             })
     return collisions

@@ -17,7 +17,7 @@ This document is the contract for the install-state manifest that the Ghost-ALIC
 
 The install-state manifest is the baseline used to decide which artifacts the next install preflight and uninstall can treat as installer-owned.
 
-The pending merge manifest is the quarantine for user changes and the merge decision queue. The install-state manifest is the SSOT for ownership and the install baseline. The two manifests do not mix their paths or purposes.
+The pending merge manifest is the quarantine for external changes and the queue for the human user's merge decisions. An external change is a change that the installer finds in an installed target after install and that its records do not hold; the installer does not record who made the change. The install-state manifest is the SSOT for ownership and the install baseline. The two manifests do not mix their paths or purposes.
 
 ## File location
 
@@ -75,7 +75,7 @@ The installer writes one manifest for the selected platform at the corresponding
 
 - If the manifest is absent, preflight treats ownership as unproven and behaves conservatively.
 - If a consumer cannot parse the manifest, it reports a diagnostic failure rather than treating the manifest as valid.
-- The manifest is not a recovery source for user changes. Recovery of user changes is handled by the pending merge manifest and the quarantine backup.
+- The manifest is not a recovery source for external changes. Recovery of external changes is handled by the pending merge manifest and the quarantine backup.
 - When the manifest exists, installer doctor uses the `targets` array as the SSOT for that platform's managed targets. It does not fail merely because a catalog-wide skill that is absent from a partial-install manifest is missing.
 - If a recorded target is missing from its destination or fails marker/hash verification, installer doctor reports that target as requiring action.
 
@@ -89,6 +89,6 @@ Each entry is distinguished by the `kind` field. The installer records the follo
 | --- | --- |
 | `source_repo_hook_path` | The install source repository's shared `core.hooksPath` that the install owns. `after` is the absolute path of the install source's `hooks` folder; `before_present` and `before` give the value from before Ghost-ALICE wrote one (the relative `hooks` an earlier installer wrote counts as none, unless that installer recorded for this repository the value it replaced), and `repo_root` names the install source. Every install that knows the earlier value writes the entry, so a reinstall that finds its own value in place carries the recorded `before` and `applied_at`; an install that finds a value no record names writes no entry. The git hook step also writes the same fields to `source-repo-hook-path.json` next to the manifests in the same step as the git write, so an install that stops before its manifest leaves the earlier value for the next install; the last host's full uninstall removes that file. Only the full uninstall of the last host acts on it: when the current value equals `after`, it restores `before`, or unsets the value when there was none. Without this entry the value stays. |
 | `codex_hooks_feature_flag` | A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[features] hooks` to `true`. Records `path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores `before_state` only from this record. |
-| `codex_project_trust` | A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[projects."<repo>"] trust_level` to `trusted`. Records `path`, `project_path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores or removes that trust entry only from this record. |
+| `codex_project_trust` | A trace-backed record that the installer changed `~/.codex/config.toml` `[projects."<repo>"] trust_level` to `trusted` for the Ghost-ALICE project. Records `path`, `project_path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores or removes that trust entry only from this record. |
 
 Each entry has an `applied_at` UTC ISO-8601 timestamp and the kind-specific fields above. Adding a kind requires both install-recording and uninstall-rollback implementation and tests.

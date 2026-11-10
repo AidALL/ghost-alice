@@ -2,7 +2,7 @@
 
 [🇺🇸 English](architecture.md) | [🇰🇷 한국어](architecture_ko.md)
 
-Ghost-ALICE Core is the collection of how the generative backend works under this philosophy: the common contract, the skills, and the Core code (hooks, ledger and context gateway). An adapter translates Core for one host, such as Claude Code or Codex: the instruction template, hook event names, transcript format and configuration. The host runs the generative backend and its tools, and the response model follows Core's instructions, performs authorized work and judges its results. The [design philosophy](https://github.com/AidALL/ghost-alice/wiki/Design-Principles) makes the user's purpose the standard for judgment; agreement between procedures or records alone does not prove success.
+Ghost-ALICE Core is the collection of how the generative backend works under this philosophy: the common contract, the skills, and the Core code (hooks, ledger and context gateway). An adapter translates Core for one host, such as Claude Code or Codex: the instruction template, hook event names, transcript format and configuration. The host runs the generative backend and its tools, and the response model follows Core's instructions, performs the work that the human user's instructions authorize and judges its results. The [design philosophy](https://github.com/AidALL/ghost-alice/wiki/Design-Principles) makes the human user's purpose the standard for judgment; agreement between procedures or records alone does not prove success.
 
 ## Structure and boundaries
 
@@ -19,7 +19,7 @@ flowchart TB
     BC["Generative backend: Claude"]
     BX["Generative backend: GPT"]
   end
-  U["User: objective and authority"]
+  U["Human user: objective and authority"]
   AD["Add-on"]
   C -->|translated for Claude Code| AC
   C -->|translated for Codex| AX
@@ -40,28 +40,28 @@ While a request runs, each participant has one responsibility.
 
 | Participant | Responsibility |
 | --- | --- |
-| User | Supplies the objective, constraints and authority. |
-| Response model | Follows Core's instructions: interprets each input, selects and performs work, compares claims with originals, then judges the complete answer. |
+| Human user | Supplies the objective, constraints and authority. |
+| Response model | Follows Core's instructions: on each input, interprets what the human user wants, selects and performs work, compares claims with originals, then judges the complete answer. |
 | Adapter | Translates Core's instructions, hook events, transcripts and configuration for its host. |
-| Native host | Executes tools, enforces permissions, constructs model requests and displays answers. |
-| Core code | Binds work, sources and both judgments to the exact native input, and records and authenticates them. |
+| Host | Executes tools, enforces its permission rules, constructs model requests and displays answers. |
+| Core code | Binds work, sources and both judgments to the current input that Core code recorded (on Claude Code, an input whose transcript row carries the host's human-origin markers; on Codex, every prompt that Codex's prompt-submit event (`UserPromptSubmit`) delivers), and records and authenticates them. |
 
 ```mermaid
 flowchart TD
-  U["User purpose and authority"] -->|"Input as is (user-said)"| I["Response model: interpret the input (interpreted-as):<br/>objective, constraints and done conditions"]
+  U["Human user's purpose and authority"] -->|"Input as written (user-said)"| I["Response model: interpret the input (interpreted-as):<br/>objective, constraints and done conditions"]
   I -->|"Work that needs tools, except a local read-only lookup:<br/>new or changed interpretation, before the next tool call"| L["Core code: record the interpretation in the intent ledger"]
-  I -->|Interpretation and its assumptions| Q{"Do the user's words leave more than one reasonable reading<br/>that changes the next action, or a decision only the user can make?"}
+  I -->|Interpretation and its assumptions| Q{"Does the human user's input leave more than one reasonable reading<br/>that changes the next action, or a decision only the human user can make?"}
   Q -->|Yes| K["Response model: end the answer with a question that states<br/>the assumption and what changes if it is wrong"]
   K -->|Confirmation question| U
-  Q -->|"No; the intent is clear"| M["Response model: select and perform work"]
-  M -->|Authorized tool requests| T["Native host: tools and permissions"]
+  Q -->|"No; what the human user wants is clear"| M["Response model: select and perform work"]
+  M -->|Tool requests the response model sends within what the human user's instructions authorize| T["Host: tools and its permission rules"]
   T -->|Observed results| M
   O["Original evidence"] --> J["Compare claims with originals"]
   M --> J
   J --> W["Judge the complete answer against the input as is and the interpreted<br/>objective, constraints and done conditions"]
   I -->|"Input as is and interpreted objective, constraints and done conditions"| W
-  W -->|Correction or needed investigation within the current request| M
-  W --> R{"Completion claims or an authenticated review the user requested"}
+  W -->|Correction or needed investigation within what the human user currently requests| M
+  W --> R{"Completion claims or an authenticated review the human user requested"}
   R -->|Required| C["Core code: authenticate both judgments and source bindings"]
   R -->|Routine explanation| D["Response model: submit the answer"]
   C -->|Status and references| D
@@ -73,7 +73,7 @@ flowchart TD
   N --> E
 ```
 
-The model chooses the next judgment target: micro for an individual result, meso for a subtask or mapping, macro for the integrated outcome and dependencies, or meta for necessity or premise. The task complexity level follows from the work's verification burden; whether the evidence supports full or partial completion is a separate judgment. A mismatch starts investigation; it does not identify the cause. Unresolved conditions prevent their dependent claims or actions while independent authorized work can continue. The wiki page [Verification and Evidence](https://github.com/AidALL/ghost-alice/wiki/Verification-and-Evidence) describes these decisions.
+The model chooses the next judgment target: micro for an individual result, meso for a subtask or mapping, macro for the integrated outcome and dependencies, or meta for necessity or premise. The task complexity level follows from the work's verification burden; whether the evidence supports full or partial completion is a separate judgment. A mismatch starts investigation; it does not identify the cause. Unresolved conditions prevent their dependent claims or actions while independent work that the human user's instructions authorize can continue. The wiki page [Verification and Evidence](https://github.com/AidALL/ghost-alice/wiki/Verification-and-Evidence) describes these decisions.
 
 ## Hook calls
 
@@ -96,15 +96,15 @@ sequenceDiagram
     R->>L: The refusal and its reason
     R-->>H: Exit code 126 without running the hook script
   end
-  opt Claude PreToolUse or Stop
-    R->>R: Record in the intent ledger which session inputs the user typed,<br/>from the Claude transcript<br/>A failure is recorded in the ledger, or else in the hook log, and the hook still runs
+  opt Claude Code PreToolUse or Stop
+    R->>R: Record in the intent ledger the inputs whose transcript rows carry<br/>the host's human-origin markers, from the Claude Code transcript<br/>A failure is recorded in the ledger, or else in the hook log, and the hook still runs
   end
   opt Stop
     R->>R: Before an add-on Stop hook, build this Stop's notice message and record it<br/>in stop-notice.json in the session folder unless the file already holds it.<br/>For every Stop hook, set GHOST_ALICE_STOP_NOTICE_FILE to the file's full path.<br/>A failure is recorded in the hook log, and the hook runs without the variable
   end
   R->>C: Run the Core hook script with the event JSON
   opt The script needs a ledger record or a source binding check
-    C->>C: Read or write the intent ledger,<br/>or check a source's binding to the current input
+    C->>C: Read or write the intent ledger,<br/>or check a source's binding to the current input that Core code recorded
   end
   opt The Core Stop script
     C->>C: Compare the answer with its recorded review, record this Stop's notice message<br/>in stop-notice.json, and return its text as systemMessage when its state is notice
@@ -112,8 +112,8 @@ sequenceDiagram
   C-->>R: Output, diagnostics and exit code
   R->>R: Keep only the fields the host accepts<br/>Remove block, stop and permission-decision fields<br/>Report block, stop, deny and ask in systemMessage
   R->>R: Apply the agent visibility profile to the user-facing output
-  opt Claude PreToolUse or Stop, the runner could not resolve whether an input was typed by the user, has not warned about that cause in this session, and the output can carry the warning
-    R->>R: Add a systemMessage warning that intent, response-route<br/>and completion records wait for the user's next typed input
+  opt Claude Code PreToolUse or Stop, the runner could not find the host's human-origin markers on an input's transcript row, has not warned about that cause in this session, and the output can carry the warning
+    R->>R: Add a systemMessage warning that the response model's interpreted-as record,<br/>response-route and completion records wait for the next input<br/>whose transcript row carries the host's human-origin markers
   end
   R->>L: The hook's original output, diagnostics and exit code,<br/>the visibility decision and the user-facing output
   R-->>H: Output for the host and an exit code<br/>(exit code 2 becomes 1, and a command registered with || true returns 0)
@@ -130,7 +130,7 @@ sequenceDiagram
   end
 ```
 
-On Stop, Core code's Stop script compares the answer with its recorded review and builds one Stop notice message for the current input and answer. It records the message at the path the runner sets in the environment variable `GHOST_ALICE_STOP_NOTICE_FILE`: `stop-notice.json` in the session folder `~/.ghost-alice/session-logs/<host>/<session>/`, next to the hook log. The script returns `continue: true`. The message's `state` is `notice` when it reports at least one of four things: a claim the recorded review does not support; an issue found while checking the answer; a criterion a partial-completion block leaves unresolved; or remaining work the response model declared in the route. The script then also returns the notice text as `systemMessage`, and the host shows it after the answer. For an answer with none of the four, the message's `state` is `quiet` and the script returns no `systemMessage`. A plain explanation without a completion block or declared remaining work, whose input has no recorded review, is such an answer. When no completion block stands before a code fence that never closes, a sample block inside that fence counts as a completion block, so that answer gets a notice. As remaining work, the script lists only the rows the response model declared in the route registered for the current input; a criterion named by no declared row does not appear. The notice's fixed words are English. Claims, unresolved reasons, and each declared row's reason and next needed information appear as the response model wrote them; a claim shows its first 160 characters. An example of the text:
+On Stop, Core code's Stop script compares the answer with its recorded review and builds one Stop notice message for the current input that Core code recorded and the answer. It records the message at the path the runner sets in the environment variable `GHOST_ALICE_STOP_NOTICE_FILE`: `stop-notice.json` in the session folder `~/.ghost-alice/session-logs/<host>/<session>/`, next to the hook log. The script returns `continue: true`. The message's `state` is `notice` when it reports at least one of four things: a claim the recorded review does not support; an issue found while checking the answer; a criterion a partial-completion block leaves unresolved; or remaining work the response model declared in the route. The script then also returns the notice text as `systemMessage`, and the host shows it after the answer. For an answer with none of the four, the message's `state` is `quiet` and the script returns no `systemMessage`. A plain explanation without a completion block or declared remaining work, whose input has no recorded review, is such an answer. When no completion block stands before a code fence that never closes, a sample block inside that fence counts as a completion block, so that answer gets a notice. As remaining work, the script lists only the rows the response model declared in the route registered for the current input that Core code recorded; a criterion named by no declared row does not appear. The notice's fixed words are English. Claims, unresolved reasons, and each declared row's reason and next needed information appear as the response model wrote them; a claim shows its first 160 characters. An example of the text:
 
 ```text
 Ghost-ALICE Stop notice: the recorded review does not support 1 of 2 claims.
@@ -163,18 +163,18 @@ sequenceDiagram
 
 ## Response boundary
 
-The model performs the work already authorized by the current request before final delivery. At the response boundary, the model asks whether a currently actionable required follow-up remains. No means an answer with the supported result and any unresolved conditions. Yes means that answer plus recommended additional work, its reason and the next needed information. Core can authenticate this feedback but does not schedule a new request or return from answer delivery to work selection. No actionable follow-up does not establish whole completion: required conditions may still depend on missing authority or external support.
+The response model performs the work that the human user's instructions already authorize before final delivery. At the response boundary, the response model asks whether a currently actionable required follow-up remains. No means an answer with the supported result and any unresolved conditions. Yes means that answer plus recommended additional work, its reason and the next needed information. Core code can authenticate the remaining work that the response model declared but does not schedule a new request or return from answer delivery to work selection. No actionable follow-up does not establish whole completion: required conditions may still depend on a decision only the human user can make or on external support.
 
 ```mermaid
 flowchart TD
-  R["Current requested work performed and results assessed"] --> N{"Currently actionable required follow-up?"}
+  R["The response model performs the work that the human user's instructions authorize and assesses the results"] --> N{"Currently actionable required follow-up?"}
   N -->|No| A["Answer: supported result and unresolved conditions"]
   N -->|Yes| B["Answer plus recommended additional work"]
   A --> D["Native host displays the answer. When the Stop notice message's state is notice,<br/>the Core Stop script returns the notice text and the host shows it. The host stops"]
   B --> D
 ```
 
-A later user request starts the next native model invocation; Core schedules none. That new invocation rechecks the current objective, original criteria and constraints before selecting work.
+A later prompt that the host delivers under the user role starts the next model invocation; Core code schedules none. In that invocation, the response model rechecks the current objective, original criteria and constraints before selecting work.
 
 ## Context and original evidence
 
@@ -214,12 +214,12 @@ flowchart LR
 
 ## Evidence and native delivery
 
-The model makes two distinct judgments: each claim against original evidence, and the complete answer against the user's objective and constraints. Core code authenticates ownership, input bindings and source integrity; IDs and hashes do not determine semantic truth. The native host displays the model's answer. Core code's Stop script compares the answer with the recorded review; it does not generate missing judgments or schedule another task.
+The model makes two distinct judgments: each claim against original evidence, and the complete answer against the human user's objective and constraints. Core code authenticates ownership, input bindings and source integrity; IDs and hashes do not determine semantic truth. The native host displays the model's answer. Core code's Stop script compares the answer with the recorded review; it does not generate missing judgments or schedule another task.
 
 The [verification procedure](coding-convention/verification-before-completion/SKILL.md) owns evidence selection and completion claims. Its [response review procedure](coding-convention/verification-before-completion/references/response-review.md#prepare-and-record-the-response-review) owns the recording handoff. Other documents refer to that procedure rather than duplicating its commands.
 
-Supported results retain their original evidence, verification times and correction links. A changed relevant target or criterion, a contrary observation, an explicit recheck or a materially broader claim reopens only the affected evidence. A recording or delivery defect does not justify replaying unchanged business work. An accurate partial answer may be accepted as an answer while required work remains incomplete. The wiki page [Focus and Recovery](https://github.com/AidALL/ghost-alice/wiki/Focus-and-Recovery) describes unresolved conditions and the model's next judgment.
+Supported results retain their original evidence, verification times and correction links. A changed relevant target or criterion, a contrary observation, a recheck that the human user explicitly requested or a materially broader claim reopens only the affected evidence. A recording or delivery defect does not justify replaying unchanged business work. The response model may deliver an accurate partial answer as its answer while required work remains incomplete. The wiki page [Focus and Recovery](https://github.com/AidALL/ghost-alice/wiki/Focus-and-Recovery) describes unresolved conditions and the model's next judgment.
 
 ## Necessary-work declaration
 
-The response model declares current necessary unprocessed work, its reason and the next needed information in the route that Core code stores. Core code authenticates the selected criteria, current human input, declared boundary and original-source references without copying their bodies. Changed originals hold only dependent feedback rows while preserving work and proof. Core code records this declaration and schedules none of the work it names; only a later user request starts that work. Core code's Stop script writes the declared rows into the Stop notice message; the host shows them in the notice text, and anyone can read them in `stop-notice.json`.
+The response model declares current necessary unprocessed work, its reason and the next needed information in the route that Core code stores. Core code authenticates the selected criteria, the current input that Core code recorded, declared boundary and original-source references without copying their bodies. When originals change, Core code holds only the dependent items of the remaining work that the response model declared while preserving work and proof. Core code records this declaration and schedules none of the work it names; only a later prompt that the host delivers under the user role starts that work. Core code's Stop script writes the declared rows into the Stop notice message; the host shows them in the notice text, and anyone can read them in `stop-notice.json`.

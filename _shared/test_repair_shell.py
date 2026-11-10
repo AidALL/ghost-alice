@@ -3,8 +3,8 @@
 It calls the ownership classifier before replacing anything.
 
 - A managed target that went MISSING is re-provisioned (mutation).
-- A target the user replaced (not cleanly managed) is LEFT UNTOUCHED (classify
-  before replace) -- repair never clobbers user/domain content.
+- A target replaced after install (not cleanly managed; writer unknown) is LEFT UNTOUCHED (classify
+  before replace) -- repair never clobbers unmanaged or domain content.
 
 Run: python3 -m pytest _shared/test_repair_shell.py -q
 """
@@ -57,7 +57,7 @@ class RepairTest(unittest.TestCase):
             env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=180, check=False)
 
-    def test_repair_reprovisions_missing_and_preserves_user(self):
+    def test_repair_reprovisions_missing_and_preserves_unclaimed_slot(self):
         with tempfile.TemporaryDirectory() as home:
             env = os.environ.copy()
             env["HOME"] = home
@@ -76,14 +76,14 @@ class RepairTest(unittest.TestCase):
             self.assertTrue(os.path.lexists(skill), msg="repair did not re-provision missing target: "
                             + repair.stderr + repair.stdout)
 
-            # 2) user replaced the managed slot with their own dir -> repair must NOT clobber it
+            # 2) the test replaced the managed slot with another dir -> repair must NOT clobber it
             _symlink_safe_remove(skill)
             skill.mkdir()
-            (skill / "USER_FILE").write_text("mine\n", encoding="utf-8")
+            (skill / "UNMANAGED_FILE").write_text("mine\n", encoding="utf-8")
             repair2 = self._run(env, "--platform", "claude", "--repair")
-            self.assertTrue((skill / "USER_FILE").exists(),
-                            msg="repair clobbered a user-owned slot: " + repair2.stderr + repair2.stdout)
-            self.assertFalse(skill.is_symlink() or _is_reparse_point(skill))  # still the user's dir, not re-symlinked
+            self.assertTrue((skill / "UNMANAGED_FILE").exists(),
+                            msg="repair clobbered an unclaimed slot: " + repair2.stderr + repair2.stdout)
+            self.assertFalse(skill.is_symlink() or _is_reparse_point(skill))  # still the replacing dir, not re-symlinked
 
     def test_repair_fixes_dangling_shared(self):
         with tempfile.TemporaryDirectory() as home:

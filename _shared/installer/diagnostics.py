@@ -164,7 +164,7 @@ def run_doctor(ctx: "Context") -> int:
     rc = 0
     addons_dir = locations.home() / ".ghost-alice" / "addons" / ctx.platform
     if addons_dir.is_dir() and any(addons_dir.glob("*.json.removing")):
-        report.warn("A pending addon uninstall could not complete (manual review needed); see .removing markers "
+        report.warn("A pending addon uninstall could not complete (the human user must review the kept items); see .removing markers "
                     "under ~/.ghost-alice/addons")
         rc = 1
     doctor_rc = run_install_doctor(ctx, "doctor", skills_dir)

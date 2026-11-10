@@ -46,7 +46,7 @@ Content fragment vs. full document: if the HTML file starts with `<!DOCTYPE` or 
 
 ## Starting a Session
 
-Resolve every `scripts/` path below relative to the loaded brainstorming skill directory, and invoke it through the host's shell tool. Bind the project path from the accepted task, not the shell's incidental working directory.
+Resolve every `scripts/` path below relative to the loaded brainstorming skill directory, and invoke it through the host's shell tool. Bind the project path from the task that the human user requested, not the shell's incidental working directory.
 
 ```bash
 # Start the server with persistence for the project (mockups are saved)
@@ -71,7 +71,7 @@ Select the process mode from the actual host execution capability:
 
 Do not infer process lifetime from a product name. Read the returned startup JSON or the exact session's `state/server-info` before presenting a URL.
 
-If the returned URL is unreachable and the accepted environment permits non-loopback binding, use the host and URL hostname appropriate to that environment. The following is an example, not authorization to expose a server:
+If the returned URL is unreachable and the human user authorizes non-loopback binding in this environment, use the host and URL hostname appropriate to that environment. The following is an example, not authorization to expose a server:
 
 ```bash
 scripts/start-server.sh \
@@ -95,8 +95,8 @@ Use `--url-host` to control which hostname the printed URL JSON shows.
    - Give a short summary of what is on the screen (for example, "Showing 3 layout options for the home page")
    - Ask the user to respond in the conversation: "Take a look and let me know what you think. If you like, click to select an option."
 
-3. The next turn, after the user responds in the conversation:
-   - If it exists, read `$STATE_DIR/events`, which contains JSON lines of the user's browser interactions (clicks and selections)
+3. The next turn, after the human user responds in the conversation:
+   - If it exists, read `$STATE_DIR/events`, which contains JSON lines of click and selection events that the visual companion server (`server.cjs`) recorded from browser messages; the visual companion server does not check the sender
    - Merge it with the user's conversation text to get the complete picture
    - The conversation message is the primary feedback. `state_dir/events` provides structured interaction data
 

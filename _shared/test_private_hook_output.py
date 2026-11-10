@@ -50,15 +50,15 @@ class PrivateHookOutputTests(unittest.TestCase):
         receipt = {"platform": "codex", "manifest_path": "/private/home/.ghost-alice/pending-merges/codex/manifest.json",
                    "undecided_count": 1}
         raw = json.dumps({"continue": True, "ghostAlicePendingMergeCheck": receipt,
-                          "systemMessage": "A pending merge requires a decision.",
-                          "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "Keep the pending decision."}})
+                          "systemMessage": "A pending merge requires the human user's choice.",
+                          "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "Keep the pending entry for the human user's choice."}})
         for level in ("hidden", "compact", "focused", "full", "forced"):
             with self.subTest(level=level):
                 rendered, _ = hook_profile_gate._render_user_surface({"user_surface": level, "value_key": "pending-merge"}, raw, "")
                 payload = json.loads(rendered)
                 self.assertNotIn("ghostAlicePendingMergeCheck", payload)
                 self.assertTrue(payload["continue"])
-                self.assertEqual(payload["hookSpecificOutput"]["additionalContext"], "Keep the pending decision.")
+                self.assertEqual(payload["hookSpecificOutput"]["additionalContext"], "Keep the pending entry for the human user's choice.")
                 self.assertIn("ghostAlicePendingMergeCheck", json.loads(raw))
 
     def test_internal_pending_check_receipt_still_prevents_duplicate_inspection(self):

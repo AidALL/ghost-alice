@@ -12,11 +12,11 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from snapshot import capture_snapshot
-from file_walker import walk_user_files
+from file_walker import walk_installed_copy_files
 
 
-def _walk_user_files(skills_dir: Path) -> list[Path]:
-    return walk_user_files(skills_dir)
+def _walk_installed_copy_files(skills_dir: Path) -> list[Path]:
+    return walk_installed_copy_files(skills_dir)
 
 
 def main() -> int:
@@ -26,7 +26,7 @@ def main() -> int:
     p.add_argument("--skills-dir", required=True)
     args = p.parse_args()
     skills_dir = Path(args.skills_dir)
-    files = _walk_user_files(skills_dir)
+    files = _walk_installed_copy_files(skills_dir)
     capture_snapshot(Path(args.output), files, args.platform, skills_dir=skills_dir)
     return 0
 

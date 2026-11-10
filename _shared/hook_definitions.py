@@ -20,9 +20,9 @@ PROVIDER = 'ghost_alice_context'
 SAFE_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 
 # Semantic hook intent → concrete host event name.
-#   - claude/codex: UserPromptSubmit fires once when user input is submitted.
+#   - claude/codex: UserPromptSubmit fires when the host submits a prompt under the user role; the sender may be the human user or a script.
 HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
-    "on_user_prompt": {
+    "on_prompt_submit": {
         "claude": "UserPromptSubmit",
         "codex":  "UserPromptSubmit",
     },
@@ -58,6 +58,8 @@ RETIRED_CORE_HOOK_IDS = ("prompt", "pending-merge-prompt", "web-search-first")
 
 def resolve_hook_event(intent: str, platform: str) -> str:
     """Convert a semantic intent to the concrete event name for a platform."""
+    if intent == "on_user_prompt":
+        intent = "on_prompt_submit"
     try:
         return HOOK_EVENT_MAP[intent][platform]
     except KeyError:

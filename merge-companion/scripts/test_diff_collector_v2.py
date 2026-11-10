@@ -9,8 +9,8 @@ import unittest
 import json
 from pathlib import Path
 
-from diff_collector import README_FIRST_TEMPLATE, collect_user_changes, register_changes_in_manifest
-from file_walker import walk_user_files
+from diff_collector import README_FIRST_TEMPLATE, collect_external_changes, register_changes_in_manifest
+from file_walker import walk_installed_copy_files
 from manifest_io import read_manifest
 from snapshot import capture_snapshot, file_hash
 
@@ -34,7 +34,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         snap = self.root / "snapshot.json"
         capture_snapshot(snap, [skill_file], "codex", skills_dir=self.skills_dir)
 
-        self.assertEqual(collect_user_changes(snap, [skill_file], skills_dir=self.skills_dir), [])
+        self.assertEqual(collect_external_changes(snap, [skill_file], skills_dir=self.skills_dir), [])
 
     def test_plain_snapshot_modified_file_yields_change_without_skill_root(self):
         file_path = self.root / "a.md"
@@ -43,7 +43,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         capture_snapshot(snap, [file_path], "codex")
 
         file_path.write_text("user edit", encoding="utf-8")
-        changes = collect_user_changes(snap, [file_path])
+        changes = collect_external_changes(snap, [file_path])
 
         self.assertEqual(len(changes), 1)
         self.assertEqual(changes[0]["path"], str(file_path))
@@ -57,7 +57,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         snap = self.root / "snapshot.json"
         capture_snapshot(snap, [skill_file], "codex", skills_dir=self.skills_dir)
         skill_file.write_text("user edit", encoding="utf-8")
-        changes = collect_user_changes(snap, [skill_file], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [skill_file], skills_dir=self.skills_dir)
 
         register_changes_in_manifest(
             changes,
@@ -78,11 +78,11 @@ class TestDiffCollectorV2(unittest.TestCase):
     def test_readme_first_uses_backup_folder_context(self):
         body = README_FIRST_TEMPLATE
 
-        self.assertIn("User:", body)
+        self.assertIn("For the human user:", body)
         self.assertIn("Tech:", body)
-        self.assertLess(body.index("User:"), body.index("Tech:"))
+        self.assertLess(body.index("For the human user:"), body.index("Tech:"))
         self.assertIn("This is the backup folder guide", body)
-        self.assertIn("local changes", body)
+        self.assertIn("external changes", body)
         self.assertIn("merge-companion", body)
         self.assertIn("Please review backed-up changes.", body)
         self.assertIn("Entry and activation", body)
@@ -98,7 +98,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         capture_snapshot(snap, [skill_file], "codex", skills_dir=self.skills_dir)
 
         skill_file.unlink()
-        changes = collect_user_changes(snap, [], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [], skills_dir=self.skills_dir)
 
         self.assertEqual(len(changes), 1)
         self.assertEqual(changes[0]["path"], str(skill_file))
@@ -115,7 +115,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         capture_snapshot(snap, [generated_file], "codex", skills_dir=self.skills_dir)
 
         generated_file.unlink()
-        changes = collect_user_changes(snap, [], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [], skills_dir=self.skills_dir)
 
         self.assertEqual(changes, [])
 
@@ -126,7 +126,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         snap = self.root / "snapshot.json"
         capture_snapshot(snap, [], "codex", skills_dir=self.skills_dir)
 
-        changes = collect_user_changes(snap, [generated_file], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [generated_file], skills_dir=self.skills_dir)
 
         self.assertEqual(changes, [])
 
@@ -138,7 +138,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         capture_snapshot(snap, [nested], "codex", skills_dir=self.skills_dir)
 
         nested.write_text("user edit", encoding="utf-8")
-        changes = collect_user_changes(snap, [nested], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [nested], skills_dir=self.skills_dir)
 
         self.assertEqual(len(changes), 1)
         self.assertEqual(changes[0]["change_kind"], "modified")
@@ -152,7 +152,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         snap = self.root / "snapshot.json"
         capture_snapshot(snap, [skill_file], "codex", skills_dir=self.skills_dir)
         skill_file.unlink()
-        changes = collect_user_changes(snap, [], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [], skills_dir=self.skills_dir)
 
         register_changes_in_manifest(
             changes,
@@ -179,7 +179,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         snap = self.root / "snapshot.json"
         capture_snapshot(snap, [skill_file], "codex", skills_dir=self.skills_dir)
         skill_file.write_text("user edit", encoding="utf-8")
-        changes = collect_user_changes(snap, [skill_file], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [skill_file], skills_dir=self.skills_dir)
 
         register_changes_in_manifest(
             changes,
@@ -208,7 +208,7 @@ class TestDiffCollectorV2(unittest.TestCase):
 
         skill_file.unlink()
         skill_file.mkdir()
-        changes = collect_user_changes(snap, [], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [], skills_dir=self.skills_dir)
 
         self.assertEqual(len(changes), 1)
         self.assertEqual(changes[0]["change_kind"], "type-changed")
@@ -224,7 +224,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         capture_snapshot(snap, [skill_file], "codex", skills_dir=self.skills_dir)
 
         skill_file.write_bytes(b"\xff\xfeinvalid")
-        changes = collect_user_changes(snap, [skill_file], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [skill_file], skills_dir=self.skills_dir)
 
         self.assertEqual(len(changes), 1)
         self.assertEqual(changes[0]["change_kind"], "encoding-invalid")
@@ -238,7 +238,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         snap = self.root / "snapshot.json"
         capture_snapshot(snap, [skill_file], "codex", skills_dir=self.skills_dir)
         skill_file.write_text("user edit", encoding="utf-8")
-        changes = collect_user_changes(snap, [skill_file], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [skill_file], skills_dir=self.skills_dir)
 
         register_changes_in_manifest(
             changes,
@@ -270,7 +270,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         capture_snapshot(snap, [skill_file], "codex", skills_dir=self.skills_dir)
 
         skill_file.rename(moved_file)
-        changes = collect_user_changes(snap, [moved_file], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [moved_file], skills_dir=self.skills_dir)
 
         self.assertEqual(len(changes), 1)
         self.assertEqual(changes[0]["change_kind"], "moved")
@@ -291,7 +291,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         capture_snapshot(snap, [skill_file], "codex", skills_dir=self.skills_dir)
 
         marker.write_text('{"asset_id":"task-router","source":"user"}\n', encoding="utf-8")
-        changes = collect_user_changes(snap, [skill_file], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [skill_file], skills_dir=self.skills_dir)
 
         self.assertEqual(len(changes), 1)
         self.assertEqual(changes[0]["change_kind"], "ownership-conflict")
@@ -346,7 +346,7 @@ class TestDiffCollectorV2(unittest.TestCase):
             encoding="utf-8",
         )
 
-        changes = collect_user_changes(snap, [skill_file], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [skill_file], skills_dir=self.skills_dir)
 
         self.assertEqual(changes, [])
 
@@ -397,7 +397,7 @@ class TestDiffCollectorV2(unittest.TestCase):
             encoding="utf-8",
         )
 
-        changes = collect_user_changes(snap, [skill_file], skills_dir=self.skills_dir)
+        changes = collect_external_changes(snap, [skill_file], skills_dir=self.skills_dir)
 
         self.assertEqual(changes, [])
 
@@ -415,7 +415,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         (own / "SKILL.md").write_text("the user's own skill", encoding="utf-8")
 
         # Only a marked root holds Ghost-ALICE files that the installer replaces.
-        self.assertEqual(walk_user_files(self.skills_dir), [managed / "SKILL.md"])
+        self.assertEqual(walk_installed_copy_files(self.skills_dir), [managed / "SKILL.md"])
 
     def test_walker_tracks_a_replaced_root_without_its_marker(self):
         replaced = self.skills_dir / "task-router"
@@ -426,18 +426,18 @@ class TestDiffCollectorV2(unittest.TestCase):
         (own / "SKILL.md").write_text("the user's own skill", encoding="utf-8")
 
         # A root this install replaces is checked even when its marker is gone.
-        self.assertEqual(walk_user_files(self.skills_dir, ["task-router"]), [replaced / "SKILL.md"])
+        self.assertEqual(walk_installed_copy_files(self.skills_dir, ["task-router"]), [replaced / "SKILL.md"])
 
     def test_app_synced_change_never_enters_pending_store(self):
         synced_file = self.skills_dir / "synced" / "bucket" / "pptx" / "SKILL.md"
         synced_file.parent.mkdir(parents=True)
         synced_file.write_text("version 1", encoding="utf-8")
         snap = self.root / "snapshot.json"
-        capture_snapshot(snap, walk_user_files(self.skills_dir), "claude", skills_dir=self.skills_dir)
+        capture_snapshot(snap, walk_installed_copy_files(self.skills_dir), "claude", skills_dir=self.skills_dir)
 
         synced_file.write_text("version 2 from the app", encoding="utf-8")
 
-        self.assertEqual(collect_user_changes(snap, walk_user_files(self.skills_dir), skills_dir=self.skills_dir), [])
+        self.assertEqual(collect_external_changes(snap, walk_installed_copy_files(self.skills_dir), skills_dir=self.skills_dir), [])
 
 
 if __name__ == "__main__":

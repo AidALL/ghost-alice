@@ -13,17 +13,17 @@ class OperatingRuleContractTest(unittest.TestCase):
         common = (ROOT / 'platforms/common-governance.md').read_text()
         intent = common.split('## Session Intent\n', 1)[1].split('\n## ', 1)[0]
         selection = common.split('## Work Selection\n', 1)[1].split('\n## ', 1)[0]
-        for term in ('does not cancel authorized work',
-                     "When the user's words leave more than one reasonable reading",
-                     'ask the user before that action'):
+        for term in ("does not cancel work that the human user's instructions authorize",
+                     "When the human user's input leaves more than one reasonable reading",
+                     'ask the human user before that action'):
             self.assertIn(term, intent)
         for term in ('apply the direct-answer rule below; applying it loads no skill',
                      'A direct answer reads no skills, accesses no ledger, registers no response route'):
             self.assertIn(term, selection)
         self.assertIn('Do not substitute another session', common)
-        self.assertIn('A missing or pending identity of the session, repository, installation or input blocks the writes that depend on it', common)
+        self.assertIn('A missing or pending identity of the session, repository, installation or of the input that Core code records as the current input blocks the writes that depend on it', common)
         self.assertIn('stored result or available tool grants no authority', common)
-        self.assertIn('Do not derive installation or write authority from default paths; explicit paths and the current session metadata identify the installation and session', common)
+        self.assertIn("Do not derive installation or write authority from default paths. The current session metadata and paths stated in the human user's input or the common contract identify the installation and session. This identification does not grant write authority", common)
         self.assertIn('The host executes tools and enforces permissions', common)
         self.assertIn('`session-intent-analyzer`: reading or writing the `interpreted-as` record', common)
         router = (ROOT / 'task-router/SKILL.md').read_text()
@@ -51,7 +51,7 @@ class OperatingRuleContractTest(unittest.TestCase):
         reference = (ROOT / 'coding-convention/verification-before-completion/references/verify-or-reuse.md').read_text()
         for phrase in ('## Instruction Body Reuse', 'same session', 'new user input alone',
                        'observed instruction change', 'retained body is lost',
-                       'execute the applicable workflow for the current input'):
+                       'execute the applicable workflow for the input the response model is answering'):
             self.assertIn(phrase, reference)
 
     def test_focus_further_checks_and_sufficient_correction_are_distinct_decisions(self):

@@ -235,7 +235,7 @@ class UninstallHelperTests(AddonCase):
         self.assertEqual(args, ["--resume-pending", "--addons-dir", str(self.home / ".ghost-alice" / "addons" / "codex"),
                                 "--skills-dir", str(ctx.skills_dir), "--skills-dir", str(self.home / ".claude" / "commands"),
                                 "--skills-dir", str(self.home / ".ghost-alice" / "resources" / "codex"),
-                                "--platform", "codex", "--confirm"])
+                                "--platform", "codex", "--apply"])
         self.assertEqual((self.home / ".ghost-alice" / "addon-resume.log").read_text(encoding="utf-8"), "resumed noop\nwarning\n")
 
     def test_uninstall_addon_and_dependents(self):
@@ -248,7 +248,7 @@ class UninstallHelperTests(AddonCase):
             self.assertEqual(addons.dependents_rc(ctx, "task-router"), 2)
         removal, dependents = self.runner.tool_calls("addon_uninstall.py")
         self.assertEqual(removal[:2], ["--addon-id", "noop"])
-        self.assertEqual(removal[-3:], ["--platform", "claude", "--confirm"])
+        self.assertEqual(removal[-3:], ["--platform", "claude", "--apply"])
         self.assertEqual(dependents, ["--dependents", "task-router", "--addons-dir",
                                       str(self.home / ".ghost-alice" / "addons" / "claude")])
 
@@ -266,7 +266,7 @@ class UninstallHelperTests(AddonCase):
         self.assertFalse(ok)
         ids = [a[1] for a in self.runner.tool_calls("addon_uninstall.py")]
         self.assertEqual(ids, ["noop", "rich"])
-        self.assertIn("[WARN] Full uninstall preserved addon rich; manual review is required before sidecar cleanup", out)
+        self.assertIn("[WARN] Full uninstall preserved addon rich; the human user must review its preserved files before sidecar cleanup", out)
 
     def test_installed_ids_and_promotion(self):
         # uninstall.sh:50-79

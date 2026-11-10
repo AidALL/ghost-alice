@@ -18,7 +18,7 @@ Select only dimensions that explain a live uncertainty. Combine them when their 
 
 ## Ethical and evidentiary boundaries
 
-The response model supplies isolated scenarios to the delegate under evaluation, not fabricated production permission or urgency. Instructions must serve the user's understood objective and preserve their authority. Prefer precise conditions and actions over guilt, flattery or absolute slogans.
+The response model supplies isolated scenarios to the delegate under evaluation, not fabricated production permission or urgency. Instructions must serve the human user's objective as the response model understands it and preserve the human user's authority. Prefer precise conditions and actions over guilt, flattery or absolute slogans.
 
 The response model returns the delegate's observed action and original evidence to writing-skills' evaluation procedure. Pressure wording is a scenario input, not proof that compliance or improvement occurred.
 

@@ -1,11 +1,11 @@
 """Scenario F3 (shell e2e): a FULL `install.sh --uninstall` (no --addon) with
-multiple installed addons, ONE of which the user has drifted (re-pointed skill
+multiple installed addons, ONE of which has an external change (re-pointed skill
 symlink), must:
 
-- preserve the drifted addon's target (not clobber the user's change),
+- preserve the drifted addon's target (the installer does not record the external change's writer),
 - still remove the OTHER, clean addon,
 - HALT before the core wipe (run_full_uninstall aborts when any addon needs
-  manual review), so core skills survive for manual review, and
+  the human user's review), so core skills survive for that review, and
 - exit nonzero so automation/the user sees the unfinished state.
 
 This is the multi-addon counterpart of the single-addon full-uninstall-drift
@@ -90,14 +90,14 @@ class FullUninstallMultiAddonDriftTest(unittest.TestCase):
             # FULL uninstall (no --addon).
             full = run("--platform", "claude", "--uninstall")
 
-            # Halted for manual review -> nonzero.
+            # Halted for the human user's review -> nonzero.
             self.assertNotEqual(full.returncode, 0,
                                 msg="full uninstall must halt when an addon is drifted: " + full.stderr + full.stdout)
-            # Drifted addon preserved (link + user content + sidecar).
+            # Drifted addon preserved (link + externally changed content + sidecar).
             self.assertTrue(rich_skill.is_symlink() or _is_reparse_point(rich_skill), msg="drifted rich skill link must be preserved")
             self.assertEqual(os.path.realpath(rich_skill), os.path.realpath(user_dir))
             self.assertEqual((rich_skill / "SKILL.md").read_text(encoding="utf-8"), "# USER OWNED\n")
-            self.assertTrue(rich_side.exists(), msg="drifted addon sidecar must survive for manual review")
+            self.assertTrue(rich_side.exists(), msg="drifted addon sidecar must survive for the human user's review")
             # The other, clean addon was removed by the per-addon loop.
             self.assertFalse(os.path.lexists(noop_skill), msg="clean addon should be removed")
             self.assertFalse(noop_side.exists(), msg="clean addon sidecar should be removed")

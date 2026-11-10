@@ -62,7 +62,7 @@ class IntakeOriginQueueTests(unittest.TestCase):
         return state
 
     def assert_context_refuses_writes(self, state):
-        with self.assertRaisesRegex(ValueError, 'SDK context input supplies no human mutation authority'):
+        with self.assertRaisesRegex(ValueError, 'the context input of the current SDK-started turn does not provide the recorded input binding required for this write'):
             ledger.record_turn(**self.coords, expected_input_event_id=state['latest_input_event_id'] or None,
                                intent_delta={'current_goal': 'No authority from a non-human turn'})
 
@@ -102,7 +102,7 @@ class IntakeOriginQueueTests(unittest.TestCase):
         self.assertEqual(superseded[0]['superseded_by_transport_observation_id'], later)
         self.assertEqual((superseded[0]['actor'], superseded[0]['cause']), ('unknown', 'row-not-found'))
         self.assertNotIn('native_row', superseded[0])
-        self.assertEqual(len(self.events('user-input-observed')), 1)
+        self.assertEqual(len(self.events('input-observed')), 1)
 
     def test_unknown_row_without_a_later_human_waits_and_is_recorded_once(self):
         before = self.human('Earlier typed request.')
@@ -250,13 +250,13 @@ class IntakeOriginQueueTests(unittest.TestCase):
     def test_queued_app_event_keeps_the_human_route(self):
         event = self.human('Push the branch and open the pull request.')['latest_input_event_id']
         ledger.record_turn(**self.coords, expected_input_event_id=event, intent_delta={'acceptance_criteria': [
-            dict(id='AC1', summary='The pull request is open', source='user-said', admitted=True,
+            dict(id='AC1', summary='The pull request is open', source='user-said', selectable=True,
                  work_unit_id='publish', contract_revision=1)]})
         candidate = {
             'schema_version': 'response-route.v1',
             'routing_surface': {'response_mode': 'normal', 'boundary_contract': 'required',
                                 'reason': 'authorized publication'},
-            'work_units': [dict(work_unit_id='publish', contract_revision=1, kind='execution', admitted=True,
+            'work_units': [dict(work_unit_id='publish', contract_revision=1, kind='execution', selectable=True,
                                 owner={'platform': 'claude', 'session_id': SESSION})],
             'selected_work_unit_ids': ['publish'],
             'selected_criteria': [dict(work_unit_id='publish', contract_revision=1, criterion_id='AC1')],
@@ -318,13 +318,13 @@ class IntakeOriginQueueTests(unittest.TestCase):
         opened = []
         original = Path.open
         def counting_open(path, *args, **kwargs):
-            if Path(path) == self.log:
+            if Path(path).resolve() == self.log.resolve():
                 opened.append(args[0] if args else kwargs.get('mode', 'r'))
             return original(path, *args, **kwargs)
         with mock.patch.object(Path, 'open', counting_open):
             state = self.reconcile()
         self.assertEqual(state['pending_native_inputs'], [])
-        self.assertEqual(len(self.events('user-input-observed')), 30)
+        self.assertEqual(len(self.events('input-observed')), 30)
         self.assertEqual(len(opened), 1)
 
 

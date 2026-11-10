@@ -156,7 +156,7 @@ class HistoricalResponseReviewTests(unittest.TestCase):
                 try:
                     result = self.assess()
                     self.assertTrue(result['body_issue'].startswith(status + ':'), result['body_issue'])
-                    self.assertIn('Response acceptance is blocked for the affected review', result['body_issue'])
+                    self.assertIn("Core code's Stop script does not pass the response for the affected review", result['body_issue'])
                     if status == 'source-changed':
                         self.assertIn('compares only the affected claims with the changed source under verification-before-completion', result['body_issue'])
                     else:
@@ -183,7 +183,7 @@ class UnroutedNativeWorkTests(unittest.TestCase):
             GHOST_ALICE_PLATFORM='claude', GHOST_ALICE_SESSION_ID='current')
         native = importlib.import_module('native_completion')
         with patch.object(importlib.import_module('ledger_access').load_ledger(), 'read_response_route',
-                side_effect=ValueError('selected execution work needs an admitted owned criterion')):
+                side_effect=ValueError('selected execution work needs a selectable owned criterion')):
             rejected_route = native.assess_native_completion(source)
         self.assertEqual(rejected_route['input_event_id'], fixture.event)
         self.assertIsNone(rejected_route['response_route'])
@@ -205,15 +205,15 @@ class UnroutedNativeWorkTests(unittest.TestCase):
         candidate = fixture.candidate()
         candidate['work_units'][0]['owner']['platform'] = 'claude'
         candidate['selected_criteria'] = []
-        with self.assertRaisesRegex(fixture.api.RouteSchemaError, 'admitted.*criterion'):
+        with self.assertRaisesRegex(fixture.api.RouteSchemaError, 'selectable.*criterion'):
             fixture.record(candidate)
-        # The same route becomes usable once the assistant supplies the actual condition.
+        # The same route becomes usable once the response model supplies the criterion that Core code can select.
         fixtures.ledger.record_turn(**fixture.coords, expected_input_event_id=fixture.event,
             intent_delta={'acceptance_criteria': [fixture.criterion(summary='Create the memo from the supplied notes.')]})
         candidate['selected_criteria'] = [dict(work_unit_id='first', contract_revision=1, criterion_id='AC1')]
         fixture.record(candidate)
         assert_stop_observation(self, stop())
-        # A later tool-free input must not inherit the preceding Write call.
+        # A later tool-free prompt row that the test writes under the user role must not inherit the preceding Write call.
         entries.append(dict(type='user', sessionId='current', message=dict(role='user', content='Thanks.')))
         transcript.write_text(''.join(json.dumps(row) + '\n' for row in entries))
         assert_stop_observation(self, stop())
@@ -246,7 +246,7 @@ class NativeActivityTests(unittest.TestCase):
     def assess(self, payload=None):
         return importlib.import_module('native_completion').assess_native_completion(
             self.source, text=self.payload['last_assistant_message'],
-            native_input=self.payload if payload is None else payload)
+            hook_payload=self.payload if payload is None else payload)
 
     def test_conversation_explanation_passes_without_a_retained_claim_archive(self):
         body = '''네. 검토한 최종본은 모두 문서 본문에 들어가 있습니다.
@@ -394,7 +394,7 @@ class NativeCompletionTests(unittest.TestCase):
         return importlib.import_module('native_completion').assess_native_completion
 
     def test_rejected_progress_report_does_not_infer_a_new_completion(self):
-        # The actual follow-up rejected after the previous repair had applied.
+        # Core code's Stop script did not pass this follow-up report as a completion submission after the previous repair.
         # Its words do not constitute a new structured completion submission.
         body = '''원하신 수준에는 아직 못 미칩니다. 현재 상태는 다음과 같습니다.
 
@@ -437,7 +437,7 @@ class NativeCompletionTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.service()(self.source, claim_report={'valid': True})
 
-    def test_missing_authority_does_not_disable_body_validation_or_create_state(self):
+    def test_missing_ledger_coordinates_do_not_disable_body_validation_or_create_state(self):
         result = self.service()({}, text='[completion-check]')
         self.assertIsNotNone(result['body_issue'])
         self.assertEqual(result['context_status'], 'unavailable')
@@ -450,7 +450,7 @@ class NativeCompletionTests(unittest.TestCase):
 
     def test_missing_route_keeps_canonical_input_binding_without_inventing_selection(self):
         coords = dict(self.fixture.coords, session_id='unrouted')
-        fixtures.ledger.record_turn(**coords, raw_user_input='Explain existing results', source='hook')
+        fixtures.ledger.record_turn(**coords, raw_input='Explain existing results', recording_path='hook')
         event = fixtures.ledger.read_session_state(**coords)['latest_input_event_id']
         assess = self.service()
         source = dict(self.source, GHOST_ALICE_SESSION_ID='unrouted')
@@ -615,7 +615,7 @@ class NativeProofBindingTests(unittest.TestCase):
 
     def assert_source_recovery(self, result, status):
         self.assertTrue(result['body_issue'].startswith(status + ':'), result['body_issue'])
-        self.assertIn('Completion acceptance is blocked for the affected review', result['body_issue'])
+        self.assertIn("Core code's Stop script does not pass the completion claim for the affected review", result['body_issue'])
         if status == 'source-changed':
             self.assertIn('compares only the affected claims with the changed source under verification-before-completion', result['body_issue'])
         else:

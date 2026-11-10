@@ -156,7 +156,7 @@ def preview(plan, *, was_running):
             recovery_unconfirmed='preserve-current-artifacts-and-block-dependent-work'))
 
 
-def execute(plan, io, *, confirm=True):
+def execute(plan, io, *, apply_changes=True):
     for guard in plan.guards:
         assert_current(io, guard)
     try:
@@ -165,7 +165,7 @@ def execute(plan, io, *, confirm=True):
         raise GatewayServiceError('Service state is unavailable; no installed artifacts changed') from exc
     if was_running and plan.prior_state is None:
         raise GatewayBlocked('An unowned running gateway service must be preserved')
-    if not confirm:
+    if not apply_changes:
         return preview(plan, was_running=was_running)
     journal = _Journal(io, plan)
     stopped, attempted_start, recorded, phase = False, False, False, 'prepare'
@@ -204,7 +204,7 @@ def execute(plan, io, *, confirm=True):
             journal.apply(mutation)
     except Exception as failure:
         if phase == 'stop' or (phase == 'verify-absence' and not stopped):
-            raise GatewayServiceError('Gateway service stop/absence is unconfirmed; no active files changed; retain Core for review',
+            raise GatewayServiceError('Gateway service stop/absence is unconfirmed; no active files changed; retain Core for the human user to review',
                                       phase=phase) from failure
         try:
             if attempted_start:

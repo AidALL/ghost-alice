@@ -1,6 +1,6 @@
-"""Context-aware user messages for merge-companion pending entries.
+"""Core code's guidance for the human user about pending merge-companion entries.
 
-Pending-merge user messages are English-only.
+Pending-merge guidance for the human user is English-only.
 """
 from __future__ import annotations
 
@@ -14,10 +14,10 @@ PendingMessageContext = Literal[
 
 _USER_COPY: Dict[PendingMessageContext, str] = {
     "session_start": (
-        "This conversation is a new session. Backed-up personal changes from a previous " "agent tool update may still be unresolved. In this conversation, please ask " "'Please review backed-up changes.' to review what to keep or discard."
+        "This conversation is a new session. Backups of external changes found during a previous " "agent tool update may still await your merge, discard or defer choice. In this conversation, please ask " "'Please review backed-up changes.' to review those backups."
     ),
     "readme": (
-        "This is the backup folder guide. During the agent tool update, your local changes " "were copied here instead of being overwritten. If an AI chat is already open, " "please ask 'Please review backed-up changes.' Otherwise, open a new chat and ask the same thing."
+        "This is the backup folder guide. During the agent tool update, external changes found after installation " "were copied here for you to choose whether to merge, discard or defer. If an AI chat is already open, " "please ask 'Please review backed-up changes.' Otherwise, open a new chat and ask the same thing."
     ),
 }
 
@@ -32,4 +32,4 @@ def render_pending_merge_message(context: PendingMessageContext) -> str:
     if context not in _USER_COPY:
         valid = ", ".join(sorted(_USER_COPY))
         raise ValueError(f"unknown pending merge message context: {context!r}; expected one of {valid}")
-    return f"User: {_USER_COPY[context]}\nTech: {_TECH_COPY}"
+    return f"For the human user: {_USER_COPY[context]}\nTech: {_TECH_COPY}"

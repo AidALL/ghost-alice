@@ -531,7 +531,7 @@ def _native_protocol_output(stdout: str, *, hook_id: str) -> str:
     if protocol.get("decision") == "block":
         asked.append(f"block ({_control_reason(protocol.get('reason'), protocol.get('systemMessage'))})")
     if protocol.get("continue") is False:
-        asked.append(f"stop ({_control_reason(protocol.get('stopReason'), protocol.get('systemMessage'))})")
+        asked.append(f"stop the turn ({_control_reason(protocol.get('stopReason'), protocol.get('systemMessage'))})")
     projected = {key: value for key, value in protocol.items()
                  if key in HOST_ENVELOPE_FIELDS and key not in HOST_CONTROL_FIELDS}
     if protocol.get("continue") is False:
@@ -539,12 +539,13 @@ def _native_protocol_output(stdout: str, *, hook_id: str) -> str:
     specific = projected.get("hookSpecificOutput")
     if isinstance(specific, dict) and any(key in specific for key in PERMISSION_FIELDS):
         if specific.get("permissionDecision") in {"deny", "ask"}:
-            asked.append(f"{specific['permissionDecision']} the tool "
+            action = "ask at the host's permission prompt whether to run the tool call" if specific['permissionDecision'] == 'ask' else 'deny the tool call'
+            asked.append(f"{action} "
                          f"({_control_reason(specific.get('permissionDecisionReason'), None)})")
         projected["hookSpecificOutput"] = {key: value for key, value in specific.items()
                                            if key not in PERMISSION_FIELDS}
     if asked:
-        notice = f"{hook_id} asked the host to {'; '.join(asked)}. Ghost-ALICE Core does not block the host."
+        notice = f"{hook_id} asked the host to {'; '.join(asked)}; the hook runner removed that request before the host saw it."
         warning = projected.get("systemMessage")
         projected["systemMessage"] = f"{warning}\n{notice}" if isinstance(warning, str) and warning.strip() else notice
     if projected == protocol:
@@ -801,9 +802,10 @@ def _native_intake_notice(env, hook_payload):
     if not notice:
         return None
     reason = notice['cause'].split(':', 1)[0]
-    return (f"Ghost-ALICE intake: records that need a confirmed input (intent, route and completion) are paused "
+    return (f"Ghost-ALICE intake: records that need an input that Core code matched to the host's transcript row "
+            f"(the response model's `interpreted-as` record, the response route and the completion records) are paused "
             f"in this session because {NATIVE_WAIT_REASONS.get(reason, 'an input origin is unconfirmed')} "
-            f"({reason}). They resume at your next typed input. Later waits with this cause are only recorded; "
+            f"({reason}). They resume at your next input in this session. Later waits with this cause are only recorded; "
             "`bash install.sh --doctor` lists them.")
 
 

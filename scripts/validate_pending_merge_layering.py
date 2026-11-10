@@ -76,7 +76,7 @@ CHECKS: list[LayerCheck] = [
         layer="pending-merge-prose-rule",
         description="common governance applies merge-companion before an installed-skill change and for a requested review",
         file=REPO / "platforms" / "common-governance.md",
-        pattern=r"`merge-companion`: before the selected work modifies, replaces or installs an installed skill, and when the user asks to review backed-up changes",
+        pattern=r"`merge-companion`: before the selected work modifies, replaces or installs an installed skill, and when the human user asks to review backed-up changes",
     ),
     LayerCheck(
         layer="pending-merge-skill-activation",
@@ -98,9 +98,9 @@ CHECKS: list[LayerCheck] = [
     ),
     LayerCheck(
         layer="pending-merge-install-tail",
-        description="the installer cli tail contains localized User/Tech backup-review guidance",
+        description="the installer CLI tail addresses backup-review guidance to the human user before technical details",
         file=REPO / "_shared" / "installer" / "cli.py",
-        pattern=r"User:.*Please\s+review\s+backed-up\s+changes",
+        pattern=r"For the human user:.*Please\s+review\s+backed-up\s+changes",
         multiline=True,
     ),
     LayerCheck(
@@ -164,7 +164,7 @@ CHECKS: list[LayerCheck] = [
         pattern=r"docs/policies/evaluator-artifact-contract\.md",
         owner=REPO / "docs/policies/evaluator-artifact-contract.md",
         owner_section="Promotion Rules",
-        owner_pattern=r"read-only evaluator pass must not mutate installed assets[\s\S]*accepted verifier-result[\s\S]*accepted: false[\s\S]*stop installed asset changes",
+        owner_pattern=r"During a read-only evaluation pass[\s\S]*changes installed assets[\s\S]*does not promote[\s\S]*verifier_accepted: true[\s\S]*stops installed asset changes[\s\S]*verifier_accepted: false",
         multiline=True,
     ),
     LayerCheck(
@@ -174,7 +174,7 @@ CHECKS: list[LayerCheck] = [
         pattern=r"\]\(references/evaluator-artifacts\.md\)",
         owner=REPO / "coding-convention/verification-before-completion/references/evaluator-artifacts.md",
         owner_section="Evaluator Artifact Contract",
-        owner_pattern=r"docs/policies/evaluator-artifact-contract\.md[\s\S]*accepted `verifier-result\.json`[\s\S]*Missing required evidence",
+        owner_pattern=r"docs/policies/evaluator-artifact-contract\.md[\s\S]*verifier's judgment in `verifier-result\.json`[\s\S]*`verifier_accepted`[\s\S]*Missing required evidence",
         multiline=True,
     ),
 ]

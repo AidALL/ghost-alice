@@ -9,6 +9,8 @@ Run: python3 -m pytest _shared/test_addon_uninstall.py -q
 from __future__ import annotations
 
 import base64
+import contextlib
+import io
 import json
 import os
 import shlex
@@ -37,7 +39,7 @@ class UninstallTestBase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
-        # platform-scoped layout (review M5): sidecars live under addons/<platform>/
+        # platform-scoped layout: sidecars live under addons/<platform>/
         self.addons = self.root / ".ghost-alice" / "addons" / "claude"
         self.skills = self.root / ".claude" / "skills"
         self.src = self.root / "src"
@@ -103,6 +105,58 @@ class UninstallTestBase(unittest.TestCase):
 
 
 class CoreUninstallTest(UninstallTestBase):
+    def test_public_apply_aliases_remove_once(self):
+        for index, selection in enumerate(({"apply_changes": True}, {"confirm": True},
+                                           {"apply_changes": True, "confirm": True})):
+            addon_id, name = f"alias-{index}", f"alias-skill-{index}"
+            self._install(addon_id, [name])
+            with self.subTest(selection=selection):
+                self.assertEqual(self._uninstall(addon_id, **selection)["status"], "removed")
+                self.assertFalse(os.path.lexists(self.skills / name))
+                self.assertFalse((self.addons / f"{addon_id}.json").exists())
+
+    def test_cli_default_and_positive_aliases_apply_removal(self):
+        for index, flags in enumerate(([], ["--apply"], ["--confirm"], ["--apply", "--confirm"])):
+            addon_id, name = f"cli-{index}", f"cli-skill-{index}"
+            self._install(addon_id, [name])
+            with self.subTest(flags=flags), contextlib.redirect_stdout(io.StringIO()) as output:
+                status = un.main(["--addons-dir", str(self.addons), "--skills-dir", str(self.skills),
+                                  "--addon-id", addon_id, *flags])
+                self.assertEqual(status, 0)
+                self.assertEqual(json.loads(output.getvalue())["status"], "removed")
+                self.assertFalse(os.path.lexists(self.skills / name))
+
+    def test_apply_aliases_preview_without_changing_recorded_target(self):
+        self._install("alpha", ["one"])
+        original = (self.addons / "alpha.json").read_bytes()
+        for selection in ({"apply_changes": False}, {"confirm": False},
+                          {"apply_changes": False, "confirm": False}):
+            with self.subTest(selection=selection):
+                self.assertEqual(self._uninstall("alpha", **selection)["status"], "dry-run")
+                self.assertTrue(os.path.lexists(self.skills / "one"))
+                self.assertEqual((self.addons / "alpha.json").read_bytes(), original)
+                self.assertFalse(self._marker("alpha").exists())
+
+    def test_conflicting_apply_aliases_preserve_even_a_leftover_marker(self):
+        self.addons.mkdir(parents=True)
+        marker = self._marker("alpha")
+        marker.write_text("leftover", encoding="utf-8")
+        for operation in (lambda **kw: self._uninstall("alpha", **kw),
+                          lambda **kw: un.resume_pending(addons_dir=self.addons,
+                              allowed_roots=[self.skills], **kw)):
+            with self.assertRaisesRegex(ValueError, "apply_changes.*confirm.*conflict"):
+                operation(apply_changes=False, confirm=True)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "leftover")
+
+    def test_cli_dry_run_wins_over_both_positive_aliases(self):
+        self._install("alpha", ["one"])
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            status = un.main(["--addons-dir", str(self.addons), "--skills-dir", str(self.skills),
+                              "--addon-id", "alpha", "--apply", "--confirm", "--dry-run"])
+        self.assertEqual(status, 0)
+        self.assertEqual(json.loads(output.getvalue())["status"], "dry-run")
+        self.assertTrue(os.path.lexists(self.skills / "one"))
+
     def test_removes_recorded_targets_and_sidecar_last(self):
         self._install("alpha", ["one", "two"])
         result = self._uninstall("alpha")
@@ -110,7 +164,7 @@ class CoreUninstallTest(UninstallTestBase):
         self.assertFalse(os.path.lexists(self.skills / "one"))
         self.assertFalse(os.path.lexists(self.skills / "two"))
         self.assertFalse((self.addons / "alpha.json").exists())  # sidecar deleted last
-        self.assertFalse(self._marker("alpha").exists())  # intent marker cleaned
+        self.assertFalse(self._marker("alpha").exists())  # removal marker cleaned
 
     def test_other_addon_untouched(self):
         self._install("alpha", ["a1"])
@@ -291,7 +345,7 @@ class CoreUninstallTest(UninstallTestBase):
 
     def test_dry_run_removes_nothing(self):
         self._install("alpha", ["one"])
-        result = self._uninstall("alpha", confirm=False)
+        result = self._uninstall("alpha", apply_changes=False)
         self.assertEqual(result["status"], "dry-run")
         self.assertTrue(os.path.lexists(self.skills / "one"))
         self.assertTrue((self.addons / "alpha.json").exists())
@@ -381,7 +435,7 @@ class ExecutableDetachmentOrderTest(UninstallTestBase):
         self.assertEqual([r["status"] for r in resumed], ["removed"])
         self._assert_detached()
 
-    def test_missing_hook_object_finishes_confirmed_removal_and_clears_marker(self):
+    def test_missing_hook_object_finishes_removal_and_clears_marker(self):
         self.settings.write_text('{"theme":"dark","permissions":{"allow":["Read"]}}', encoding='utf-8')
         original = self.settings.read_bytes()
         remove = un._symlink_safe_remove
@@ -415,7 +469,7 @@ class ExecutableDetachmentOrderTest(UninstallTestBase):
 
     def test_dry_run_keeps_registrations_files_and_sidecar(self):
         original = self.settings.read_bytes()
-        result = self._uninstall("demo-addon", confirm=False)
+        result = self._uninstall("demo-addon", apply_changes=False)
         self.assertEqual(result["status"], "dry-run")
         self.assertEqual(self.settings.read_bytes(), original)
         self.assertTrue(os.path.lexists(self.skills / "pilot-skill"))
@@ -442,6 +496,45 @@ class ResumeTest(UninstallTestBase):
         results = un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills], platform="claude")
         self.assertEqual(results[0]["status"], "resumed-noop")
         self.assertFalse(self._marker("ghost").exists())
+
+    def test_preview_preserves_marker_when_sidecar_is_gone(self):
+        self.addons.mkdir(parents=True, exist_ok=True)
+        marker = self._marker("ghost")
+        original = b'{"addon_id":"ghost","stage":"removing"}\n'
+        for selection in ({"apply_changes": False}, {"confirm": False},
+                          {"apply_changes": False, "confirm": False}):
+            with self.subTest(selection=selection):
+                marker.write_bytes(original)
+                result = self._uninstall("ghost", **selection)
+                self.assertEqual(marker.read_bytes() if marker.exists() else None, original)
+                self.assertEqual(result["status"], "dry-run")
+                self.assertTrue(result["has_pending_marker"])
+                resumed = un.resume_pending(addons_dir=self.addons,
+                    allowed_roots=[self.skills], platform="claude", **selection)
+                self.assertEqual(resumed, [result])
+                self.assertEqual(marker.read_bytes(), original)
+                self.assertEqual(self._uninstall("ghost")["status"], "resumed-noop")
+                self.assertFalse(marker.exists())
+
+    def test_cli_resume_preview_keeps_marker_available_for_apply(self):
+        self.addons.mkdir(parents=True, exist_ok=True)
+        marker = self._marker("ghost")
+        original = b'{"addon_id":"ghost","stage":"removing"}\n'
+        for flags in (["--dry-run"], ["--apply", "--confirm", "--dry-run"]):
+            with self.subTest(flags=flags), contextlib.redirect_stdout(io.StringIO()) as output:
+                marker.write_bytes(original)
+                status = un.main(["--resume-pending", "--addons-dir", str(self.addons),
+                                  "--skills-dir", str(self.skills), *flags])
+                self.assertEqual(status, 0)
+                self.assertEqual(marker.read_bytes() if marker.exists() else None, original)
+                self.assertEqual(json.loads(output.getvalue())["resumed"], [{
+                    "addon_id": "ghost", "status": "dry-run", "items": [],
+                    "has_pending_marker": True,
+                }])
+                applied = un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills])
+                self.assertEqual(applied[0]["status"], "resumed-noop")
+                self.assertFalse(marker.exists())
+                self.assertEqual(un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills]), [])
 
     def test_resume_ignores_non_addon_id_marker(self):
         (self.addons).mkdir(parents=True, exist_ok=True)
@@ -523,7 +616,7 @@ class CliTest(UninstallTestBase):
 
 
 class UninstallScenarioGapTest(UninstallTestBase):
-    """Approved uninstall gap scenarios (A4, A9, B2, C4, C5, partial-managed-hook-strip, H1).
+    """Uninstall gap scenarios (A4, A9, B2, C4, C5, partial-managed-hook-strip, H1).
 
     Hook operations resolve via CLAUDE_CONFIG_DIR; setUp pins it at a temp dir so
     these tests can NEVER touch the real ~/.claude/settings.json.
@@ -542,7 +635,7 @@ class UninstallScenarioGapTest(UninstallTestBase):
         super().tearDown()
 
     def _repoint(self, name):
-        """Re-point an installed skill symlink at a user dir -> recorded hash drifts."""
+        """Re-point an installed skill symlink at another directory -> an external change makes its recorded hash differ."""
         dest = self.skills / name
         if self._install_modes.get(dest) == "copy":
             self.skipTest("directory link capability is required")
@@ -556,7 +649,7 @@ class UninstallScenarioGapTest(UninstallTestBase):
             self.skipTest(f"directory link capability is required: {exc}")
         return dest
 
-    # A4: a user re-pointed (drifted) symlink is preserved as manual-review, not removed.
+    # A4: a symlink with an external change is preserved as manual-review, not removed; the installer does not record the change's writer.
     def test_a4_repointed_symlink_is_preserved(self):
         self._install("alpha", ["one"])
         dest = self._repoint("one")
@@ -602,7 +695,7 @@ class UninstallScenarioGapTest(UninstallTestBase):
         self.assertEqual(self._uninstall("alpha")["status"], "partial")
         self.assertTrue(self._marker("alpha").exists())
         results = un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills],
-                                    platform="claude", confirm=True)
+                                    platform="claude", apply_changes=True)
         self.assertEqual([r["status"] for r in results], ["partial"])
         self.assertTrue(os.path.lexists(dest))  # still preserved
         self.assertTrue((self.addons / "alpha.json").exists())
@@ -617,7 +710,7 @@ class UninstallScenarioGapTest(UninstallTestBase):
         self._marker("alpha").write_text(
             '{"addon_id":"alpha","stage":"removing","targets":["one"]}', encoding="utf-8")
         results = un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills],
-                                    platform="claude", confirm=True)
+                                    platform="claude", apply_changes=True)
         self.assertEqual([r["status"] for r in results], ["removed"])  # completes
         self.assertFalse((self.addons / "alpha.json").exists())  # sidecar deleted
         self.assertFalse(self._marker("alpha").exists())  # marker cleared

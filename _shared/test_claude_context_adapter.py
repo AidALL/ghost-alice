@@ -32,7 +32,7 @@ def text(value):
 class ClaudeContextAdapterTests(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(adapter, 'The required pure Claude native-to-wire adapter is absent')
-        self.human = message('user', text('implement now\n'))
+        self.user_role_message = message('user', text('implement now\n'))
         self.thinking = dict(type='thinking', thinking='signed reasoning', signature='synthetic-signature')
         self.call = dict(type='tool_use', id='consumed', name='Read',
                          input={'file_path': '/fixture/source'}, caller={'type': 'direct'})
@@ -41,12 +41,12 @@ class ClaudeContextAdapterTests(unittest.TestCase):
         # Substitution fixtures are unsigned: retaining signature bytes while
         # editing their prefix did not establish Claude's binding contract.
         self.unsigned = text('unsigned pre-call context')
-        self.originals = {1: self.human, 2: message('assistant', self.unsigned, self.call),
+        self.originals = {1: self.user_role_message, 2: message('assistant', self.unsigned, self.call),
                           3: message('user', self.result), 4: self.answer}
         self.necessary = text('necessary original source\n' * 2000)
         self.request = dict(model='fixture', thinking={'type': 'disabled'}, metadata={'user_id': 'opaque-native-owner'},
                             system=[text('required system source')], messages=[
-                                dict(role='user', content=copy.deepcopy(self.human['content'])),
+                                dict(role='user', content=copy.deepcopy(self.user_role_message['content'])),
                                 dict(role='assistant', content=copy.deepcopy(self.originals[2]['content'])),
                                 dict(role='user', content=[copy.deepcopy(self.result), self.necessary]),
                                 dict(role='assistant', content=copy.deepcopy(self.answer['content']))])
@@ -63,17 +63,17 @@ class ClaudeContextAdapterTests(unittest.TestCase):
     def binding(self, value='implement now\n'):
         return dict(input_digest='sha256:' + hashlib.sha256(value.encode()).hexdigest(), input_char_count=len(value))
 
-    def test_human_receipt_matches_unique_whole_block_without_dropping_host_sibling(self):
-        human = message('user', text('host guidance retained'), text('implement now\n'))
-        self.assertEqual(adapter.human_input([human], self.binding()), human)
+    def test_input_binding_matches_unique_whole_block_without_dropping_host_sibling(self):
+        delivered_message = message('user', text('host guidance retained'), text('implement now\n'))
+        self.assertEqual(adapter.bound_input_message([delivered_message], self.binding()), delivered_message)
         with self.assertRaises(adapter.NativeContextRejected):
-            adapter.human_input([message('user', text('implement now\n'), text('implement now\n'))], self.binding())
+            adapter.bound_input_message([message('user', text('implement now\n'), text('implement now\n'))], self.binding())
 
-    def test_human_receipt_matches_exact_newline_joined_host_envelope(self):
-        human = message('user', text('host guidance retained'), text('latest correction'))
-        self.assertEqual(adapter.human_input([human], self.binding('host guidance retained\nlatest correction')), human)
+    def test_input_binding_matches_exact_newline_joined_host_envelope(self):
+        delivered_message = message('user', text('host guidance retained'), text('latest correction'))
+        self.assertEqual(adapter.bound_input_message([delivered_message], self.binding('host guidance retained\nlatest correction')), delivered_message)
         with self.assertRaises(adapter.NativeContextRejected):
-            adapter.human_input([human], self.binding('host guidance retained\n\nlatest correction'))
+            adapter.bound_input_message([delivered_message], self.binding('host guidance retained\n\nlatest correction'))
 
     def server_omit(self, request=None, choices=None):
         request = copy.deepcopy(self.request if request is None else request)
@@ -117,7 +117,7 @@ class ClaudeContextAdapterTests(unittest.TestCase):
             dict(role='user', content=[dict(type='tool_result', tool_use_id='publication', content=[
                 text('stdout before\n' + json.dumps({'receipt': projection, 'required': 'carrier wrapper'})),
                 text('required carrier sibling')])]),
-            dict(role='user', content=[text('latest human instruction remains unchanged')])])
+            dict(role='user', content=[text('latest user-role prompt remains unchanged')])])
         inspected[0]['replacement_context'] = dict(projection=projection,
             carrier=dict(message_index=5, wire_block_index=0, tool_use_id='publication'))
         return request, inspected
@@ -139,8 +139,8 @@ class ClaudeContextAdapterTests(unittest.TestCase):
         self.assertEqual(observed[0]['disposition'], 'replace')
         self.assertEqual(observed[0]['replacement_carrier']['tool_use_id'], 'publication')
         self.assertEqual(observed[0]['provider_application'], 'requested')
-        self.assertEqual(adapter.human_input(forwarded['messages'],
-            self.binding('latest human instruction remains unchanged')), message('user', text('latest human instruction remains unchanged')))
+        self.assertEqual(adapter.bound_input_message(forwarded['messages'],
+            self.binding('latest user-role prompt remains unchanged')), message('user', text('latest user-role prompt remains unchanged')))
 
     def test_server_replace_requires_exact_unique_capsule_and_complete_context_schema(self):
         request, choices = self.replacement_case()
@@ -351,7 +351,7 @@ class ClaudeContextAdapterTests(unittest.TestCase):
             from text_lines import committed_records
             records = adapter.native_records_from_rows(committed_records(path.read_bytes()))
         self.assertEqual(set(records), {2, 3, 4, 5, 6})
-        self.assertEqual(records[2], self.human)
+        self.assertEqual(records[2], self.user_role_message)
         self.assertEqual(records[3], message('assistant', self.thinking))
         self.assertEqual(records[4], message('assistant', self.call))
         self.assertEqual(records[5], message('user', self.result))
@@ -372,7 +372,7 @@ class ClaudeContextAdapterTests(unittest.TestCase):
                            dict(type='future-block', opaque='retain'), text('necessary'))
         self.originals[4] = original
         self.request['messages'][3]['content'] = copy.deepcopy(original['content'])
-        self.request['messages'].append(dict(role='user', content='latest human'))
+        self.request['messages'].append(dict(role='user', content='latest user-role prompt'))
         choices = [dict(self.choice(4, index, 'assistant'), disposition='omit', replacement_text='')
                    for index in (0, 1)]
         forwarded, observations = self.apply(choices)
@@ -380,8 +380,8 @@ class ClaudeContextAdapterTests(unittest.TestCase):
         self.assertEqual(forwarded['messages'][-1], self.request['messages'][-1])
         self.assertEqual(len(observations), 2)
 
-    def test_omit_single_prior_text_removes_message_but_preserves_latest_human_and_unknown_metadata(self):
-        self.request['messages'].append(dict(role='user', content='latest human'))
+    def test_omit_single_prior_text_removes_message_but_preserves_latest_user_role_prompt_and_unknown_metadata(self):
+        self.request['messages'].append(dict(role='user', content='latest user-role prompt'))
         choice = dict(self.choice(4, 0, 'assistant'), disposition='omit', replacement_text='')
         forwarded, observations = self.apply([choice])
         self.assertEqual(forwarded['messages'], self.request['messages'][:3] + self.request['messages'][4:])
@@ -428,31 +428,31 @@ class ClaudeContextAdapterTests(unittest.TestCase):
             with self.assertRaises(adapter.NativeContextRejected):
                 adapter.native_path(home, '../exact-session')
 
-    def test_human_input_uses_latest_real_message_and_canonical_identity(self):
+    def test_bound_input_message_uses_latest_user_role_prompt_and_canonical_identity(self):
         items = dict(self.originals, **{})
         items[5] = message('user', text('<task-notification>finished</task-notification>'))
         items[6] = message('user', dict(type='tool_result', tool_use_id='other', content='tool output'))
-        self.assertEqual(adapter.human_input(items, self.binding()), self.human)
-        self.assertEqual(adapter.human_input(list(items.values()), self.binding()), self.human)
+        self.assertEqual(adapter.bound_input_message(items, self.binding()), self.user_role_message)
+        self.assertEqual(adapter.bound_input_message(list(items.values()), self.binding()), self.user_role_message)
 
-    def test_human_input_does_not_fall_back_to_an_older_matching_human(self):
+    def test_bound_input_message_does_not_fall_back_to_an_older_matching_prompt(self):
         items = dict(self.originals)
-        items[7] = message('user', text('new human request'))
+        items[7] = message('user', text('new user-role prompt'))
         with self.assertRaises(adapter.NativeContextRejected):
-            adapter.human_input(items, self.binding())
+            adapter.bound_input_message(items, self.binding())
 
-    def test_human_input_preserves_unicode_and_whitespace(self):
+    def test_bound_input_message_preserves_unicode_and_whitespace(self):
         value = '한글 α\n '
         item = message('user', text(value))
-        self.assertEqual(adapter.human_input([item], self.binding(value)), item)
+        self.assertEqual(adapter.bound_input_message([item], self.binding(value)), item)
         wrong = self.binding(value)
         wrong['input_char_count'] += 1
         with self.assertRaises(adapter.NativeContextRejected):
-            adapter.human_input([item], wrong)
+            adapter.bound_input_message([item], wrong)
 
     def test_selected_value_supports_native_text_and_result_content(self):
         self.assertEqual(adapter.selected_value(self.answer, self.choice(4, kind='assistant')), self.answer['content'][0])
-        self.assertEqual(adapter.selected_value(self.human, self.choice(1, kind='message')), self.human['content'][0])
+        self.assertEqual(adapter.selected_value(self.user_role_message, self.choice(1, kind='message')), self.user_role_message['content'][0])
         self.assertEqual(adapter.selected_value(self.originals[3], self.choice()), 'consumed body')
 
     def test_unknown_exchange_and_signed_reasoning_are_explicitly_rejected(self):
@@ -462,7 +462,7 @@ class ClaudeContextAdapterTests(unittest.TestCase):
         with self.assertRaises(adapter.NativeContextRejected):
             adapter.selected_value(message('assistant', self.thinking), dict(kind='assistant', block_index=0))
         with self.assertRaises(adapter.NativeContextRejected):
-            adapter.selected_value(self.human, dict(kind='assistant', block_index=0))
+            adapter.selected_value(self.user_role_message, dict(kind='assistant', block_index=0))
 
     def test_merged_result_replacement_preserves_id_error_and_necessary_siblings(self):
         before_request, before_originals = copy.deepcopy(self.request), copy.deepcopy(self.originals)

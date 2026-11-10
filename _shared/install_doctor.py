@@ -31,8 +31,8 @@ from installer_assets import (
     OWNERSHIP_GHOST_ALICE_MANAGED,
     OWNERSHIP_CONFLICT,
     OWNERSHIP_LEGACY_NO_BASELINE,
-    OWNERSHIP_USER_MODIFIED_MANAGED,
-    OWNERSHIP_USER_OWNED,
+    OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED,
+    OWNERSHIP_UNCLAIMED,
     AssetClassification,
     classify_global_rule_file,
     classify_skill_root,
@@ -122,11 +122,10 @@ def _addon_registry_audit(ghost_alice_root: Path, platform: str) -> tuple[str, l
 
 
 def _live_dir_ownership(skills_root: Path, core_names: set[str], addons_dir: Path) -> list[dict[str, str]]:
-    """Classify each live skills-dir entry as core / addon / domain / user.
+    """Classify each live skills-dir entry as core / addon / domain / unclaimed.
 
     Read-only management view. ``core`` = a core skill name; ``addon`` = a dest
-    recorded in an addon sidecar; ``domain`` = an unmanaged skill the user authored
-    directly in the dir (has SKILL.md); ``user`` = any other entry. The ``_shared``
+    recorded in an addon sidecar; ``domain`` = an unmanaged skill placed directly in the dir (has SKILL.md; the doctor does not check its writer); ``unclaimed`` = any other entry. The ``_shared``
     support dir and dotfiles are excluded. This management view never mutates.
     """
     skills_root = Path(skills_root)
@@ -158,7 +157,7 @@ def _live_dir_ownership(skills_root: Path, core_names: set[str], addons_dir: Pat
         elif (child / "SKILL.md").exists():
             owner = "domain"
         else:
-            owner = "user"
+            owner = "unclaimed"
         findings.append({"name": name, "owner": owner})
     return findings
 
@@ -168,8 +167,8 @@ def _ownership_status(item: AssetClassification) -> str:
         return STATUS_OK
     if item.ownership in {
         OWNERSHIP_LEGACY_NO_BASELINE,
-        OWNERSHIP_USER_MODIFIED_MANAGED,
-        OWNERSHIP_USER_OWNED,
+        OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED,
+        OWNERSHIP_UNCLAIMED,
     }:
         return STATUS_WARNING
     if item.ownership in {OWNERSHIP_ABSENT, OWNERSHIP_CONFLICT}:
@@ -961,7 +960,7 @@ def _runtime_session_intent_golden_status(
                             "degraded": (root / platform / session / hook.DEGRADE_MARKER_FILE).exists()}
                 observed = material()
                 if platform == "claude" and observed["state"].get("pending_native_inputs"):
-                    # Native actor evidence follows UserPromptSubmit.
+                    # The doctor writes the host's human-origin markers on its own scratch transcript row so Core records the golden prompt in the scratch ledger.
                     Path(sys.argv[4]).write_text(json.dumps(dict(type="user",
                         sessionId=session, promptId="doctor-runtime-prompt",
                         origin=dict(kind="human"), promptSource="sdk", turnOrigin="human",
@@ -1141,8 +1140,8 @@ def run(args: argparse.Namespace) -> int:
             body = Path(rule_path).read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError):
             continue  # Existing ownership diagnostics handle the primary.
-        # The managed loader declares its sibling dependency; user appendices
-        # and section-heading edits do not define installation ownership.
+        # The managed loader declares its sibling dependency; text outside the managed block
+        # and section-heading edits do not define installation ownership, whoever wrote them.
         if codex_requires_governance_companion(body):
             global_rules.append(("codex-governance", str(Path(rule_path).with_name("ghost-alice-governance.md")), marker, begin, end))
     global_rule_results = [
@@ -1264,7 +1263,7 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--target", action="append", nargs=2, default=[], metavar=("ASSET_ID", "DEST_PATH"))
     parser.add_argument("--skill-root", action="append", type=Path, default=[])
     parser.add_argument("--skills-root", type=Path, default=None,
-                        help="live skills dir for the core/addon/domain/user management view")
+                        help="live skills dir for the core/addon/domain/unclaimed management view")
     parser.add_argument(
         "--global-rule",
         action="append",

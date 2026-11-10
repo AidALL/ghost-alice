@@ -1,6 +1,6 @@
 ---
 name: adversarial-verification
-description: "Assigns independent delegates to try to refute a claim and its evidence and returns a verdict with the part that survives, when the user or another skill calls for an adversarial review or fact-check of a numeric, legal, novelty or prior-art claim."
+description: "Assigns independent delegates to try to refute a claim and its evidence and returns a verdict with the part that survives, when the human user or another skill calls for an adversarial review or fact-check of a numeric, legal, novelty or prior-art claim."
 calls:
 compatibility:
   - "Python 3.11+ standard library"
@@ -25,7 +25,7 @@ The response model supplies:
 
 ## Entry gate
 
-The response model admits claims marked as required or recommended for verification, claims that use external documents, legal conditions, numbers or sources outside the approved context, and claims of guarantees, compatibility, novelty, prior-art difference, reproducibility, theoretical result or experimental effect.
+The response model admits claims marked as required or recommended for verification, claims that use external documents, legal conditions, numbers or sources outside the context that the human user approved, and claims of guarantees, compatibility, novelty, prior-art difference, reproducibility, theoretical result or experimental effect.
 
 Before starting delegates, the response model applies these bypass conditions:
 

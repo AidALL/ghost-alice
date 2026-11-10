@@ -72,7 +72,7 @@ Item 3-5 is a Ghost-ALICE project navigation rule implemented by `validate_phase
 
 ## Phase 5: Language/tone verification (Ghost-ALICE OS project only)
 
-This phase applies to canonical skill instructions and their accessory guidance. Reader-facing Korean project documentation (README files, installation guides, website copy, and release notes) follows the polite documentation register in the common contract's [General Rules](../../platforms/common-governance.md#general-rules); it is not rejected for honorific endings. Explicit user tone instructions take precedence over defaults.
+This phase applies to canonical skill instructions and their accessory guidance. Reader-facing Korean project documentation (README files, installation guides, website copy, and release notes) follows the polite documentation register in the common contract's [General Rules](../../platforms/common-governance.md#general-rules); it is not rejected for honorific endings. Explicit tone instructions that the human user enters in the conversation take precedence over defaults under the common contract's [Operating Model](../../platforms/common-governance.md#operating-model).
 
 | # | Item | Criterion | Verification method | Automatic |
 | --- | --- | --- | --- | :---: |

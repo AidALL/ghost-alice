@@ -1,7 +1,7 @@
 """Own only addon Skill grants that this installer added to Claude settings.
 
-Preexisting grants remain user/previous-owner data. Unknown legacy ownership is
-reported for review, never converted into removal authority. This module stores
+The installer preserves preexisting allow rules and does not record who added them. Unknown legacy ownership is
+reported for the human user to review, never converted into removal authority. This module stores
 names and booleans, not prompts or credentials. Dependencies: standard library.
 """
 from __future__ import annotations

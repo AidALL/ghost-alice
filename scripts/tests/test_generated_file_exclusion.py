@@ -10,7 +10,7 @@ MERGE_SCRIPTS = REPO_ROOT / "merge-companion" / "scripts"
 if str(MERGE_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(MERGE_SCRIPTS))
 
-from diff_collector import collect_user_changes
+from diff_collector import collect_external_changes
 from snapshot import capture_snapshot
 
 
@@ -66,21 +66,21 @@ class GeneratedFileExclusionTest(unittest.TestCase):
             str(self.skill / "scripts" / "helper.py"),
         }
 
-        for walker in [SNAPSHOT_CLI._walk_user_files, DIFF_COLLECTOR_CLI._walk_user_files]:
+        for walker in [SNAPSHOT_CLI._walk_installed_copy_files, DIFF_COLLECTOR_CLI._walk_installed_copy_files]:
             walked = {str(path) for path in walker(self.skills_dir)}
             self.assertEqual(walked, expected)
 
     def test_generated_file_change_does_not_enter_pending_diff(self) -> None:
         snapshot = self.root / "snapshot.json"
-        capture_snapshot(snapshot, SNAPSHOT_CLI._walk_user_files(self.skills_dir), "codex")
+        capture_snapshot(snapshot, SNAPSHOT_CLI._walk_installed_copy_files(self.skills_dir), "codex")
 
         generated = self.skill / "__pycache__" / "skill.cpython-312.pyc"
         generated.write_text("changed generated\n", encoding="utf-8")
-        self.assertEqual(collect_user_changes(snapshot, DIFF_COLLECTOR_CLI._walk_user_files(self.skills_dir)), [])
+        self.assertEqual(collect_external_changes(snapshot, DIFF_COLLECTOR_CLI._walk_installed_copy_files(self.skills_dir)), [])
 
         real_config = self.skill / "config.toml"
         real_config.write_text("version = 2\n", encoding="utf-8")
-        changes = collect_user_changes(snapshot, DIFF_COLLECTOR_CLI._walk_user_files(self.skills_dir))
+        changes = collect_external_changes(snapshot, DIFF_COLLECTOR_CLI._walk_installed_copy_files(self.skills_dir))
         self.assertEqual([change["path"] for change in changes], [str(real_config)])
 
 

@@ -76,8 +76,9 @@ class TestPendingMergeLayeredGate(unittest.TestCase):
         text = contract.read_text(encoding="utf-8")
         for artifact in EVALUATOR_ARTIFACTS:
             self.assertIn(artifact, text)
-        self.assertIn("read-only evaluator pass", text)
-        self.assertIn("accepted verifier-result", text)
+        self.assertIn("During a read-only evaluation pass", text)
+        self.assertIn("neither the response model that runs the evaluation nor any evaluator tool or delegate it runs changes installed assets", text)
+        self.assertIn("the verifier's `verifier_accepted: true` judgment in `verifier-result.json`", text)
         self.assertIn("rejected candidate", text)
 
     def test_verification_skills_reach_the_evaluator_contract_owner(self):

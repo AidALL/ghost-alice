@@ -61,7 +61,7 @@ def _native(path):
             if row.get('type') == 'response_item'}
 
 
-def _input_item(items):
+def _last_user_role_message(items):
     return next((item for item in reversed(items) if isinstance(item, dict)
                  and item.get('type') == 'message' and item.get('role') == 'user'), None)
 
@@ -143,7 +143,7 @@ def _current_input(core, root, owner, connection):
 
 
 def context_input_binding(source, expected_input_event_id=None, *, current=False, transaction=None):
-    """Bind content operations to human intake or separated native SDK context.
+    """Bind content operations to the current input that Core code recorded or to the separated context input of an SDK-started turn.
 
     Historical SDK bindings use their immutable committed prefix and byte row.
     Current binding additionally closes every unresolved transport boundary.
@@ -177,10 +177,10 @@ def context_input_binding(source, expected_input_event_id=None, *, current=False
         return core_api.response_input_binding(source, expected_input_event_id, transaction=connection)
 
 
-def _locate(items, literal, kind, user_record, platform='codex'):
+def _locate(items, literal, kind, input_record, platform='codex'):
     coordinates = []
     for record, item in items.items():
-        if kind in {'assistant', 'message'} and record >= user_record:
+        if kind in {'assistant', 'message'} and record >= input_record:
             continue
         output = item.get('content') if platform == 'claude' or kind in {'assistant', 'message'} else item.get('output')
         blocks = [output] if isinstance(output, str) else output if isinstance(output, list) else []
@@ -196,7 +196,7 @@ def _locate(items, literal, kind, user_record, platform='codex'):
     return coordinates
 
 
-def _resolve_choices(items, selected, user_record, platform='codex'):
+def _resolve_choices(items, selected, input_record, platform='codex'):
     resolved = []
     for choice in selected:
         if not isinstance(choice, dict):
@@ -207,7 +207,7 @@ def _resolve_choices(items, selected, user_record, platform='codex'):
                 or kind not in {'output', 'exchange', 'assistant', 'message'}
                 or not isinstance(choice['locate_text'], str) or not choice['locate_text']):
                 raise ContextSelectionRejected('A literal, use conclusion and remaining need are required')
-            matches = _locate(items, choice['locate_text'], kind, user_record, platform)
+            matches = _locate(items, choice['locate_text'], kind, input_record, platform)
             if len(matches) != 1:
                 raise ContextSelectionRejected('The original selection is ambiguous or unavailable; a unique coordinate is required')
             choice = dict(matches[0], summary=choice['summary'], next_need=choice['next_need'],
@@ -232,8 +232,8 @@ def locate_outputs(source, expected_input_event_id, literal, kind='output'):
     if path is None:
         raise ContextSelectionRejected('The original native transcript is unavailable')
     coordinates, items = [], _native(path)
-    user_record = max((n for n, i in items.items() if i.get('type') == 'message' and i.get('role') == 'user'), default=0)
-    for match in _locate(items, literal, kind, user_record):
+    last_user_role_record = max((n for n, i in items.items() if i.get('type') == 'message' and i.get('role') == 'user'), default=0)
+    for match in _locate(items, literal, kind, last_user_role_record):
         item = items[match['record']]
         block = _selected_value(item, match)
         coordinate = dict(source=path, record=match['record'], block_index=match['block_index'],
@@ -297,7 +297,7 @@ def _codex_decisions(connection, reference, payload, source, path, originals):
             if decision['input_binding'] != old_binding or decision['original']['locator'] != path:
                 raise ContextSelectionRejected('The retained decision belongs to a different input or original')
             # Authenticate the original prefix, rather than rebinding a choice
-            # to the later input that published this update.
+        # to the later input that Core code recorded as current when the response model published this update.
             rows = committed_records(source_text(decision['original']))
             if (not all(isinstance(row, dict) for row in rows.values())
                 or not any(row.get('type') == 'session_meta' for row in rows.values())
@@ -308,9 +308,9 @@ def _codex_decisions(connection, reference, payload, source, path, originals):
                 raise ContextSelectionRejected('The retained original native owner differs')
             historical = {number: _item(row['payload']) for number, row in rows.items()
                           if row.get('type') == 'response_item'}
-            human = _input_item(list(historical.values()))
-            text = _input_text(human)
-            if (json_digest(human) != decision['native_input_digest']
+            original_input = _last_user_role_message(list(historical.values()))
+            text = _input_text(original_input)
+            if (json_digest(original_input) != decision['native_input_digest']
                 or not matches_input(text, old_binding)):
                 raise ContextSelectionRejected('The retained original input differs from its decision binding')
             historical_choices[decision_reference] = historical
@@ -395,13 +395,13 @@ def record_disposition(source, expected_input_event_id, selected, *, transaction
             raise ContextSelectionRejected('The native intake receipt changed')
         binding = core_api.response_input_binding(source, expected_input_event_id, transaction=connection)
         items = _native(path)
-        user = _input_item(list(items.values()))
-        text = _input_text(user)
+        input_message = _last_user_role_message(list(items.values()))
+        text = _input_text(input_message)
         if not matches_input(text, binding):
             raise ContextSelectionRejected('Native input differs from the canonical intake receipt')
-        user_record = max(n for n, i in items.items() if i == user)
+        input_record = max(n for n, i in items.items() if i == input_message)
         selections, seen = [], set()
-        for choice in _resolve_choices(items, selected, user_record):
+        for choice in _resolve_choices(items, selected, input_record):
             if (not isinstance(choice, dict) or set(choice) - {'kind', 'disposition'} != {'record', 'block_index', 'summary', 'next_need'}
                 or choice.get('kind', 'output') not in {'output', 'exchange', 'assistant', 'message'}):
                 raise ContextSelectionRejected('An explicit block, use summary and next need are required')
@@ -420,8 +420,8 @@ def record_disposition(source, expected_input_event_id, selected, *, transaction
                 raise ContextSelectionRejected('Context selections cannot overlap')
             paired = {}
             if kind in {'assistant', 'message'}:
-                if record >= user_record:
-                    raise ContextSelectionRejected('Only a message before the current user input can be selected')
+                if record >= input_record:
+                    raise ContextSelectionRejected('Only a message before the current bound user-role message can be selected')
             else:
                 call_record, call = _paired_call(items, record, item)
                 if kind == 'exchange':
@@ -429,7 +429,7 @@ def record_disposition(source, expected_input_event_id, selected, *, transaction
             seen.add(key)
             selections.append(dict(choice, **paired, item_digest=json_digest(item), block_digest=json_digest(block)))
         payload = dict(schema_version='context-disposition.v2', input_binding=binding,
-            native_input_digest=json_digest(user),
+            native_input_digest=json_digest(input_message),
             original=reference_source(path, appendable=True), selected=selections)
         if selection_mode == 'update':
             try:
@@ -451,7 +451,7 @@ def record_disposition(source, expected_input_event_id, selected, *, transaction
 
 
 def _select_manual_request(request, root, codex_home, *, _inspect=None, _blocked=()):
-    """Distinguish authenticated selection, unselected input and unavailable storage."""
+    """Apply the response model's existing-material selection and distinguish its authenticated choices, unselected input and unavailable storage."""
     reason = request_support_reason(request)
     if reason:
         return RequestSelection(request, 'preserved', reason)
@@ -483,19 +483,19 @@ def _select_manual_request(request, root, codex_home, *, _inspect=None, _blocked
                 or json_digest(payload) != reference or payload['input_binding'] != original_binding
                 or payload['original']['locator'] != codex_transcript_path(str(codex_home), session)):
                 return RequestSelection(request, 'preserved', 'selection-unverified')
-            user = _input_item(request['input'])
-            text = _input_text(user)
+            input_message = _last_user_role_message(request['input'])
+            text = _input_text(input_message)
             if not matches_input(text, binding):
                 return RequestSelection(request, 'preserved', 'input-changed')
             verify_source(payload['original'])
             originals = _native(payload['original']['locator'])
-            if json_digest(_input_item(list(originals.values()))) != json_digest(user):
+            if json_digest(_last_user_role_message(list(originals.values()))) != json_digest(input_message):
                 return RequestSelection(request, 'preserved', 'native-input-changed')
             decisions = (_codex_decisions(connection, reference, payload, source,
                           payload['original']['locator'], originals) if payload['schema_version'] == 'context-disposition.v4'
                          else [(reference, payload, choice, index) for index, choice in enumerate(payload['selected'])])
         changes = []
-        human_index = max(n for n, item in enumerate(request['input']) if item is user)
+        input_index = max(n for n, item in enumerate(request['input']) if item is input_message)
         for decision_reference, decision, selected, _ in decisions:
             original = originals[selected['record']]
             kind = selected.get('kind', 'output')
@@ -520,8 +520,8 @@ def _select_manual_request(request, root, codex_home, *, _inspect=None, _blocked
                     or json_digest(call) != selected['call_digest']
                     or json_digest(request['input'][call_index]) != selected['call_digest']):
                     continue
-            if len(matches) == 1 and matches[0] != human_index:
-                if kind in {'assistant', 'message'} and matches[0] >= human_index:
+            if len(matches) == 1 and matches[0] != input_index:
+                if kind in {'assistant', 'message'} and matches[0] >= input_index:
                     continue
                 changes.append((matches[0], selected, call_index, decision_reference, decision))
         if _inspect is not None:
@@ -605,17 +605,17 @@ def _select_manual_request(request, root, codex_home, *, _inspect=None, _blocked
 
 
 def _claude_originals(source, owner, binding):
-    from response_context_use import _path, _native, _bound_human, ResponseUseRejected
+    from response_context_use import _path, _native, _bound_input_row, ResponseUseRejected
     home = claude_home(source)
     path = _path(home, 'claude', owner['session_id'])
     if path is None:
         raise ContextSelectionRejected('The original native Claude transcript is unavailable')
     try:
         native = _native(path, 'claude', owner['session_id'])
-        record, human = _bound_human(native, binding, 'claude')
+        record, input_item = _bound_input_row(native, binding, 'claude')
     except ResponseUseRejected as error:
         raise ContextSelectionRejected(str(error)) from error
-    return path, native, record, human
+    return path, native, record, input_item
 
 
 def _claude_input(core, root, owner, source, expected, connection):
@@ -640,9 +640,9 @@ def _locate_claude(source, expected, literal, kind):
         or kind not in {'output', 'assistant', 'message'}):
         raise ContextSelectionRejected('An explicit supported Claude search literal is required')
     with core._read_connection(root) as connection:
-        _, (path, native, user_record, _) = _claude_input(core, root, owner, source, expected, connection)
+        _, (path, native, input_record, _) = _claude_input(core, root, owner, source, expected, connection)
     coordinates = []
-    for match in _locate(native.records, literal, kind, user_record, 'claude'):
+    for match in _locate(native.records, literal, kind, input_record, 'claude'):
         item = native.records[match['record']]
         block = _selected_value(item, match, 'claude')
         coordinates.append(dict(match, source=path, item_digest=json_digest(item), block_digest=json_digest(block)))
@@ -659,11 +659,11 @@ def _claude_replacement_projection(payload, reference):
             for choice in payload['selected'] if choice.get('disposition', 'replace') == 'replace'])
 
 
-def _claude_pending_replacement_carrier(native, user_record, selections):
+def _claude_pending_replacement_carrier(native, input_record, selections):
     replacements = [choice for choice in selections if choice.get('disposition', 'replace') == 'replace']
     if not replacements or any(choice.get('kind', 'output') != 'output' for choice in replacements):
         raise ContextSelectionRejected('Native projection requires an explicit whole-result replacement')
-    pending = [call for call in native.calls if call[0] > user_record
+    pending = [call for call in native.calls if call[0] > input_record
         and isinstance(call[2], str) and call[2]
         and not any(result[2] == call[2] for result in native.results)]
     if (len(pending) != 1 or sum(call[2] == pending[0][2] for call in native.calls) != 1
@@ -673,7 +673,7 @@ def _claude_pending_replacement_carrier(native, user_record, selections):
     return dict(call_record=call[0], call_block_index=call[1], call_id=call[2], call_digest=json_digest(call[3]))
 
 
-def _claude_replacement_context(request, native, payload, reference, human_record, human_index):
+def _claude_replacement_context(request, native, payload, reference, input_record, input_index):
     """Authenticate the completed native publication and its exact wire result."""
     from response_context_use import _native_pair, _wire_pair, _output
     import claude_context_adapter as adapter
@@ -690,9 +690,9 @@ def _claude_replacement_context(request, native, payload, reference, human_recor
     if pair is None:
         return None
     wire = _wire_pair(request, pair, 'claude')
-    if (wire is None or wire[0] == human_index or wire[3] == human_index
-        or (pair[1][0] > human_record) != (wire[0] > human_index)
-        or (pair[0][0] > human_record) != (wire[3] > human_index)):
+    if (wire is None or wire[0] == input_index or wire[3] == input_index
+        or (pair[1][0] > input_record) != (wire[0] > input_index)
+        or (pair[0][0] > input_record) != (wire[3] > input_index)):
         return None
     wire_block = request['messages'][wire[0]]['content'][wire[1]]
     if adapter.semantic_fingerprint(wire_block) != adapter.semantic_fingerprint(pair[1][3]):
@@ -715,10 +715,10 @@ def _record_claude(source, expected, selected, *, transaction=None, project_repl
     if not isinstance(selected, list):
         raise ContextSelectionRejected('An explicit current selection is required')
     with core._transaction(root, transaction=transaction) as connection:
-        binding, (path, native, user_record, human) = _claude_input(
+        binding, (path, native, input_record, input_item) = _claude_input(
             core, root, owner, source, expected, connection)
         selections, seen = [], set()
-        for choice in _resolve_choices(native.records, selected, user_record, 'claude'):
+        for choice in _resolve_choices(native.records, selected, input_record, 'claude'):
             if (not isinstance(choice, dict)
                 or set(choice) - {'kind', 'disposition', 'clear_tool_inputs'} != {'record', 'block_index', 'summary', 'next_need'}
                 or choice.get('kind', 'output') not in {'output', 'assistant', 'message'}):
@@ -739,8 +739,8 @@ def _record_claude(source, expected, selected, *, transaction=None, project_repl
             block = _selected_value(item, choice, 'claude')
             if (record, index) in seen:
                 raise ContextSelectionRejected('Context selections cannot overlap')
-            if kind in {'message', 'assistant'} and record >= user_record:
-                raise ContextSelectionRejected('Only a message before the current human input can be selected')
+            if kind in {'message', 'assistant'} and record >= input_record:
+                raise ContextSelectionRejected('Only a message before the current bound user-role message can be selected')
             call_binding = {}
             if kind == 'output':
                 call = _claude_pair(native, record, index)
@@ -749,10 +749,10 @@ def _record_claude(source, expected, selected, *, transaction=None, project_repl
             seen.add((record, index))
             selections.append(dict(choice, item_digest=json_digest(item), block_digest=json_digest(block), **call_binding))
         payload = dict(schema_version='context-disposition.v5' if project_replacements else 'context-disposition.v3',
-            platform='claude', input_binding=binding, native_input_record=user_record,
-            native_input_digest=json_digest(human), original=reference_source(path, appendable=True), selected=selections)
+            platform='claude', input_binding=binding, native_input_record=input_record,
+            native_input_digest=json_digest(input_item), original=reference_source(path, appendable=True), selected=selections)
         if project_replacements:
-            payload['replacement_carrier'] = _claude_pending_replacement_carrier(native, user_record, selections)
+            payload['replacement_carrier'] = _claude_pending_replacement_carrier(native, input_record, selections)
         reference = json_digest(payload)
         _schema(connection)
         connection.execute('INSERT OR IGNORE INTO core_context_dispositions VALUES (?,?)',
@@ -765,10 +765,10 @@ def _record_claude(source, expected, selected, *, transaction=None, project_repl
     return result
 
 
-def _claude_wire_human(request, binding, human):
-    from response_context_use import ResponseUseRejected, _wire_human
+def _claude_wire_input_index(request, binding, input_item):
+    from response_context_use import ResponseUseRejected, _wire_input_index
     try:
-        return _wire_human(request, 'claude', binding, human)
+        return _wire_input_index(request, 'claude', binding, input_item)
     except ResponseUseRejected as error:
         raise ContextSelectionRejected(str(error)) from error
 
@@ -818,7 +818,7 @@ def _select_claude_request(request, root, native_home, session, *, _inspect=None
                 or set(original) != {'storage', 'locator', 'digest', 'byte_length', 'appendable', 'source_id'}
                 or not isinstance(payload.get('selected'), list)):
                 return RequestSelection(request, 'preserved', 'selection-unverified')
-            binding, (path, native, human_record, human) = _claude_input(
+            binding, (path, native, input_record, input_item) = _claude_input(
                 core, root, owner, source, None, connection)
             original_binding = context_input_binding(source,
                 payload['input_binding']['input_event_id'], transaction=connection)
@@ -829,10 +829,10 @@ def _select_claude_request(request, root, native_home, session, *, _inspect=None
                 return RequestSelection(request, 'preserved', 'selection-unverified')
             prefix_rows = committed_records(source_text(original))
             prefix_records = adapter.native_records_from_rows(prefix_rows)
-            original_human = payload['native_input_record']
-            if (original_human not in native.humans or original_human not in prefix_records
-                or json_digest(prefix_records[original_human]) != payload['native_input_digest']
-                or json_digest(native.records[original_human]) != payload['native_input_digest']):
+            original_input_record = payload['native_input_record']
+            if (original_input_record not in native.user_role_prompts or original_input_record not in prefix_records
+                or json_digest(prefix_records[original_input_record]) != payload['native_input_digest']
+                or json_digest(native.records[original_input_record]) != payload['native_input_digest']):
                 return RequestSelection(request, 'preserved', 'native-input-changed')
             if any(not isinstance(choice, dict) or type(choice.get('record')) is not int
                    or choice['record'] not in prefix_records
@@ -852,8 +852,8 @@ def _select_claude_request(request, root, native_home, session, *, _inspect=None
                 if (call_item.get('role') != 'assistant' or carrier['call_block_index'] >= len(call_item['content'])
                     or json_digest(call_item['content'][carrier['call_block_index']]) != carrier['call_digest']):
                     return RequestSelection(request, 'preserved', 'native-call-changed')
-            human_index = _claude_wire_human(request, binding, human)
-        native_replacement = _claude_replacement_context(request, native, payload, reference, human_record, human_index)
+            input_index = _claude_wire_input_index(request, binding, input_item)
+        native_replacement = _claude_replacement_context(request, native, payload, reference, input_record, input_index)
         selections = []
         for choice in payload['selected']:
             if _inspect is None and (choice.get('disposition', 'replace') == 'keep'
@@ -866,7 +866,7 @@ def _select_claude_request(request, root, native_home, session, *, _inspect=None
                     choice.get('call_record') != call[0] or choice.get('call_block_index') != call[1]
                     or choice.get('call_digest') != json_digest(call[3])):
                     return RequestSelection(request, 'preserved', 'native-call-changed')
-            elif choice['record'] >= original_human:
+            elif choice['record'] >= original_input_record:
                 return RequestSelection(request, 'preserved', 'selection-unverified')
             locator = f"{path}#record={choice['record']},content={choice['block_index']}"
             text = json.dumps(dict(summary=choice['summary'], next_need=choice['next_need'], original=locator,
@@ -880,9 +880,9 @@ def _select_claude_request(request, root, native_home, session, *, _inspect=None
         changed, observed = adapter.request_apply(request, native.records, selections, _inspect=inspected)
         if inspected is not None:
             observed = inspected
-        # Semantic text matching must never substitute the current human when
+        # Semantic text matching must never substitute the bound input when
         # an equal earlier text disappeared from the host's retained messages.
-        boundary_reason = _claude_selection_boundary_reason(request, native, observed, human_record, human_index)
+        boundary_reason = _claude_selection_boundary_reason(request, native, observed, input_record, input_index)
         if boundary_reason:
             return RequestSelection(request, 'preserved', boundary_reason)
         for value in observed:
@@ -1177,13 +1177,13 @@ def _claude_native_readiness(core, root, owner, source, request, state, native_b
                     # mismatched or ambiguous row is not an append condition.
                     return None
             return 'pending-input'
-        binding, (_, native, human_record, human) = _claude_input(core,root,owner,source,None,connection)
-        human_index = _claude_wire_human(request,binding,human)
+        binding, (_, native, input_record, input_item) = _claude_input(core,root,owner,source,None,connection)
+        input_index = _claude_wire_input_index(request,binding,input_item)
         if context_input_binding(source,payload['input_binding']['input_event_id'],transaction=connection)!=payload['input_binding']:
             return None
         requirements = _claude_wait_eligible(request,payload,reference,native,prefix,can_rewrite,root=root,
             native_home=claude_home(source),session=owner['session_id'],
-            native_boundary=human_record,wire_boundary=human_index,native_betas=native_betas)
+            native_boundary=input_record,wire_boundary=input_index,native_betas=native_betas)
         if requirements is None or not requirements.replacement_carrier_ids:
             return None
         carrier = payload.get('replacement_carrier')
@@ -1204,7 +1204,7 @@ def _claude_native_readiness(core, root, owner, source, request, state, native_b
         wire_results = [block for block in blocks if block[2]=='user' and block[3].get('type')=='tool_result'
             and block[3].get('tool_use_id')==carrier['call_id']]
         if (len(wire_calls)!=1 or len(wire_results)!=1 or wire_calls[0][:2]>=wire_results[0][:2]
-            or wire_calls[0][0]<=human_index or wire_results[0][0]<=human_index
+            or wire_calls[0][0]<=input_index or wire_results[0][0]<=input_index
             or adapter._call_fingerprint(wire_calls[0][3])!=adapter._call_fingerprint(calls[0][3])
             or 'signature' in wire_results[0][3]):
             return None

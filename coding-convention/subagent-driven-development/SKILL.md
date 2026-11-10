@@ -1,22 +1,22 @@
 ---
 name: subagent-driven-development
-description: "Executes an accepted plan in this session by giving each task, one at a time, to a new delegate and reviewing the result, when the user chose delegate execution and each task is self-contained."
+description: "Executes a plan that the response model saved under writing-plans in this session by giving each task, one at a time, to a new delegate and reviewing the result, when the human user chose delegate execution and each task is self-contained."
 compatibility:
   - "Python 3.11+ standard library"
 ---
 
 # Subagent-Driven Development
 
-The response model executes an accepted plan by giving each task to a fresh delegate, then has independent delegates review specification compliance and code quality in that order. The response model supplies a self-contained task context; delegates do not inherit the whole session history.
+The response model executes a plan that it saved under writing-plans by giving each task to a fresh delegate, then has independent delegates review specification compliance and code quality in that order. The response model supplies a self-contained task context; delegates do not inherit the whole session history.
 
 ## Preconditions and procedure
 
-Use this workflow when the plan's tasks can be assigned independently and execution remains in the current session. Use executing-plans for the accepted inline workflow. Use the authorized checkout and apply using-git-worktrees only when isolation is needed; do not edit main/master without explicit user consent.
+Use this workflow when the plan's tasks can be assigned independently and execution remains in the current session. Use executing-plans for the inline workflow that the human user chose. Use the checkout that the human user authorized and apply using-git-worktrees only when isolation is needed; do not edit main/master without the human user's explicit consent.
 
-1. Establish the tasks and shared dependencies from the accepted plan. Track current task state and original-source locations.
+1. Establish the tasks and shared dependencies from the plan. Track current task state and original-source locations.
 2. Select a ready task and prepare its assignment using [references/implementer-prompt.md](references/implementer-prompt.md). The delegate retrieves the required task passages through the supplied source locations.
-3. Answer the delegate's questions from available authority and context.
-4. When implementation is ready, dispatch a delegate to review specification compliance using [references/spec-reviewer-prompt.md](references/spec-reviewer-prompt.md). That delegate checks the changed artifacts against the accepted requirements.
+3. Answer the delegate's questions from the authority that the human user's instructions grant and the available context.
+4. When implementation is ready, dispatch a delegate to review specification compliance using [references/spec-reviewer-prompt.md](references/spec-reviewer-prompt.md). That delegate checks the changed artifacts against the requirements that the human user accepted, as the assignment from the parent (the session or agent that started the delegate) states them with original-source locators separately from the parent's interpretation.
 5. Return valid specification defects to the delegate that implemented the task. After that delegate fixes them, dispatch a delegate to review the affected requirements again before code-quality review. Reject incorrect findings with evidence instead of implementing them blindly.
 6. After specification compliance, dispatch a delegate to review code quality using [references/code-quality-reviewer-prompt.md](references/code-quality-reviewer-prompt.md) and requesting-code-review.
 7. Have the delegate that implemented the task fix valid blocking quality findings, then dispatch a delegate to review the affected changes again. Mark the task complete only after each review whose outcome can change the next action or the judgment of an acceptance criterion has evidence.
@@ -43,7 +43,7 @@ A blocked delegate must not receive the same unchanged retry. Change the context
 - Do not start quality review before specification compliance.
 - Do not move to the next task while a valid blocking review defect remains.
 - Do not treat a delegate's review statement as proof without its inspected targets and evidence.
-- Do not broaden a delegate's write scope to resolve a conflict without checking authority.
+- Do not broaden a delegate's write scope to resolve a conflict without checking what the human user's instructions authorize.
 - Do not interpret delegate completion as authorization to commit, publish or message externally.
 
 ## Output and references

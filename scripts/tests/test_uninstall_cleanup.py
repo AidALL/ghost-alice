@@ -196,10 +196,10 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
         (self.publish_rollbacks / "rollback-task-router").mkdir(exist_ok=True)
         (self.publish_rollbacks / "rollback-task-router" / "SKILL.md").write_text(value, encoding="utf-8")
 
-    def _support(self, confirm=True):
+    def _support(self, apply_changes=True):
         args = cleanup.build_parser().parse_args([
             "--platform", "codex", "--install-state-manifest", str(self.manifest),
-            *(["--confirm"] if confirm else []),
+            *(["--apply"] if apply_changes else []),
         ])
         return {item["target_name"]: item for item in cleanup._support_artifact_items(args)}
 
@@ -257,7 +257,7 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
 
     def test_dry_run_keeps_recovery_material_and_creates_no_archive(self):
         before = {p: p.read_bytes() for p in self.ghost.rglob("*") if p.is_file()}
-        report = self._support(confirm=False)
+        report = self._support(apply_changes=False)
         self.assertEqual({p: p.read_bytes() for p in self.ghost.rglob("*") if p.is_file()}, before)
         self.assertFalse((self.ghost / "uninstall-backup").exists())
         self.assertEqual(report["pending-merges"]["action"], "would-quarantine-remove")
@@ -374,6 +374,14 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
 
 
 class UninstallCleanupTest(unittest.TestCase):
+    def test_apply_flag_and_legacy_alias_keep_the_preview_default(self):
+        parser = cleanup.build_parser()
+        base = ["--platform", "codex", "--install-state-manifest", "/isolated/manifest.json"]
+        self.assertFalse(parser.parse_args(base).apply_changes)
+        for flags in (["--apply"], ["--confirm"], ["--apply", "--confirm"]):
+            with self.subTest(flags=flags):
+                self.assertTrue(parser.parse_args([*base, *flags]).apply_changes)
+
     def test_claude_global_rule_cleanup_has_one_reported_owner(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -382,10 +390,10 @@ class UninstallCleanupTest(unittest.TestCase):
             claude_home.mkdir(parents=True)
             rule_file.write_text("# Ghost-ALICE Claude Bootstrap\n<!-- Ghost-ALICE managed block begin: claude-bootstrap -->\nmanaged\n<!-- Ghost-ALICE managed block end: claude-bootstrap -->\nuser rule\n", encoding="utf-8")
             with mock.patch.dict(os.environ, {"HOME": str(root), "CLAUDE_CONFIG_DIR": str(claude_home)}):
-                dry_run = cleanup._global_rule_item("claude", confirm=False)
+                dry_run = cleanup._global_rule_item("claude", apply_changes=False)
                 self.assertIsNotNone(dry_run)
                 self.assertEqual(dry_run["action"], "would-remove-global-rule")
-                confirmed = cleanup._global_rule_item("claude", confirm=True)
+                confirmed = cleanup._global_rule_item("claude", apply_changes=True)
             self.assertEqual(confirmed["action"], "removed-global-rule")
             self.assertEqual(rule_file.read_text(encoding="utf-8").strip(), "user rule")
 
@@ -397,7 +405,7 @@ class UninstallCleanupTest(unittest.TestCase):
         manifest: Path,
         report: Path,
         *,
-        confirm: bool = False,
+        apply_changes: bool = False,
         ) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env["HOME"] = str(root)
@@ -412,8 +420,8 @@ class UninstallCleanupTest(unittest.TestCase):
             "--report-path",
             str(report),
         ]
-        if confirm:
-            args.append("--confirm")
+        if apply_changes:
+            args.append("--apply")
         return subprocess.run(
             args,
             cwd=REPO_ROOT,
@@ -445,7 +453,7 @@ class UninstallCleanupTest(unittest.TestCase):
                     "codex",
                     "--install-state-manifest",
                     str(manifest),
-                    "--confirm",
+                    "--apply",
                 ],
                 cwd=REPO_ROOT,
                 env=env,
@@ -460,7 +468,7 @@ class UninstallCleanupTest(unittest.TestCase):
             temp_report_root = root / ".ghost-alice" / "uninstall-reports"
             self.assertIn(str(temp_report_root), result.stdout)
             self.assertNotIn(str(Path.home() / ".ghost-alice" / "uninstall-reports"), result.stdout)
-            reports = glob(str(temp_report_root / "codex-confirm-*.json"))
+            reports = glob(str(temp_report_root / "codex-apply-*.json"))
             self.assertEqual(len(reports), 1, msg=result.stdout)
 
     def test_the_ghost_alice_root_comes_from_the_installer_locations(self) -> None:
@@ -497,18 +505,18 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertTrue(old[2].exists())
             self.assertTrue(kept_copy.is_dir())
 
-    def test_dry_run_reports_managed_targets_without_deleting_user_owned_paths(self) -> None:
+    def test_dry_run_reports_managed_targets_without_deleting_unclaimed_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             managed = _write_managed_skill(root, "task-router")
-            user_owned = root / ".agents" / "skills" / "custom-local-skill"
-            user_owned.mkdir(parents=True)
-            (user_owned / "SKILL.md").write_text("# user owned\n", encoding="utf-8")
+            unclaimed_skill = root / ".agents" / "skills" / "custom-local-skill"
+            unclaimed_skill.mkdir(parents=True)
+            (unclaimed_skill / "SKILL.md").write_text("# user owned\n", encoding="utf-8")
             manifest = _write_manifest(
                 root,
                 [
                     {"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"},
-                    {"target_name": "custom-local-skill", "dest_path": user_owned.as_posix(), "install_mode": "copy"},
+                    {"target_name": "custom-local-skill", "dest_path": unclaimed_skill.as_posix(), "install_mode": "copy"},
                 ],
             )
             report = root / "uninstall-report.json"
@@ -517,36 +525,37 @@ class UninstallCleanupTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertTrue(managed.exists())
-            self.assertTrue(user_owned.exists())
+            self.assertTrue(unclaimed_skill.exists())
             data = json.loads(report.read_text(encoding="utf-8"))
             self.assertEqual(data["mode"], "dry-run")
             actions = {item["target_name"]: item["action"] for item in data["items"] if "target_name" in item}
             self.assertEqual(actions["task-router"], "would-remove")
             self.assertEqual(actions["custom-local-skill"], "manual-review")
 
-    def test_confirm_removes_only_ghost_alice_managed_targets_and_writes_report(self) -> None:
+    def test_apply_removes_only_ghost_alice_managed_targets_and_writes_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             managed = _write_managed_skill(root, "task-router")
-            user_owned = root / ".agents" / "skills" / "custom-local-skill"
-            user_owned.mkdir(parents=True)
-            (user_owned / "SKILL.md").write_text("# user owned\n", encoding="utf-8")
+            unclaimed_skill = root / ".agents" / "skills" / "custom-local-skill"
+            unclaimed_skill.mkdir(parents=True)
+            (unclaimed_skill / "SKILL.md").write_text("# user owned\n", encoding="utf-8")
             manifest = _write_manifest(
                 root,
                 [
                     {"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"},
-                    {"target_name": "custom-local-skill", "dest_path": user_owned.as_posix(), "install_mode": "copy"},
+                    {"target_name": "custom-local-skill", "dest_path": unclaimed_skill.as_posix(), "install_mode": "copy"},
                 ],
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertFalse(managed.exists())
-            self.assertTrue(user_owned.exists())
+            self.assertTrue(unclaimed_skill.exists())
             data = json.loads(report.read_text(encoding="utf-8"))
-            self.assertEqual(data["mode"], "confirm")
+            self.assertEqual(data["mode"], "apply")
+            self.assertEqual(data["schema_version"], 2)
             install_actions = {
                 item["target_name"]: item["action"]
                 for item in data["items"]
@@ -555,7 +564,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(install_actions["task-router"], "removed")
             self.assertEqual(install_actions["custom-local-skill"], "manual-review")
 
-    def test_confirm_unlinks_manifest_symlink_without_removing_source(self) -> None:
+    def test_apply_unlinks_manifest_symlink_without_removing_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             source = root / "repo" / "_shared"
@@ -570,13 +579,13 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertFalse(dest.exists() or dest.is_symlink())
             self.assertTrue(source.exists())
 
-    def test_confirm_refuses_symlink_inside_platform_root_when_target_is_outside_source_repo(self) -> None:
+    def test_apply_refuses_symlink_inside_platform_root_when_target_is_outside_source_repo(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             repo = root / "repo"
@@ -601,7 +610,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             _assert_directory_link_exists(self, dest, link_kind)
@@ -609,10 +618,10 @@ class UninstallCleanupTest(unittest.TestCase):
             data = json.loads(report.read_text(encoding="utf-8"))
             item = next(item for item in data["items"] if item.get("target_name") == "personal-link")
             self.assertEqual(item["action"], "manual-review")
-            self.assertEqual(item["ownership"], "user-owned")
+            self.assertEqual(item["ownership"], "unclaimed")
             self.assertEqual(item["reason"], f"{link_kind}-outside-repo")
 
-    def test_confirm_refuses_manifest_targets_outside_platform_roots(self) -> None:
+    def test_apply_refuses_manifest_targets_outside_platform_roots(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             source = root / "repo" / "_shared"
@@ -625,7 +634,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             _assert_directory_link_exists(self, outside, link_kind)
@@ -634,7 +643,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(item["action"], "manual-review")
             self.assertEqual(item["reason"], "outside-allowed-roots")
 
-    def test_confirm_removes_manifest_junction_without_removing_source_on_windows(self) -> None:
+    def test_apply_removes_manifest_junction_without_removing_source_on_windows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             source = root / "repo" / "_shared"
@@ -650,7 +659,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertFalse(dest.exists())
@@ -661,7 +670,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(item["ownership"], "ghost-alice-managed")
             self.assertEqual(item["reason"], "junction-to-repo")
 
-    def test_confirm_checks_report_path_before_removing_targets(self) -> None:
+    def test_apply_checks_report_path_before_removing_targets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             managed = _write_managed_skill(root, "task-router")
@@ -672,12 +681,12 @@ class UninstallCleanupTest(unittest.TestCase):
             report = root / "report-as-directory"
             report.mkdir()
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertNotEqual(result.returncode, 0)
             self.assertTrue(managed.exists())
 
-    def test_confirm_removes_trace_backed_support_artifacts(self) -> None:
+    def test_apply_removes_trace_backed_support_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             managed = _write_managed_skill(root, "task-router")
@@ -701,7 +710,7 @@ class UninstallCleanupTest(unittest.TestCase):
             (rollback_dir / "rollback-task-router").write_text("previous copy\n", encoding="utf-8")
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertFalse(managed.exists())
@@ -724,7 +733,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual((pending_copy / "manifest.json").read_text(), '{"entries": []}\n')
             self.assertEqual((rollback_copy / "rollback-task-router").read_text(), "previous copy\n")
 
-    def test_confirm_removes_addon_sidecars(self) -> None:
+    def test_apply_removes_addon_sidecars(self) -> None:
         # Full uninstall must clean the per-addon sidecar registry; otherwise orphan ~/.ghost-alice/addons/*.json survive a full uninstall.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -739,7 +748,7 @@ class UninstallCleanupTest(unittest.TestCase):
             (addons_dir / "noop.json").write_text('{"addon_id":"noop"}\n', encoding="utf-8")
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertFalse(addons_dir.exists())
@@ -747,7 +756,7 @@ class UninstallCleanupTest(unittest.TestCase):
             support = {item["target_name"]: item for item in data["items"] if item.get("kind") == "support-artifact"}
             self.assertEqual(support["addon-sidecars"]["action"], "removed")
 
-    def test_confirm_reports_hook_uninstall_before_target_removal(self) -> None:
+    def test_apply_reports_hook_uninstall_before_target_removal(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             managed = _write_managed_skill(root, "task-router")
@@ -757,7 +766,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             data = json.loads(report.read_text(encoding="utf-8"))
@@ -796,7 +805,7 @@ class UninstallCleanupTest(unittest.TestCase):
         data = json.loads(report.read_text(encoding="utf-8"))
         return next(item for item in data["items"] if item.get("kind") == "source-repo-hook-config")
 
-    def test_confirm_leaves_a_source_repo_hook_path_no_change_record_names(self) -> None:
+    def test_apply_leaves_a_source_repo_hook_path_no_change_record_names(self) -> None:
         # A value of `hooks` alone does not say this install wrote it: another installation or the user may have.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -809,7 +818,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertEqual(self._hook_path(git, repo), "hooks")
@@ -817,7 +826,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual((source_hook["action"], source_hook["reason"]),
                              ("unchanged", "source-repo-hook-path-unrecorded"))
 
-    def test_confirm_unsets_the_hook_path_the_install_wrote_over_no_value(self) -> None:
+    def test_apply_unsets_the_hook_path_the_install_wrote_over_no_value(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             git, repo = self._hook_path_repo(root, None)
@@ -835,13 +844,13 @@ class UninstallCleanupTest(unittest.TestCase):
             dry = self.run_cleanup(root, manifest, report)
             self.assertEqual(dry.returncode, 0, msg=dry.stderr + dry.stdout)
             self.assertEqual(self._source_hook_item(report)["action"], "would-remove-source-repo-hook-path")
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertIsNone(self._hook_path(git, repo))
             self.assertEqual(self._source_hook_item(report)["action"], "removed-source-repo-hook-path")
 
-    def test_confirm_restores_previous_source_repo_hook_path_from_change_record(self) -> None:
+    def test_apply_restores_previous_source_repo_hook_path_from_change_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             git, repo = self._hook_path_repo(root, None)
@@ -856,7 +865,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertEqual(self._hook_path(git, repo), "custom-hooks")
@@ -864,7 +873,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(source_hook["action"], "restored-source-repo-hook-path")
             self.assertEqual(source_hook["restored_to"], "custom-hooks")
 
-    def test_confirm_leaves_a_hook_path_that_changed_after_the_install(self) -> None:
+    def test_apply_leaves_a_hook_path_that_changed_after_the_install(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             git, repo = self._hook_path_repo(root, "user-hooks")
@@ -877,7 +886,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertEqual(self._hook_path(git, repo), "user-hooks")
@@ -901,7 +910,7 @@ class UninstallCleanupTest(unittest.TestCase):
                                                          encoding="utf-8")
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertEqual(self._hook_path(git, repo), hooks)
@@ -930,7 +939,7 @@ class UninstallCleanupTest(unittest.TestCase):
                         json.dumps({"schema_version": 1, "platform": "claude"}), encoding="utf-8")
                 report = root / "uninstall-report.json"
 
-                result = self.run_cleanup(root, manifest, report, confirm=True)
+                result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
                 self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
                 self.assertEqual(record.exists(), other_host)
@@ -938,7 +947,7 @@ class UninstallCleanupTest(unittest.TestCase):
                 item = next(item for item in data["items"] if item.get("target_name") == "source-repo-hook-path-record")
                 self.assertEqual(item["action"], "manual-review" if other_host else "removed")
 
-    def test_confirm_restores_codex_hooks_feature_flag_from_change_record(self) -> None:
+    def test_apply_restores_codex_hooks_feature_flag_from_change_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             codex_dir = root / ".codex"
@@ -961,7 +970,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             content = config_toml.read_text(encoding="utf-8")
@@ -972,7 +981,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(feature["action"], "restored-codex-hooks-feature-flag")
             self.assertEqual(feature["restored_to"], "false")
 
-    def test_codex_hooks_feature_flag_rollback_preserves_user_hooks(self) -> None:
+    def test_codex_hooks_feature_flag_rollback_preserves_unmanaged_hooks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             codex_dir = root / ".codex"
@@ -1012,7 +1021,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertIn("hooks = true", config_toml.read_text(encoding="utf-8"))
@@ -1021,7 +1030,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(feature["action"], "manual-review")
             self.assertEqual(feature["reason"], "codex-hooks-feature-required-by-non-ghost-hooks")
 
-    def test_confirm_restores_codex_project_trust_from_change_record(self) -> None:
+    def test_apply_restores_codex_project_trust_from_change_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             codex_dir = root / ".codex"
@@ -1050,7 +1059,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertIn('trust_level = "untrusted"', config_toml.read_text(encoding="utf-8"))
@@ -1059,7 +1068,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(trust["action"], "restored-codex-project-trust")
             self.assertEqual(trust["restored_to"], "untrusted")
 
-    def test_confirm_removes_codex_project_trust_when_change_record_was_missing(self) -> None:
+    def test_apply_removes_codex_project_trust_when_change_record_was_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             codex_dir = root / ".codex"
@@ -1086,7 +1095,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             content = config_toml.read_text(encoding="utf-8")
@@ -1097,7 +1106,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(trust["action"], "removed-codex-project-trust")
             self.assertEqual(trust["restored_to"], "missing")
 
-    def test_confirm_surfaces_codex_project_trust_when_before_state_was_other(self) -> None:
+    def test_apply_surfaces_codex_project_trust_when_before_state_was_other(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             codex_dir = root / ".codex"
@@ -1126,7 +1135,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertIn('trust_level = "trusted"', config_toml.read_text(encoding="utf-8"))
@@ -1137,7 +1146,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(trust["before_state"], "other")
             self.assertEqual(trust["after_state"], "trusted")
 
-    def test_confirm_defers_target_still_referenced_by_another_platform_manifest(self) -> None:
+    def test_apply_defers_target_still_referenced_by_another_platform_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             managed = _write_managed_skill(root, "task-router")
@@ -1166,7 +1175,7 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
-            result = self.run_cleanup(root, manifest, report, confirm=True)
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertTrue(managed.exists())
@@ -1210,7 +1219,7 @@ class UninstallCleanupTest(unittest.TestCase):
             [REMOVED_BASH_FLAG],
             [REMOVED_BASH_CONFIRM_FLAG],
             [REMOVED_BASH_REPORT_FLAG, "report.json"],
-            ["--confirm"],
+            ["--apply"],
         )
         for args in cases:
             with self.subTest(args=args):
@@ -1259,7 +1268,7 @@ class UninstallCleanupTest(unittest.TestCase):
                 # pwsh writes its own state under HOME; the installer wrote nothing.
                 self.assertEqual(installer_home_effects(Path(temp_dir)), [])
 
-    def test_bash_uninstall_without_skill_args_runs_full_confirm_cleanup(self) -> None:
+    def test_bash_uninstall_without_skill_args_runs_full_apply_cleanup(self) -> None:
         bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh uninstall test")
@@ -1290,10 +1299,10 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertFalse(managed.exists())
             self.assertFalse(manifest.exists())
-            reports = glob(str(root / ".ghost-alice" / "uninstall-reports" / "codex-confirm-*.json"))
+            reports = glob(str(root / ".ghost-alice" / "uninstall-reports" / "codex-apply-*.json"))
             self.assertEqual(len(reports), 1)
             data = json.loads(Path(reports[0]).read_text(encoding="utf-8"))
-            self.assertEqual(data["mode"], "confirm")
+            self.assertEqual(data["mode"], "apply")
 
     def test_bash_plain_uninstall_detects_install_state_manifest_platforms(self) -> None:
         bash = _find_test_bash()
@@ -1327,8 +1336,8 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertFalse(manifest.exists())
 
 
-class UninstallUserModifiedQuarantineTest(unittest.TestCase):
-    def _run(self, root, manifest, report, *, confirm=False, purge_modified=False):
+class UninstallExternalChangeQuarantineTest(unittest.TestCase):
+    def _run(self, root, manifest, report, *, apply_changes=False, purge_modified=False):
         env = os.environ.copy()
         env["HOME"] = str(root)
         env["USERPROFILE"] = str(root)
@@ -1342,8 +1351,8 @@ class UninstallUserModifiedQuarantineTest(unittest.TestCase):
             "--report-path",
             str(report),
         ]
-        if confirm:
-            args.append("--confirm")
+        if apply_changes:
+            args.append("--apply")
         if purge_modified:
             args.append("--purge-modified")
         return subprocess.run(
@@ -1356,9 +1365,9 @@ class UninstallUserModifiedQuarantineTest(unittest.TestCase):
             errors="replace",
         )
 
-    def _user_modified_skill(self, root: Path, name: str = "task-router") -> Path:
+    def _externally_changed_skill(self, root: Path, name: str = "task-router") -> Path:
         target = _write_managed_skill(root, name)
-        # Mutate content so the recorded hash no longer matches -> USER_MODIFIED_MANAGED.
+        # Mutate content so the recorded hash no longer matches -> EXTERNALLY_MODIFIED_MANAGED.
         (target / "SKILL.md").write_text("# task-router\nUSER EDIT KEEP ME\n", encoding="utf-8")
         return target
 
@@ -1366,29 +1375,29 @@ class UninstallUserModifiedQuarantineTest(unittest.TestCase):
         data = json.loads(report.read_text(encoding="utf-8"))
         return {i["target_name"]: i["action"] for i in data["items"] if "target_name" in i}
 
-    def test_confirm_quarantines_user_modified_before_remove(self) -> None:
+    def test_apply_quarantines_externally_changed_skill_before_remove(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            target = self._user_modified_skill(root)
+            target = self._externally_changed_skill(root)
             manifest = _write_manifest(
                 root,
                 [{"target_name": "task-router", "dest_path": target.as_posix(), "install_mode": "copy"}],
             )
             report = root / "report.json"
 
-            result = self._run(root, manifest, report, confirm=True)
+            result = self._run(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             backup = root / ".ghost-alice" / "uninstall-backup" / "codex" / "task-router" / "SKILL.md"
-            self.assertTrue(backup.exists(), "user-modified skill must be backed up before removal")
+            self.assertTrue(backup.exists(), "skill with an external change must be backed up before removal")
             self.assertIn("USER EDIT KEEP ME", backup.read_text(encoding="utf-8"))
             self.assertFalse(target.exists(), "footprint removed after backup")
             self.assertEqual(self._actions(report)["task-router"], "quarantined-removed")
 
-    def test_dry_run_user_modified_would_quarantine(self) -> None:
+    def test_dry_run_externally_changed_skill_would_quarantine(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            target = self._user_modified_skill(root)
+            target = self._externally_changed_skill(root)
             manifest = _write_manifest(
                 root,
                 [{"target_name": "task-router", "dest_path": target.as_posix(), "install_mode": "copy"}],
@@ -1401,17 +1410,17 @@ class UninstallUserModifiedQuarantineTest(unittest.TestCase):
             self.assertTrue(target.exists())
             self.assertEqual(self._actions(report)["task-router"], "would-quarantine-remove")
 
-    def test_purge_modified_removes_user_modified_without_backup(self) -> None:
+    def test_purge_modified_removes_externally_changed_skill_without_backup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            target = self._user_modified_skill(root)
+            target = self._externally_changed_skill(root)
             manifest = _write_manifest(
                 root,
                 [{"target_name": "task-router", "dest_path": target.as_posix(), "install_mode": "copy"}],
             )
             report = root / "report.json"
 
-            result = self._run(root, manifest, report, confirm=True, purge_modified=True)
+            result = self._run(root, manifest, report, apply_changes=True, purge_modified=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertFalse(target.exists())

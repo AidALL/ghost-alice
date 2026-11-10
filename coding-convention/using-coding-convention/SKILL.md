@@ -11,7 +11,7 @@ The response model starting development uses this entrypoint to select the appli
 
 ## Priority and loading
 
-User instructions and project rules govern the task; coding-convention skills govern the implementation procedure within that authority. Load or validly reuse the skill selected for the next development action. When uncertain applicability would change that action, read the body and decide; otherwise continue with the established workflow.
+The common contract defines instruction precedence. Coding-convention skills govern the implementation procedure within what the human user's instructions authorize and the constraints that instruction files add. Load or validly reuse the skill selected for the next development action. When uncertain applicability would change that action, read the body and decide; otherwise continue with the established workflow.
 
 Use the host's actual skill mechanism, map each operation to the host's exposed tool schemas, and do not invent unavailable tools.
 
@@ -21,7 +21,7 @@ For Codex operations, use [references/codex-tools.md](references/codex-tools.md)
 
 After selecting development work under task-router, the response model uses the table below to choose its workflow. The common contract's Session Intent and Work Selection sections define the earlier interpretation and the direct-answer rule.
 
-Before the next file read, command, edit, plan, review or development-status claim, select the applicable workflow below. Reuse accepted design and authorization. If evidence contradicts the plan, revise the implicated assumption or task within that authorization. Follow boundary-contract to distinguish an implementation change within existing authority from a change requiring the user’s decision.
+Before the next file read, command, edit, plan, review or development-status claim, select the applicable workflow below. Reuse the design that the human user accepted and the authority that the human user gave. If evidence contradicts the plan, revise the implicated assumption or task within what the human user's instructions authorize. Follow boundary-contract to distinguish an implementation change within what the human user's instructions already authorize from a change requiring the human user's decision.
 
 | Condition | Workflow |
 | --- | --- |
@@ -30,8 +30,8 @@ Before the next file read, command, edit, plan, review or development-status cla
 | A failure needs a cause and a correction | systematic-debugging |
 | Known behavior can be exercised by a meaningful test | test-driven-development |
 | Independent tasks can run concurrently | dispatching-parallel-agents |
-| An accepted plan will run through task-specific delegates | subagent-driven-development |
-| An accepted plan will run inline | executing-plans |
+| A plan that the response model saved under writing-plans will run through task-specific delegates | subagent-driven-development |
+| A plan that the response model saved under writing-plans will run inline | executing-plans |
 | The task needs an isolated checkout | using-git-worktrees |
 | Implementation needs review | requesting-code-review |
 | A reviewer proposes changes | receiving-code-review |
@@ -50,5 +50,5 @@ For repair attempts, follow systematic-debugging's [Incident accounting and cont
 ## Failure modes
 
 - A small change does not excuse skipping an applicable required workflow.
-- An agent's plan cannot weaken the user's acceptance criteria.
+- An agent's plan cannot weaken the acceptance criteria that the human user set.
 - Repeating a check requires the evidence trigger defined by verification-before-completion.

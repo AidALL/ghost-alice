@@ -111,7 +111,7 @@ class TestManifestIO(unittest.TestCase):
 
     @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
     def test_a_lock_the_file_system_refuses_raises_and_writes_nothing(self):
-        # An entry points at a backed-up user edit, so two writers without the lock could lose it without a trace.
+        # An entry points at a backed-up external change, so two writers without the lock could lose it without a trace.
         with mock.patch.object(file_lock.fcntl, "flock", side_effect=OSError(errno.ENOLCK, "No locks available")), \
                 self.assertRaises(OSError):
             append_entry(self.path, {"id": "late", "decided": False})

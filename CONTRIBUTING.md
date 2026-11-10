@@ -132,7 +132,7 @@ Fill in the [pull request template](./.github/PULL_REQUEST_TEMPLATE.md) for each
 
 Record what changed and how only in commit messages. Pull request descriptions, release descriptions and active documentation, including the Wiki and GitHub Pages, state current behavior, verification and limitations without a changelog, before/after comparison or upgrade narrative.
 
-For governance behavior changes, include the relevant gate or hook surface, such as `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, or `SessionStart`.
+For governance behavior changes, include the relevant gate or hook surface, such as the host's prompt-submit event (`UserPromptSubmit`), `PreToolUse`, `PostToolUse`, `Stop`, or `SessionStart`. The prompt-submit event name does not show who sent the prompt.
 
 Keep pull requests focused. Separate unrelated documentation, installer, hook, and skill behavior changes unless the coupling is part of the problem being fixed.
 
@@ -144,7 +144,7 @@ Do not include:
 - `~/.ghost-alice/secrets.env` or real secret values from any source
 - Local install logs, `.tmp/`, pending merge queues, or user-specific runtime state
 - Customer, grant, company, or tenant data that is not intentionally public
-- Private addon skills or private design overlays unless they are explicitly approved for release
+- Private addon skills or private design overlays unless a human project maintainer explicitly approved them for release
 
 Document public examples with placeholders. Avoid real usernames, machine paths, and organization-private URLs unless they are already public project URLs.
 

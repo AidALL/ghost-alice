@@ -204,8 +204,8 @@ class StopResponseTextTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'rollout.jsonl'
             path.write_text(''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in rows), encoding='utf-8')
-            native_input = dict(session_id='current', turn_id='turn', transcript_path=str(path))
-            self.assertEqual(stop_response_text(native_input), text)
+            hook_payload = dict(session_id='current', turn_id='turn', transcript_path=str(path))
+            self.assertEqual(stop_response_text(hook_payload), text)
 
 
 if __name__ == '__main__':

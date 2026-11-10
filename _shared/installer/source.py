@@ -130,7 +130,7 @@ def check_source_health(*, skip: bool) -> bool:
             elif behind > 0:
                 report.error("Source branch is behind its upstream; refusing to install from stale source.")
                 report.error("Run git fetch origin, inspect git status, then fast-forward or otherwise reconcile this checkout "
-                             "before installing. If this local source is intentional, rerun with --skip-source-health.")
+                             "before installing. If the human user decided to install from this local source, rerun with --skip-source-health.")
                 report.error(f"To preserve source-local changes while updating, run {report.install_command()} --update-source.")
                 report.error("If an old checkout is already blocked by local changes during git pull, use the bootstrap "
                              "one-command update in docs/getting-started/troubleshooting.md.")
@@ -142,7 +142,7 @@ def check_source_health(*, skip: bool) -> bool:
     if untracked:
         report.warn("Source tree has untracked files; continuing because tracked files are clean.")
     if tracked_dirty:
-        report.warn("Source tree has tracked local changes; continuing. Installed target user edits remain protected "
+        report.warn("Source tree has tracked local changes; continuing. External changes to installed targets remain protected "
                     "by pending-merges backup and manifest checks.")
     return True
 
@@ -202,7 +202,7 @@ def check_install_source(ctx: "Context", *, can_adopt: bool = True, match: Sourc
     longer exists (a fresh clone at another path). Otherwise the installer names both folders; at a terminal
     it asks whether this checkout replaces the install source (no by default), elsewhere it stops with the
     command to run. A replacement is kept in the options, so the auto mode's children carry it instead of
-    judging again; the answer is kept for `recheck_install_source`. The command's first publish records this
+    judging again; the installer's source comparison result is kept for `recheck_install_source`. The command's first publish records this
     checkout as the source.
     """
     match = match_install_source() if match is None else match

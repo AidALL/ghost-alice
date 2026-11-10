@@ -110,7 +110,7 @@ class Command(HelpRow):
     adopts_source: bool = False
 
 
-COMMON, REMOVAL, ADVANCED = "Common commands", "Removal commands", "Advanced/operator commands"
+COMMON, REMOVAL, ADVANCED = "Common commands", "Removal commands", "Advanced commands"
 HELP_SECTIONS = (COMMON, REMOVAL, ADVANCED)
 # The usage examples: arguments after the install command, and the comment.
 HELP_USAGE = (
@@ -136,7 +136,7 @@ COMMAND_LINE: tuple[HelpRow, ...] = (
     HelpRow(COMMON, "--agent-visibility strict|dynamic|minimal", "Alias for --visibility"),
     Command(COMMON, "--doctor", "Run install diagnostics", names=("--doctor",),
             run=lambda ctx: diagnostics.run_doctor(ctx)),
-    Command(COMMON, "--repair", "Re-provision missing managed targets (never overwrites user-owned slots)",
+    Command(COMMON, "--repair", "Re-provision missing managed targets (never overwrites an occupied slot that is not a clean managed target)",
             names=("--repair",), run=lambda ctx: lifecycle.run_repair(ctx), lock="repair", checks_source=True),
     HelpRow(COMMON, "--verbose, -v", "Show per-target install details"),
     UNINSTALL,
@@ -528,8 +528,8 @@ def run_install(ctx: Context) -> int:
     else:
         report.ok("[5/5] Verification: install state recorded")
         report.emit("")
-        report.info("[Ghost-ALICE] User: when local changes are detected during the agent tool update, "
-                    "they are backed up instead of overwritten. Next time you open Claude/Codex, please ask the line below.")
+        report.info("[Ghost-ALICE] For the human user: the installer backs up external changes it finds in installed targets during updates; "
+                    "its records do not hold those changes or identify their writer. To review the backups next time you open Claude/Codex, ask the line below.")
         report.emit("")
         report.emit("    Please review backed-up changes.")
         report.emit("")

@@ -23,7 +23,7 @@ class SkillGateContractTest(unittest.TestCase):
             self.assertEqual(boundary_issues, [])
 
     def test_boundary_contract_rejects_missing_authority_and_objective_protection(self) -> None:
-        for obligation in ("human-owned", "self-declared", "objective"):
+        for obligation in ("a boundary the human user set", "self-declared", "objective"):
             with self.subTest(obligation=obligation), tempfile.TemporaryDirectory() as tmpdir:
                 root = Path(tmpdir)
                 self._write_valid_fixture(root)
@@ -53,7 +53,7 @@ class SkillGateContractTest(unittest.TestCase):
         }))
         additions = {
             "platforms/common-governance.md": "## Session Intent\n`user-said: ` `interpreted-as: `\n## Work Selection\n`task-router` decides between a direct answer and work.\n## io-trace Transparency Rule\n`intent` `why` `stage: before-tool` `contract-ref` `contract-check`\n",
-            "session-intent-analyzer/references/ledger-schema.md": "## Core Response Projection\nresponse-route.v1 record_response_route\n",
+            "session-intent-analyzer/references/ledger-schema.md": "## Core Response Projection\nresponse-route.v2 record_response_route\n",
             "coding-convention/using-coding-convention/SKILL.md": "[Instruction Body Reuse](../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse)\n",
             "coding-convention/verification-before-completion/SKILL.md": "session-intent-analyzer's `references/ledger-schema.md`, section Core Response Projection\n[Deliver](references/response-review.md#deliver)\n",
         }
@@ -131,7 +131,7 @@ class SkillGateContractTest(unittest.TestCase):
     def test_owner_contract_fields_must_remain_in_the_owned_section(self) -> None:
         cases = (
             ("platforms/common-governance.md", ("why", "contract-ref", "contract-check")),
-            ("session-intent-analyzer/references/ledger-schema.md", ("record_response_route", "response-route.v1")),
+            ("session-intent-analyzer/references/ledger-schema.md", ("record_response_route", "response-route.v2")),
             ("coding-convention/verification-before-completion/references/verify-or-reuse.md", ("session_check_cache.py", "--body-retained")),
             ("coding-convention/verification-before-completion/references/response-review.md", ("recording-only error", "Do not invoke Stop")),
         )
@@ -454,8 +454,8 @@ class SkillGateContractTest(unittest.TestCase):
     def test_route_surface_carries_only_controls_and_reason(self) -> None:
         router = (REPO_ROOT / "task-router/SKILL.md").read_text()
         schema = (REPO_ROOT / "session-intent-analyzer/references/ledger-schema.md").read_text()
-        self.assertIn("the user's objective", router)
-        self.assertIn('Do not replace a requested repair with a report', router)
+        self.assertIn("the human user's objective", router)
+        self.assertIn('Do not replace a repair that the human user requested with a report', router)
         self.assertIn('ledger-schema.md#core-response-projection', router)
         for field in ('response_mode', 'boundary_contract', '"reason"'):
             self.assertIn(field, schema)
@@ -474,7 +474,7 @@ class SkillGateContractTest(unittest.TestCase):
         self.assertIn("semantic", proof)
         self.assertIn("identity", proof)
         self.assertIn("Hash and provenance evidence establishes identity, drift and merge safety", merge)
-        self.assertIn("evidence from the current contract and behavior decides which meaning to keep", merge)
+        self.assertIn("evidence from the current contract and behavior supports the response model's proposal of which meaning to keep", merge)
 
     def test_korean_session_gate_matrix_points_to_the_english_owners(self) -> None:
         for relative in ("docs/ko/policies/session-gate-matrix.md",):

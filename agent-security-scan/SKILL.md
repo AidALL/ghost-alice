@@ -1,6 +1,6 @@
 ---
 name: agent-security-scan
-description: "Scans the host's settings, hooks, skills, Model Context Protocol config and credential files for exposed secrets, remote fetches and side-effecting shell commands, after any of them changes or governance rules from another project are adopted, or when the user asks to check them."
+description: "Scans the host's settings, hooks, skills, Model Context Protocol config and credential files for exposed secrets, remote fetches and side-effecting shell commands, after any of them changes or governance rules from another project are adopted, or when the human user asks to check them."
 compatibility:
   - "Python 3.11+ standard library"
 ---
@@ -11,7 +11,7 @@ The response model uses this skill for a report-only static review of host setti
 
 ## Scope and trigger
 
-Apply the scan after relevant hooks, skills, server configuration or credential files change, after governance rules from another project are adopted, or when the user asks to inspect suspicious commands. The response model selects the authorized repository and home targets before running the scanner; the table below does not expand the user's scope.
+Apply the scan after relevant hooks, skills, server configuration or credential files change, after governance rules from another project are adopted, or when the human user asks to inspect suspicious commands. The response model selects the repository and home targets that the human user authorized before running the scanner; the table below does not expand the human user's scope.
 
 | Surface | Candidate paths |
 | --- | --- |
@@ -22,10 +22,10 @@ Apply the scan after relevant hooks, skills, server configuration or credential 
 
 ## Procedure
 
-1. The response model establishes the repository root and home candidates from authorized context.
-2. When both the repository and home candidate sets are authorized, it invokes `python3 <loaded-skill-directory>/scripts/scan_agent_security_surface.py --root <absolute-repo> --home <absolute-home> --json` through the host's shell tool. The bundled command scans both sets and has no path allowlist. For a narrower request, read only the named allowed files through the host's file tools and report that limited coverage; do not broaden the request or invent an empty home path to imitate a scope flag.
+1. The response model establishes the repository root and home candidates from the targets that the human user authorized.
+2. When the human user authorized both the repository and home candidate sets, the response model invokes `python3 <loaded-skill-directory>/scripts/scan_agent_security_surface.py --root <absolute-repo> --home <absolute-home> --json` through the host's shell tool. The bundled command scans both sets and has no path allowlist. When the human user requests a narrower scan, the response model reads only the named allowed files through the host's file tools and reports that limited coverage; it does not broaden what the human user requested or invent an empty home path to imitate a scope flag.
 3. It reads the exit status and the returned JSON `root`, `home`, `finding_count` and `findings`, then each finding's severity, rule and mitigation. The scanner lists skills under the root by matching immediate `*/SKILL.md`; do not claim from that command that it covers skills nested in a family folder. When an observation is unavailable, that coverage stays unresolved.
-4. It reports `mitigation=reject`, critical and high findings as blockers requiring a separately authorized fix workflow. Scanner output alone does not authorize deletion, edits or disabling servers.
+4. It reports `mitigation=reject`, critical and high findings as blockers requiring a fix workflow that the human user separately authorized. Scanner output alone does not authorize deletion, edits or disabling servers.
 
 ## Output
 

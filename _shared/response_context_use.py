@@ -1,8 +1,9 @@
 """Bind an explicit source lookup use to its native response scope.
 
-The model declares read purpose during its needed lookup. Core stores identities,
-never another source body. A separate explicit post-use judgment determines keep,
-replace or omit for the next generation; native answers add only optional locators.
+The response model declares read purpose during its needed lookup. Core code stores
+identities, never another source body. The response model's separate explicit
+post-use judgment determines keep, replace or omit for the next generation;
+native answers add only optional locators.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ import completion_assessment as core_api
 from claude_context_adapter import (NativeContextRejected, SignedPrefixSelectionUnsupported, claude_home,
                                     require_rewriteable_prefix)
 import ledger_access
-from native_transcript import codex_home, codex_transcript_path, is_actual_user_prompt
+from native_transcript import codex_home, codex_transcript_path, is_user_role_prompt
 from source_reference import SourceReferenceError, json_digest, matches_input, reference_source, verify_source
 from text_lines import committed_records
 
@@ -39,7 +40,7 @@ def _clean(value):
 @dataclass(frozen=True)
 class _Native:
     records: dict
-    humans: tuple
+    user_role_prompts: tuple
     calls: tuple
     results: tuple
     finals: tuple
@@ -49,7 +50,7 @@ class _Native:
 def _native(path, platform, session):
     rows = committed_records(Path(path).read_bytes())
     _require(all(isinstance(row, dict) for row in rows.values()), 'Native JSONL objects are required')
-    calls, results, humans, finals = [], [], [], []
+    calls, results, user_role_prompts, finals = [], [], [], []
     if platform == 'codex':
         owners = [r.get('payload', {}).get('id') for r in rows.values() if r.get('type') == 'session_meta']
         _require(owners and all(owner == session for owner in owners), 'Native transcript owner differs')
@@ -64,7 +65,7 @@ def _native(path, platform, session):
                 metadata = raw.get('internal_chat_message_metadata_passthrough')
                 kinds = metadata.get('content_item_kinds') if isinstance(metadata, dict) else None
                 if kinds is None or (isinstance(kinds, list) and 'user.text' in kinds):
-                    humans.append(n)
+                    user_role_prompts.append(n)
             if typ in ('custom_tool_call', 'function_call'):
                 calls.append((n, 0, item.get('call_id'), item))
             if typ in ('custom_tool_call_output', 'function_call_output'):
@@ -84,8 +85,8 @@ def _native(path, platform, session):
         records = adapter.native_records_from_rows(rows)
         for n, item in records.items():
             row = owned[n]
-            if is_actual_user_prompt(row):
-                humans.append(n)
+            if is_user_role_prompt(row):
+                user_role_prompts.append(n)
             for index, block in enumerate(item['content']):
                 if block.get('type') == 'tool_use' and item['role'] == 'assistant':
                     calls.append((n, index, block.get('id'), block))
@@ -96,19 +97,19 @@ def _native(path, platform, session):
                 and not any(b.get('type') == 'tool_use' for b in item['content'])
                 and _text_present(item['content'], 'text')):
                 # With no explicit end_turn, only the last assistant message
-                # before the next actual human can establish supported closure.
+                # before the next user-role prompt can establish supported closure.
                 if reason == 'end_turn':
                     finals.append(n)
-        # The next human may appear after this candidate in the ordered scan.
+        # The next user-role prompt may appear after this candidate in the ordered scan.
         for n, item in records.items():
             if (item['role'] == 'assistant' and owned[n]['message'].get('stop_reason') is None
                 and not any(b.get('type') == 'tool_use' for b in item['content'])
                 and _text_present(item['content'], 'text')):
                 later = [k for k, v in records.items() if k > n and
-                         (v['role'] == 'assistant' or k in humans)]
-                if later and later[0] in humans and n not in finals:
+                         (v['role'] == 'assistant' or k in user_role_prompts)]
+                if later and later[0] in user_role_prompts and n not in finals:
                     finals.append(n)
-    return _Native(records, tuple(humans), tuple(calls), tuple(results), tuple(sorted(finals)), str(Path(path).resolve()))
+    return _Native(records, tuple(user_role_prompts), tuple(calls), tuple(results), tuple(sorted(finals)), str(Path(path).resolve()))
 
 
 def _text_present(content, block_type):
@@ -124,7 +125,7 @@ def _path(home, platform, session):
     return adapter.native_path(home, session)
 
 
-def _human_text(item, platform):
+def _input_message_text(item, platform):
     if platform == 'codex':
         from context_lifecycle import _input_text
         return _input_text(item)
@@ -137,9 +138,9 @@ def _binding(source, event=None, *, current=False, transaction=None):
     return context_input_binding(source, event, current=current, transaction=transaction)
 
 
-def _bound_human(native, binding, platform):
-    _require(bool(native.humans), 'Current native human input is unavailable')
-    record = native.humans[-1]
+def _bound_input_row(native, binding, platform):
+    _require(bool(native.user_role_prompts), 'The transcript row for the bound input is unavailable')
+    record = native.user_role_prompts[-1]
     item = native.records[record]
     if binding.get('context_only'):
         _require(platform == 'claude' and native.locator == binding.get('native_transcript_path')
@@ -147,10 +148,10 @@ def _bound_human(native, binding, platform):
             'Current SDK context must use its exact original native row and full message')
     if platform == 'claude':
         import claude_context_adapter as adapter
-        _require(adapter.human_input(native.records, binding) == item, 'Native human identity differs')
+        _require(adapter.bound_input_message(native.records, binding) == item, 'The bound input message identity differs')
     else:
-        text = _human_text(item, platform)
-        _require(matches_input(text, binding), 'Native human differs from canonical intake')
+        text = _input_message_text(item, platform)
+        _require(matches_input(text, binding), 'The transcript row differs from the current input that Core code recorded')
     return record, item
 
 
@@ -185,8 +186,8 @@ def record_use(source, expected_input_event_id, observation, *, purpose, call_id
     with core._transaction(root) as connection:
         binding = _binding(source, expected_input_event_id, current=True, transaction=connection)
         native = _native(path, platform, session)
-        user_record, user = _bound_human(native, binding, platform)
-        pending = [call for call in native.calls if call[0] > user_record
+        input_record, input_message = _bound_input_row(native, binding, platform)
+        pending = [call for call in native.calls if call[0] > input_record
                    and isinstance(call[2], str) and bool(call[2])
                    and not any(result[2] == call[2] for result in native.results)]
         if call_id is not None:
@@ -197,7 +198,7 @@ def record_use(source, expected_input_event_id, observation, *, purpose, call_id
         _require(sum(c[2] == identifier for c in native.calls) == 1,
                  'The native pending call identity is replayed or ambiguous')
         payload = dict(schema_version='response-context-use.v1',
-            input_binding=binding, native_input_record=user_record, native_input_digest=json_digest(user),
+            input_binding=binding, native_input_record=input_record, native_input_digest=json_digest(input_message),
             original=reference_source(path, appendable=True), call_record=call_record,
             call_block_index=call_index, call_id=identifier, call_digest=json_digest(call),
             observation_digest=json_digest(observation), source=coordinates, purpose=purpose)
@@ -260,7 +261,7 @@ def record_use_judgments(source, expected_input_event_id, judgments, *, transact
     with core._transaction(root, transaction=transaction) as connection:
         binding = _binding(source, expected_input_event_id, current=True, transaction=connection)
         native = _native(path, platform, session)
-        user_record, user = _bound_human(native, binding, platform)
+        input_record, input_message = _bound_input_row(native, binding, platform)
         validated = []
         for judgment in judgments:
             payload = _use_payload(connection, judgment['use_reference'], owner)
@@ -269,16 +270,16 @@ def record_use_judgments(source, expected_input_event_id, judgments, *, transact
             _require(payload['input_binding'] == original_binding and payload['original']['locator'] == path,
                      'The read-use input or original native owner differs')
             verify_source(payload['original'])
-            _require(payload['native_input_record'] in native.humans
+            _require(payload['native_input_record'] in native.user_role_prompts
                 and json_digest(native.records[payload['native_input_record']]) == payload['native_input_digest'],
-                'The original read-use human input differs')
+                'The original input that Core code bound to the read use differs')
             pair = _native_pair(native, payload, platform)
             _require(pair is not None, 'A post-use judgment requires one actual paired native result')
             value = pair[1][3]['output'] if platform == 'codex' else pair[1][3].get('content')
             _, count, occurrences = _output(value, platform, judgment['use_reference'], payload['observation_digest'], {})
             _require(count == occurrences == 1, 'A post-use judgment requires one exact read producer result')
             validated.append(dict(schema_version='response-use-judgment.v1', **judgment,
-                input_binding=binding, native_input_record=user_record, native_input_digest=json_digest(user),
+                input_binding=binding, native_input_record=input_record, native_input_digest=json_digest(input_message),
                 original=reference_source(path, appendable=True), call_record=payload['call_record'],
                 call_digest=payload['call_digest'], native_result_record=pair[1][0],
                 native_result_block_index=pair[1][1], native_result_digest=json_digest(native.records[pair[1][0]]),
@@ -359,20 +360,20 @@ def _output(value, platform, reference, digest, replacement, *, marker='use_refe
     return (result if count else value), count, occurrences
 
 
-def _wire_human(request, platform, binding, original):
+def _wire_input_index(request, platform, binding, original):
     if platform == 'codex':
-        from context_lifecycle import _input_item
-        item = _input_item(request['input'])
-        _require(isinstance(item, dict), 'Current wire human input is unavailable')
-        text = _human_text(item, platform)
+        from context_lifecycle import _last_user_role_message
+        item = _last_user_role_message(request['input'])
+        _require(isinstance(item, dict), 'The wire message for the bound input is unavailable')
+        text = _input_message_text(item, platform)
         _require(matches_input(text, binding) and json_digest(_clean(item)) == json_digest(original),
-            'Current wire human input differs from canonical native input')
+            'The wire message differs from the current input that Core code recorded')
         return max(n for n, value in enumerate(request['input']) if value is item)
     else:
         import claude_context_adapter as adapter
-        item = adapter.human_input(request['messages'], binding)
+        item = adapter.bound_input_message(request['messages'], binding)
         _require(adapter.semantic_fingerprint(item) == adapter.semantic_fingerprint(original),
-                 'Current Claude wire human differs from canonical native input')
+                 'The Claude wire message differs from the bound input')
         return max(n for n, value in enumerate(request['messages']) if isinstance(value, dict)
             and value.get('role') == 'user' and adapter.semantic_fingerprint(
                 adapter._normalize_message('user', value.get('content'))) == adapter.semantic_fingerprint(item))
@@ -381,7 +382,7 @@ def _wire_human(request, platform, binding, original):
 def _answer_record(native, payload):
     """Locate a supported original answer without gating the model's judgment."""
     start = payload['native_input_record']
-    later = [record for record in native.humans if record > start]
+    later = [record for record in native.user_role_prompts if record > start]
     end = later[0] if later else max(native.records, default=start) + 1
     answers = [record for record in native.finals if max(start, payload['native_result_record']) < record < end]
     return answers[-1] if answers else None
@@ -492,10 +493,10 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
             _require(path is not None, 'The original native transcript is unavailable')
             native = _native(path, platform, session)
             if _retained_boundary is None:
-                human_record, human = _bound_human(native, binding, platform)
-                human_index = _wire_human(request, platform, binding, human)
+                input_record, input_item = _bound_input_row(native, binding, platform)
+                input_index = _wire_input_index(request, platform, binding, input_item)
             else:
-                human_record, human_index = _retained_boundary
+                input_record, input_index = _retained_boundary
             eligible = []
             for reference, raw in rows:
                 if reference not in current_judgments:
@@ -512,7 +513,7 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
                     verify_source(payload['original'])
                 except SourceReferenceError:
                     continue
-                if (payload['native_input_record'] not in native.humans
+                if (payload['native_input_record'] not in native.user_role_prompts
                     or json_digest(native.records[payload['native_input_record']]) != payload['native_input_digest']):
                     continue
                 judgment_reference, judgment_raw = current_judgments[reference]
@@ -530,7 +531,7 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
                     verify_source(judgment['original'])
                 except SourceReferenceError:
                     continue
-                if (judgment['native_input_record'] not in native.humans
+                if (judgment['native_input_record'] not in native.user_role_prompts
                     or json_digest(native.records[judgment['native_input_record']]) != judgment['native_input_digest']):
                     continue
                 pair = _native_pair(native, payload, platform)
@@ -542,9 +543,9 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
                     or payload['call_digest'] != judgment['call_digest']):
                     continue
                 wire = _wire_pair(request, pair, platform)
-                if (wire is None or wire[0] == human_index or wire[3] == human_index
-                    or (pair[1][0] > human_record) != (wire[0] > human_index)
-                    or (pair[0][0] > human_record) != (wire[3] > human_index)):
+                if (wire is None or wire[0] == input_index or wire[3] == input_index
+                    or (pair[1][0] > input_record) != (wire[0] > input_index)
+                    or (pair[0][0] > input_record) != (wire[3] > input_index)):
                     continue
                 answer_record = _answer_record(native, judgment)
                 answer = None if answer_record is None else dict(locator=f'{path}#record={answer_record}',

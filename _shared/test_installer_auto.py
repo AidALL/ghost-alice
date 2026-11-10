@@ -113,7 +113,7 @@ class ChildCommandTests(AutoCase):
                            addon_sources=["/a", "/b"], addon_tags=["v1"], args=["task-router"], adopt_source=True)
         ctx.addon_sources = ["/cache/a", "/cache/b"]
         ctx.addon_sources_prepared = True
-        # The parent checked the install source once; a child carries its decision instead of asking again.
+        # The child carries the source replacement the parent installer performs after its --adopt-source, a yes typed at its terminal question (sender unchecked), or a missing recorded checkout.
         self.assertEqual(auto.child_command(ctx, "codex"),
                          [sys.executable, self.cli, "--platform", "codex", "--skip-source-health", "--adopt-source",
                           "--visibility", "strict", "--verbose", "--addon-source", "/cache/a", "--addon-source",

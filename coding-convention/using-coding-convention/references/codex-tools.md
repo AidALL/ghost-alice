@@ -33,6 +33,6 @@ git branch --show-current
 git worktree list
 ```
 
-Distinct Git/common directories identify a linked worktree. An empty branch name identifies detached HEAD; it does not itself prohibit branch creation, commits or pushes. Actual user instructions, repository policy and host permissions govern those actions.
+Distinct Git/common directories identify a linked worktree. An empty branch name identifies detached HEAD; it does not itself prohibit branch creation, commits or pushes. The human user's instructions authorize those actions, repository policy adds constraints, and the host enforces its permission rules; the common contract defines instruction precedence.
 
-Reuse a suitable existing checkout. When the host exposes managed-worktree tools, follow their create, attach and archive contracts. Do not remove an active checkout or infer a cleanup action from a successful PR alone. For integration, follow `finishing-a-development-branch` and the user's existing authorization; use the host's controls only when the supported workflow requires them.
+Reuse a suitable existing checkout. When the host exposes managed-worktree tools, follow their create, attach and archive contracts. Do not remove an active checkout or infer a cleanup action from a successful PR alone. For integration, follow `finishing-a-development-branch` and the human user's existing authorization; use the host's controls only when the supported workflow requires them.

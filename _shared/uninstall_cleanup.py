@@ -18,7 +18,7 @@ from typing import Any, Sequence
 from installer_assets import (
     OWNERSHIP_ABSENT,
     OWNERSHIP_GHOST_ALICE_MANAGED,
-    OWNERSHIP_USER_MODIFIED_MANAGED,
+    OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED,
     classify_skill_root,
 )
 from global_rule_blocks import remove_claude_bootstrap, remove_codex_rule_file
@@ -47,8 +47,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _default_report_path(platform: str, *, confirm: bool) -> Path:
-    mode = "confirm" if confirm else "dry-run"
+def _default_report_path(platform: str, *, apply_changes: bool) -> Path:
+    mode = "apply" if apply_changes else "dry-run"
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return _ghost_alice_root() / "uninstall-reports" / f"{platform}-{mode}-{stamp}.json"
 
@@ -159,7 +159,7 @@ def _platforms_referencing_target(path: Path, *, current_manifest: Path, current
     return platforms
 
 
-def _source_repo_hook_item_from_change(change: dict[str, Any], *, confirm: bool) -> dict[str, Any] | None:
+def _source_repo_hook_item_from_change(change: dict[str, Any], *, apply_changes: bool) -> dict[str, Any] | None:
     raw_repo_root = change.get("repo_root") or change.get("path")
     if not isinstance(raw_repo_root, str) or not raw_repo_root:
         return None
@@ -201,7 +201,7 @@ def _source_repo_hook_item_from_change(change: dict[str, Any], *, confirm: bool)
         item.update(action="unchanged", reason="non-ghost-alice-hook-path")
         return item
 
-    if not confirm:
+    if not apply_changes:
         if before_present:
             item.update(action="would-restore-source-repo-hook-path", reason="trace-backed-source-repo-hook-path")
         else:
@@ -254,7 +254,7 @@ def _source_repo_hook_item_from_change(change: dict[str, Any], *, confirm: bool)
 
 
 def _source_repo_hook_items(
-    manifest: dict[str, Any], *, confirm: bool, other_platforms: list[str]
+    manifest: dict[str, Any], *, apply_changes: bool, other_platforms: list[str]
 ) -> list[dict[str, Any]]:
     """The source repository's shared `core.hooksPath`, restored only by the full removal of the last host.
 
@@ -289,7 +289,7 @@ def _source_repo_hook_items(
                 "shared_platforms": other_platforms,
             })
             continue
-        item = _source_repo_hook_item_from_change(change, confirm=confirm)
+        item = _source_repo_hook_item_from_change(change, apply_changes=apply_changes)
         if item is not None:
             items.append(item)
     return items
@@ -455,7 +455,7 @@ def _codex_hooks_json_has_remaining_entries() -> bool:
     return False
 
 
-def _codex_hook_feature_item_from_change(change: dict[str, Any], *, confirm: bool) -> dict[str, Any] | None:
+def _codex_hook_feature_item_from_change(change: dict[str, Any], *, apply_changes: bool) -> dict[str, Any] | None:
     raw_path = change.get("path")
     before_state = str(change.get("before_state") or "").strip().lower()
     after_state = str(change.get("after_state") or "").strip().lower()
@@ -491,7 +491,7 @@ def _codex_hook_feature_item_from_change(change: dict[str, Any], *, confirm: boo
     if not changed:
         item.update(action="unchanged", reason="codex-hooks-feature-already-restored")
         return item
-    if not confirm:
+    if not apply_changes:
         item.update(
             action="would-restore-codex-hooks-feature-flag",
             reason="trace-backed-codex-hooks-feature-flag",
@@ -511,17 +511,17 @@ def _codex_hook_feature_item_from_change(change: dict[str, Any], *, confirm: boo
     return item
 
 
-def _codex_hook_feature_items(manifest: dict[str, Any], *, confirm: bool) -> list[dict[str, Any]]:
+def _codex_hook_feature_items(manifest: dict[str, Any], *, apply_changes: bool) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for change in manifest.get("system_env_changes", []):
         if isinstance(change, dict) and change.get("kind") == "codex_hooks_feature_flag":
-            item = _codex_hook_feature_item_from_change(change, confirm=confirm)
+            item = _codex_hook_feature_item_from_change(change, apply_changes=apply_changes)
             if item is not None:
                 items.append(item)
     return items
 
 
-def _codex_project_trust_item_from_change(change: dict[str, Any], *, confirm: bool) -> dict[str, Any] | None:
+def _codex_project_trust_item_from_change(change: dict[str, Any], *, apply_changes: bool) -> dict[str, Any] | None:
     raw_path = change.get("path")
     raw_project_path = change.get("project_path")
     before_state = str(change.get("before_state") or "").strip().lower()
@@ -568,7 +568,7 @@ def _codex_project_trust_item_from_change(change: dict[str, Any], *, confirm: bo
     if not changed:
         item.update(action="unchanged", reason="codex-project-trust-already-restored")
         return item
-    if not confirm:
+    if not apply_changes:
         item.update(
             action="would-remove-codex-project-trust"
             if before_state == "missing"
@@ -592,18 +592,18 @@ def _codex_project_trust_item_from_change(change: dict[str, Any], *, confirm: bo
     return item
 
 
-def _codex_project_trust_items(manifest: dict[str, Any], *, confirm: bool) -> list[dict[str, Any]]:
+def _codex_project_trust_items(manifest: dict[str, Any], *, apply_changes: bool) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for change in manifest.get("system_env_changes", []):
         if isinstance(change, dict) and change.get("kind") == "codex_project_trust":
-            item = _codex_project_trust_item_from_change(change, confirm=confirm)
+            item = _codex_project_trust_item_from_change(change, apply_changes=apply_changes)
             if item is not None:
                 items.append(item)
     return items
 
 
-def _apply_remove_action(item: dict[str, Any], path: Path, *, confirm: bool, reason: str) -> dict[str, Any]:
-    if confirm:
+def _apply_remove_action(item: dict[str, Any], path: Path, *, apply_changes: bool, reason: str) -> dict[str, Any]:
+    if apply_changes:
         _remove_path(path)
         item.update(action="removed", reason=reason)
     else:
@@ -619,18 +619,18 @@ def _quarantine_then_remove(
     item: dict[str, Any],
     path: Path,
     *,
-    confirm: bool,
+    apply_changes: bool,
     reason: str,
     platform: str,
 ) -> dict[str, Any]:
-    """Back a user-modified target up to the uninstall-backup root before removing it.
+    """Back a target with an external change up to the uninstall-backup root before removing it; the installer does not record the change's writer.
 
-    Without --purge-modified, a USER_MODIFIED_MANAGED skill is never destroyed without a
+    Without --purge-modified, an EXTERNALLY_MODIFIED_MANAGED skill is never destroyed without a
     recoverable copy. The pending-merges quarantine is untouched here because
-    uninstall cleanup does not own pending-merge quarantine decisions.
+    uninstall cleanup does not own the human user's pending-merge quarantine decisions.
     """
     target_backup = _uninstall_backup_root(platform) / path.name
-    if confirm:
+    if apply_changes:
         target_backup.parent.mkdir(parents=True, exist_ok=True)
         if target_backup.exists() or target_backup.is_symlink():
             _remove_path(target_backup)
@@ -653,7 +653,7 @@ def _target_item(
     manifest: dict[str, Any],
     manifest_path: Path,
     platform: str,
-    confirm: bool,
+    apply_changes: bool,
     purge_modified: bool = False,
 ) -> dict[str, Any]:
     name = str(target.get("target_name") or "")
@@ -709,15 +709,15 @@ def _target_item(
     if classification.link_target:
         item["link_target"] = classification.link_target
 
-    if classification.ownership == OWNERSHIP_USER_MODIFIED_MANAGED:
+    if classification.ownership == OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED:
         if purge_modified:
-            return _apply_remove_action(item, path, confirm=confirm, reason="user-modified-purge")
+            return _apply_remove_action(item, path, apply_changes=apply_changes, reason="external-change-purge")
         return _quarantine_then_remove(
-            item, path, confirm=confirm, reason="user-modified-quarantine", platform=platform
+            item, path, apply_changes=apply_changes, reason="external-change-quarantine", platform=platform
         )
 
     if classification.ownership in REMOVABLE_TARGET_OWNERSHIPS:
-        return _apply_remove_action(item, path, confirm=confirm, reason=classification.reason)
+        return _apply_remove_action(item, path, apply_changes=apply_changes, reason=classification.reason)
 
     item["action"] = "manual-review"
     return item
@@ -743,7 +743,7 @@ def _support_artifact_item(
     name: str,
     path: Path,
     *,
-    confirm: bool,
+    apply_changes: bool,
     shared_platforms: list[str] | None = None,
     recovery_platform: str | None = None,
 ) -> dict[str, Any]:
@@ -769,7 +769,7 @@ def _support_artifact_item(
                         junction_path=junction.as_posix())
             return item
         backup_root = _uninstall_backup_root(recovery_platform) / "support-state"
-        if not confirm:
+        if not apply_changes:
             item.update(action="would-quarantine-remove", reason="preserve-original-recovery-material",
                         backup_root=backup_root.as_posix())
             return item
@@ -797,7 +797,7 @@ def _support_artifact_item(
         item.update(action="quarantined-removed", reason="preserve-original-recovery-material",
                     backup_path=target_backup.as_posix())
         return item
-    return _apply_remove_action(item, path, confirm=confirm, reason="trace-backed-support-artifact")
+    return _apply_remove_action(item, path, apply_changes=apply_changes, reason="trace-backed-support-artifact")
 
 
 def _other_platform_install_states(manifest_path: Path, current_platform: str) -> list[str]:
@@ -828,7 +828,7 @@ def _runtime_core_item(args: argparse.Namespace) -> dict[str, Any]:
     so the tree is removed only when no other platform still has an install-state
     manifest; otherwise removing it would break the remaining platform's hooks.
     A non-default ``GHOST_ALICE_RUNTIME_SHARED_DIR`` override resolves outside the
-    Ghost-ALICE root and is left for manual review.
+    Ghost-ALICE root and the installer leaves it for the human user to review.
     """
     path = _ghost_alice_root() / "runtime"
     item: dict[str, Any] = {
@@ -850,7 +850,7 @@ def _runtime_core_item(args: argparse.Namespace) -> dict[str, Any]:
             shared_platforms=others,
         )
         return item
-    return _apply_remove_action(item, path, confirm=args.confirm, reason="trace-backed-support-artifact")
+    return _apply_remove_action(item, path, apply_changes=args.apply_changes, reason="trace-backed-support-artifact")
 
 
 def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -861,19 +861,19 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
         _support_artifact_item(
             "pending-merges",
             _ghost_alice_root() / "pending-merges" / args.platform,
-            confirm=args.confirm,
+            apply_changes=args.apply_changes,
             recovery_platform=args.platform,
         ),
         _support_artifact_item(
             "hook-dispatcher-assets",
             _ghost_alice_root() / "hooks",
-            confirm=args.confirm,
+            apply_changes=args.apply_changes,
             shared_platforms=others,
         ),
         _support_artifact_item(
             "install-rollbacks",
             _ghost_alice_root() / "install-rollbacks",
-            confirm=args.confirm,
+            apply_changes=args.apply_changes,
             shared_platforms=others,
             recovery_platform=args.platform,
         ),
@@ -882,50 +882,50 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
         _support_artifact_item(
             "publish-rollbacks",
             _ghost_alice_root() / "rollbacks",
-            confirm=args.confirm,
+            apply_changes=args.apply_changes,
             shared_platforms=others,
             recovery_platform=args.platform,
         ),
         _support_artifact_item(
             "install-record",
             _ghost_alice_root() / "installed-payload.json",
-            confirm=args.confirm,
+            apply_changes=args.apply_changes,
             shared_platforms=others,
         ),
         # The record of the installation's git hook path write, which the hosts' install-state entries also carry.
         _support_artifact_item(
             "source-repo-hook-path-record",
             install_state_dir / "source-repo-hook-path.json",
-            confirm=args.confirm,
+            apply_changes=args.apply_changes,
             shared_platforms=others,
         ),
         _support_artifact_item(
             "addon-sidecars",
             _ghost_alice_root() / "addons" / args.platform,
-            confirm=args.confirm,
+            apply_changes=args.apply_changes,
         ),
         _runtime_core_item(args),
         _support_artifact_item(
             "install-state-events",
             install_state_dir / f"{args.platform}-events.jsonl",
-            confirm=args.confirm,
+            apply_changes=args.apply_changes,
         ),
         _support_artifact_item(
             "codex-hook-feature-change",
             install_state_dir / f"{args.platform}-hook-feature-change.json",
-            confirm=args.confirm,
+            apply_changes=args.apply_changes,
         ),
         _support_artifact_item(
             "codex-project-trust-change",
             install_state_dir / f"{args.platform}-project-trust-change.json",
-            confirm=args.confirm,
+            apply_changes=args.apply_changes,
         ),
     ]
     unresolved_recovery = any(item.get("reason") in {
         "recovery-junction-needs-review", "recovery-link-time-not-preserved",
     } for item in items)
     manifest_item = _support_artifact_item(
-        "install-state-manifest", manifest_path, confirm=args.confirm and not unresolved_recovery,
+        "install-state-manifest", manifest_path, apply_changes=args.apply_changes and not unresolved_recovery,
     )
     if unresolved_recovery and manifest_item["action"] == "would-remove":
         manifest_item.update(action="manual-review", reason="recovery-removal-pending")
@@ -933,7 +933,7 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
     return items
 
 
-def _global_rule_item(platform: str, *, confirm: bool, companion: bool = False) -> dict[str, Any] | None:
+def _global_rule_item(platform: str, *, apply_changes: bool, companion: bool = False) -> dict[str, Any] | None:
     if platform == "codex":
         path = _codex_home() / ("ghost-alice-governance.md" if companion else "AGENTS.md")
         remover = remove_codex_rule_file
@@ -950,7 +950,7 @@ def _global_rule_item(platform: str, *, confirm: bool, companion: bool = False) 
     if not path.is_file():
         return {"kind": "global-rule", "path": path.as_posix(), "action": "manual-review", "reason": "rule-path-not-file"}
 
-    if confirm:
+    if apply_changes:
         result = remover(path)
         action = "removed-global-rule" if result.status in {"removed", "updated"} else "unchanged"
         return {
@@ -978,20 +978,20 @@ def _global_rule_item(platform: str, *, confirm: bool, companion: bool = False) 
     }
 
 
-def _global_rule_items(platform: str, *, confirm: bool) -> list[dict[str, Any]]:
-    primary = _global_rule_item(platform, confirm=confirm)
+def _global_rule_items(platform: str, *, apply_changes: bool) -> list[dict[str, Any]]:
+    primary = _global_rule_item(platform, apply_changes=apply_changes)
     items = [primary] if primary is not None else []
     if platform == "codex":
-        items.append(_global_rule_item(platform, confirm=confirm, companion=True))
+        items.append(_global_rule_item(platform, apply_changes=apply_changes, companion=True))
     return items
 
 
-def _hook_item(platform: str, *, confirm: bool) -> dict[str, Any]:
-    result = uninstall_hook(platform, dry_run=not confirm)
+def _hook_item(platform: str, *, apply_changes: bool) -> dict[str, Any]:
+    result = uninstall_hook(platform, dry_run=not apply_changes)
     return {
         "kind": "hook-config",
         "target_name": f"{platform}-hooks",
-        "action": "hook-uninstall" if confirm else "hook-uninstall-dry-run",
+        "action": "hook-uninstall" if apply_changes else "hook-uninstall-dry-run",
         "result": result,
     }
 
@@ -1037,30 +1037,30 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     from installer import gateway_participant
     # The gateway judgment takes the roots this removal deletes, under the same ownership/shared-platform
     # plan as the deletion. A raw manifest row does not establish that its target can go.
-    preview = argparse.Namespace(**dict(vars(args), confirm=False))
+    preview = argparse.Namespace(**dict(vars(args), apply_changes=False))
     planned = _support_artifact_items(preview)
     for target in (manifest or {}).get('targets', []):
         if isinstance(target, dict):
             planned.append(_target_item(target, manifest=manifest,
                 manifest_path=args.install_state_manifest, platform=args.platform,
-                confirm=False, purge_modified=getattr(args, 'purge_modified', False)))
+                apply_changes=False, purge_modified=getattr(args, 'purge_modified', False)))
     removing_paths = [Path(item['path']) for item in planned
                       if item.get('action') in {'would-remove', 'would-quarantine-remove'} and item.get('path')]
     blocked = False
     try:
         gateway = gateway_participant.removal(_ghost_alice_root(), removing_paths,
-            remove_codex=args.platform == 'codex', confirm=args.confirm)
+            remove_codex=args.platform == 'codex', apply_changes=args.apply_changes)
     except (ValueError, OSError, RuntimeError) as exc:
         gateway = dict(kind='context-gateway', action='manual-review', reason='gateway-detach-unresolved', detail=str(exc))
         blocked = True
     if gateway['action'] != 'missing':
         items.append(gateway)
     if blocked:
-        return dict(schema_version=1, platform=args.platform, mode='confirm' if args.confirm else 'dry-run',
+        return dict(schema_version=2, platform=args.platform, mode='apply' if args.apply_changes else 'dry-run',
             generated_at=_now(), install_state_manifest=args.install_state_manifest.as_posix(),
             items=items, summary=_summary(items), blocked=True)
-    items.append(_hook_item(args.platform, confirm=args.confirm))
-    items.extend(_global_rule_items(args.platform, confirm=args.confirm))
+    items.append(_hook_item(args.platform, apply_changes=args.apply_changes))
+    items.extend(_global_rule_items(args.platform, apply_changes=args.apply_changes))
     if manifest is None:
         items.append(
             {
@@ -1072,10 +1072,10 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         )
     else:
         items.extend(_source_repo_hook_items(
-            manifest, confirm=args.confirm,
+            manifest, apply_changes=args.apply_changes,
             other_platforms=_other_platform_install_states(args.install_state_manifest, args.platform)))
-        items.extend(_codex_hook_feature_items(manifest, confirm=args.confirm))
-        items.extend(_codex_project_trust_items(manifest, confirm=args.confirm))
+        items.extend(_codex_hook_feature_items(manifest, apply_changes=args.apply_changes))
+        items.extend(_codex_project_trust_items(manifest, apply_changes=args.apply_changes))
         for target in manifest.get("targets", []):
             if isinstance(target, dict):
                 items.append(
@@ -1084,7 +1084,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                         manifest=manifest,
                         manifest_path=args.install_state_manifest,
                         platform=args.platform,
-                        confirm=args.confirm,
+                        apply_changes=args.apply_changes,
                         purge_modified=getattr(args, "purge_modified", False),
                     )
                 )
@@ -1100,9 +1100,9 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     items.extend(_support_artifact_items(args))
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "platform": args.platform,
-        "mode": "confirm" if args.confirm else "dry-run",
+        "mode": "apply" if args.apply_changes else "dry-run",
         "generated_at": _now(),
         "install_state_manifest": args.install_state_manifest.as_posix(),
         "items": items,
@@ -1128,7 +1128,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--platform", choices=["claude", "codex"], required=True)
     parser.add_argument("--install-state-manifest", type=Path, required=True)
     parser.add_argument("--report-path", type=Path, default=None)
-    parser.add_argument("--confirm", action="store_true")
+    parser.add_argument("--apply", "--confirm", dest="apply_changes", action="store_true")
     parser.add_argument("--purge-modified", action="store_true")
     return parser
 
@@ -1136,13 +1136,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.report_path is None:
-        args.report_path = _default_report_path(args.platform, confirm=args.confirm)
+        args.report_path = _default_report_path(args.platform, apply_changes=args.apply_changes)
         # The reports folder keeps the last 30 reports before this one (`state_retention` uninstall-reports).
         state_retention.apply("uninstall-reports", args.report_path.parent)
     prepare_report_path(args.report_path)
     report = build_report(args)
     write_report(report, args.report_path)
-    mode = "CONFIRM" if args.confirm else "DRY-RUN"
+    mode = "APPLY" if args.apply_changes else "DRY-RUN"
     print(f"Uninstall cleanup {mode}: {args.platform}")
     print(f"Report: {args.report_path}")
     print(json.dumps(report["summary"], ensure_ascii=False, sort_keys=True))

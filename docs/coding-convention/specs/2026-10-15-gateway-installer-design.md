@@ -2,13 +2,13 @@
 
 [🇺🇸 English](./2026-10-15-gateway-installer-design.md) | [🇰🇷 한국어](../../ko/coding-convention/specs/2026-10-15-gateway-installer-design.md)
 
-Status: implemented in the source checkout; local acceptance and remote publication are separate stages. No installer deployment or native-service restart has targeted the actual user HOME during this restructuring. Existing source links continue to expose this checkout's installer files.
+Status: implemented in the source checkout; local verification (the stage in which the project's tests and local CI pass on the checkout) and remote publication are separate stages. No installer deployment or native-service restart has targeted the actual user HOME during this restructuring. Existing source links continue to expose this checkout's installer files.
 
 ## Scope
 
 Restructure installation, refresh, removal and recovery for the optional context gateway, including the general installer's replacement of gateway dependencies and Core cleanup's deletion of those dependencies. Core response processing, context selection, native hooks and addon logic are outside this change. Their installer callers may change; their feature behavior must remain unchanged. Subscription authentication, model selection and native thinking settings remain unchanged.
 
-Publication remains one sole-author commit per repository. This design adds no release, remote review request, persistent installation backup or new checkout. Existing recovery material and unrelated user changes remain intact. Removal of obsolete generated files follows the same ownership and transaction rules as other mutations.
+Publication remains one sole-author commit per repository. This design adds no release, remote review request, persistent installation backup or new checkout. Existing recovery material and local changes that this work did not make remain intact; those changes were already present in the checkout, and git does not record who made them. Removal of obsolete generated files follows the same ownership and transaction rules as other mutations.
 
 ## Current callers and structural cause
 
@@ -87,13 +87,13 @@ The planner compares two explicit sets: M, the paths/trees this operation will w
 | Independent | All dependencies needed for the comparison are known and no selected mutation overlaps D. This result leaves the existing gateway unchanged; it does not skip the caller's unrelated work. | Removing an independent Claude installation while the gateway uses a separate Codex runtime and ledger. |
 | Affected | At least one selected mutation overlaps D. The planner must coordinate that change with the service lifecycle. | Replacing the runtime `_shared` used by the service, or deleting its ledger root. |
 | Unknown | A required observation is unavailable or its schema cannot establish the dependency/ownership fact. Unknown does not mean absent, independent or owned. | Native discovery fails, state is unreadable, the service arguments are malformed, or a registration cannot locate its receipt. |
-| Conflict | Available observations establish a mismatch with an ownership baseline or a requested target. | An installed component/provider has a user edit, a receipt digest differs from registration, or an unowned service occupies the target. |
+| Conflict | Available observations establish a mismatch with an ownership baseline or a requested target. | An installed component/provider has an external change (a change the installer finds after install that its records do not hold; the installer does not record who made it), a receipt digest differs from registration, or an unowned service occupies the target. |
 
 The plan's permission to mutate is operation-specific. It is not a general inference from "affected".
 
 | Request | Allowed change | Independent / absent behavior | Blocked condition |
 | --- | --- | --- | --- |
-| First gateway installation | Required capability is present, selected Core/ledger inputs are valid, no unowned service/provider/agent occupies the target, and occupied target files match the source or an explicitly permitted baseline. Create a new owned installation. | Confirmed service absence is an installation precondition, not a no-op result. | Unowned occupied targets, conflicting edits or unknown service state. |
+| First gateway installation | Required capability is present, selected Core/ledger inputs are valid, no unowned service/provider/agent occupies the target, and occupied target files match the source or a baseline that the human user explicitly authorized. Create a new owned installation. | Confirmed service absence is an installation precondition, not a no-op result. | Unowned occupied targets, conflicting edits or unknown service state. |
 | Gateway refresh | The registration authenticates the prior receipt, state, agent and component baselines; preserve the listener binding and apply the selected replacement plan. | An absent prior service can still be refreshed from valid owned files; it must not be confused with first installation. | Missing ownership, changed managed artifacts or unknown service state. |
 | General Core payload/source update | First compute M. If it overlaps D, coordinate the owned service around precisely that replacement and update its affected ownership baselines. | No installed gateway or proven disjoint dependencies means the caller performs its own update without gateway service/config changes. | An affected gateway is unowned, conflicting or cannot be scoped. |
 | Core removal / gateway detach | First compute actual deletion roots M. If the owned gateway depends on them, detach it successfully before the caller deletes those roots. | A proven unrelated gateway stays active while the independent removal proceeds. Confirmed absence with no local installation signals requires no gateway detach. | Unowned affected service, modified managed configuration or unproven independence. |
@@ -153,7 +153,7 @@ Every error includes its phase, stable identifier and concise cause. "Held" is a
 
 ```mermaid
 flowchart TD
-    P["Approved plan and unchanged inputs"] --> S{"Prior service present?"}
+    P["Plan the installer's plan module validated<br/>and unchanged inputs"] --> S{"Prior service present?"}
     S -->|"Owned and present"| STOP["Stop prior service; confirm absence"]
     S -->|"Confirmed absent"| APPLY["Apply planned runtime, companion, state and agent changes"]
     STOP --> APPLY
@@ -253,4 +253,4 @@ An uncertain stop before file replacement has its own held result and never clai
 | Artifact cleanup after ownership publication; first-install cleanup after safe recovery. | Retirement is journaled; failure uses the same recovery owner. |
 | Exactly one recovery owner, with downward module dependencies. | Transaction owns the phase machine; platform and filesystem primitives expose effects/results without hidden whole-operation recovery. |
 
-The sequence table records design judgments. Executable coverage is in `_shared/test_context_gateway_install.py`, `_shared/test_context_gateway_uninstall.py`, `_shared/test_gateway_payload_update.py` and `_shared/test_gateway_installer_faults.py`. The subprocess fixture uses a private HOME/config/state, a private launchctl simulator and an actual loopback gateway process. It exercises native discovery/stop/start failures, partial writes, readiness failure, concurrent edits and uncertain recovery, including exit codes. General payload replacement and a linked checkout update have their own participant/recovery coverage. Local observations do not establish actual user-installation adoption, remote CI acceptance or whole-upgrade completion. Intermediate remote automatic review remains stopped during local development; final publication follows the existing CI and automatic-review conditions.
+The sequence table records design judgments. Executable coverage is in `_shared/test_context_gateway_install.py`, `_shared/test_context_gateway_uninstall.py`, `_shared/test_gateway_payload_update.py` and `_shared/test_gateway_installer_faults.py`. The subprocess fixture uses a private HOME/config/state, a private launchctl simulator and an actual loopback gateway process. It exercises native discovery/stop/start failures, partial writes, readiness failure, concurrent edits and uncertain recovery, including exit codes. General payload replacement and a linked checkout update have their own participant/recovery coverage. Local observations do not establish actual user-installation adoption, remote CI acceptance or whole-upgrade completion. Intermediate remote automatic review remains stopped during local development; final publication, which the human user decides, follows the existing CI and remote automatic-review conditions.

@@ -1,6 +1,6 @@
 ---
 name: finishing-a-development-branch
-description: "For a branch ready to integrate, runs its locally runnable CI jobs before any push or merge and carries out the user's choice, asking if undecided: merge locally, open or merge a pull request, keep, or delete the branch."
+description: "For a branch ready to integrate, runs its locally runnable CI jobs before any push or merge and carries out the human user's choice, asking the human user if undecided: merge locally, open or merge a pull request, keep, or delete the branch."
 calls:
   - "soft:using-git-worktrees"
   - "soft:requesting-code-review"
@@ -12,9 +12,9 @@ compatibility:
 
 ## Overview
 
-Offer clear options for completing development work and carry out the selected workflow.
+Offer clear options for completing development work and carry out the workflow that the human user selected.
 
-Principle: reproduce relevant CI locally -> honor the selected path -> reconcile remote CI and review -> integrate the verified head -> clean up only when safe.
+Principle: reproduce relevant CI locally -> honor the path that the human user selected -> reconcile remote CI and review -> integrate the verified head -> clean up only when safe.
 
 ## Process
 
@@ -26,7 +26,7 @@ Run all relevant locally executable equivalents, including setup and generated-a
 
 Bind results to the tested tree and environment. After an edit, regeneration, amend, rebase, or dependency/configuration change, invalidate and rerun every affected check before pushing. Reuse unaffected results only with an explicit unchanged-input basis; if impact cannot be bounded, rerun the applicable workflow set. Documentation-only changes can still affect literal assertions, link checks, catalog parity, and packaging checks. An unchanged tree after a metadata-only amend can retain local results, but the new head still needs its own remote CI and review evidence.
 
-Fix observed failures before pushing. Do not add skip flags, weaken assertions, disable jobs, or mark required checks optional merely to obtain a green result. A legitimate contract change must retain meaningful coverage. Report unavoidable remote-only gaps honestly and proceed with an authorized branch push only after runnable checks pass; this is not permission to integrate with unverified required CI.
+Fix observed failures before pushing. Do not add skip flags, weaken assertions, disable jobs, or mark required checks optional merely to obtain a green result. A legitimate contract change must retain meaningful coverage. Report unavoidable remote-only gaps honestly and proceed with a branch push that the human user authorized only after runnable checks pass; this is not permission to integrate with unverified required CI.
 
 Record a compact preflight matrix: workflow/job, applicable command, required versus actual environment, tested tree, exit status, skipped or remote-only coverage, and reason. The preflight reduces preventable remote failures; it does not guarantee that CI cannot fail.
 
@@ -39,33 +39,33 @@ Tests failing (<N> failures). Must fix before completing:
 Cannot push or integrate until runnable checks pass.
 ```
 
-Suspend the push or integration that depends on those checks. Correct the observed failure within existing authority.
+Suspend the push or integration that depends on those checks. Correct the observed failure within what the human user's instructions already authorize.
 
 When runnable checks pass and runner gaps are recorded: proceed to Step 2. After pushing, require successful applicable remote CI for the exact head before integration. A green older SHA, local pass, clean code review, pending job, or silently skipped required job does not satisfy that condition.
 
 ### Step 2: Determine the base branch
 
-Use the PR target, user's specified target or inspected repository default. A merge-base with main or master shows ancestry but does not by itself identify the intended integration target. Ask only when the authorized target remains unresolved.
+Use the target that the human user specified, the target of a PR whose base the human user set, or the inspected repository default; a PR base that the response model set does not identify the integration target. A merge-base with main or master shows ancestry but does not by itself identify the intended integration target. Ask the human user only when these leave the integration target unresolved.
 
 ### Step 3: Resolve the integration path
 
-First use the user's existing instruction. If they already authorized merging, pushing a PR, or retaining the branch, carry out that path after its checks. Authorization to merge does not imply permission to skip review.
+First use the human user's existing instruction. If the human user already authorized merging, pushing a PR, or retaining the branch, carry out that path after its checks. The human user's authorization to merge does not imply permission to skip review.
 
-Only when the integration path remains undecided, ask the user, in the user's language, to choose one of Step 4's four options: local merge, push and create a pull request, keep as-is, or discard.
+Only when the integration path remains undecided, ask the human user, in the human user's language, to choose one of Step 4's four options: local merge, push and create a pull request, keep as-is, or discard.
 
 Keep the options concise and explain only a concrete blocker or consequence the user needs to decide.
 
-### Step 4: Execute the selection
+### Step 4: Execute the human user's selection
 
 #### Before integrating a pull request
 
 The response model follows requesting-code-review's [Remote Pull Request Review Gate](../requesting-code-review/SKILL.md#remote-pull-request-review-gate). That procedure returns the reconciled head, required review/CI results and finding dispositions. Integrate only the head those results support. This gate adds no remote review to a purely local integration without a PR.
 
-When the user requests one commit, consolidate the unmerged work before the final review. An authorized replacement of a published PR branch uses `--force-with-lease` with the expected prior head and targets only that PR branch. A one-commit request alone does not authorize rewriting published `main` or another shared base branch. Work already merged needs a follow-up commit unless the user specifically authorizes replacing an identified published range. With that separate authorization, preserve recovery refs, verify that the replacement contains exactly the authorized work without dropping unrelated changes, and use an explicit expected-head lease on the authorized target ref. If the remote head moves or the range cannot be reconciled, stop the push and inspect; do not broaden the authorization or overwrite the new work. A rewritten head invalidates the prior review's freshness even when tests remain green.
+When the human user requests one commit, consolidate the unmerged work before the final review. A replacement of a published PR branch that the human user authorized uses `--force-with-lease` with the expected prior head and targets only that PR branch. A one-commit request alone does not authorize rewriting published `main` or another shared base branch. Work already merged needs a follow-up commit unless the human user specifically authorizes replacing an identified published range. With that separate authorization from the human user, preserve recovery refs, verify that the replacement contains exactly the work that the human user's instructions authorize without dropping unrelated changes, and use an explicit expected-head lease on the target ref that the human user authorized. If the remote head moves or the range cannot be reconciled, stop the push and inspect; do not broaden the authorization or overwrite the new work. A rewritten head invalidates the prior review's freshness even when tests remain green.
 
 #### Option 1: Local merge
 
-Apply the remote review gate first when this branch has an associated PR. Preserve the user's requested merge strategy and authorship; the commands below illustrate a local merge when no different strategy was specified.
+Apply the remote review gate first when this branch has an associated PR. Preserve the merge strategy and authorship that the human user requested; the commands below illustrate a local merge when the human user specified no different strategy.
 
 ```bash
 # Switch to the base branch
@@ -98,7 +98,7 @@ git push -u origin <feature-branch>
 gh pr create --title "<title>" --body-file <prepared-body-file>
 ```
 
-Keep the branch and worktree while review or follow-up changes are pending. If the user also authorized merging, continue through the remote review gate and integrate the reconciled head; do not stop at PR creation. Posting review requests or bot-trigger comments requires existing user authorization for that communication or an explicitly invoked workflow that authorizes it.
+Keep the branch and worktree while review or follow-up changes are pending. If the human user also authorized merging, continue through the remote review gate and integrate the reconciled head; do not stop at PR creation. Posting review requests or bot-trigger comments requires the human user's existing authorization for that communication, including through a workflow that the human user explicitly invoked for that post.
 
 #### Option 3: Keep as-is
 
@@ -108,7 +108,7 @@ Do not clean up the worktree.
 
 #### Option 4: Discard
 
-Confirm first:
+Ask the human user to confirm first:
 ```
 This will permanently delete:
 - Branch <name>
@@ -118,9 +118,9 @@ This will permanently delete:
 Type 'discard' to confirm.
 ```
 
-Wait for the exact confirmation.
+Wait for the human user's exact confirmation.
 
-On confirmation:
+On the human user's confirmation:
 ```bash
 git checkout <base-branch>
 git branch -D <feature-branch>
@@ -130,7 +130,7 @@ After that: clean up the worktree (Step 5)
 
 ### Step 5: Worktree cleanup
 
-For a completed merge or confirmed discard (options 1 and 4), first ensure no uncommitted work or ongoing review/fix task needs the checkout. Never delete the working directory of an active task.
+For a completed merge or a discard the human user confirmed (options 1 and 4), first ensure no uncommitted work or ongoing review/fix task needs the checkout. Never delete the working directory of an active task.
 
 Check whether you are in a worktree:
 ```bash

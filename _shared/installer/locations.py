@@ -125,7 +125,7 @@ def deprecated_skill_backup_root() -> Path:
 
 
 def prefers_copy_install(platform: str) -> bool:
-    """Codex installs copies so its user edits can be protected; Claude links."""
+    """Codex installs copies so external changes can be protected; the installer does not record their writer. Claude links."""
     return platform == "codex"
 
 

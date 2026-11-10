@@ -12,11 +12,11 @@ INSTALLER_REPORT = REPO_ROOT / "_shared" / "installer" / "report.py"
 
 class TestInstallTailPendingMessage(unittest.TestCase):
     def assert_install_tail_copy(self, body: str) -> None:
-        self.assertIn("User:", body)
+        self.assertIn("For the human user:", body)
         self.assertIn("Tech:", body)
-        self.assertIn("when local changes are detected during the agent tool update", body)
-        self.assertIn("they are backed up instead of overwritten", body)
-        self.assertIn("Next time you open Claude/Codex", body)
+        self.assertIn("the installer backs up external changes it finds in installed targets during updates", body)
+        self.assertIn("its records do not hold those changes or identify their writer", body)
+        self.assertIn("next time you open Claude/Codex", body)
         self.assertIn("Please review backed-up changes.", body)
         self.assertNotIn("were backed up", body)
 

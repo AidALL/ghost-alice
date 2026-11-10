@@ -82,7 +82,7 @@
               },
               "union_group": {
                 "type": "string",
-                "description": "Used only when type=union. Entries in the same union_group form an OR relationship selected by the user."
+                "description": "Used only when type=union. Entries in the same union_group form an OR relationship selected by the human user."
               }
             }
           }

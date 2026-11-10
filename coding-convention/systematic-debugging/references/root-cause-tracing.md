@@ -8,16 +8,16 @@ The response model records the failing operation, target and actual arguments. F
 
 For example, a test passes an empty project directory to a workspace initializer. The initializer later invokes Git in the source checkout. Trace the empty value through the workspace and session calls to the fixture that was read before setup. Correct that initialization and verify the original failure.
 
-If the existing trace cannot identify the caller, add bounded diagnostics immediately before the affected operation. Capture the safe argument metadata, current directory and call stack. Do not log raw credentials or environment contents. Remove or retain diagnostics according to the task's accepted debugging requirements.
+If the existing trace cannot identify the caller, add bounded diagnostics immediately before the affected operation. Capture the safe argument metadata, current directory and call stack. Do not log raw credentials or environment contents. Remove or retain diagnostics according to the debugging requirements that the human user accepted for the task.
 
 ## Isolate test pollution
 
-When a test creates an artifact in the wrong location, identify the triggering test before changing shared setup. The bundled `find-polluter.sh` sequentially invokes `npm test` for candidate files, ignores test exit statuses and stops at the first observed artifact. Use it only for an authorized compatible runner and isolated target; its result concerns artifact creation, not passing tests. Resolve it relative to this reference's directory; otherwise use the project's actual runner for the same bounded observation.
+When a test creates an artifact in the wrong location, identify the triggering test before changing shared setup. The bundled `find-polluter.sh` sequentially invokes `npm test` for candidate files, ignores test exit statuses and stops at the first observed artifact. Use it only for a compatible test runner and isolated target that the human user authorized; its result concerns artifact creation, not passing tests. Resolve it relative to this reference's directory; otherwise use the project's actual runner for the same bounded observation.
 
 Systematic-debugging defines how to count failed repair rounds, and verification-before-completion defines evidence reuse.
 
 ## Correct the source and verify
 
-Once the source is supported, implement the correction under the accepted behavior contract and TDD applicability. Add distinct boundary validation only where another actual caller can bypass the source protection; [defense-in-depth.md](defense-in-depth.md) defines that selection.
+Once the source is supported, implement the correction under the behavior contract that the human user accepted and TDD applicability. Add distinct boundary validation only where another actual caller can bypass the source protection; [defense-in-depth.md](defense-in-depth.md) defines that selection.
 
 Report the trace, causal input, correction and original-failure evidence. A call-chain hypothesis alone is not proof of a fixed result.

@@ -24,16 +24,19 @@ from typing import Any
 
 
 _SHARED_MODULE_LOAD = threading.RLock()
+_UNSET = object()
 
-SCHEMA_VERSION = "session-intent-ledger.v1"
+SCHEMA_VERSION = "session-intent-ledger.v2"
 CURRENT_SESSION_SCHEMA = "session-intent-current.v1"
 SESSION_INTENT_ROOT_ENV = "GHOST_ALICE_SESSION_INTENT_ROOT"
 LEGACY_DEFAULT_ROOT = Path("~/.ghost-alice/session-intent")
 TEXT_FIELDS = ("current_goal", "routing_summary")
 LIST_FIELDS = ("constraints", "non_goals", "open_questions")
+# Source labels are the response model's claims; Core code validates their spelling without checking the sender.
 ACCEPTANCE_CRITERIA_SOURCES = {"user-said", "interpreted-as", "previous-tool", "system-doc"}
-ACCEPTANCE_CRITERIA_ADMITTED_SOURCES = {"user-said", "previous-tool", "system-doc"}
+ACCEPTANCE_CRITERIA_SELECTABLE_SOURCES = {"user-said", "previous-tool", "system-doc"}
 # Stored labels are never rewritten; readers map a legacy label to its current name.
+# user-explicit is the legacy spelling of the response model's user-said claim.
 LEGACY_SOURCE_ALIASES = {"user-explicit": "user-said", "inferred": "interpreted-as"}
 CONDUCT_FEEDBACK_SOURCES = {"user-said", "interpreted-as"}
 CONDUCT_FEEDBACK_STATUS = {"open", "encoded"}
@@ -113,7 +116,14 @@ def json_digest(value: Any) -> str:
     return _shared_module("source_reference").json_digest(value)
 
 
-def build_input_observation(*, platform: str, session_id: str, raw_user_input: str | None) -> dict[str, Any]:
+def build_input_observation(*, platform: str, session_id: str,
+                            raw_input=_UNSET, raw_user_input=_UNSET) -> dict[str, Any]:
+    if raw_user_input is not _UNSET:
+        if raw_input is not _UNSET and raw_input != raw_user_input:
+            raise ValueError("raw_input and legacy raw_user_input conflict")
+        raw_input = raw_user_input
+    if raw_input is _UNSET:
+        raise TypeError("build_input_observation requires raw_input")
     observed_at = utc_now()
     observation: dict[str, Any] = {
         "observed_at": observed_at,
@@ -121,13 +131,13 @@ def build_input_observation(*, platform: str, session_id: str, raw_user_input: s
         "input_digest": "",
         "input_char_count": 0,
     }
-    if raw_user_input is None:
+    if raw_input is None:
         return observation
-    digest = text_digest(raw_user_input)
+    digest = text_digest(raw_input)
     observation["input_digest"] = digest
-    observation["input_char_count"] = len(raw_user_input)
+    observation["input_char_count"] = len(raw_input)
     observation["input_event_id"] = json_digest({
-        "event": "user-input-observed",
+        "event": "input-observed",
         "platform": platform,
         "session_id": session_id,
         "input_digest": digest,
@@ -267,7 +277,7 @@ def _load_legacy_state(paths: dict[str, Path], platform: str, session_id: str, *
             data = json.loads(paths["state"].read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeError):
             raise ValueError("ledger state is corrupt; inspect and restore it before writing") from None
-    if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
+    if not isinstance(data, dict) or data.get("schema_version") not in {"session-intent-ledger.v1", SCHEMA_VERSION}:
         raise ValueError("ledger state header is missing or unsupported; inspect it before writing")
     if data.get("platform") != platform or data.get("session_id") != session_id:
         raise ValueError("persisted ledger identity mismatch; no mutation was applied")
@@ -289,7 +299,7 @@ def _load_legacy_state(paths: dict[str, Path], platform: str, session_id: str, *
         # audit before committing the session to SQLite.
         try:
             for event in _legacy_events(paths, platform, session_id):
-                if event.get("event") == "user-input-observed":
+                if event.get("event") in {"input-observed", "user-input-observed"}:
                     if not event.get("event_id") or not event.get("input_digest"):
                         raise ValueError("legacy input lineage is incomplete")
                     state["latest_input_event_id"] = event["event_id"]
@@ -313,7 +323,7 @@ def _check_expected(state: dict[str, Any], expected_input_event_id: str | None,
     if _pending_native_inputs(state):
         raise ValueError("native input origin is pending; reconcile native intake before writing")
     if state.get('current_context_input_event_id'):
-        raise ValueError("current SDK context input supplies no human mutation authority")
+        raise ValueError("the context input of the current SDK-started turn does not provide the recorded input binding required for this write")
     if expected_revision is not None and (
         type(expected_revision) is not int or expected_revision != state["ledger_revision"]
     ):
@@ -322,7 +332,7 @@ def _check_expected(state: dict[str, Any], expected_input_event_id: str | None,
     if active_input and expected_input_event_id is None and not new_input:
         raise ValueError("expected-input-event-id is required; use the input_event_id that session_intent_ledger.py --read-intent returns")
     if expected_input_event_id is not None and expected_input_event_id != active_input:
-        raise ValueError("stale input event; re-evaluate against the current user input before writing")
+        raise ValueError("stale input event; re-evaluate against the current input that Core code recorded before writing")
 
 
 STORAGE_SCHEMA_VERSION = 1
@@ -506,7 +516,7 @@ def _stored_state(connection, platform: str, session_id: str):
     if row is None:
         return None
     state = json.loads(row[2])
-    if (not isinstance(state, dict) or state.get("schema_version") != SCHEMA_VERSION
+    if (not isinstance(state, dict) or state.get("schema_version") not in {"session-intent-ledger.v1", SCHEMA_VERSION}
             or state.get("platform") != platform or state.get("session_id") != session_id
             or type(state.get("ledger_revision")) is not int or state["ledger_revision"] != row[0]
             or state.get("latest_input_event_id") != row[1]):
@@ -583,7 +593,7 @@ def _load_state_for_update(connection, paths, platform, session_id):
     if mismatch is not None:
         raise ValueError(mismatch)
     # Portable state may carry a copied intake stamp or ready route. Only a
-    # fresh intake committed here can establish canonical current authority.
+    # fresh intake committed here can record an input as the current input that later writes bind to.
     state["canonical_input_event_id"] = ""
     if isinstance(state.get("response_route"), dict):
         state["response_route"]["status"] = "stale"
@@ -612,6 +622,7 @@ def migrate_session(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str
 def _commit(connection, state: dict[str, Any], event: dict[str, Any]) -> None:
     if state["ledger_revision"] >= MAX_SHARED_INTEGER:
         raise ValueError("ledger revision has reached the shared JSON integer limit; no mutation was applied")
+    state["schema_version"] = SCHEMA_VERSION
     state["ledger_revision"] += 1
     event.update(ledger_revision=state["ledger_revision"], mutation_id=uuid.uuid4().hex)
     _save_state(connection, state)
@@ -678,7 +689,7 @@ def export_session(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
 
 
 def _semantic_projection(state: dict[str, Any]) -> dict[str, Any]:
-    """History of approved semantic fields, never the arbitrary input delta.
+    """History of semantic fields on Core code's fixed key allowlist, not arbitrary fields in the response model's update.
 
     Nested objects need an allowlist too: decisions and scope permit accessory
     fields in current state, but those are not copied into historical events.
@@ -696,7 +707,11 @@ def _semantic_projection(state: dict[str, Any]) -> dict[str, Any]:
     for key in ("constraints", "non_goals", "open_questions"):
         projection[key] = objects(state.get(key), ("id", "summary", "source", "status"))
     projection["acceptance_criteria"] = objects(state.get("acceptance_criteria"),
-        ("id", "summary", "source", "admitted", "work_unit_id", "contract_revision"))
+        ("id", "summary", "source", "selectable", "admitted", "work_unit_id", "contract_revision"))
+    for criterion in projection["acceptance_criteria"]:
+        if isinstance(criterion, dict) and {"selectable", "admitted"} & criterion.keys():
+            criterion["selectable"] = selectable_value(criterion)
+            criterion.pop("admitted", None)
     projection["decisions"] = objects(state.get("decisions"),
         ("id", "summary", "source", "superseded", "superseded_by"))
     projection["conduct_feedback"] = objects(state.get("conduct_feedback"),
@@ -783,6 +798,15 @@ def canonical_source(value: Any, default: str) -> str:
     return LEGACY_SOURCE_ALIASES.get(source, source)
 
 
+def selectable_value(record: dict[str, Any]) -> Any:
+    """Read the selection flag without treating it as a human approval."""
+    if "selectable" in record and "admitted" in record:
+        if (type(record["selectable"]) is not bool or type(record["admitted"]) is not bool
+                or record["selectable"] != record["admitted"]):
+            raise ValueError("selectable and legacy admitted must be the same boolean")
+    return record.get("selectable", record.get("admitted"))
+
+
 def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
     if isinstance(raw, str):
         summary = raw.strip()
@@ -792,7 +816,7 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
             "id": safe_component(summary.lower(), "criterion"),
             "summary": summary,
             "source": "interpreted-as",
-            "admitted": False,
+            "selectable": False,
         }
     if not isinstance(raw, dict):
         return None
@@ -803,14 +827,14 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
     source = str(raw.get("source") or "interpreted-as").strip()
     if canonical_source(source, "interpreted-as") not in ACCEPTANCE_CRITERIA_SOURCES:
         source = "interpreted-as"
-    admitted = raw.get("admitted")
-    if not isinstance(admitted, bool):
-        admitted = canonical_source(source, "interpreted-as") in ACCEPTANCE_CRITERIA_ADMITTED_SOURCES
+    selectable = selectable_value(raw)
+    if not isinstance(selectable, bool):
+        selectable = canonical_source(source, "interpreted-as") in ACCEPTANCE_CRITERIA_SELECTABLE_SOURCES
     criterion = {
         "id": criterion_id,
         "summary": summary,
         "source": source,
-        "admitted": admitted,
+        "selectable": selectable,
     }
     if "work_unit_id" in raw or "contract_revision" in raw:
         unit = raw.get("work_unit_id")
@@ -843,7 +867,7 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
             continue
         store(acceptance_criterion_key(criterion), criterion)
 
-    # An incoming delta may promote a criterion's admission.
+    # A delta can explicitly select or withdraw a criterion.
     incoming_items = incoming if isinstance(incoming, list) else [incoming]
     for item in incoming_items:
         criterion = normalize_acceptance_criterion(item)
@@ -852,10 +876,10 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
         criterion_id = acceptance_criterion_key(criterion)
         prior = merged.get(criterion_id)
         if prior is not None:
-            incoming_admitted = item.get("admitted") if isinstance(item, dict) else None
-            if not isinstance(incoming_admitted, bool):
-                # No explicit boolean admission: admission is sticky and can be upgraded by a newly contract-bound source, but a present-but-invalid field (e.g. null) must never silently drop it.
-                criterion["admitted"] = bool(prior["admitted"]) or bool(criterion["admitted"])
+            incoming_selectable = selectable_value(item) if isinstance(item, dict) else None
+            if not isinstance(incoming_selectable, bool):
+                # Without an explicit boolean, preserve selection or enable it from a source allowed by the contract.
+                criterion["selectable"] = bool(prior["selectable"]) or bool(criterion["selectable"])
         store(criterion_id, criterion)
 
     return [merged[criterion_id] for criterion_id in order]
@@ -881,10 +905,10 @@ def normalize_conduct_feedback(raw: Any, timestamp: str) -> dict[str, Any] | Non
     entry_id = str(payload.get("id") or rule or pattern or summary).strip()
     if not entry_id:
         return None
-    source = str(payload.get("source") or "user-said").strip()
+    source = str(payload.get("source") or "").strip()
     pattern_class = str(payload.get("pattern_class") or "").strip()
     invalid = []
-    if canonical_source(source, "user-said") not in CONDUCT_FEEDBACK_SOURCES:
+    if canonical_source(source, "") not in CONDUCT_FEEDBACK_SOURCES:
         invalid.append(f"source {source!r} is not one of {sorted(CONDUCT_FEEDBACK_SOURCES)}")
     if pattern_class and pattern_class not in CONDUCT_PATTERN_CLASSES:
         invalid.append(f"pattern_class {pattern_class!r} is not one of {list(CONDUCT_PATTERN_CLASSES)}")
@@ -938,6 +962,21 @@ def merge_conduct_feedback(existing: Any, incoming: Any, timestamp: str) -> list
             if key not in order:
                 order.append(key)
     for raw in incoming if isinstance(incoming, list) else [incoming]:
+        if isinstance(raw, dict) and raw.get("id") and raw.keys() <= {"id", "status", "pattern_class"}:
+            key = safe_component(str(raw["id"]), "conduct")
+            if key in by_id:
+                pattern_class = str(raw.get("pattern_class") or "").strip()
+                if pattern_class and pattern_class not in CONDUCT_PATTERN_CLASSES:
+                    raise ValueError(f"conduct_feedback {key!r}: pattern_class {pattern_class!r} "
+                                     f"is not one of {list(CONDUCT_PATTERN_CLASSES)}")
+                current = by_id[key]
+                if pattern_class:
+                    current["pattern_class"] = pattern_class
+                if "status" in raw:
+                    status = str(raw.get("status") or "open").strip()
+                    current["status"] = status if status in CONDUCT_FEEDBACK_STATUS else "open"
+                current["updated_at"] = timestamp
+                continue
         normalized = normalize_conduct_feedback(raw, timestamp)
         if normalized is None:
             continue
@@ -1041,19 +1080,19 @@ def apply_delta(state: dict[str, Any], delta: dict[str, Any] | None) -> dict[str
     return state
 
 
-def _commit_turn(connection, state, observation, *, has_input, intent_delta, source, native_human=False):
+def _commit_turn(connection, state, observation, *, has_input, intent_delta, recording_path, native_human=False):
     """Single owner of semantic updates and canonical input promotion."""
     platform, session_id = state['platform'], state['session_id']
     if intent_delta is not None and not isinstance(intent_delta, dict):
         raise ValueError("intent_delta must be an object")
     if has_input:
         if state.get('current_context_input_event_id') and not native_human:
-            raise ValueError('Only positively reconciled native human input clears SDK context authority')
+            raise ValueError("Only a positively reconciled input whose transcript row carries the host's human-origin markers clears the current context input of an SDK-started turn")
         if native_human:
             state['current_context_input_event_id'] = ''
         route = state.get("response_route")
         if isinstance(route, dict) and route.get("input_event_id") != observation["input_event_id"]:
-            # Reopen only the routing and authorization binding.
+            # Reopen only the response route's binding to its input.
             route["status"] = "stale"
         state["latest_input_event_id"] = observation["input_event_id"]
         state["canonical_input_event_id"] = observation["input_event_id"]
@@ -1068,10 +1107,10 @@ def _commit_turn(connection, state, observation, *, has_input, intent_delta, sou
     state["intake_status"] = "pending-native-origin" if _pending_native_inputs(state) else "observed"
     event: dict[str, Any] = {
         "ts": observation["observed_at"],
-        "event": "user-input-observed" if has_input else "intent-updated",
+        "event": "input-observed" if has_input else "intent-updated",
         "platform": platform,
         "session_id": session_id,
-        "source": source,
+        "recording_path": recording_path,
         "intent_delta_status": "recorded" if intent_delta else "not-provided",
         "input_event_id": state["latest_input_event_id"],
         "semantic_changes": _semantic_changes(before, state),
@@ -1096,37 +1135,51 @@ def record_turn(
     root: Path = DEFAULT_ROOT,
     platform: str,
     session_id: str,
-    raw_user_input: str | None = None,
+    raw_input=_UNSET,
     intent_delta: dict[str, Any] | None = None,
-    source: str = "agent",
+    recording_path=_UNSET,
     observation: dict[str, Any] | None = None,
     expected_input_event_id: str | None = None,
     expected_revision: int | None = None,
     transaction: sqlite3.Connection | None = None,
+    raw_user_input=_UNSET,
+    source=_UNSET,
 ) -> dict[str, Path]:
+    if raw_user_input is not _UNSET:
+        if raw_input is not _UNSET and raw_input != raw_user_input:
+            raise ValueError("raw_input and legacy raw_user_input conflict")
+        raw_input = raw_user_input
+    if raw_input is _UNSET:
+        raw_input = None
+    if source is not _UNSET:
+        if recording_path is not _UNSET and recording_path != source:
+            raise ValueError("recording_path and legacy source conflict")
+        recording_path = source
+    if recording_path is _UNSET:
+        recording_path = "unspecified"
     validate_identity(platform, session_id)
     if observation is None:
         observation = build_input_observation(
             platform=platform,
             session_id=session_id,
-            raw_user_input=raw_user_input,
+            raw_input=raw_input,
         )
     if not isinstance(observation, dict) or not isinstance(observation.get("observed_at"), str) or not observation["observed_at"]:
         raise ValueError("input observation requires an observation timestamp")
-    if raw_user_input is not None:
+    if raw_input is not None:
         if (not isinstance(observation.get("input_event_id"), str) or not observation["input_event_id"]
-                or observation.get("input_digest") != text_digest(raw_user_input)
+                or observation.get("input_digest") != text_digest(raw_input)
                 or type(observation.get("input_char_count")) is not int
                 or not 0 <= observation["input_char_count"] <= MAX_SHARED_INTEGER
-                or observation["input_char_count"] != len(raw_user_input)):
+                or observation["input_char_count"] != len(raw_input)):
             raise ValueError("input observation does not match this intake")
     paths = session_paths(root, platform, session_id)
     with _transaction(root, transaction) as connection:
         state = _load_state_for_update(connection, paths, platform, session_id)
         _check_expected(state, expected_input_event_id, expected_revision,
-                        new_input=raw_user_input is not None and not intent_delta)
-        _commit_turn(connection, state, observation, has_input=raw_user_input is not None,
-                     intent_delta=intent_delta, source=source)
+                        new_input=raw_input is not None and not intent_delta)
+        _commit_turn(connection, state, observation, has_input=raw_input is not None,
+                     intent_delta=intent_delta, recording_path=recording_path)
     return paths
 
 
@@ -1171,7 +1224,7 @@ def _pending_native_inputs(state):
 def stage_native_input(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
                        raw_input: str, prompt_id: str | None, transcript_path: str | None,
                        transaction: sqlite3.Connection | None = None) -> dict[str, Path]:
-    """Record transport reception without assigning user authority or a route."""
+    """Record reception without making it the current input that Core code records or assigning a response route."""
     validate_identity(platform, session_id)
     if platform != 'claude' or session_id == 'unknown' or not isinstance(raw_input, str):
         raise ValueError('native transport requires an exact Claude session and input')
@@ -1187,7 +1240,7 @@ def stage_native_input(*, root: Path = DEFAULT_ROOT, platform: str, session_id: 
         state['pending_native_inputs'] = [*pending, observation]
         state['intake_status'] = 'pending-native-origin'
         _commit(connection, state, dict(ts=observation['observed_at'], event='native-input-staged',
-            platform=platform, session_id=session_id, source='hook', **{
+            platform=platform, session_id=session_id, recording_path='hook', **{
                 key: observation[key] for key in ('transport_observation_id', 'input_digest', 'input_char_count')}))
     return paths
 
@@ -1258,11 +1311,12 @@ def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session
                             record_wait: bool = False) -> dict[str, Any]:
     """Resolve committed native origin in queue order, before native consumers run.
 
-    Public reads remain pure. Each located row resolves by its actor. An unknown
-    or unlocated input never blocks a later located human input, which
-    supersedes it without promoting it. Without a later human input the queue
-    waits and dependent writes stay refused. Notification resolution preserves
-    the exact preceding human route. Each transcript is read once per call.
+    Public reads remain pure. Core code classifies each located row from the host's markers.
+    An unknown or unlocated input never blocks a later located input whose row carries
+    the host's human-origin markers; that later input supersedes it without promoting it.
+    Without such an input the queue waits and dependent writes stay refused.
+    A notification preserves the preceding input that Core code recorded as current
+    and the response route that the response model recorded for it. Each transcript is read once per call.
 
     The lifecycle hook wrapper passes record_wait: PreToolUse and Stop run after
     the host appends the turn's input, so a wait there is recorded once per
@@ -1297,7 +1351,7 @@ def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session
                     session_id=session_id, transport_observation_id=observation['transport_observation_id'],
                     superseded_by_transport_observation_id=later['transport_observation_id'],
                     actor='unknown', cause=cause,
-                    reason='Later positively bound human input controls current authority; earlier actor is not promoted.',
+                    reason="Core code records the later input matched to the host's human-origin markers as current; the earlier input is not promoted.",
                     input_event_id=state['latest_input_event_id'])
                 if located['status'] == 'located':
                     event['native_row'] = {key: located[key] for key in ('cursor_key', 'start_offset', 'end_offset')}
@@ -1306,15 +1360,15 @@ def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session
             _leave_native_input(state, observation, located)
             if actor == 'human':
                 promoted = dict(observed_at=observation['observed_at'],
-                    input_event_id=json_digest(dict(event='user-input-observed', platform=platform,
+                    input_event_id=json_digest(dict(event='input-observed', platform=platform,
                         session_id=session_id, transport_observation_id=observation['transport_observation_id'])),
                     input_digest=observation['input_digest'], input_char_count=observation['input_char_count'])
-                state = _commit_turn(connection, state, promoted, has_input=True, intent_delta=None, source='hook', native_human=True)
+                state = _commit_turn(connection, state, promoted, has_input=True, intent_delta=None, recording_path='hook', native_human=True)
             context_event = None
             if actor in CONTEXT_ACTORS:
                 context_event = json_digest(dict(event='context-input-resolved', platform=platform,
                     session_id=session_id, transport_observation_id=observation['transport_observation_id']))
-            # An app event delivered while Claude works keeps the human input and route, as a notification does.
+            # An app event delivered while the response model works preserves the input Core code recorded as current and its response route.
             if actor == 'sdk':
                 state['current_context_input_event_id'] = context_event
                 if isinstance(state.get('response_route'),dict):
@@ -1556,7 +1610,7 @@ def _imported_event_count(connection: sqlite3.Connection, root: Path, state: dic
 
 
 def _observation_matches(event, platform, session_id, event_id, digest, count) -> bool:
-    return (isinstance(event, dict) and event.get("event") == "user-input-observed"
+    return (isinstance(event, dict) and event.get("event") in {"input-observed", "user-input-observed"}
             and event.get("platform") == platform and event.get("session_id") == session_id
             and event.get("event_id") == event_id and event.get("input_event_id") == event_id
             and event.get("input_digest") == digest and type(event.get("input_char_count")) is int
@@ -1637,10 +1691,10 @@ def bind_legacy_acceptance_criteria(
     expected_revision: int, expected_criteria: list[dict[str, Any]],
     transaction: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
-    """Core binds existing admitted rows to their frozen unit and returns state.
+    """Core code binds existing selectable rows to their frozen unit and returns state.
 
     The caller supplies the current input, revision and complete row snapshots.
-    Core preserves the criterion's meaning and admission; binding does not
+    Core code preserves the criterion's meaning and selection flag; binding does not
     accept evidence or establish a response route.
     """
     routes = _response_route_module()
@@ -1666,8 +1720,8 @@ def bind_legacy_acceptance_criteria(
             raise routes.RouteBindingError("ownership binding requires a unique latest registered unit revision")
         unit = registry[keys.index(key)]
         if (unit.get("owner") != {"platform": platform, "session_id": session_id}
-                or unit.get("kind") != "execution" or unit.get("admitted") is not True):
-            raise routes.RouteBindingError("ownership binding requires the current admitted execution owner")
+                or unit.get("kind") != "execution" or selectable_value(unit) is not True):
+            raise routes.RouteBindingError("ownership binding requires the current selectable execution owner")
         definitions = unit.get("criteria")
         if not isinstance(definitions, list) or not definitions:
             raise routes.RouteBindingError("ownership binding requires frozen criterion definitions")
@@ -1683,11 +1737,11 @@ def bind_legacy_acceptance_criteria(
         selected = []
         for snapshot in expected_criteria:
             if (not isinstance(snapshot, dict) or "work_unit_id" in snapshot or "contract_revision" in snapshot
-                    or snapshot.get("admitted") is not True):
-                raise routes.RouteBindingError("ownership binding requires admitted ownerless row snapshots")
+                    or selectable_value(snapshot) is not True):
+                raise routes.RouteBindingError("ownership binding requires selectable ownerless row snapshots")
             matches = [row for row in rows if row.get("id") == snapshot.get("id")
                        and "work_unit_id" not in row and "contract_revision" not in row]
-            if len(matches) != 1 or exact(matches[0]) != exact(snapshot):
+            if len(matches) != 1 or exact(routes.selection_view(matches[0])) != exact(routes.selection_view(snapshot)):
                 raise routes.RouteBindingError("existing criterion snapshot changed or is ambiguous")
             if any(row.get("id") == snapshot.get("id") and
                    (row.get("work_unit_id"), row.get("contract_revision")) == key for row in rows):
@@ -1728,7 +1782,7 @@ def record_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_i
         state["canonical_input_event_id"] = state["latest_input_event_id"]
         _persist_canonical_intake(connection, state)
         projection, units = routes.validate_response_route(state, candidate, boundary_ref)
-        projection = routes.authenticate_continuation_feedback(projection, root, connection)
+        projection = routes.authenticate_declared_remaining_work(projection, root, connection)
         state["response_route"] = projection
         state["work_units"] = units
         state["updated_at"] = utc_now()
@@ -1761,10 +1815,17 @@ def read_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_id:
         if state is None:
             return None
         projection = routes.project_stored_response_route(state, expected_input_event_id)
-        return None if projection is None else routes.refresh_continuation_feedback(projection, root, connection)
+        return None if projection is None else routes.refresh_declared_remaining_work(projection, root, connection)
 
 
 def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
+    """Return the response model's recorded interpretation, not authenticated human instructions.
+
+    current_goal is the objective in the model's wording. non_goals and latest_scope
+    do not establish each item's origin; Core code requires no per-item source.
+    Only a decision entry's optional source claims who decided. active_decisions
+    contains entries no later entry superseded, and decision_count counts those entries.
+    """
     if isinstance(state_or_path, Path):
         # A single read preserves both semantics and their actual metadata.
         # Missing input metadata must not become a fabricated CAS anchor.
@@ -1808,7 +1869,7 @@ def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
 
 
 def intent_reference(state):
-    """Small routing input; detailed state remains available by exact pointer."""
+    """References to the response model's recorded objective, scope and decisions, not grants of authority."""
     return {
         "schema_version": "session-intent-reference.v1",
         "input_event_id": state.get("latest_input_event_id", ""),
@@ -1853,17 +1914,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=str(default_root()), help="ledger root")
     parser.add_argument("--platform", default="codex", help="agent platform")
     parser.add_argument("--session-id", default="", help="session identifier; required for writes without a bound host session")
-    parser.add_argument("--delta-json", default=None, help="intent delta JSON")
+    parser.add_argument("--delta-json", default=None, help="JSON update to the response model's interpreted-as record")
     parser.add_argument("--expected-input-event-id", default=None,
                         help="input_event_id that --read-intent returns; required after intake")
     parser.add_argument("--expected-revision", type=int, default=None,
                         help="optional ledger_revision of the snapshot used for this update")
     parser.add_argument("--snapshot", action="store_true", help="emit consumer snapshot")
-    parser.add_argument("--read-state", action="store_true", help="read intent references, or one detail with --pointer")
+    parser.add_argument("--read-state", action="store_true", help="read references to the response model's interpreted-as record, or one detail with --pointer")
     parser.add_argument("--read-intent", action="store_true", help="read routing keywords and detail references only")
     parser.add_argument("--pointer", help="select one JSON pointer from --read-state")
     parser.add_argument("--read-events", action="store_true", help="read ordered authoritative audit events")
-    parser.add_argument("--migrate", action="store_true", help="atomically import the explicitly selected JSON session")
+    parser.add_argument("--migrate", action="store_true", help="atomically import the JSON session identified by --platform and --session-id")
     parser.add_argument("--export-to", help="write a portable projection to a separate root")
     parser.add_argument("--list-native-waits", action="store_true",
                         help="list this platform's sessions whose native input waits, from their failure records")
@@ -1916,7 +1977,7 @@ def main(argv: list[str] | None = None) -> int:
         if not bound_session and not explicit_session:
             raise SystemExit(
                 "--session-id is required for writes without a bound host session. "
-                "Use the current session receipt or an explicitly selected standalone session; "
+                "Use the current session receipt or select a standalone session with --platform and --session-id; "
                 "current-session.json is a shared discovery hint, not a write identity. "
                 "No ledger was written."
             )
@@ -1936,9 +1997,9 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 result = read_session_state(**coordinates)
                 if args.expected_input_event_id and result.get("latest_input_event_id") != args.expected_input_event_id:
-                    raise ValueError("State input changed; read the current intent reference")
+                    raise ValueError("State input changed; read the reference to the response model's interpreted-as record again")
                 if args.expected_revision is not None and result.get("ledger_revision") != args.expected_revision:
-                    raise ValueError("State revision changed; read the current intent reference")
+                    raise ValueError("State revision changed; read the reference to the response model's interpreted-as record again")
                 if args.read_intent:
                     result = intent_reference(result)
                 elif args.pointer:
@@ -1964,7 +2025,7 @@ def main(argv: list[str] | None = None) -> int:
             platform=args.platform,
             session_id=session_id,
             intent_delta=delta,
-            source="cli",
+            recording_path="cli",
             expected_input_event_id=args.expected_input_event_id,
             expected_revision=args.expected_revision,
         )

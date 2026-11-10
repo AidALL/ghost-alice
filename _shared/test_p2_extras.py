@@ -226,7 +226,7 @@ class CollisionTest(unittest.TestCase):
         self.assertEqual([item["owner"] for item in collisions], ["addon-drift"])
 
     def test_same_addon_drift_is_a_collision(self):
-        # H1: same addon owns dest but the LIVE target drifted from the recorded content_hash (user edited the installed copy) -> must be flagged so the install aborts and the user's change is preserved, never clobbered.
+        # The same addon owns dest, but the live target differs from content_hash; the installer must abort and preserve that external change.
         import hash_utils  # noqa: PLC0415
         dest = self.skills / "noop"
         dest.mkdir()
@@ -338,7 +338,7 @@ class CollisionTest(unittest.TestCase):
             un._symlink_safe_remove(dest)
 
     def test_same_addon_skill_symlink_to_foreign_dir_is_drift(self):
-        # user repointed the symlink elsewhere -> still drift (must not be cleared).
+        # The symlink now points elsewhere; the installer must retain the drift finding without attributing the change to a human.
         import hash_utils  # noqa: PLC0415
         foreign = self.root / "foreign"
         foreign.mkdir()

@@ -4,13 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ghost-ALICE OS: Claude Code와 Codex를 위한 거버넌스 계층</title>
-  <meta name="description" content="Ghost-ALICE OS는 Claude Code와 Codex를 위한 거버넌스 계층입니다. 응답 모델에게 사용자의 목적을 지키고 주장마다 원본 근거와 대조하라고 지시하며, Claude Code나 Codex가 알린 도구 호출과 그 호출이 사용한 파일이나 명령을 사용자가 확인할 수 있게 기록합니다.">
+  <meta name="description" content="Ghost-ALICE OS는 Claude Code와 Codex를 위한 거버넌스 계층입니다. 응답 모델에게 인간 사용자의 목적을 지키고 주장마다 원본 근거와 대조하라고 지시하며, Claude Code나 Codex가 알린 도구 호출과 그 호출이 사용한 파일이나 명령을 인간 사용자가 확인할 수 있게 기록합니다.">
   <link rel="alternate" hreflang="en" href="https://aidall.github.io/ghost-alice/">
   <link rel="alternate" hreflang="ko" href="https://aidall.github.io/ghost-alice/index_ko.html">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Ghost-ALICE OS">
   <meta property="og:title" content="Ghost-ALICE OS">
-  <meta property="og:description" content="Ghost-ALICE OS는 Claude Code와 Codex를 위한 거버넌스 계층입니다. 응답 모델에게 사용자의 목적을 지키고 주장마다 원본 근거와 대조하라고 지시하며, Claude Code나 Codex가 알린 도구 호출과 그 호출이 사용한 파일이나 명령을 사용자가 확인할 수 있게 기록합니다.">
+  <meta property="og:description" content="Ghost-ALICE OS는 Claude Code와 Codex를 위한 거버넌스 계층입니다. 응답 모델에게 인간 사용자의 목적을 지키고 주장마다 원본 근거와 대조하라고 지시하며, Claude Code나 Codex가 알린 도구 호출과 그 호출이 사용한 파일이나 명령을 인간 사용자가 확인할 수 있게 기록합니다.">
   <meta property="og:url" content="https://aidall.github.io/ghost-alice/index_ko.html">
   <meta property="og:image" content="https://aidall.github.io/ghost-alice/imgs/Ghost-ALICE_logo.png">
   <meta property="og:image:alt" content="Ghost-ALICE OS 로고">
@@ -438,7 +438,7 @@
         <div class="eyebrow">에이전트 거버넌스 계층 · <a href="https://github.com/AidALL/ghost-alice/releases">Core 0.5.1</a></div>
         <h1 class="sr-only" id="hero-heading">Ghost-ALICE OS</h1>
         <div class="hero-logo-lockup"><img src="imgs/Ghost-ALICE_logo.png" alt="Ghost-ALICE OS"></div>
-        <p class="lead">Claude Code와 Codex를 위한 거버넌스 계층입니다. 응답 모델에게 사용자의 목적을 지키고 주장마다 원본 근거와 대조하라고 지시하며, Claude Code나 Codex가 알린 도구 호출과 그 호출이 사용한 파일이나 명령을 사용자가 확인할 수 있게 기록합니다.</p>
+        <p class="lead">Claude Code와 Codex를 위한 거버넌스 계층입니다. 응답 모델에게 인간 사용자의 목적을 지키고 주장마다 원본 근거와 대조하라고 지시하며, Claude Code나 Codex가 알린 도구 호출과 그 호출이 사용한 파일이나 명령을 인간 사용자가 확인할 수 있게 기록합니다.</p>
         <div class="actions"><a class="btn primary" href="./docs/ko/getting-started/installation.html">시작하기</a><a class="btn" href="https://github.com/AidALL/ghost-alice">GitHub에서 보기</a></div>
       </div>
       <div class="hero-visual"><div class="quick-panel">
@@ -454,18 +454,18 @@
     <section id="features" aria-labelledby="features-heading"><div class="wrap">
       <div class="section-head"><h2 id="features-heading">Ghost-ALICE가 응답 모델에게 지시하는 일</h2></div>
       <div class="grid grid-4">
-<div class="card"><h3>요청을 어떻게 해석했는지 기록합니다</h3><p>도구를 호출해야 하는 작업이면, 응답 모델은 첫 도구 호출 전에 요청의 목적, 제약, 완료 조건을 어떻게 해석했는지 의도 원장에 기록합니다. 사용자의 말에 합리적인 해석이 여럿이고 해석에 따라 다음 행동이 달라지면, 그 행동 전에 사용자에게 묻습니다.</p><a href="https://github.com/AidALL/ghost-alice/wiki/설계-원칙#대조와-피드백">설계 원칙</a></div>
-<div class="card"><h3>주장을 근거와 대조합니다</h3><p>응답 모델은 주장마다 원본 근거와 대조하고, 답변 전체를 사용자의 목적과 대조합니다. 완료 조건을 뒷받침하는 근거가 없으면 완료를 주장하지 않고, 그 완료 조건을 실패나 미해결로 보고합니다.</p><a href="https://github.com/AidALL/ghost-alice/wiki/검증과-증거">검증과 증거</a></div>
-<div class="card"><h3>구현 전에 작업 범위 선언을 작성합니다</h3><p>응답 모델은 구현을 시작하기 전에 작업 범위 선언을 작성합니다. 작업 범위 선언은 조회하거나 변경해도 되는 대상, 다음에 실행해도 되는 행동, 금지하는 경로·계층·행동, 완료 조건, 중지 조건을 담습니다. 응답 모델은 도구를 호출하기 전에 그 호출을 작업 범위 선언과 대조합니다.</p><a href="https://github.com/AidALL/ghost-alice/blob/main/boundary-contract/SKILL.md">작업 범위 선언</a></div>
+<div class="card"><h3>인간 사용자의 입력을 어떻게 해석했는지 기록합니다</h3><p>도구를 호출해야 하는 작업이면, 응답 모델은 첫 도구 호출 전에 인간 사용자의 입력에 있는 목적, 제약, 완료 조건을 어떻게 해석했는지 의도 원장에 기록합니다. 인간 사용자의 입력에 합리적인 해석이 여럿이고 해석에 따라 다음 행동이 달라지면, 응답 모델은 그 행동 전에 인간 사용자에게 묻습니다.</p><a href="https://github.com/AidALL/ghost-alice/wiki/설계-원칙#대조와-피드백">설계 원칙</a></div>
+<div class="card"><h3>주장을 근거와 대조합니다</h3><p>응답 모델은 주장마다 원본 근거와 대조하고, 답변 전체를 인간 사용자의 목적과 대조합니다. 완료 조건을 뒷받침하는 근거가 없으면 완료를 주장하지 않고, 그 완료 조건을 실패나 미해결로 보고합니다.</p><a href="https://github.com/AidALL/ghost-alice/wiki/검증과-증거">검증과 증거</a></div>
+<div class="card"><h3>구현 전에 작업 범위 선언을 작성합니다</h3><p>응답 모델은 구현을 시작하기 전에 인간 사용자의 지시가 허가한 작업 안에서 작업 범위 선언을 작성합니다. 응답 모델은 조회하거나 변경하도록 허용한 대상과 다음에 실행하도록 허용한 행동을 선언하고, 금지하는 경로·계층·행동, 완료 조건, 중지 조건을 기록합니다. 금지 항목은 인간 사용자의 금지, 프로젝트 지침의 금지 또는 응답 모델이 스스로 정한 더 좁은 한도에서 나올 수 있으며, 작업 범위 선언의 필드는 각 금지 항목의 출처를 표시하지 않습니다. 응답 모델은 도구를 호출하기 전에 그 호출을 작업 범위 선언과 대조합니다.</p><a href="https://github.com/AidALL/ghost-alice/blob/main/boundary-contract/SKILL.md">작업 범위 선언</a></div>
 <div class="card"><h3>호출 의도와 핵심 변경을 보입니다</h3><p>아직 내리지 않은 결정을 위해 정보를 조회하는 도구 호출이면, 응답 모델은 호출 전에 그 의도와 이유를 밝힙니다. 답변에는 핵심 변경과 그 내용을 보입니다. 응답 모델과 별개로 io-trace 훅은 Claude Code나 Codex가 알린 도구 호출마다 감사 기록을 작성합니다.</p><a href="https://github.com/AidALL/ghost-alice/blob/main/platforms/common-governance.md#io-trace-transparency-rule">io-trace 규칙</a></div>
       </div>
     </div></section>
     <section id="how-it-works" aria-labelledby="how-heading"><div class="wrap">
       <div class="section-head"><h2 id="how-heading">작동 방식</h2></div>
-      <p class="section-text">Ghost-ALICE Core는 공용 계약, 스킬, Core 코드(훅, 의도 원장, 문맥 게이트웨이)로 이루어집니다. 어댑터는 Core를 호스트 하나(Claude Code 또는 Codex)의 형식으로 번역하고, 인스톨러는 그 결과를 그 호스트에 설치합니다. 응답 모델은 Core의 지시에 따라 사용자가 허락한 작업을 실행하고 그 결과의 의미를 판단합니다. Core 코드는 응답 모델이 제출한 기록(입력 해석, 작업 선택 기록, 응답 검토)을 의도 원장에 저장하고, 각 기록과 그 출처의 연결을 인증합니다. Ghost-ALICE의 설계는 응답 모델이 사용자의 지시와 설치된 공용 계약을 따른다고 전제합니다. Ghost-ALICE는 지시하고 기록하며, Core 코드는 도구 호출이나 답변을 막지 않습니다.</p>
+      <p class="section-text">Ghost-ALICE Core는 공용 계약, 스킬, Core 코드(훅, 의도 원장, 문맥 게이트웨이)로 이루어집니다. 어댑터는 Core를 호스트 하나(Claude Code 또는 Codex)의 형식으로 번역하고, 인스톨러는 그 결과를 그 호스트에 설치합니다. 응답 모델은 Core의 지시에 따라 인간 사용자의 지시가 허가한 작업을 실행하고 그 결과의 의미를 판단합니다. Core 코드는 응답 모델이 제출한 기록(입력 해석, 작업 선택 기록, 응답 검토)을 의도 원장에 저장하고, 각 기록과 그 출처의 연결을 인증합니다. Ghost-ALICE의 설계는 응답 모델이 인간 사용자의 지시와 설치된 공용 계약을 따른다고 전제합니다. Ghost-ALICE는 지시하고 기록하며, Core 코드는 도구 호출이나 답변을 막지 않습니다.</p>
       <div class="actions start"><a class="btn" href="./architecture_ko.html">Core 아키텍처 읽기</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/설계-원칙#구조의-경계">구조의 경계</a></div>
     </div></section>
-    <section id="addons" aria-labelledby="addons-heading"><div class="wrap"><div class="section-head"><h2 id="addons-heading">애드온</h2><p class="section-note">애드온은 <code>bash install.sh --addon-source &lt;저장소-또는-경로&gt;</code>로 그 애드온의 저장소나 로컬 경로에서 설치합니다. 인스톨러는 애드온의 스킬과 관찰 훅을 호스트에 등록하고, 훅 실행기는 그 훅이 호스트를 막지 못하게 합니다. 애드온을 설치해도 사용자가 작업을 허락한 것은 아닙니다. 공용 계약에 따라 응답 모델은 사용자가 허락한 작업에서만 애드온의 스킬을 호출합니다. 애드온이 추가하는 기능은 그 애드온의 문서가 설명합니다.</p></div>
+    <section id="addons" aria-labelledby="addons-heading"><div class="wrap"><div class="section-head"><h2 id="addons-heading">애드온</h2><p class="section-note">애드온은 <code>bash install.sh --addon-source &lt;저장소-또는-경로&gt;</code>로 그 애드온의 저장소나 로컬 경로에서 설치합니다. 인스톨러는 애드온의 스킬과 관찰 훅을 호스트에 등록하고, 훅 실행기는 그 훅이 호스트를 막지 못하게 합니다. 애드온의 설치는 어떤 작업도 허가하지 않습니다. 공용 계약에 따라 응답 모델은 인간 사용자의 지시가 허가한 작업에서만 애드온의 스킬을 호출합니다. 애드온이 추가하는 기능은 그 애드온의 문서가 설명합니다.</p></div>
 <div class="actions start"><a class="btn" href="./docs/ko/reference/addons.html">애드온 설치 원본</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/애드온-작성">애드온 작성</a></div>
 </div></section>
     <section id="routes" aria-labelledby="docs-heading"><div class="wrap">

@@ -32,7 +32,7 @@ class SQLiteIntentConsumerTests(unittest.TestCase):
 
     def observe(self, text="bounded request"):
         ledger.record_turn(root=self.root, platform=self.platform, session_id=self.sid,
-                           raw_user_input=text)
+                           raw_input=text)
 
     def test_posttool_audits_tools_without_inferring_missing_semantic_changes(self):
         for index in range(3):
