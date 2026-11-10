@@ -54,6 +54,8 @@ CODE_OWNER_ROOT = Path(__file__).resolve().parents[1]
 NODE_JS_DOWNLOAD_URL = "https://nodejs.org/en/download"
 RUNTIME_SHARED_FILES = (
     "hook_profile_gate.py",
+    "fresh_agent_session.py",
+    "project_runtime.py",
     "agent_visibility_policy.py",
     "runtime_config.py",
     "work_impact_projection.py",

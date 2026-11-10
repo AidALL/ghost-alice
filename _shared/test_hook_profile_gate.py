@@ -414,6 +414,43 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
         expected_digest = hashlib.sha256("상태 확인".encode("utf-8")).hexdigest()
         self.assertEqual(row["stdout"].strip(), expected_digest)
 
+    def test_full_hook_output_uses_utf8_and_preserves_line_endings(self):
+        for encoding in ("cp949", "cp1252"):
+            for ending in ("", "\n", "\n\n"):
+                with self.subTest(encoding=encoding, ending=repr(ending)):
+                    expected_stdout = "한글 출력" + ending
+                    expected_stderr = "경로 오류: C:/사용자" + ending
+                    raw_stdout, raw_stderr = io.BytesIO(), io.BytesIO()
+                    stdout = io.TextIOWrapper(raw_stdout, encoding=encoding, newline="")
+                    stderr = io.TextIOWrapper(raw_stderr, encoding=encoding, newline="")
+                    try:
+                        with mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr):
+                            hook_profile_gate._emit_rendered_user_surface(
+                                *hook_profile_gate._render_user_surface(
+                                    {"user_surface": "full"}, expected_stdout, expected_stderr))
+                        stdout.flush()
+                        stderr.flush()
+                        self.assertEqual(raw_stdout.getvalue(), expected_stdout.encode("utf-8"))
+                        self.assertEqual(raw_stderr.getvalue(), expected_stderr.encode("utf-8"))
+                    finally:
+                        stdout.detach()
+                        stderr.detach()
+
+    def test_empty_hook_output_emits_no_bytes(self):
+        raw_stdout, raw_stderr = io.BytesIO(), io.BytesIO()
+        stdout = io.TextIOWrapper(raw_stdout, encoding="cp949", newline="")
+        stderr = io.TextIOWrapper(raw_stderr, encoding="cp1252", newline="")
+        try:
+            with mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr):
+                hook_profile_gate._emit_rendered_user_surface("", "")
+            stdout.flush()
+            stderr.flush()
+            self.assertEqual(raw_stdout.getvalue(), b"")
+            self.assertEqual(raw_stderr.getvalue(), b"")
+        finally:
+            stdout.detach()
+            stderr.detach()
+
     def test_dynamic_visibility_does_not_disable_tool_checkpoint(self):
         env = {"GHOST_ALICE_AGENT_VISIBILITY": "dynamic"}
 

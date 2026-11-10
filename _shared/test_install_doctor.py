@@ -1375,20 +1375,23 @@ class RuntimeCoreAuditTest(unittest.TestCase):
         ):
             self.assertIn(dependency, install_doctor.RUNTIME_SHARED_FILES)
 
-    def test_runtime_shared_file_audit_rejects_missing_runner_dependency(self):
-        (self.source / "hook_profile_gate.py").write_text("# runner\n", encoding="utf-8")
-        (self.runtime / "hook_profile_gate.py").write_text("# runner\n", encoding="utf-8")
-        (self.source / "agent_visibility_policy.py").write_text("# dependency\n", encoding="utf-8")
-
-        with mock.patch.object(
-            install_doctor,
-            "RUNTIME_SHARED_FILES",
-            ("hook_profile_gate.py", "agent_visibility_policy.py"),
-        ):
-            findings = install_doctor._runtime_shared_file_audit(self.source, self.runtime)
-
-        self.assertTrue(any(f["status"] == install_doctor.STATUS_ERROR for f in findings))
-        self.assertTrue(any(f["name"] == "agent_visibility_policy.py" for f in findings))
+    def test_runtime_shared_file_audit_checks_runner_dependency_content(self):
+        for name in ("agent_visibility_policy.py", "fresh_agent_session.py", "project_runtime.py"):
+            (self.source / name).write_text("# original\n", encoding="utf-8")
+            for content, expected_status, expected_reason in (
+                (None, "error", "runtime-missing"),
+                ("# changed\n", "error", "hash-mismatch"),
+                ("# original\n", "ok", "hash-match"),
+            ):
+                with self.subTest(dependency=name, state=expected_reason):
+                    runtime_file = self.runtime / name
+                    if content is None:
+                        runtime_file.unlink(missing_ok=True)
+                    else:
+                        runtime_file.write_text(content, encoding="utf-8")
+                    findings = install_doctor._runtime_shared_file_audit(self.source, self.runtime)
+                    observed = [(f["status"], f["reason"]) for f in findings if f["name"] == name]
+                    self.assertEqual(observed, [(expected_status, expected_reason)])
 
     def test_runtime_core_audit_accepts_runtime_hook_config(self):
         self._write_runtime_files()

@@ -289,8 +289,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _write_utf8(stream: TextIO, text: str) -> None:
-    output = text if text.endswith("\n") else text + "\n"
+def write_utf8(stream: TextIO, text: str) -> None:
+    """Write text as UTF-8 without adding a line ending."""
     reconfigure = getattr(stream, "reconfigure", None)
     if callable(reconfigure):
         try:
@@ -298,12 +298,12 @@ def _write_utf8(stream: TextIO, text: str) -> None:
         except (AttributeError, OSError, TypeError, ValueError):
             pass
     try:
-        stream.write(output)
+        stream.write(text)
     except UnicodeEncodeError:
         buffer = getattr(stream, "buffer", None)
         if buffer is None:
             raise
-        buffer.write(output.encode("utf-8", errors="replace"))
+        buffer.write(text.encode("utf-8", errors="replace"))
 
 
 def main(
@@ -336,7 +336,7 @@ def main(
     except (FreshAgentSessionError, OSError, ValueError) as exc:
         error_stream.write(f"[fresh-agent-session] {exc}\n")
         return 1
-    _write_utf8(output_stream, response)
+    write_utf8(output_stream, response if response.endswith("\n") else response + "\n")
     return 0
 
 
