@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -175,18 +177,22 @@ def _apply_bootstrap(
     if source_text is None:
         source_text = platform_contract_text(source)
 
-    existing_text = None
-    if dest.exists():
-        try:
-            existing_text = dest.read_text(encoding="utf-8-sig")
-        except UnicodeDecodeError:
-            status, body = "proposed", _render_bootstrap(source_text, spec)
-            _write_text(proposed, body)
-            return ApplyResult(status, proposed)
-
-    status, body = _merge_bootstrap_text(existing_text, source_text, spec)
+    try:
+        existing_text = dest.read_text(encoding="utf-8-sig") if dest.exists() else None
+    except UnicodeDecodeError:
+        status, body = "proposed", _render_bootstrap(source_text, spec)
+    else:
+        status, body = _merge_bootstrap_text(existing_text, source_text, spec)
     if status == "proposed":
-        _write_text(proposed, body)
+        proposed.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with proposed.open("x", encoding="utf-8") as output:
+                output.write(body)
+        except FileExistsError:
+            descriptor, candidate = tempfile.mkstemp(prefix=proposed.name + ".", dir=proposed.parent)
+            proposed = Path(candidate)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                output.write(body)
         return ApplyResult(status, proposed)
 
     _write_text(dest, body)
@@ -200,7 +206,8 @@ def _remove_marker_line(text: str, spec: RuleBlockSpec) -> str:
     return text
 
 
-def _remove_bootstrap(dest_path: Path | str, spec: RuleBlockSpec) -> ApplyResult:
+def _remove_bootstrap(dest_path: Path | str, spec: RuleBlockSpec, *, apply_changes: bool = True) -> ApplyResult:
+    """Return the owned block's disposition; apply its file change only when apply_changes is true."""
     dest = Path(dest_path)
     if dest.is_symlink():
         return ApplyResult("unchanged", dest)
@@ -213,13 +220,16 @@ def _remove_bootstrap(dest_path: Path | str, spec: RuleBlockSpec) -> ApplyResult
         begin, end = managed_block
         remaining = _remove_marker_line(existing[:begin] + existing[end:], spec).strip()
         if not remaining:
-            dest.unlink()
+            if apply_changes:
+                dest.unlink()
             return ApplyResult("removed", dest)
-        _write_text(dest, remaining + "\n")
+        if apply_changes:
+            _write_text(dest, remaining + "\n")
         return ApplyResult("updated", dest)
 
     if existing.startswith(_known_markers(spec)):
-        dest.unlink()
+        if apply_changes:
+            dest.unlink()
         return ApplyResult("removed", dest)
 
     return ApplyResult("unchanged", dest)
@@ -294,9 +304,9 @@ def remove_codex_bootstrap(dest_path: Path | str) -> ApplyResult:
     return companion if result.status == "unchanged" and companion.status != "unchanged" else result
 
 
-def remove_codex_rule_file(dest_path: Path | str) -> ApplyResult:
+def remove_codex_rule_file(dest_path: Path | str, *, apply_changes: bool = True) -> ApplyResult:
     """Remove one owned rule asset so cleanup can report each disposition."""
-    return _remove_bootstrap(dest_path, CODEX_SPEC)
+    return _remove_bootstrap(dest_path, CODEX_SPEC, apply_changes=apply_changes)
 
 
 def render_claude_managed_block(source_text: str) -> str:
@@ -325,8 +335,8 @@ def apply_claude_bootstrap(
     )
 
 
-def remove_claude_bootstrap(dest_path: Path | str) -> ApplyResult:
-    return _remove_bootstrap(dest_path, CLAUDE_SPEC)
+def remove_claude_bootstrap(dest_path: Path | str, *, apply_changes: bool = True) -> ApplyResult:
+    return _remove_bootstrap(dest_path, CLAUDE_SPEC, apply_changes=apply_changes)
 
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:

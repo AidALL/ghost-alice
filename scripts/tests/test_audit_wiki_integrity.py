@@ -132,8 +132,18 @@ class TestNonOverblock(unittest.TestCase):
 
     def test_image_or_nested_path_links_not_treated_as_wiki_pages(self):
         pages = dict(CLEAN)
-        pages["Home"] = CLEAN["Home"] + " ![logo](images/icon.png) and [asset](sub/dir/file.md)."
+        pages["Home"] = CLEAN["Home"] + " ![logo](logo.png) ![logo](images/icon.png) and [asset](sub/dir/file.md)."
         self.assertNotIn("broken-link", _checks(awi.audit(pages)))
+        pages["Home"] += " A page with the same name: [logo](logo.png)."
+        self.assertIn("Home", _pages_with(awi.audit(pages), "broken-link"))
+
+    def test_image_marker_distinguishes_escaped_punctuation(self):
+        for text, broken in ((r'![logo](Missing)', False), (r'\![logo](Missing)', True),
+                             (r'\\![logo](Missing)', False), (r'\[logo](Missing)', False)):
+            with self.subTest(text=text):
+                pages = dict(CLEAN)
+                pages['Home'] += '\n' + text
+                self.assertEqual('Home' in _pages_with(awi.audit(pages), 'broken-link'), broken)
 
 
 class TestDuplicatePages(unittest.TestCase):

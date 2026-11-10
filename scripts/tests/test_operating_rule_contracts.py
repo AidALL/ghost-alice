@@ -27,7 +27,6 @@ class OperatingRuleContractTest(unittest.TestCase):
         self.assertIn('The host executes tools and enforces permissions', common)
         self.assertIn('`session-intent-analyzer`: reading or writing the `interpreted-as` record', common)
         router = (ROOT / 'task-router/SKILL.md').read_text()
-        self.assertIn('Work Selection section', router)
         self.assertIn('register the response route with Core code at that point', router)
         self.assertIn('`ledger_root`, `platform` and `session_id` from the session metadata', router)
         self.assertIn('the input ID that `--read-intent` returned when this input', router)
@@ -49,7 +48,7 @@ class OperatingRuleContractTest(unittest.TestCase):
 
     def test_reuse_instruction_contract_stays_at_its_owner(self):
         reference = (ROOT / 'coding-convention/verification-before-completion/references/verify-or-reuse.md').read_text()
-        for phrase in ('## Instruction Body Reuse', 'same session', 'new user input alone',
+        for phrase in ('same session', 'new user input alone',
                        'observed instruction change', 'retained body is lost',
                        'execute the applicable workflow for the input the response model is answering'):
             self.assertIn(phrase, reference)

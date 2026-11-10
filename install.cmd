@@ -8,10 +8,11 @@ set "SCRIPT_DIR=%~dp0"
 set "PS1=%SCRIPT_DIR%install.ps1"
 
 where pwsh.exe >nul 2>nul
-if %ERRORLEVEL% EQU 0 (
-    pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*
-    exit /b %ERRORLEVEL%
-)
+if %ERRORLEVEL% NEQ 0 goto powershell
 
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*
+exit /b %ERRORLEVEL%
+
+:powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*
 exit /b %ERRORLEVEL%

@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hook_definitions
 import hook_profile_gate
 import install_hooks
+import strict_session_log
 
 
 def _make_node_executable(node: Path) -> None:
@@ -95,7 +96,69 @@ def _node_marker_command(node: Path, marker: Path) -> str:
     return f'"{node.as_posix()}" -e {shlex.quote(code)} -- --platform codex'
 
 
+def _b64(command):
+    return base64.urlsafe_b64encode(command.encode()).decode()
+
 class TestHookRunnerExecutionGate(unittest.TestCase):
+    def test_runner_records_launch_failure_without_a_child_exit_code(self):
+        import errno
+        for error in (FileNotFoundError(errno.ENOENT, 'executable disappeared'),
+                      OSError(errno.ENOEXEC, 'invalid executable format')):
+            for suffix in ('', ' || true'):
+                with self.subTest(error=error.errno, suffix=suffix), tempfile.TemporaryDirectory() as home:
+                    command = shlex.join([sys.executable, '-c', 'print(1)']) + suffix
+                    payload = _b64(command)
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    raw = '{"session_id":"launch-failure","event":"PreToolUse"}'
+                    with (mock.patch.dict(os.environ, {'HOME': home, 'GHOST_ALICE_PLATFORM': 'codex'}, clear=True),
+                          mock.patch.object(hook_profile_gate, '_read_stdin', return_value=raw),
+                          mock.patch.object(hook_profile_gate.subprocess, 'run', side_effect=error),
+                          mock.patch.object(sys, 'stdout', stdout), mock.patch.object(sys, 'stderr', stderr)):
+                        self.assertEqual(hook_profile_gate.run('tool-checkpoint', payload), 0)
+                    rows = strict_session_log.log_path(home, 'codex', 'launch-failure').read_text().splitlines()
+                    self.assertEqual(len(rows), 1)
+                    row = json.loads(rows[0])
+                    self.assertIsNone(row['exit_code'])
+                    self.assertEqual(row['surface_item']['launch_failure']['errno'], error.errno)
+                    self.assertEqual(row['visible_decision'], 'hide')
+                    self.assertEqual(row['stdout'], '')
+                    self.assertIn(type(error).__name__, row['stderr'])
+                    self.assertEqual(stdout.getvalue() + stderr.getvalue(), '')
+                    self.assertEqual(row['user_surface_output'], '')
+                    self.assertEqual(row['payload_digest'], 'sha256:' + hashlib.sha256(raw.encode()).hexdigest())
+
+    def test_event_aliases_reconcile_inputs_and_deliver_wait_notices(self):
+        import session_intent_ledger as ledger
+        for field in ('event', 'hook_event_name', 'hookEventName', None):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                session = 'event-alias'
+                destination, transcript = self._wrapper_fixture(directory, session)
+                coords = dict(root=Path(destination.ledger_root), platform='claude', session_id=session)
+                ledger.stage_native_input(**coords, raw_input='Waiting for native row',
+                                          prompt_id=None, transcript_path=str(transcript))
+                hook_input = dict(session_id=session, transcript_path=str(transcript))
+                env = {'HOME': directory, 'GHOST_ALICE_AGENT_VISIBILITY': 'minimal'}
+                if field:
+                    hook_input[field] = 'PreToolUse'
+                    env['GHOST_ALICE_HOOK_EVENT'] = 'UserPromptSubmit'
+                else:
+                    env['GHOST_ALICE_HOOK_EVENT'] = 'PreToolUse'
+                output = io.StringIO()
+                command = _b64(shlex.join([sys.executable, '-c', 'print(1)']))
+                with (mock.patch.dict(os.environ, env, clear=True),
+                      mock.patch.object(hook_profile_gate, '_read_stdin', return_value=json.dumps(hook_input)),
+                      mock.patch.object(hook_profile_gate.subprocess, 'run',
+                                        return_value=subprocess.CompletedProcess([], 0, '{"continue":true}\n', '')),
+                      mock.patch.object(sys, 'stdout', output)):
+                    self.assertEqual(hook_profile_gate.run('tool-checkpoint', command,
+                                                          platform='claude', binding=destination.binding()), 0)
+                self.assertIn('row-not-found', json.loads(output.getvalue())['systemMessage'])
+                events = [row['event'] for row in ledger.read_session_events(**coords)]
+                self.assertEqual(events.count('native-input-waiting'), 1)
+                self.assertEqual(events.count('native-input-notice'), 1)
+                row = json.loads(strict_session_log.log_path(directory, 'claude', session).read_text().splitlines()[0])
+                self.assertEqual(row['event'], 'PreToolUse')
+
     def test_claude_wrapper_reconciles_before_pretool_or_stop_child_only(self):
         import session_intent_ledger as ledger
         import install_destination
@@ -443,7 +506,7 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             env = {"HOME": temp_home, "GHOST_ALICE_PLATFORM": "codex"}
             manifest = Path(temp_home) / ".ghost-alice/pending-merges/codex/manifest.json"
             for count in (0, 1):
-                receipt = {"platform": "codex", "manifest_path": str(manifest), "undecided_count": count}
+                receipt = {"platform": "codex", "manifest_path": str(manifest), "manifest_state": "parsed", "undecided_count": count}
                 stdout = json.dumps({"continue": True, "ghostAlicePendingMergeCheck": receipt})
                 with mock.patch.object(hook_profile_gate, "_has_pending_merge_undecided", side_effect=AssertionError("duplicate manifest read")):
                     context = hook_profile_gate._visibility_context("session-start", stdout, "", 0, env=env, declared="routine")
@@ -504,21 +567,6 @@ class TestHookCommandAllowlist(unittest.TestCase):
         native_identity.start()
         self.addCleanup(native_identity.stop)
 
-    def test_configured_node_runtime_uses_shared_usability_predicate(self):
-        with tempfile.TemporaryDirectory() as temp_home:
-            node = Path(temp_home) / ("node.exe" if os.name == "nt" else "node")
-            node.write_text("# fake node runtime\n", encoding="utf-8")
-
-            with mock.patch.object(
-                hook_profile_gate.runtime_config,
-                "is_usable_node_runtime",
-                return_value=False,
-                create=True,
-            ) as usability:
-                configured = hook_profile_gate._configured_node_runtime_from_value(str(node))
-
-        self.assertIsNone(configured)
-        usability.assert_called_once_with(node.resolve())
 
     def test_dynamic_node_runtime_rebinds_stale_codex_registration_to_current_config(self):
         with tempfile.TemporaryDirectory() as temp_home:
@@ -820,6 +868,34 @@ class TestHookCommandAllowlist(unittest.TestCase):
                     self.fail(f"PATH-resolved Node runtime was rejected: {exc}")
 
         self.assertEqual(Path(argv[0]).resolve(), node.resolve())
+
+    def test_path_authorization_accepts_both_exact_paths_but_only_first_runtime_hardlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "first" / "node"
+            second = root / "second" / "node.exe"
+            first_alias = root / "first-alias" / "node"
+            second_alias = root / "second-alias" / "node"
+            for path in (first, second, first_alias, second_alias):
+                path.parent.mkdir()
+            for path in (first, second):
+                path.write_text("node fixture", encoding="utf-8")
+                _make_node_executable(path)
+            os.link(first, first_alias)
+            os.link(second, second_alias)
+            env = {"HOME": directory, "USERPROFILE": directory, "PATH": "fixture-path"}
+            runtimes = {"node": str(first), "node.exe": str(second)}
+
+            with (mock.patch.dict(os.environ, env, clear=True),
+                  mock.patch("shutil.which", side_effect=lambda name, path=None: runtimes.get(name))):
+                selected = hook_profile_gate._resolve_dynamic_hook_node(
+                    [hook_profile_gate.runtime_config.HOOK_NODE_SENTINEL, "--platform", "claude"], env)
+                self.assertEqual(selected, first.resolve())
+                for accepted in (first, second, first_alias):
+                    with self.subTest(accepted=accepted):
+                        hook_profile_gate.assert_allowed_command([str(accepted)], [], env=env)
+                with self.assertRaises(hook_profile_gate.HookCommandRejected):
+                    hook_profile_gate.assert_allowed_command([str(second_alias)], [], env=env)
 
     def test_userprofile_locates_configured_node_when_home_is_missing(self):
         with tempfile.TemporaryDirectory() as temp_home:
@@ -2457,6 +2533,37 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
 
 
 class TestHookProtocolSurface(unittest.TestCase):
+    def test_routine_declaration_cannot_hide_removed_control_notice(self):
+        controls = (
+            {'decision': 'block', 'reason': 'Finish the requested work.'},
+            {'continue': False, 'stopReason': 'Stop requested.'},
+            {'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny'}},
+            {'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'ask'}},
+        )
+        for control in controls:
+            for profile in ('strict', 'dynamic', 'minimal'):
+                with self.subTest(control=control, profile=profile), tempfile.TemporaryDirectory() as home:
+                    raw = json.dumps(dict(control, ghostAliceSurface='routine')) + '\n'
+                    command = _b64(shlex.join([sys.executable, '-c', 'print(1)']))
+                    output = io.StringIO()
+                    with (mock.patch.dict(os.environ, {'HOME': home, 'GHOST_ALICE_PLATFORM': 'codex',
+                                                      'GHOST_ALICE_AGENT_VISIBILITY': profile}, clear=True),
+                          mock.patch.object(hook_profile_gate, '_read_stdin',
+                                            return_value='{"session_id":"routine-control","event":"PreToolUse"}'),
+                          mock.patch.object(hook_profile_gate.subprocess, 'run',
+                                            return_value=subprocess.CompletedProcess([], 0, raw, '')),
+                          mock.patch.object(sys, 'stdout', output)):
+                        self.assertEqual(hook_profile_gate.run('tool-checkpoint', command), 0)
+                    protocol = json.loads(output.getvalue())
+                    self.assertIn('removed that request before the host saw it', protocol['systemMessage'])
+                    self.assertNotIn('decision', protocol)
+                    self.assertIsNot(protocol.get('continue'), False)
+                    self.assertNotIn('permissionDecision', protocol.get('hookSpecificOutput', {}))
+                    row = json.loads(strict_session_log.log_path(home, 'codex', 'routine-control').read_text().splitlines()[0])
+                    self.assertEqual(row['stdout'], raw)
+                    self.assertEqual(row['visible_decision'], 'force_show')
+                    self.assertEqual(row['surface_item']['value_kind'], 'risk')
+
     def test_pretool_controls_and_recording_metadata_stay_in_raw_audit_not_native_envelope(self):
         for platform in ('codex', 'claude'):
             for denied in (False, True):

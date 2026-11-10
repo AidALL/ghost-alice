@@ -4,6 +4,7 @@ import inspect
 import json
 import os
 import shlex
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 import install_hooks
@@ -23,12 +24,11 @@ def test_installer_exposes_one_destination_across_actions():
 
 
 def test_native_assessment_needs_no_display_trace_or_delivery_instruction():
-    from test_completion_skill_evidence import (
-        StopHookSkillEvidenceTests, WITHOUT_SELF_REPORT, assert_stop_observation,
+    from stop_hook_testing import (
+        run_reviewed_stop, WITHOUT_SELF_REPORT, assert_stop_observation,
     )
-    case = StopHookSkillEvidenceTests()
-    payload = case.run_hook(platform='codex', message=WITHOUT_SELF_REPORT)
-    assert_stop_observation(case, payload)
+    payload = run_reviewed_stop(platform='codex', message=WITHOUT_SELF_REPORT)
+    assert_stop_observation(unittest.TestCase(), payload)
     assert '[io-trace]' not in json.dumps(payload)
     assert 'delivery-route:' not in json.dumps(payload)
 

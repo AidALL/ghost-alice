@@ -6,11 +6,13 @@ Run with a 3.11+ interpreter, e.g.:
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -207,6 +209,72 @@ class ForwardCompatTest(RegistryTestBase):
         reg.write_record(loaded, addons_dir=self.addons)
         self.assertEqual(reg.read_record("alpha", addons_dir=self.addons).get("future_field"), {"k": "v"})
 
+    def test_reader_preserves_forward_entries_without_writer_only_fields(self):
+        rec = _record("alpha", schema_version="1.5", provided=[
+            {"kind": "future-kind", "future_field": {"k": "v"}},
+        ], depends_on_core=["task-router"])
+        self.addons.mkdir()
+        path = self.addons / "alpha.json"
+        path.write_text(json.dumps(rec), encoding="utf-8")
+        before = path.read_bytes()
+        self.assertEqual(reg.read_record("alpha", addons_dir=self.addons), rec)
+        self.assertEqual(reg.scan_records(addons_dir=self.addons), ([rec], []))
+        self.assertEqual(path.read_bytes(), before)
+
+
+class ConsumerShapeTest(RegistryTestBase):
+    def test_malformed_consumer_lists_are_rejected_and_reported_without_rewrite(self):
+        self.addons.mkdir()
+        path = self.addons / "alpha.json"
+        for field, bad in [
+            ("provided", None), ("provided", "skill"), ("provided", [None]),
+            ("depends_on_core", None), ("depends_on_core", "task-router"),
+            ("depends_on_core", [None]), ("depends_on_core", [{"name": "task-router"}]),
+        ]:
+            with self.subTest(field=field, bad=bad):
+                path.write_text(json.dumps(_record(**{field: bad})), encoding="utf-8")
+                before = path.read_bytes()
+                with self.assertRaisesRegex(reg.SchemaValidationError, field):
+                    reg.read_record("alpha", addons_dir=self.addons)
+                records, skipped = reg.scan_records(addons_dir=self.addons)
+                self.assertEqual(records, [])
+                self.assertEqual([name for name, _ in skipped], ["alpha.json"])
+                self.assertIn(field, skipped[0][1])
+                self.assertEqual(path.read_bytes(), before)
+
+    def test_malformed_dependency_is_unknown_to_removal_cli(self):
+        import addon_uninstall
+
+        self.addons.mkdir()
+        path = self.addons / "alpha.json"
+        for bad in (None, "task-router", [None]):
+            with self.subTest(bad=bad):
+                path.write_text(json.dumps(_record(depends_on_core=bad)), encoding="utf-8")
+                before = path.read_bytes()
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    rc = addon_uninstall.main([
+                        "--addons-dir", str(self.addons), "--dependents", "task-router",
+                    ])
+                self.assertEqual(rc, 2, output.getvalue())
+                self.assertEqual(json.loads(output.getvalue())["skipped"], ["alpha.json"])
+                self.assertEqual(path.read_bytes(), before)
+
+    def test_malformed_provided_preserves_sidecar_without_starting_uninstall(self):
+        import addon_uninstall
+
+        self.addons.mkdir()
+        path = self.addons / "alpha.json"
+        path.write_text(json.dumps(_record(provided=None)), encoding="utf-8")
+        before = path.read_bytes()
+        result = addon_uninstall.uninstall_addon(
+            "alpha", addons_dir=self.addons, allowed_roots=[Path(self._tmp.name)], confirm=True,
+        )
+        self.assertEqual(result["status"], "error")
+        self.assertIn("provided", result["reason"])
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(sorted(p.name for p in self.addons.iterdir()), ["alpha.json"])
+
 
 class ReadNegativeTest(RegistryTestBase):
     def test_read_record_missing_raises(self):
@@ -241,19 +309,64 @@ class ReadNegativeTest(RegistryTestBase):
             reg.read_record("alpha", addons_dir=self.addons)
 
     def test_read_in_dir_symlink_rejected_by_nofollow(self):
-        # alpha.json -> beta.json, both INSIDE the dir: containment passes, O_NOFOLLOW rejects.
-        reg.write_record(_record("beta"), addons_dir=self.addons)
+        # The target declares the same ID, so neither containment nor ID binding masks link acceptance.
+        self.addons.mkdir()
+        target = self.addons / "same-id.data"
+        target.write_text(json.dumps(_record("alpha")), encoding="utf-8")
         try:
-            os.symlink(self.addons / "beta.json", self.addons / "alpha.json")
+            os.symlink(target, self.addons / "alpha.json")
         except (OSError, NotImplementedError):
             self.skipTest("symlinks unavailable")
-        with self.assertRaises(reg.SchemaValidationError):
-            reg.read_record("alpha", addons_dir=self.addons)
+        for flag in (getattr(os, "O_NOFOLLOW", 0), 0):
+            with self.subTest(nofollow=flag), mock.patch.object(reg.os, "O_NOFOLLOW", flag, create=True):
+                with self.assertRaises(reg.SchemaValidationError):
+                    reg.read_record("alpha", addons_dir=self.addons)
+                records, skipped = reg.scan_records(addons_dir=self.addons)
+                self.assertEqual(records, [])
+                self.assertEqual([name for name, _ in skipped], ["alpha.json"])
+        self.assertTrue((self.addons / "alpha.json").is_symlink())
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), _record("alpha"))
+
+    def test_fallback_accepts_regular_record(self):
+        reg.write_record(_record("alpha"), addons_dir=self.addons)
+        with mock.patch.object(reg.os, "O_NOFOLLOW", 0, create=True):
+            self.assertEqual(reg.read_record("alpha", addons_dir=self.addons), _record("alpha"))
+
+    def test_fallback_rejects_file_replaced_while_opening(self):
+        path = reg.write_record(_record("alpha"), addons_dir=self.addons)
+        before = path.read_bytes()
+        replacement = self.addons / "replacement.data"
+        replacement.write_text(json.dumps(_record("alpha", addon_version="9.9.9")), encoding="utf-8")
+        saved = self.addons / "saved.data"
+        real_open = os.open
+
+        def open_replacement(candidate, flags):
+            path.rename(saved)
+            replacement.rename(path)
+            try:
+                return real_open(candidate, flags)
+            finally:
+                path.rename(replacement)
+                saved.rename(path)
+
+        with mock.patch.object(reg.os, "O_NOFOLLOW", 0, create=True), mock.patch.object(reg.os, "open", side_effect=open_replacement):
+            with self.assertRaisesRegex(reg.SchemaValidationError, "changed"):
+                reg.read_record("alpha", addons_dir=self.addons)
+        self.assertEqual(path.read_bytes(), before)
 
     def test_oversized_sidecar_rejected(self):
         self.addons.mkdir(parents=True, exist_ok=True)
-        (self.addons / "alpha.json").write_text("x" * (reg.MAX_SIDECAR_BYTES + 1), encoding="utf-8")
-        with self.assertRaises(reg.SchemaValidationError):
+        path = self.addons / "alpha.json"
+        record = _record(padding="")
+        overhead = len(json.dumps(record).encode("utf-8"))
+        record["padding"] = "x" * (reg.MAX_SIDECAR_BYTES - 1 - overhead)
+        path.write_text(json.dumps(record), encoding="utf-8")
+        self.assertEqual(path.stat().st_size, reg.MAX_SIDECAR_BYTES - 1)
+        self.assertEqual(reg.read_record("alpha", addons_dir=self.addons), record)
+        record["padding"] += "xx"
+        path.write_text(json.dumps(record), encoding="utf-8")
+        self.assertEqual(path.stat().st_size, reg.MAX_SIDECAR_BYTES + 1)
+        with self.assertRaisesRegex(reg.SchemaValidationError, f"exceeds {reg.MAX_SIDECAR_BYTES} bytes"):
             reg.read_record("alpha", addons_dir=self.addons)
 
 

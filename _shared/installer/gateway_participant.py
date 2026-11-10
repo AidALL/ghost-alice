@@ -25,7 +25,8 @@ import sys
 import context_gateway_install as gateway
 import context_gateway_platform as gateway_platform
 import installed_payload
-from context_gateway_model import GatewayBlocked, GatewayFailure, GatewayServiceError, ServiceObservation
+from context_gateway_model import GatewayBlocked, GatewayFailure, GatewayServiceError
+from context_gateway_transaction import owned_service_state
 from installer import locations
 from installer.participant import PublishContext
 
@@ -104,19 +105,11 @@ class GatewayParticipant:
 
     def __init__(self, ghost_root: Path | str, service: dict, *, effects=None, platform: str | None = None):
         self.ghost_root, self.service = Path(ghost_root), dict(service)
-        self.effects = gateway._effects() if effects is None else effects
+        self.effects = gateway._effects(self.ghost_root.parent) if effects is None else effects
         self.platform = _host(platform)
         self.domain = gateway_platform.service_domain(self.platform)
         self.agent = Path(service["launch_agent"])
         self.affected = self.was_running = self.stopped = self.started = False
-
-    def _state(self) -> str:
-        value = self.effects.state(self.domain)
-        if isinstance(value, ServiceObservation):
-            value = "running" if value.presence == "present" else value.presence
-        if value not in ("running", "absent"):
-            raise RuntimeError("Native service observation is inconclusive")
-        return value
 
     def _listener(self) -> dict:
         return json.loads(Path(self.service["state_path"]).read_bytes())
@@ -128,7 +121,7 @@ class GatewayParticipant:
         if self.platform != "darwin":
             raise GatewayBlocked("The registered gateway service needs its macOS launchctl owner to stop and start it")
         try:
-            self.was_running = self._state() == "running"
+            self.was_running = owned_service_state(self.effects, self.domain, self.agent) == "running"
         except Exception as exc:
             raise GatewayServiceError("Service state is unavailable; no installed artifacts changed") from exc
         if self.was_running:
@@ -139,7 +132,7 @@ class GatewayParticipant:
                                           "retain Core for review", phase="stop") from exc
             self.stopped = True
         try:
-            absent = self._state() == "absent"
+            absent = owned_service_state(self.effects, self.domain, self.agent) == "absent"
         except Exception:
             absent = False
         if not absent:
@@ -165,9 +158,9 @@ class GatewayParticipant:
         if not self.started:
             return
         try:
-            if self._state() == "running":
+            if owned_service_state(self.effects, self.domain, self.agent) == "running":
                 self.effects.stop(self.domain)
-            if self._state() != "absent":
+            if owned_service_state(self.effects, self.domain, self.agent) != "absent":
                 raise RuntimeError("Candidate stop is unconfirmed")
         except Exception as exc:
             raise GatewayFailure(f"Candidate service stop is unconfirmed: {exc}", phase="rollback") from exc
@@ -196,7 +189,7 @@ def removal(ghost_root: Path | str, removing, *, remove_codex: bool = False, app
     with the exit code of the cause.
     """
     ghost_root = Path(ghost_root)
-    io = gateway._effects() if effects is None else effects
+    io = gateway._effects(ghost_root.parent) if effects is None else effects
     platform = _host(platform)
     removing = [Path(path) for path in removing]
     try:
@@ -235,7 +228,7 @@ def loaded_service(*, effects=None, platform: str | None = None) -> LoadedServic
     platform = _host(platform)
     if platform != "darwin":
         return LoadedService("absent")
-    io = gateway._effects() if effects is None else effects
+    io = gateway._effects(Path.home()) if effects is None else effects
     try:
         observed = io.observe(gateway_platform.service_domain(platform))
     except (OSError, RuntimeError, ValueError) as exc:

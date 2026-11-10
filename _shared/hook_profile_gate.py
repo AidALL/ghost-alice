@@ -7,7 +7,6 @@ command, and then runs it.
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import re
@@ -16,7 +15,6 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-import tomllib
 import time
 from collections.abc import Mapping
 from contextlib import nullcontext
@@ -25,7 +23,6 @@ from typing import NoReturn
 
 import install_destination
 import ledger_access
-import native_transcript
 from session_identity import is_exact
 
 # Bind transport before source-provider imports. Invalid transport cannot open audit writes.
@@ -38,7 +35,9 @@ if "--binding-b64" in sys.argv:
         raise SystemExit(126)
 
 import agent_visibility_policy
-from hook_definitions import CORE_HOOK_IDS, normalize_hook_id
+import pending_manifest
+from hook_definitions import CORE_HOOK_IDS, SUPPORTED_PLATFORMS, decode_hook_payload, normalize_hook_id
+from hook_input import parse_json_object, read_stdin_utf8
 import runtime_config
 import work_impact_projection
 import state_retention
@@ -55,7 +54,6 @@ SAFE_BARE_COMMAND_RE = re.compile(r"^python3\.[0-9]+$")
 HOOK_PYTHON_SENTINEL = "__GHOST_ALICE_HOOK_PYTHON__"
 SAFE_TRAILING_SUFFIX_RE = re.compile(r"\s*\|\|\s*true\s*(#.*)?\s*$")
 FORBIDDEN_SHELL_OPERATORS = {";", "&&", "|", "||", ">", ">>", "<", "<<"}
-VALID_HOOK_PLATFORMS = {"claude", "codex"}
 
 
 class HookCommandRejected(ValueError):
@@ -98,103 +96,6 @@ def _resolve_allowed_roots(allowed_roots: list[str]) -> list[Path]:
     return roots
 
 
-def _is_node_executable(path: Path) -> bool:
-    return path.name.lower() in {"node", "node.exe"}
-
-
-def _configured_node_runtime_from_value(value: str | None) -> Path | None:
-    text = (value or "").strip().strip('"')
-    if not text:
-        return None
-    candidate = Path(text).expanduser()
-    if not _is_node_executable(candidate) or not candidate.is_file():
-        return None
-    try:
-        resolved = candidate.resolve()
-    except OSError:
-        return None
-    if not runtime_config.is_usable_node_runtime(resolved):
-        return None
-    return resolved
-
-
-def _codex_config_candidates(env: dict[str, str]) -> list[Path]:
-    if env.get("GHOST_ALICE_PLATFORM_DIR") and env.get("GHOST_ALICE_PLATFORM")=="codex":
-        return [Path(env["GHOST_ALICE_PLATFORM_DIR"])/"config.toml"]
-    return [Path(native_transcript.codex_home(env)).expanduser() / "config.toml"]
-
-
-def _codex_configured_node_runtime_paths(env: dict[str, str]) -> list[Path]:
-    paths: list[Path] = []
-    for config_file in _codex_config_candidates(env):
-        try:
-            with config_file.open("rb") as handle:
-                data = tomllib.load(handle)
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
-            continue
-        mcp_servers = data.get("mcp_servers")
-        if not isinstance(mcp_servers, Mapping):
-            continue
-        node_repl = mcp_servers.get("node_repl")
-        if not isinstance(node_repl, Mapping):
-            continue
-        env_config = node_repl.get("env")
-        if not isinstance(env_config, Mapping):
-            continue
-        value = env_config.get("NODE_REPL_NODE_PATH")
-        configured = _configured_node_runtime_from_value(
-            value if isinstance(value, str) else None
-        )
-        if configured is not None and configured not in paths:
-            paths.append(configured)
-    return paths
-
-
-def _registered_node_runtime_path(
-    env: dict[str, str],
-    active_platform: str | None,
-) -> Path | None:
-    if active_platform not in VALID_HOOK_PLATFORMS:
-        return None
-    config = runtime_config.load_config(env=env, home=install_destination.home_directory(env))
-    hook_runtime = config.get("hook_runtime")
-    if not isinstance(hook_runtime, dict):
-        return None
-    registrations = hook_runtime.get("node")
-    if not isinstance(registrations, dict):
-        return None
-    value = registrations.get(active_platform)
-    return _configured_node_runtime_from_value(value if isinstance(value, str) else None)
-
-
-def _configured_node_runtime_paths(
-    env: dict[str, str],
-    active_platform: str | None = None,
-) -> set[Path]:
-    paths: set[Path] = set()
-    for env_name in ("GHOST_ALICE_NODE", "NODE_REPL_NODE_PATH"):
-        configured = _configured_node_runtime_from_value(env.get(env_name))
-        if configured is not None:
-            paths.add(configured)
-
-    paths.update(_codex_configured_node_runtime_paths(env))
-
-    registered = _registered_node_runtime_path(env, active_platform)
-    if registered is not None:
-        paths.add(registered)
-    return paths
-
-
-def _is_configured_node_runtime(
-    path: Path,
-    env: dict[str, str],
-    active_platform: str | None,
-) -> bool:
-    if not _is_node_executable(path):
-        return False
-    return path in _configured_node_runtime_paths(env, active_platform)
-
-
 def _active_platform_from_argv(argv: list[str]) -> str | None:
     platform_indexes = [
         index
@@ -216,13 +117,13 @@ def _active_platform_from_argv(argv: list[str]) -> str | None:
     if platform_index + 1 >= len(argv):
         raise HookCommandRejected("invalid hook platform argument rejected")
     platform = argv[platform_index + 1]
-    if platform not in VALID_HOOK_PLATFORMS:
+    if platform not in SUPPORTED_PLATFORMS:
         raise HookCommandRejected(f"invalid hook platform argument rejected: {platform}")
     return platform
 
 
 def _is_path_node_runtime(path: Path, env: dict[str, str]) -> bool:
-    if not _is_node_executable(path):
+    if not runtime_config.is_node_executable(path):
         return False
     search_path = env.get("PATH")
     for executable in ("node", "node.exe"):
@@ -240,29 +141,10 @@ def _is_path_node_runtime(path: Path, env: dict[str, str]) -> bool:
     return False
 
 
-def _path_node_runtime(env: dict[str, str]) -> Path | None:
-    search_path = env.get("PATH")
-    for executable in ("node", "node.exe"):
-        resolved = shutil.which(executable, path=search_path)
-        if not resolved:
-            continue
-        configured = _configured_node_runtime_from_value(resolved)
-        if configured is not None:
-            return configured
-    return None
-
-
 def _is_same_file_as_trusted_node_runtime(
     path: Path,
-    env: dict[str, str],
-    active_platform: str | None,
+    trusted_paths: list[Path],
 ) -> bool:
-    if not _is_node_executable(path) or not path.is_file():
-        return False
-    trusted_paths = _configured_node_runtime_paths(env, active_platform)
-    path_runtime = _path_node_runtime(env)
-    if path_runtime is not None:
-        trusted_paths.add(path_runtime)
     for trusted in trusted_paths:
         try:
             if path.samefile(trusted):
@@ -274,7 +156,7 @@ def _is_same_file_as_trusted_node_runtime(
 
 def _hook_platform(argv: list[str], env: dict[str, str]) -> str:
     outer = env.get("GHOST_ALICE_PLATFORM", "").strip().lower()
-    if outer and outer not in VALID_HOOK_PLATFORMS:
+    if outer and outer not in SUPPORTED_PLATFORMS:
         raise HookCommandRejected(f"invalid outer hook platform rejected: {outer}")
     inner = _active_platform_from_argv(argv)
     if outer and inner and outer != inner:
@@ -282,7 +164,7 @@ def _hook_platform(argv: list[str], env: dict[str, str]) -> str:
             f"hook platform mismatch: outer={outer}, inner={inner}"
         )
     platform = outer or inner
-    if platform not in VALID_HOOK_PLATFORMS:
+    if platform not in SUPPORTED_PLATFORMS:
         raise HookCommandRejected(
             "dynamic Node hook command requires claude or codex platform"
         )
@@ -291,19 +173,9 @@ def _hook_platform(argv: list[str], env: dict[str, str]) -> str:
 
 def _resolve_dynamic_hook_node(argv: list[str], env: dict[str, str]) -> Path:
     platform = _hook_platform(argv, env)
-    candidates: list[Path | None] = []
-    for env_name in ("GHOST_ALICE_NODE", "NODE_REPL_NODE_PATH"):
-        candidates.append(_configured_node_runtime_from_value(env.get(env_name)))
-    codex_configured = _codex_configured_node_runtime_paths(env)
-    if platform == "codex":
-        candidates.extend(codex_configured)
-    candidates.append(_registered_node_runtime_path(env, platform))
-    candidates.append(_path_node_runtime(env))
-    if platform == "claude":
-        candidates.extend(codex_configured)
-    for candidate in candidates:
-        if candidate is not None:
-            return candidate
+    candidates = runtime_config.node_runtime_candidates(env, platform)
+    if candidates:
+        return candidates[0]
     raise HookCommandRejected(f"no trusted Node runtime available for {platform}")
 
 
@@ -334,16 +206,12 @@ def assert_allowed_command(
     if not resolved.is_file():
         raise HookCommandRejected(f"hook executable missing: {executable}")
 
-    if _is_configured_node_runtime(resolved, source_env, active_platform):
-        return
-    if _is_path_node_runtime(resolved, source_env):
-        return
-    if _is_same_file_as_trusted_node_runtime(
-        resolved,
-        source_env,
-        active_platform,
-    ):
-        return
+    if runtime_config.is_node_executable(resolved):
+        candidates = runtime_config.node_runtime_candidates(source_env, active_platform)
+        if resolved in candidates or _is_path_node_runtime(resolved, source_env):
+            return
+        if _is_same_file_as_trusted_node_runtime(resolved, candidates):
+            return
 
     for root in _resolve_allowed_roots(allowed_roots):
         try:
@@ -400,46 +268,23 @@ def _validate_shell_command(
 
 def _decode_payload(payload: str) -> str:
     try:
-        return base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8")
+        return decode_hook_payload(payload)
     except Exception as exc:  # noqa: BLE001 - CLI boundary returns a clear rejection.
         raise HookCommandRejected("hook payload decode failed") from exc
 
 
 def _read_stdin() -> str:
-    if sys.stdin.isatty():
-        return ""
-    # Read the raw byte buffer and decode UTF-8 explicitly. Claude Code sends the hook payload as UTF-8 JSON, but the default stdin encoding on Windows is cp949/cp1252, so a bare sys.stdin.read() would mis-decode non-ASCII (Korean) text into mojibake/lone-surrogates at this outer boundary before it reaches any inner hook. errors="replace" keeps a stray byte from crashing the gate.
-    buffer = getattr(sys.stdin, "buffer", None)
-    if buffer is not None:
-        try:
-            data = buffer.read()
-        except OSError:
-            return ""
-        if isinstance(data, bytes):
-            return data.decode("utf-8", errors="replace")
-        return str(data)
     try:
-        return sys.stdin.read()
+        return read_stdin_utf8()
     except OSError:
         return ""
 
 
 def _payload_from_stdin(stdin_text: str) -> dict[str, object]:
-    if not stdin_text.strip():
-        return {}
     try:
-        payload = json.loads(stdin_text)
+        return parse_json_object(stdin_text)
     except json.JSONDecodeError:
         return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def _read_json(path: Path) -> dict[str, object]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return value if isinstance(value, dict) else {}
 
 
 def _first_text(*values: object) -> str:
@@ -469,18 +314,17 @@ def _platform_name(env: dict[str, str]) -> str:
 def _pending_merge_manifest_path(env: dict[str, str], platform: str) -> Path | None:
     if not is_exact(platform):
         return None
-    return install_destination.ghost_root(install_destination.home_directory(env), env) / "pending-merges" / platform / "manifest.json"
+    return pending_manifest.manifest_path(platform, env)
 
 
 def _has_pending_merge_undecided(env: dict[str, str], platform: str) -> bool:
     path = _pending_merge_manifest_path(env, platform)
     if path is None:
         return False
-    data = _read_json(path)
-    entries = data.get("entries")
-    if not isinstance(entries, list):
+    try:
+        return pending_manifest.check_pending(path)["undecided_count"] > 0
+    except Exception:  # A failed visibility fallback supplies no pending fact and must not skip the hook's audit.
         return False
-    return any(isinstance(entry, dict) and entry.get("decided") is False for entry in entries)
 
 
 # A hook marks its own routine state with this private key; the runner strips it before the host sees the output.
@@ -519,14 +363,14 @@ PERMISSION_FIELDS = ("permissionDecision", "permissionDecisionReason")
 HOST_ENVELOPE_FIELDS = frozenset({"continue", "suppressOutput", "systemMessage", "hookSpecificOutput", "additionalContext"})
 
 
-def _native_protocol_output(stdout: str, *, hook_id: str) -> str:
-    """Project a hook's JSON output to the host envelope without a blocking control, on every event."""
+def _native_protocol_output(stdout: str, *, hook_id: str) -> tuple[str, bool]:
+    """Return the host envelope and whether the runner removed a blocking request."""
     try:
         protocol = json.loads(stdout)
     except (json.JSONDecodeError, TypeError):
-        return stdout
+        return stdout, False
     if not isinstance(protocol, dict):
-        return stdout
+        return stdout, False
     asked: list[str] = []
     if protocol.get("decision") == "block":
         asked.append(f"block ({_control_reason(protocol.get('reason'), protocol.get('systemMessage'))})")
@@ -546,11 +390,10 @@ def _native_protocol_output(stdout: str, *, hook_id: str) -> str:
                                            if key not in PERMISSION_FIELDS}
     if asked:
         notice = f"{hook_id} asked the host to {'; '.join(asked)}; the hook runner removed that request before the host saw it."
-        warning = projected.get("systemMessage")
-        projected["systemMessage"] = f"{warning}\n{notice}" if isinstance(warning, str) and warning.strip() else notice
+        return _with_system_notice(projected, notice), True
     if projected == protocol:
-        return stdout
-    return json.dumps(projected, ensure_ascii=False) + "\n"
+        return stdout, False
+    return json.dumps(projected, ensure_ascii=False) + "\n", False
 
 
 def _control_reason(*candidates: object) -> str:
@@ -578,7 +421,7 @@ def _visibility_context(
                 receipt = json.loads(stdout).get("ghostAlicePendingMergeCheck")
                 if (isinstance(receipt, dict) and receipt.get("platform") == platform
                         and receipt.get("manifest_path") == str(_pending_merge_manifest_path(source_env, platform))
-                        and type(receipt.get("undecided_count")) is int and receipt["undecided_count"] >= 0):
+                        and pending_manifest.valid_check(receipt)):
                     pending = receipt["undecided_count"] > 0
             except (ValueError, TypeError, AttributeError):
                 pass
@@ -628,6 +471,8 @@ def _classification_from_decision(hook_id: str, decision: dict[str, str]) -> tup
         return (normalize_hook_id(hook_id), "routine", "routine", False)
     if reason == "forced-pending-merge":
         return ("pending-merge", "risk", "forced", False)
+    if reason == "forced-removed-host-control":
+        return (normalize_hook_id(hook_id), "risk", "forced", False)
     if reason in {"forced-verification", "forced-nonzero-exit"}:
         return ("completion-check", "verification", "forced", True)
     return (normalize_hook_id(hook_id), "routine", "essential", False)
@@ -745,12 +590,15 @@ def run(hook_id: str, payload: str, *, platform: str | None = None, binding=None
         return _run(hook_id,payload,platform=platform,binding=binding)
 
 
+def _native_intake_session(env, hook_payload):
+    if _platform_name(env) != 'claude' or _event_name(hook_payload, env) not in ('PreToolUse', 'Stop'):
+        return None
+    return bound_session_identity('claude', hook_payload, env)
+
+
 def _reconcile_native_intake(env, hook_payload):
     """One native lifecycle transition, shared by every bound tool/Stop hook."""
-    event = hook_payload.get('hook_event_name') or hook_payload.get('hookEventName')
-    if env.get('GHOST_ALICE_PLATFORM') != 'claude' or event not in ('PreToolUse', 'Stop'):
-        return
-    session = bound_session_identity('claude', hook_payload, env)
+    session = _native_intake_session(env, hook_payload)
     if session is None:
         return
     module = ledger_access.load_ledger()
@@ -778,9 +626,8 @@ def _accepts_system_notice(stdout: str, *, exit_code: int) -> bool:
         return False
 
 
-def _with_system_notice(stdout: str, notice: str) -> str:
+def _with_system_notice(protocol: dict[str, object], notice: str) -> str:
     """Add one user warning to the host envelope; decisions and model context stay unchanged."""
-    protocol = json.loads(stdout) if stdout.strip() else {}
     warning = protocol.get('systemMessage')
     protocol['systemMessage'] = f'{warning}\n{notice}' if isinstance(warning, str) and warning else notice
     return json.dumps(protocol, ensure_ascii=False) + '\n'
@@ -788,10 +635,7 @@ def _with_system_notice(stdout: str, notice: str) -> str:
 
 def _native_intake_notice(env, hook_payload):
     """Claim this session's first notice for the current wait's cause and word it; None otherwise."""
-    event = hook_payload.get('hook_event_name') or hook_payload.get('hookEventName')
-    if env.get('GHOST_ALICE_PLATFORM') != 'claude' or event not in ('PreToolUse', 'Stop'):
-        return None
-    session = bound_session_identity('claude', hook_payload, env)
+    session = _native_intake_session(env, hook_payload)
     if session is None:
         return None
     try:
@@ -877,46 +721,58 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
         except Exception as error:  # noqa: BLE001 - Ghost-ALICE's own step fails without stopping the hook
             stop_notice_failure = f"{type(error).__name__}: {error}"
     started = time.perf_counter()
-    result = subprocess.run(
-        argv,
-        input=stdin_text if stdin_text else None,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=child_env,
-        check=False,
-    )
+    launch_failure = None
+    try:
+        result = subprocess.run(
+            argv,
+            input=stdin_text if stdin_text else None,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=child_env,
+            check=False,
+        )
+        stdout, stderr, child_exit_code = result.stdout, result.stderr, result.returncode
+    except OSError as error:
+        launch_failure = dict(error=type(error).__name__, errno=error.errno, detail=str(error))
+        stdout, stderr, child_exit_code = '', f'{hook_id}: runner could not start the hook: {type(error).__name__}: {error}\n', None
     observed_duration = time.perf_counter() - started
-    declared, host_stdout = _take_surface_declaration(result.stdout)
-    hook_payload = _payload_from_stdin(stdin_text)
+    # A launch failure has no child exit code. Its audit record is hidden and the host receives exit 0 below.
+    runner_exit_code = 1 if child_exit_code is None or child_exit_code == 2 else child_exit_code
+    declared, host_stdout = _take_surface_declaration(stdout)
+    native_stdout, removed_host_control = _native_protocol_output(host_stdout, hook_id=hook_id)
     config = runtime_config.load_config(env=env, home=install_destination.home_directory(env))
     profile = config["agent_visibility"]["profile"]
     event = _event_name(hook_payload, env)
     context = _visibility_context(
         hook_id,
         host_stdout,
-        result.stderr,
-        result.returncode,
+        stderr,
+        runner_exit_code,
         env=env,
         declared=declared,
     )
+    if removed_host_control:
+        context['removed_host_control'] = True
     decision = agent_visibility_policy.decide(
         profile=profile,
         hook_id=hook_id,
         event=event,
         stdout=host_stdout,
-        stderr=result.stderr,
-        exit_code=result.returncode,
+        stderr=stderr,
+        exit_code=runner_exit_code,
         context=context,
     )
-    platform = env.get("GHOST_ALICE_PLATFORM", "unknown")
+    if launch_failure is not None:
+        decision = {"visible_decision": "hide", "reason": "runner-launch-failure-recorded"}
+    platform = _platform_name(env)
     session_id = strict_session_log.session_id_from_payload(hook_payload, env=env, platform=platform)
     log_ref = str(strict_session_log.log_path(install_destination.home_directory(env), platform, session_id))
     item = _surface_item_for_result(
         hook_id=hook_id,
         stdout=host_stdout,
-        stderr=result.stderr,
+        stderr=stderr,
         decision=decision,
         profile=profile,
         strict_log_ref=log_ref,
@@ -925,16 +781,19 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
         item['native_intake_failure'] = native_intake_failure
     if stop_notice_failure is not None:
         item['stop_notice_failure'] = stop_notice_failure
-    model_surface_output = _render_model_surface(item, host_stdout, result.stderr)
-    native_stdout = _native_protocol_output(host_stdout, hook_id=hook_id)
-    user_stdout, user_stderr = _render_user_surface(item, native_stdout, result.stderr)
+    if launch_failure is not None:
+        item['launch_failure'] = launch_failure
+        item['user_surface'] = 'hidden'
+        item['model_surface'] = 'omitted'
+    model_surface_output = _render_model_surface(item, host_stdout, stderr)
+    user_stdout, user_stderr = _render_user_surface(item, native_stdout, stderr)
     # Claim the notice only when this envelope can carry it; visibility
     # profiles never hide it.
-    if binding is not None and _accepts_system_notice(
-            user_stdout, exit_code=0 if force_success else result.returncode):
+    if launch_failure is None and binding is not None and _accepts_system_notice(
+            user_stdout, exit_code=0 if force_success else runner_exit_code):
         notice = _native_intake_notice(env, hook_payload)
         if notice:
-            user_stdout = _with_system_notice(user_stdout, notice)
+            user_stdout = _with_system_notice(json.loads(user_stdout) if user_stdout.strip() else {}, notice)
     try:
         strict_session_log.append_event(
             home=install_destination.home_directory(env),
@@ -944,9 +803,9 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
                 "hook_id": hook_id,
                 "event": event,
                 "stdin": stdin_text,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "exit_code": result.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": child_exit_code,
                 "agent_visibility_profile": profile,
                 "visible_decision": decision["visible_decision"],
                 "observed_duration_s": observed_duration,
@@ -958,20 +817,17 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
         )
     except Exception as error:  # noqa: BLE001 - Ghost-ALICE's own step fails without stopping the hook
         state_retention.record_failure("session-logs", log_ref, error)
+    if launch_failure is not None:
+        return 0
     _emit_rendered_user_surface(user_stdout, user_stderr)
     if force_success:
         return 0
-    # Core informs and stops: no hook the runner runs blocks the host through exit 2. A usage
-    # error or a removed script reaches the host as a non-blocking error; the strict log
-    # above keeps the original exit code.
-    if result.returncode == 2:
-        return 1
-    return result.returncode
+    return runner_exit_code
 
 
 def _fallback_rejection_audit_platform(env: Mapping[str, str]) -> str:
     platform = str(env.get("GHOST_ALICE_PLATFORM") or "").strip().lower()
-    return platform if platform in VALID_HOOK_PLATFORMS else "unknown"
+    return platform if platform in SUPPORTED_PLATFORMS else "unknown"
 
 
 def _rejection_audit_platform(payload: str, env: Mapping[str, str]) -> str:
@@ -1062,7 +918,7 @@ def main(argv: list[str] | None = None) -> NoReturn:
     positional_platform: str | None = None
     if len(normalized_args) == 4:
         candidate = normalized_args[2].strip().lower()
-        if candidate in VALID_HOOK_PLATFORMS:
+        if candidate in SUPPORTED_PLATFORMS:
             positional_platform = candidate
     try:
         if len(normalized_args) == 3:

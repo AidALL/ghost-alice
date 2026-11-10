@@ -95,7 +95,7 @@ class TestTerminologyClarity(unittest.TestCase):
     def test_ci_enables_installed_skill_copy_scan(self):
         workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
-        self.assertIn("Install Codex skills for installed-copy terminology scan", workflow)
+        self.assertIn("Install Codex skills for installed-copy contract checks", workflow)
         self.assertIn("HOME: ${{ runner.temp }}/ghost-alice-ci-home", workflow)
         self.assertIn("bash ./install.sh --platform codex --skip-source-health", workflow)
         self.assertIn(

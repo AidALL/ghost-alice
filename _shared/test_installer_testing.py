@@ -15,7 +15,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from git_hook_paths import hook_paths  # noqa: E402
 import installer_testing  # noqa: E402
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env  # noqa: E402
 
 GIT = shutil.which("git")
 
@@ -56,6 +56,88 @@ class CheckoutCopyTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
         self.repo = init_repo(self.root / "repo")
+
+    def test_installer_child_uses_fixture_home_and_repository_despite_parent_overrides(self):
+        sentinel = init_repo(self.root / "sentinel")
+        home = self.root / "home"
+        home.mkdir()
+        inherited = {
+            "GIT_DIR": str(sentinel / ".git"), "GIT_WORK_TREE": str(sentinel),
+            "CLAUDE_CONFIG_DIR": str(sentinel / "claude"), "CODEX_HOME": str(sentinel / "codex"),
+            "GHOST_ALICE_CONFIG": str(sentinel / "runtime.json"),
+            "GHOST_ALICE_LEDGER_ROOT": str(sentinel / "ledger"),
+            "CODEX_THREAD_ID": "parent-codex", "CLAUDE_SESSION_ID": "parent-claude",
+            "CLAUDE_CODE_SESSION_ID": "parent-claude-code",
+        }
+        before = (sentinel / ".git" / "config").read_bytes()
+        with mock.patch.dict(os.environ, inherited):
+            original = dict(os.environ)
+            env = installer_env(home)
+            child = subprocess.run(
+                [sys.executable, "-c", (
+                    "import sys; from pathlib import Path; "
+                    "sys.path.insert(0, sys.argv[1]); "
+                    "from installer import source; "
+                    "result = source._git(Path(sys.argv[2]), 'config', 'core.hooksPath', 'fixture-hooks'); "
+                    "raise SystemExit(result.returncode)"
+                ), str(Path(__file__).resolve().parent), str(self.repo)],
+                env=env, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(dict(os.environ), original)
+        self.assertEqual(child.returncode, 0, child.stdout + child.stderr)
+        self.assertEqual((sentinel / ".git" / "config").read_bytes(), before)
+        self.assertEqual(git(self.repo, "config", "core.hooksPath"), "fixture-hooks")
+        self.assertEqual(env["HOME"], str(home))
+        self.assertEqual(env["TMPDIR"], str(home))
+        self.assertEqual(env["CLAUDE_CONFIG_DIR"], str(home / ".claude"))
+        self.assertEqual(env["CODEX_HOME"], str(home / ".codex"))
+        for name in inherited.keys() - {"CLAUDE_CONFIG_DIR", "CODEX_HOME"}:
+            self.assertNotIn(name, env)
+
+    def test_fixture_git_config_excludes_ambient_sources_and_accepts_explicit_overrides(self):
+        home = self.root / "home"
+        home.mkdir()
+        (home / ".gitconfig").write_text("[fixture]\nowned = fixture-home\n", encoding="utf-8")
+        ambient = self.root / "ambient-xdg" / "git" / "config"
+        ambient.parent.mkdir(parents=True)
+        ambient.write_text("[fixture]\nambient = outside-home\n", encoding="utf-8")
+        system_config = self.root / "system.gitconfig"
+        system_config.write_text("[fixture]\nsystem = outside-home\n", encoding="utf-8")
+
+        with mock.patch.dict(os.environ, {
+            "XDG_CONFIG_HOME": str(ambient.parent.parent),
+            "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+        }):
+            original = dict(os.environ)
+            env = installer_env(home)
+            child = subprocess.run(
+                [GIT, "config", "--get-regexp", r"^fixture\."], cwd=home,
+                env=env, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(dict(os.environ), original)
+        self.assertEqual(child.returncode, 0, child.stderr)
+        self.assertEqual(child.stdout.splitlines(), ["fixture.owned fixture-home"])
+        self.assertEqual(env["XDG_CONFIG_HOME"], str(home / ".config"))
+
+        # Supply a temporary stand-in for machine configuration; the fixture disables that scope.
+        env["GIT_CONFIG_SYSTEM"] = str(system_config)
+        child = subprocess.run(
+            [GIT, "config", "--get-regexp", r"^fixture\."], cwd=home,
+            env=env, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(child.returncode, 0, child.stderr)
+        self.assertEqual(child.stdout.splitlines(), ["fixture.owned fixture-home"])
+
+        # A test can deliberately select its own global and system fixtures after building the defaults.
+        env.update(GIT_CONFIG_GLOBAL=str(ambient), GIT_CONFIG_NOSYSTEM="0")
+        child = subprocess.run(
+            [GIT, "config", "--get-regexp", r"^fixture\."], cwd=home,
+            env=env, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(child.returncode, 0, child.stderr)
+        self.assertEqual(set(child.stdout.splitlines()), {
+            "fixture.ambient outside-home", "fixture.system outside-home",
+        })
 
     def test_the_shared_value_and_the_checkouts_own_value_are_read_by_file(self):
         worktree = self.root / "worktree"

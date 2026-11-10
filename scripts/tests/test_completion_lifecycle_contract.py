@@ -18,11 +18,11 @@ class CompletionLifecycleContractTests(unittest.TestCase):
     def assert_review_contract(self, text):
         finalization = section(text, 'Finalization sequence')
         claim = finalization.index('Compare each claim with its original sources and acceptance criterion')
-        whole = finalization.index('separately judge the complete draft')
+        whole = finalization.index('then separately judge the complete draft')
         record = finalization.index('submit both judgments to Core')
         self.assertLess(claim, whole)
         self.assertLess(whole, record)
-        self.assertIn('code does not decide their meaning', finalization)
+        self.assertIn('Core code authenticates and stores them; code does not decide their meaning', finalization)
         self.assertIn('references/response-review.md#prepare-and-record-the-response-review', finalization)
         self.assertTrue(OWNER.is_file())
 
@@ -61,10 +61,6 @@ class CompletionLifecycleContractTests(unittest.TestCase):
                        'Core code authenticates each record and its link to its source',
                        '`verification-before-completion`: selecting evidence, the per-claim and whole-response judgments'):
             self.assertIn(phrase, common)
-        verification = (ROOT / 'coding-convention/verification-before-completion/SKILL.md').read_text()
-        for phrase in ('then separately judge the complete draft',
-                       'Core code authenticates and stores them; code does not decide their meaning'):
-            self.assertIn(phrase, verification)
         for name in ('platforms/claude/CLAUDE.md', 'platforms/codex/AGENTS.md'):
             with self.subTest(path=name):
                 template = (ROOT / name).read_text()

@@ -197,13 +197,13 @@ class InstallRecordShellTest(unittest.TestCase):
                                 "source_commit": "test", "dest": str(dest), "mode": "copy"}]}
         # The publish stops after its files and record changed and before its journal says done.
         with mock.patch.dict(os.environ, {"HOME": str(self.home)}):
-            install_lock.acquire_lock(self.ghost / "install.lock", owner="test")
+            generation = install_lock.acquire_lock(self.ghost / "install.lock", owner="test")
             try:
                 with mock.patch.object(install_transaction.PublishBatch, "finalize", side_effect=KeyboardInterrupt):
                     with self.assertRaises(KeyboardInterrupt):
                         install_transaction.publish(request)
             finally:
-                install_lock.release_lock(self.ghost / "install.lock")
+                install_lock.release_lock(self.ghost / "install.lock", generation)
         self.assertEqual((dest / "SKILL.md").read_text(encoding="utf-8"), "an edit that must not stay\n")
         [txid] = install_transaction.unfinished(self.ghost)
         out = self.run_installer("--platform", "codex", "--repair")

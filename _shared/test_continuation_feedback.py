@@ -8,12 +8,14 @@ from pathlib import Path
 import unittest
 
 import completion_assessment as assessment
-from test_response_route import ResponseRouteTests, ledger
+import test_response_route as fixtures
+
+ledger = fixtures.ledger
 
 
 class ContinuationFeedbackTests(unittest.TestCase):
     def setUp(self):
-        self.fixture = ResponseRouteTests()
+        self.fixture = fixtures.ResponseRouteTests()
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
         self.fixture.event = self.fixture.setup_owned()

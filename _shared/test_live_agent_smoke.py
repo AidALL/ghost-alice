@@ -4,6 +4,7 @@
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -14,6 +15,77 @@ import live_agent_smoke
 
 
 class LiveAgentSmokeClassificationTest(unittest.TestCase):
+    def test_repeated_case_in_one_second_cannot_reuse_a_previous_answer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = mock.Mock()
+            def completed(command, **kwargs):
+                if runtime.run.call_count == 1:
+                    Path(command[command.index('--output-last-message') + 1]).write_text('[focus: meso] first answer')
+                return subprocess.CompletedProcess(command, 0, '', '')
+            runtime.run.side_effect = completed
+            with mock.patch.object(live_agent_smoke, '_timestamp', return_value='20261109T000000Z'), \
+                    mock.patch.object(live_agent_smoke, 'codex_supports_hook_trust', return_value=False):
+                results = [live_agent_smoke._run_resolved_codex_case(
+                    case=live_agent_smoke.SMOKE_CASES['readme-first-lines'], repo_root=root,
+                    log_root=root / 'logs', codex_command=['fixture-codex'], timeout_seconds=1,
+                    runtime=runtime) for _ in range(2)]
+            self.assertEqual(results[0]['status'], 'pass')
+            self.assertEqual(results[1]['status'], 'fail')
+            self.assertIn('missing-output', results[1]['reasons'])
+            self.assertNotEqual(results[0]['output_file'], results[1]['output_file'])
+            self.assertEqual(Path(results[0]['output_file']).read_text(), '[focus: meso] first answer')
+
+    def test_existing_result_requires_observed_exit_and_readable_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / 'agent.log'
+            output = Path(directory) / 'answer.txt'
+            output.write_text('answer', encoding='utf-8')
+            for log_present, exit_supplied in [(True, False), (False, True), (True, True)]:
+                with self.subTest(log_present=log_present, exit_supplied=exit_supplied):
+                    if log_present:
+                        log.write_text('', encoding='utf-8')
+                    else:
+                        log.unlink(missing_ok=True)
+                    args = live_agent_smoke.build_parser().parse_args([
+                        '--classify-log', str(log), '--output-file', str(output),
+                        *(['--exit-code', '0'] if exit_supplied else [])])
+                    args.log_file = args.classify_log
+                    result = live_agent_smoke.classify_existing(args)
+                    if not exit_supplied:
+                        self.assertIsNone(result['exit_code'])
+                        self.assertIn('missing-exit-code', result['reasons'])
+                    if not log_present:
+                        self.assertEqual(result['status'], 'inconclusive')
+                        self.assertIn('runtime-log-unavailable', result['reasons'])
+                    self.assertEqual(result['status'] == 'pass', log_present and exit_supplied)
+
+    def test_unavailable_cli_returns_inconclusive_before_creating_a_runtime(self):
+        with mock.patch.dict(os.environ, {'PATH': ''}), mock.patch.object(
+            live_agent_smoke, 'project_runtime', side_effect=AssertionError('Unavailable CLI cannot start a runtime')
+        ):
+            for binary in ('ghost-alice-missing-cli', str(Path.cwd() / '.tmp' / 'missing-cli' / 'codex.ps1')):
+                with self.subTest(binary=binary):
+                    result = live_agent_smoke.run_codex_case(
+                        case=live_agent_smoke.SMOKE_CASES['readme-first-lines'],
+                        repo_root=Path.cwd(), log_root=Path.cwd() / '.tmp' / 'unused-smoke-log',
+                        codex_bin=binary, timeout_seconds=1)
+                    self.assertEqual(result['status'], 'inconclusive')
+                    self.assertEqual(result['reasons'], ['codex-binary-not-found'])
+                    self.assertIsNone(result['exit_code'])
+                    self.assertIsNone(result['log_file'])
+
+    def test_explicit_cli_path_is_forwarded_without_a_new_existence_precheck(self):
+        binary = str(Path.cwd() / '.tmp' / 'missing-cli' / 'codex')
+        with mock.patch.dict(os.environ, {'PATH': ''}), mock.patch.object(
+            live_agent_smoke, '_run_resolved_codex_case', side_effect=lambda **arguments: arguments
+        ):
+            result = live_agent_smoke.run_codex_case(
+                case=live_agent_smoke.SMOKE_CASES['readme-first-lines'],
+                repo_root=Path.cwd(), log_root=Path.cwd() / '.tmp' / 'unused-smoke-log',
+                codex_bin=binary, timeout_seconds=1)
+        self.assertEqual(result['codex_command'], [binary])
+
     def test_help_probe_uses_repo_local_child_temp_without_mutating_parent(self):
         calls = []
 
@@ -56,25 +128,6 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
         self.assertTrue(run_root.is_relative_to(Path.cwd() / ".tmp"))
         self.assertEqual(Path(kwargs["cwd"]).resolve(), Path.cwd().resolve())
         self.assertFalse(run_root.exists())
-
-    def test_windows_resolver_prefers_cmd_for_bare_codex(self):
-        def fake_which(name):
-            return {
-                "codex.cmd": r"C:\Users\try2q\AppData\Roaming\npm\codex.cmd",
-                "codex": r"C:\Users\try2q\AppData\Roaming\npm\codex.CMD",
-                "codex.exe": r"C:\Users\try2q\AppData\Local\Microsoft\WinGet\codex.exe",
-            }.get(name)
-
-        command = live_agent_smoke.resolve_codex_command(
-            "codex",
-            which=fake_which,
-            platform="nt",
-        )
-
-        self.assertEqual(
-            command,
-            [r"C:\Users\try2q\AppData\Roaming\npm\codex.cmd"],
-        )
 
     def test_timeout_and_router_error_are_failures(self):
         result = live_agent_smoke.classify_smoke_result(

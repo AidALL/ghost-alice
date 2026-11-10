@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -251,7 +252,14 @@ def classify_skill_root(
         return AssetClassification(path, KIND_SKILL_ROOT, asset_id, OWNERSHIP_CONFLICT, reason, marker)
 
     expected_hashes = marker.get("content_hashes")
-    if isinstance(expected_hashes, dict) and expected_hashes != _content_hashes(path):
+    if not isinstance(expected_hashes, dict) or any(
+        not isinstance(name, str) or not name or not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        for name, digest in expected_hashes.items()
+    ):
+        return AssetClassification(path, KIND_SKILL_ROOT, asset_id, OWNERSHIP_CONFLICT,
+                                   "invalid-ghost-alice-marker:content-hashes", marker)
+    if expected_hashes != _content_hashes(path):
         return AssetClassification(
             path,
             KIND_SKILL_ROOT,

@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 import os
 
-PLATFORMS = ("claude", "codex")
+from hook_definitions import SUPPORTED_PLATFORMS as PLATFORMS
 
 
 def home() -> Path:

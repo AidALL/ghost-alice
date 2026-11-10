@@ -5,6 +5,7 @@ Dependencies: Python 3.11+ standard library only.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -65,19 +66,30 @@ def source_files(root: Path = ROOT) -> list[str]:
     if not (root / ".git").exists():
         return _source_files_from_worktree(root)
     result = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
         cwd=root,
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
     )
     if result.returncode == 0:
-        return result.stdout.splitlines()
+        return [os.fsdecode(name) for name in result.stdout.split(b'\0') if name]
     return _source_files_from_worktree(root)
 
 
 class SourceFileDiscoveryTests(unittest.TestCase):
+    def test_git_paths_keep_unicode_quotes_and_spaces(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            subprocess.run(['git', 'init', '--quiet'], cwd=root, check=True)
+            names = ['한글.md', 'space name.md']
+            if os.name != 'nt':
+                names += ['quoted"name.md', 'line\nbreak.md', 'literal\\name.md']
+            for name in names:
+                (root / name).write_text('exact source\n', encoding='utf-8')
+            subprocess.run(['git', 'add', '--', names[0]], cwd=root, check=True)
+            self.assertEqual(sorted(source_files(root)), sorted(names))
+
     def test_source_files_works_without_git_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

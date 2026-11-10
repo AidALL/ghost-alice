@@ -6,6 +6,7 @@ transport never becomes the current input that Core code recorded.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import glob
 import json
@@ -13,7 +14,7 @@ import os
 from pathlib import Path
 
 import install_destination
-from source_reference import json_digest, matches_input, text_digest
+from source_reference import matches_input, reference_source_prefix, SourceReferenceError, text_digest
 from text_lines import committed_byte_lines, committed_length, committed_lines, committed_records
 
 # Host entrypoints whose SDK-started turns Core reads as non-human context.
@@ -33,9 +34,96 @@ def codex_home(source):
             or str(install_destination.home_directory(source) / '.codex'))
 
 
-def codex_transcript_path(platform_dir, session_id):
-    """Find one host-owned transcript by native session identity, without copying it."""
-    if not isinstance(platform_dir, str) or not Path(platform_dir).is_absolute():
+def codex_session_owner(rows):
+    """Read the owning header and its explicit inherited fork chain, without inferring a sender."""
+    owner, permitted = None, set()
+    for row in rows:
+        if not isinstance(row, dict) or row.get('type') != 'session_meta':
+            continue
+        payload = row.get('payload')
+        identity = payload.get('id') if isinstance(payload, dict) else None
+        if not isinstance(identity, str) or not identity or (owner is not None and identity not in permitted):
+            raise ValueError('Native Codex transcript owner is invalid or conflicting')
+        if owner is None:
+            owner = identity
+        permitted.add(identity)
+        parent = payload.get('forked_from_id')
+        if parent is not None:
+            if not isinstance(parent, str) or not parent:
+                raise ValueError('Native Codex fork identity is invalid')
+            permitted.add(parent)
+    return owner
+
+
+def codex_item(value):
+    """Copy one native response payload without its host-only passthrough metadata."""
+    result = copy.deepcopy(value)
+    result.pop('internal_chat_message_metadata_passthrough', None)
+    return result
+
+
+
+def is_codex_user_message(item):
+    """Identify user-message candidates; callers bind their text and any required turn markers."""
+    if not isinstance(item, dict) or item.get('type') != 'message' or item.get('role') != 'user':
+        return False
+    metadata = item.get('internal_chat_message_metadata_passthrough')
+    kinds = metadata.get('content_item_kinds') if isinstance(metadata, dict) else None
+    return kinds is None or (isinstance(kinds, list) and 'user.text' in kinds)
+
+
+
+def codex_input_text(item):
+    """Project input_text blocks as text without changing the original mixed content."""
+    content = item.get('content') if isinstance(item, dict) else None
+    texts = [part.get('text') for part in content
+             if isinstance(part, dict) and part.get('type') == 'input_text'] if isinstance(content, list) else []
+    if not texts or any(not isinstance(text, str) for text in texts):
+        return None
+    return ''.join(texts)
+
+
+
+def codex_current_turn(rows):
+    """Return the latest turn_context's index and nonempty turn ID, or None when unavailable."""
+    for index in range(len(rows) - 1, -1, -1):
+        row = rows[index]
+        if not isinstance(row, dict) or row.get('type') != 'turn_context':
+            continue
+        payload = row.get('payload')
+        turn = payload.get('turn_id') if isinstance(payload, dict) else None
+        return (index, turn) if isinstance(turn, str) and turn else None
+    return None
+
+
+
+def correlate_prompt_index(native, wire, input_record):
+    """Map one native prompt to wire order; later prompts cannot impersonate that input.
+
+    Both arguments contain (coordinate, full-message fingerprint) pairs. Their
+    callers own host normalization and the input's recorded content binding.
+    """
+    original = next((fingerprint for record, fingerprint in native if record == input_record), None)
+    if original is None:
+        raise ValueError('The bound native prompt is unavailable')
+    later = [fingerprint for record, fingerprint in native if record > input_record]
+    if original in later:
+        raise ValueError('The bound input and a later prompt have the same full message')
+    cursor = len(later)
+    for index, fingerprint in reversed(wire):
+        if fingerprint == original:
+            return index
+        position = next((n for n in range(cursor - 1, -1, -1) if later[n] == fingerprint), None)
+        if position is None:
+            break
+        cursor = position
+    raise ValueError('Wire messages do not identify the bound native input')
+
+
+def codex_transcript_path(platform_dir, session_id, *, model_provider=None):
+    """Find one native transcript and inspect only its owning header."""
+    if (not isinstance(platform_dir, str) or not Path(platform_dir).is_absolute()
+            or not isinstance(session_id, str) or not session_id):
         return None
     matches = []
     for area in ('sessions', 'archived_sessions'):
@@ -44,14 +132,14 @@ def codex_transcript_path(platform_dir, session_id):
         return None
     path = matches[0]
     try:
-        with path.open() as stream:
+        with path.open('rb') as stream:
             header = json.loads(stream.readline())
+        if (codex_session_owner([header]) != session_id
+                or (model_provider is not None and header['payload'].get('model_provider') != model_provider)):
+            return None
     except (OSError, ValueError):
         return None
-    if header.get('type') != 'session_meta' or header.get('payload', {}).get('id') != session_id:
-        return None
     return str(path.resolve())
-
 
 def read_entries(path_value, session=None):
     if not isinstance(path_value, str) or not Path(path_value).is_absolute():
@@ -174,16 +262,16 @@ def stop_response_text(hook_payload):
     session = data.get('session_id') or data.get('sessionId')
     if not isinstance(session, str) or not session:
         return ''
-    owners = [row.get('payload', {}).get('id') for row in entries
-              if row.get('type') == 'session_meta' and isinstance(row.get('payload'), dict)]
-    if owners:
+    try:
+        owner = codex_session_owner(entries)
+    except ValueError:
+        return ''
+    if owner is not None:
         turn = data.get('turn_id')
-        contexts = [i for i, row in enumerate(entries) if row.get('type') == 'turn_context'
-                    and isinstance(row.get('payload'), dict)]
-        if (any(owner != session for owner in owners) or not turn or not contexts
-                or entries[contexts[-1]]['payload'].get('turn_id') != turn):
+        current = codex_current_turn(entries)
+        if owner != session or current is None or current[1] != turn:
             return ''
-        for row in reversed(entries[contexts[-1] + 1:]):
+        for row in reversed(entries[current[0] + 1:]):
             body = row.get('payload', {})
             if row.get('type') != 'response_item' or not isinstance(body, dict):
                 continue
@@ -192,7 +280,7 @@ def stop_response_text(hook_payload):
             if body.get('type') != 'message' or body.get('role') != 'assistant':
                 continue
             metadata = body.get('internal_chat_message_metadata_passthrough', {})
-            if metadata.get('turn_id') != turn:
+            if not isinstance(metadata, dict) or metadata.get('turn_id') != turn:
                 return ''
             return '\n'.join(part['text'] for part in body.get('content', [])
                 if isinstance(part, dict) and part.get('type') == 'output_text'
@@ -225,14 +313,15 @@ def native_tool_activity(platform, session_id, hook_payload, *, input_observatio
     if not rows or any(not isinstance(row, dict) for row in rows):
         return result('unavailable', 'native-transcript-invalid')
     if platform == 'codex':
-        owners = [row.get('payload', {}).get('id') for row in rows
-                  if row.get('type') == 'session_meta' and isinstance(row.get('payload'), dict)]
-        if not owners or any(owner != session_id for owner in owners):
+        try:
+            owner = codex_session_owner(rows)
+        except ValueError:
+            owner = None
+        if owner != session_id:
             return result('unavailable', 'native-transcript-owner-mismatch')
         turn_id = data.get('turn_id')
-        contexts = [row['payload'].get('turn_id') for row in rows
-                    if row.get('type') == 'turn_context' and isinstance(row.get('payload'), dict)]
-        if not isinstance(turn_id, str) or not turn_id or not contexts or contexts[-1] != turn_id:
+        current = codex_current_turn(rows)
+        if current is None or current[1] != turn_id:
             return result('unavailable', 'native-turn-unavailable')
         # A Codex turn can contain several messages under the user role. Core code
         # locates the latest one in the current turn by the content kind `user.text`
@@ -241,8 +330,7 @@ def native_tool_activity(platform, session_id, hook_payload, *, input_observatio
         user_text_message = None
         for index, row in enumerate(rows):
             payload = row.get('payload')
-            if (row.get('type') != 'response_item' or not isinstance(payload, dict)
-                    or payload.get('type') != 'message' or payload.get('role') != 'user'):
+            if row.get('type') != 'response_item' or not is_codex_user_message(payload):
                 continue
             metadata = payload.get('internal_chat_message_metadata_passthrough')
             if (isinstance(metadata, dict) and metadata.get('turn_id') == turn_id
@@ -251,12 +339,9 @@ def native_tool_activity(platform, session_id, hook_payload, *, input_observatio
                 user_text_message = (index, payload)
         if user_text_message is None:
             return result('unavailable', 'native-user-boundary-unavailable')
-        content = user_text_message[1].get('content')
-        texts = [part.get('text') for part in content
-                 if isinstance(part, dict) and part.get('type') == 'input_text'] if isinstance(content, list) else []
-        if not texts or any(not isinstance(text, str) for text in texts):
+        text = codex_input_text(user_text_message[1])
+        if text is None:
             return result('unavailable', 'native-user-text-unavailable')
-        text = ''.join(texts)
         if not matches_input(text, input_observation):
             return result('unavailable', 'native-input-observation-mismatch')
         active_turn = turn_id
@@ -415,7 +500,7 @@ def _candidate_texts(content):
     return [''.join(texts), '\n'.join(texts), *texts] if texts else []
 
 
-class _TranscriptSnapshot:
+class TranscriptSnapshot:
     """One read of a transcript: identity, bytes, prefix digests and a text-digest index."""
 
     def __init__(self, identity, raw):
@@ -442,6 +527,18 @@ class _TranscriptSnapshot:
         self._hashers[offset] = hasher.copy()
         return hasher.hexdigest()
 
+    def matches_boundary(self, boundary):
+        """Whether this read retains the captured file identity and committed prefix."""
+        if not isinstance(boundary, dict) or not {'device', 'inode', 'offset', 'prefix_digest'} <= boundary.keys():
+            return False
+        digest = self.prefix_digest(boundary['offset'])
+        return (digest is not None and digest == boundary['prefix_digest']
+                and (boundary['inode'] is None or self.identity == (boundary['device'], boundary['inode'])))
+
+    def cursor_key(self, path):
+        """Key used by persisted native cursors; keep the original JSON byte representation."""
+        return hashlib.sha256(json.dumps([path, *self.identity]).encode()).hexdigest()
+
     def rows_with(self, char_count, digest, start):
         """(start, end) of committed user or attachment rows at or after start that carry the text."""
         if self._index is None or start < self._indexed_from:
@@ -461,7 +558,6 @@ class _TranscriptSnapshot:
                     self._index.setdefault((len(text), row_digest), []).append((row_start, end))
         return [row for row in self._index.get((char_count, digest), []) if row[0] >= start]
 
-
 class TranscriptCache:
     """Each transcript is read once per caller operation, such as one reconcile.
 
@@ -473,7 +569,7 @@ class TranscriptCache:
 
     def snapshot(self, path):
         if path not in self._snapshots:
-            self._snapshots[path] = _TranscriptSnapshot.read(path)
+            self._snapshots[path] = TranscriptSnapshot.read(path)
         return self._snapshots[path]
 
 
@@ -492,11 +588,9 @@ def locate_staged_input(observation, session_id, cursors, *, cache=None):
     if snapshot is None:
         return unavailable
     try:
-        if boundary['inode'] is not None and snapshot.identity != (boundary['device'], boundary['inode']):
+        if not snapshot.matches_boundary(boundary):
             return unavailable
-        if snapshot.prefix_digest(boundary['offset']) != boundary['prefix_digest']:
-            return unavailable
-        cursor_key = hashlib.sha256(json.dumps([boundary['path'], *snapshot.identity]).encode()).hexdigest()
+        cursor_key = snapshot.cursor_key(boundary['path'])
         start = max(boundary['offset'], cursors.get(cursor_key, 0))
     except (KeyError, TypeError, ValueError):
         return unavailable
@@ -523,9 +617,11 @@ def locate_staged_input(observation, session_id, cursors, *, cache=None):
     if match['actor'] is None:
         match['shape'] = input_shape(entry)
     if match['actor'] == 'sdk':
-        source = dict(storage='source-reference.v1', locator=boundary['path'],
-            digest='sha256:' + snapshot.prefix_digest(end), byte_length=end, appendable=True)
-        match.update(native_source=dict(source, source_id=json_digest(source)),
+        try:
+            source = reference_source_prefix(boundary['path'], end, 'sha256:' + snapshot.prefix_digest(end))
+        except SourceReferenceError:
+            return unavailable
+        match.update(native_source=source,
             native_file_identity=dict(device=snapshot.identity[0], inode=snapshot.identity[1]))
     return match
 

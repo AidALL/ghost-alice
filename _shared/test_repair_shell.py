@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RICH = REPO_ROOT / "_shared" / "tests" / "fixtures" / "rich-addon"
 if str(REPO_ROOT / "_shared") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "_shared"))
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env  # noqa: E402
 
 
 def _python_311() -> bool:
@@ -59,8 +59,7 @@ class RepairTest(unittest.TestCase):
 
     def test_repair_reprovisions_missing_and_preserves_unclaimed_slot(self):
         with tempfile.TemporaryDirectory() as home:
-            env = os.environ.copy()
-            env["HOME"] = home
+            env = installer_env(home)
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
 
             install = self._run(env, "--platform", "claude", "task-router")
@@ -87,8 +86,7 @@ class RepairTest(unittest.TestCase):
 
     def test_repair_fixes_dangling_shared(self):
         with tempfile.TemporaryDirectory() as home:
-            env = os.environ.copy()
-            env["HOME"] = home
+            env = installer_env(home)
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
             install = self._run(env, "--platform", "claude", "task-router")
             self.assertEqual(install.returncode, 0, msg=install.stderr + install.stdout)
@@ -107,8 +105,7 @@ class RepairTest(unittest.TestCase):
 
     def test_repair_reprovisions_missing_addon_targets(self):
         with tempfile.TemporaryDirectory() as home:
-            env = os.environ.copy()
-            env["HOME"] = home
+            env = installer_env(home)
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
             install = self._run(env, "--platform", "claude", "--addon-source", str(RICH),
                                 "--skip-source-health", "task-router")

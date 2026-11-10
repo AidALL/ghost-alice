@@ -37,10 +37,11 @@ class TestCompletionEvidenceMap(unittest.TestCase):
         self.assertIsNone(v.validate_completion_evidence_map(block))
 
     def test_compact_form_missing_evidence_invalid(self):
-        block = _block(acceptance=False, criterion=None, evidence=None)
-        result = v.validate_completion_evidence_map(block)
-        self.assertIsNotNone(result)
-        self.assertIn("evidence", result)
+        for evidence in (None, ""):
+            with self.subTest(evidence=evidence):
+                block = _block(acceptance=False, criterion=None, evidence=evidence)
+                result = v.validate_completion_evidence_map(block)
+                self.assertIn("evidence", result)
 
     def test_compact_form_unverified_verdict_invalid(self):
         block = _block(acceptance=False, criterion=None, verdict="unverified")
@@ -551,16 +552,17 @@ class ValidateCompletionResponseTest(unittest.TestCase):
         self.assertIsNone(reason)
 
     def test_multi_criterion_entry_with_known_ids_is_accepted(self) -> None:
-        # A single claim may map to multiple acceptance ids (comma/space separated).
-        text = VALID_TEXT.replace("    criterion: C1\n", "    criterion: C1, C2\n", 1)
-        self.assertIsNone(v.validate_completion_text(text))
+        for value in ("C1,C2", "C1 C2", "C1; C2"):
+            with self.subTest(value=value):
+                text = VALID_TEXT.replace("    criterion: C1\n", f"    criterion: {value}\n", 1)
+                self.assertIsNone(v.validate_completion_text(text))
 
     def test_multi_criterion_entry_with_unknown_id_is_rejected(self) -> None:
-        # If any criterion in the list is unknown, the entry is still rejected.
-        text = VALID_TEXT.replace("    criterion: C1\n", "    criterion: C1, C9\n", 1)
-        reason = v.validate_completion_text(text)
-        self.assertIsNotNone(reason)
-        self.assertIn("acceptance-criteria criterion id", reason)
+        for value in ("C1,C9", "C1 C9", "C1; C9", ";", "C1; C2; C9"):
+            with self.subTest(value=value):
+                text = VALID_TEXT.replace("    criterion: C1\n", f"    criterion: {value}\n", 1)
+                reason = v.validate_completion_text(text)
+                self.assertIn("acceptance-criteria criterion id", reason)
 
     def test_entry_verdict_invalid_value(self) -> None:
         text = VALID_TEXT.replace("    verdict: pass\n", "    verdict: maybe\n", 1)

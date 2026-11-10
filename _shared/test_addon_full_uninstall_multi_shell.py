@@ -32,7 +32,7 @@ RICH = REPO_ROOT / "_shared" / "tests" / "fixtures" / "rich-addon"
 DUMMY = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 if str(REPO_ROOT / "_shared") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "_shared"))
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env  # noqa: E402
 
 
 def _python_311() -> bool:
@@ -54,9 +54,7 @@ class FullUninstallMultiAddonDriftTest(unittest.TestCase):
         if not _python_311():
             self.skipTest("python 3.11+ required")
         with __import__("tempfile").TemporaryDirectory() as home:
-            env = os.environ.copy()
-            env["HOME"] = home
-            env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
+            env = installer_env(home)
 
             source = checkout_copy(self)
 
@@ -80,12 +78,13 @@ class FullUninstallMultiAddonDriftTest(unittest.TestCase):
             self.assertTrue(noop_skill.is_symlink() or _is_reparse_point(noop_skill), msg="noop install precondition")
             self.assertTrue(core_skill.exists(), msg="core task-router install precondition")
 
-            # User drifts ONE addon: re-point richskill at their own dir.
-            user_dir = Path(home) / "my-rich"
+            self.assertEqual(sorted(path.stem for path in rich_side.parent.glob("*.json")), ["noop", "rich"])
+            # The first addon in the uninstall order is drifted; the later clean addon must still be removed.
+            user_dir = Path(home) / "my-noop"
             user_dir.mkdir()
             (user_dir / "SKILL.md").write_text("# USER OWNED\n", encoding="utf-8")
-            _symlink_safe_remove(rich_skill)
-            _create_directory_link(user_dir, rich_skill)
+            _symlink_safe_remove(noop_skill)
+            _create_directory_link(user_dir, noop_skill)
 
             # FULL uninstall (no --addon).
             full = run("--platform", "claude", "--uninstall")
@@ -94,13 +93,13 @@ class FullUninstallMultiAddonDriftTest(unittest.TestCase):
             self.assertNotEqual(full.returncode, 0,
                                 msg="full uninstall must halt when an addon is drifted: " + full.stderr + full.stdout)
             # Drifted addon preserved (link + externally changed content + sidecar).
-            self.assertTrue(rich_skill.is_symlink() or _is_reparse_point(rich_skill), msg="drifted rich skill link must be preserved")
-            self.assertEqual(os.path.realpath(rich_skill), os.path.realpath(user_dir))
-            self.assertEqual((rich_skill / "SKILL.md").read_text(encoding="utf-8"), "# USER OWNED\n")
-            self.assertTrue(rich_side.exists(), msg="drifted addon sidecar must survive for the human user's review")
+            self.assertTrue(noop_skill.is_symlink() or _is_reparse_point(noop_skill), msg="drifted noop skill link must be preserved")
+            self.assertEqual(os.path.realpath(noop_skill), os.path.realpath(user_dir))
+            self.assertEqual((noop_skill / "SKILL.md").read_text(encoding="utf-8"), "# USER OWNED\n")
+            self.assertTrue(noop_side.exists(), msg="drifted addon sidecar must survive for the human user to review")
             # The other, clean addon was removed by the per-addon loop.
-            self.assertFalse(os.path.lexists(noop_skill), msg="clean addon should be removed")
-            self.assertFalse(noop_side.exists(), msg="clean addon sidecar should be removed")
+            self.assertFalse(os.path.lexists(rich_skill), msg="later clean addon should be removed")
+            self.assertFalse(rich_side.exists(), msg="later clean addon sidecar should be removed")
             # Core wipe was gated: core skills survive until the addon drift is resolved.
             self.assertTrue(core_skill.exists(),
                             msg="core skills must survive a halted full uninstall (cleanup is gated)")

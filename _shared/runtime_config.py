@@ -6,9 +6,14 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
+import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 import atomic_write
 import install_destination
+import native_transcript
+from hook_definitions import SUPPORTED_PLATFORMS
 from typing import Any
 
 VALID_AGENT_VISIBILITY_PROFILES = {"strict", "dynamic", "minimal"}
@@ -56,6 +61,90 @@ def is_usable_node_runtime(resolved: Path) -> bool:
     if os.name == "nt":
         return True
     return os.access(resolved, os.X_OK)
+
+
+def is_node_executable(path: Path) -> bool:
+    return path.name.lower() in {"node", "node.exe"}
+
+
+def _configured_node_runtime_from_value(value: str | None) -> Path | None:
+    text = (value or "").strip().strip('"')
+    if not text:
+        return None
+    candidate = Path(text).expanduser()
+    if not is_node_executable(candidate) or not candidate.is_file():
+        return None
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return None
+    return resolved if is_usable_node_runtime(resolved) else None
+
+
+def _codex_configured_node_runtime_paths(env: dict[str, str]) -> list[Path]:
+    if env.get("GHOST_ALICE_PLATFORM_DIR") and env.get("GHOST_ALICE_PLATFORM") == "codex":
+        config_file = Path(env["GHOST_ALICE_PLATFORM_DIR"]) / "config.toml"
+    else:
+        config_file = Path(native_transcript.codex_home(env)).expanduser() / "config.toml"
+    try:
+        with config_file.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return []
+    mcp_servers = data.get("mcp_servers")
+    if not isinstance(mcp_servers, Mapping):
+        return []
+    node_repl = mcp_servers.get("node_repl")
+    if not isinstance(node_repl, Mapping):
+        return []
+    env_config = node_repl.get("env")
+    if not isinstance(env_config, Mapping):
+        return []
+    value = env_config.get("NODE_REPL_NODE_PATH")
+    configured = _configured_node_runtime_from_value(value if isinstance(value, str) else None)
+    return [configured] if configured is not None else []
+
+
+def _registered_node_runtime_path(env: dict[str, str], active_platform: str | None) -> Path | None:
+    if active_platform not in SUPPORTED_PLATFORMS:
+        return None
+    config = load_config(env=env, home=install_destination.home_directory(env))
+    hook_runtime = config.get("hook_runtime")
+    if not isinstance(hook_runtime, dict):
+        return None
+    registrations = hook_runtime.get("node")
+    if not isinstance(registrations, dict):
+        return None
+    value = registrations.get(active_platform)
+    return _configured_node_runtime_from_value(value if isinstance(value, str) else None)
+
+
+def _path_node_runtime(env: dict[str, str]) -> Path | None:
+    for executable in ("node", "node.exe"):
+        resolved = shutil.which(executable, path=env.get("PATH"))
+        if resolved:
+            configured = _configured_node_runtime_from_value(resolved)
+            if configured is not None:
+                return configured
+    return None
+
+
+def node_runtime_candidates(env: dict[str, str], active_platform: str | None) -> list[Path]:
+    """Return configured runtimes and the first usable PATH runtime in launch order.
+
+    The runner separately authorizes exact paths found under either PATH name;
+    only the selected PATH runtime supplies same-file trust to other paths.
+    """
+    candidates = [_configured_node_runtime_from_value(env.get(name))
+                  for name in ("GHOST_ALICE_NODE", "NODE_REPL_NODE_PATH")]
+    codex_configured = _codex_configured_node_runtime_paths(env)
+    if active_platform == "codex":
+        candidates.extend(codex_configured)
+    candidates.append(_registered_node_runtime_path(env, active_platform))
+    candidates.append(_path_node_runtime(env))
+    if active_platform != "codex":
+        candidates.extend(codex_configured)
+    return [candidate for candidate in candidates if candidate is not None]
 
 
 def _apply_env_overrides(config: dict[str, Any], env: dict[str, str]) -> None:

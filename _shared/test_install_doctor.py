@@ -1045,6 +1045,32 @@ class NodeRuntimeRunPathTest(NodeRuntimeRunPathCase):
         self.assertIn("node-runtime: invalid (runtime-config:config", unreadable_output)
 
 
+class PendingManifestDoctorTest(NodeRuntimeRunPathCase):
+    def test_non_object_manifest_is_diagnosed_and_doctor_continues(self):
+        manifest = self.ghost_alice_root / "pending-merges" / "claude" / "manifest.json"
+        manifest.parent.mkdir(parents=True)
+        node = self._runtime()
+        for value in ([], None, 12, "manifest"):
+            with self.subTest(value=value):
+                manifest.write_text(json.dumps(value), encoding="utf-8")
+                result, output = self._run("claude", path_node=node)
+                self.assertEqual(result, 1, output)
+                self.assertIn("pending-merge: invalid-manifest (not-object)", output)
+                self.assertIn("overall: error", output)
+
+    def test_manifest_status_preserves_missing_entries_and_pending_cases(self):
+        manifest = self.root / "manifest.json"
+        self.assertEqual(install_doctor._pending_manifest_status(manifest), ("ok", "clean", 0))
+        for value, expected in (
+            ({}, ("ok", "clean", 0)),
+            ({"entries": {}}, ("error", "invalid-manifest (entries-not-list)", 0)),
+            ({"entries": [{"decided": False}, {"decided": True}]}, ("warning", "pending (1 undecided)", 1)),
+        ):
+            with self.subTest(value=value):
+                manifest.write_text(json.dumps(value), encoding="utf-8")
+                self.assertEqual(install_doctor._pending_manifest_status(manifest), expected)
+
+
 class RetentionFailureDoctorTest(NodeRuntimeRunPathCase):
     """Doctor reads the retention failure record that `state_retention` writes, at the path it writes it."""
 
@@ -1100,6 +1126,28 @@ class RetentionFailureDoctorTest(NodeRuntimeRunPathCase):
         self.record.write_bytes(json.dumps(row).encode("utf-8") + b'\n{"ts": "\xeb\xa1\n')
         self.assertEqual(install_doctor._retention_failure_line(self.record),
                          "1 failures; last 2026-10-21T00:00:00Z session-logs OSError")
+
+    def test_retention_reader_counts_only_lf_committed_rows_and_keeps_unicode_in_json(self):
+        self.ghost_alice_root.mkdir(parents=True, exist_ok=True)
+        row = {"ts": "2026-10-21T00:00:00Z", "policy": "session-logs", "error_type": "OSError",
+               "error": "first\u2028second\u2029third\u0085last"}
+        later = dict(row, ts="2026-10-22T00:00:00Z")
+        first = json.dumps(row, ensure_ascii=False).encode("utf-8") + b"\r\n"
+        tail = json.dumps(later, ensure_ascii=False).encode("utf-8")
+        self.record.write_bytes(first + tail)
+        self.assertEqual(install_doctor._retention_failure_line(self.record),
+                         "1 failures; last 2026-10-21T00:00:00Z session-logs OSError")
+        with self.record.open("ab") as handle:
+            handle.write(b"\n")
+        self.assertEqual(install_doctor._retention_failure_line(self.record),
+                         "2 failures; last 2026-10-22T00:00:00Z session-logs OSError")
+
+    def test_retention_reader_does_not_split_bare_cr_or_report_uncommitted_tail(self):
+        self.ghost_alice_root.mkdir(parents=True, exist_ok=True)
+        self.record.write_bytes(b'{"ts": "unfinished')
+        self.assertEqual(install_doctor._retention_failure_line(self.record), "ok")
+        self.record.write_bytes(b'{"ts": "one"}\r{"ts": "two"}\n')
+        self.assertEqual(install_doctor._retention_failure_line(self.record), "record unreadable")
 
 
 class HookRejectionDoctorTest(NodeRuntimeRunPathCase):
@@ -1213,6 +1261,27 @@ class HookRejectionDoctorTest(NodeRuntimeRunPathCase):
         self.assertEqual(lines[0],
                          "hook-rejections: 1 in 14 days (1 sessions; 1 logs unreadable: JSONDecodeError codex/s-bad)")
         self.assertEqual(len(lines), 2)
+
+    def test_rejection_reader_ignores_marked_tail_until_its_lf_arrives(self):
+        row = self._row("claude", "s-live", ts=self._stamp())
+        log = self._log("claude", "s-live", [row])
+        committed = log.read_bytes()
+        tail = json.dumps(row).encode("utf-8")
+        for unfinished in (tail, b'{"surface_item": {"value_key": "hook-command-rejection"}, broken'):
+            with self.subTest(unfinished=unfinished[-12:]):
+                log.write_bytes(committed + unfinished)
+                self.assertEqual(install_doctor._hook_rejection_rows(log), [row])
+                self.assertEqual(install_doctor._hook_rejection_lines(self.session_logs)[0],
+                                 "hook-rejections: 1 in 14 days (1 sessions)")
+        log.write_bytes(committed + tail + b"\n")
+        self.assertEqual(install_doctor._hook_rejection_rows(log), [row, row])
+
+    def test_rejection_reader_keeps_chunk_spanning_json_and_skips_unmarked_malformed_lines(self):
+        row = self._row("claude", "s-large", ts=self._stamp(), reason="first\u2028second")
+        row["stdout"] = "x" * (1 << 20)
+        log = self._log("claude", "s-large", [row])
+        log.write_bytes(b"unmarked malformed row\n" + log.read_bytes())
+        self.assertEqual(install_doctor._hook_rejection_rows(log), [row])
 
     def test_doctor_reads_the_row_the_runner_writes(self):
         # The runner's own writer, at the path it chooses from the same Ghost-ALICE root.
@@ -1332,6 +1401,24 @@ class RuntimeCoreAuditTest(unittest.TestCase):
         self.assertEqual(status, install_doctor.STATUS_OK)
         self.assertTrue(any(f["reason"] == "runtime-core-referenced" for f in findings))
         self.assertTrue(any(f["reason"] == "golden-pass" for f in findings))
+
+    def test_runtime_hook_audit_does_not_decode_unrelated_base64_message(self):
+        import base64
+
+        message = base64.urlsafe_b64encode(b"/old-checkout/io_trace_hook.py is retired").decode("ascii")
+        inner = f'__GHOST_ALICE_HOOK_PYTHON__ "{self.runtime / "session_intent_analyzer_hook.py"}" --message-b64 {message}'
+        command = self._bound_session_intent_command(inner=inner)
+        findings = install_doctor._runtime_hook_config_audit([command], self.runtime)
+        self.assertEqual([finding["reason"] for finding in findings], ["runtime-core-referenced"])
+
+    def test_runtime_hook_audit_decodes_the_legacy_runner_payload(self):
+        import base64
+
+        inner = f'__GHOST_ALICE_HOOK_PYTHON__ "{self.root / "old-checkout/io_trace_hook.py"}"'
+        payload = base64.urlsafe_b64encode(inner.encode("utf-8")).decode("ascii")
+        command = f'"{sys.executable}" "{self.runtime / "hook_profile_gate.py"}" run io-trace {payload} # [io-trace] audit'
+        findings = install_doctor._runtime_hook_config_audit([command], self.runtime)
+        self.assertEqual([finding["reason"] for finding in findings], ["script-not-runtime-core:io_trace_hook.py"])
 
     def test_runtime_core_audit_rejects_platform_shared_hook_config(self):
         self._write_runtime_files()

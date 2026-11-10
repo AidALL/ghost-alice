@@ -23,7 +23,7 @@ sys.path.insert(0, str(REPO_ROOT / "_shared"))
 
 import addon_uninstall  # noqa: E402
 import install_transaction  # noqa: E402
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env  # noqa: E402
 from _shared.test_addon_installer import _find_test_bash  # noqa: E402
 
 
@@ -41,8 +41,7 @@ def _python_311() -> bool:
 
 class UninstallExitCodeTest(unittest.TestCase):
     def _env(self, home):
-        env = os.environ.copy()
-        env["HOME"] = home
+        env = installer_env(home)
         env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
         return env
 

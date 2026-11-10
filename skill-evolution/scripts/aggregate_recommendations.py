@@ -27,16 +27,6 @@ from ledger_access import load_ledger  # noqa: E402
 from timestamps import format_timestamp, parse_timestamp  # noqa: E402
 
 
-def positive_int(value: Any, default: int = 1) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    if parsed < 1:
-        return default
-    return parsed
-
-
 def discover_root(start: Path | None = None) -> Path:
     """The ledger root the ledger would use from `start`: the environment, then the repository, then the legacy home root."""
     return load_ledger().default_root(cwd=(start or Path(__file__)).resolve().parent)
@@ -98,7 +88,7 @@ def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
                 agg["corrective_rule"] = str(entry["corrective_rule"])
             agg["sources"].add(load_ledger().canonical_source(entry.get("source"), "") or "unknown")
             agg["sessions"].add(session)
-            agg["occurrence_count"] += positive_int(entry.get("occurrence_count"), 1)
+            agg["occurrence_count"] += load_ledger().positive_int(entry.get("occurrence_count"), 1)
             agg["statuses"].append(str(entry.get("status") or "open"))
             ts = parse_timestamp(entry.get("updated_at")) or parse_timestamp(entry.get("created_at"))
             if ts is not None:

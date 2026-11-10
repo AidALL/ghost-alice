@@ -12,7 +12,9 @@ If the existing trace cannot identify the caller, add bounded diagnostics immedi
 
 ## Isolate test pollution
 
-When a test creates an artifact in the wrong location, identify the triggering test before changing shared setup. The bundled `find-polluter.sh` sequentially invokes `npm test` for candidate files, ignores test exit statuses and stops at the first observed artifact. Use it only for a compatible test runner and isolated target that the human user authorized; its result concerns artifact creation, not passing tests. Resolve it relative to this reference's directory; otherwise use the project's actual runner for the same bounded observation.
+When a test creates an artifact in the wrong location, identify the triggering test before changing shared setup. The bundled `find-polluter.sh` sequentially invokes `npm test` for candidate files, ignores test exit statuses and stops at the first observed artifact. Use it only for a compatible test runner and isolated target that the human user authorized. Resolve it relative to this reference's directory; otherwise use the project's actual runner for the same bounded observation.
+
+Run the helper from the isolated project's directory with the artifact path and a quoted `find -path` pattern relative to that directory, for example `find-polluter.sh 'artifact' 'src/**/*.test.ts'`; a leading `./` is optional. The helper requires Bash, `find -print0`, `sort -z` and `npm`. It sorts matching regular-file paths, passes each intact to the runner, and reports the exact candidate count. Exit 1 identifies a run after which the artifact appeared; exit 0 reports no new target artifact. Neither result establishes a unique cause or passing tests.
 
 Systematic-debugging defines how to count failed repair rounds, and verification-before-completion defines evidence reuse.
 

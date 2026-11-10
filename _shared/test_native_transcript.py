@@ -208,5 +208,71 @@ class StopResponseTextTests(unittest.TestCase):
             self.assertEqual(stop_response_text(hook_payload), text)
 
 
+class AppendBoundaryTests(unittest.TestCase):
+    def test_append_window_keeps_the_captured_prefix_and_file_identity(self):
+        raw = b'{"type":"user"}\n'
+        boundary = dict(path='/tmp/transcript.jsonl', device=7, inode=9,
+                        offset=len(raw), prefix_digest=hashlib.sha256(raw).hexdigest())
+        snapshot = native_transcript.TranscriptSnapshot((7, 9), raw + b'next row\n')
+        self.assertTrue(snapshot.matches_boundary(boundary))
+        for changed in (dict(boundary, offset=True), dict(boundary, offset=len(raw) + 100),
+                        dict(boundary, inode=10), dict(boundary, prefix_digest='changed')):
+            with self.subTest(boundary=changed):
+                self.assertFalse(snapshot.matches_boundary(changed))
+        for missing in ('inode', 'device', 'offset', 'prefix_digest'):
+            with self.subTest(missing=missing):
+                self.assertFalse(snapshot.matches_boundary({k: v for k, v in boundary.items() if k != missing}))
+        self.assertFalse(native_transcript.TranscriptSnapshot((7, 9), raw[:-1]).matches_boundary(boundary))
+        self.assertFalse(native_transcript.TranscriptSnapshot((7, 9), b'X' + raw[1:]).matches_boundary(boundary))
+
+    def test_missing_file_boundary_can_match_its_first_committed_rows(self):
+        boundary = dict(path='/tmp/new.jsonl', device=None, inode=None, offset=0,
+                        prefix_digest=hashlib.sha256(b'').hexdigest())
+        self.assertTrue(native_transcript.TranscriptSnapshot((7, 9), b'first\n').matches_boundary(boundary))
+
+    def test_cursor_key_preserves_existing_non_ascii_path_serialization(self):
+        snapshot = native_transcript.TranscriptSnapshot((7, 9), b'')
+        stored_bytes = b'["/tmp/\\ud55c\\uae00/trace.jsonl", 7, 9]'
+        self.assertEqual(snapshot.cursor_key('/tmp/한글/trace.jsonl'), hashlib.sha256(stored_bytes).hexdigest())
+
+
+class CodexOwnershipTests(unittest.TestCase):
+    def test_header_lookup_does_not_parse_inherited_history_and_checks_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            path = home / 'sessions' / 'rollout-child.jsonl'
+            path.parent.mkdir()
+            header = dict(type='session_meta', payload=dict(id='child', forked_from_id='parent',
+                parent_thread_id='parent', model_provider='ghost_alice_context'))
+            path.write_text(json.dumps(header) + '\n' + 'unparsed history\n')
+            self.assertEqual(native_transcript.codex_transcript_path(str(home), 'child'), str(path))
+            self.assertEqual(native_transcript.codex_transcript_path(str(home), 'child',
+                model_provider='ghost_alice_context'), str(path))
+            self.assertIsNone(native_transcript.codex_transcript_path(str(home), 'child', model_provider='other'))
+
+    def test_fork_metadata_binds_owner_and_current_turn_without_accepting_unrelated_headers(self):
+        header = dict(type='session_meta', payload=dict(id='child', forked_from_id='parent', parent_thread_id='parent'))
+        parent = dict(type='session_meta', payload=dict(id='parent'))
+        message = dict(type='message', role='user', content=[dict(type='input_text', text='current input')],
+            internal_chat_message_metadata_passthrough=dict(turn_id='turn', content_item_kinds=['user.text']))
+        call = dict(type='function_call', call_id='call', name='read', arguments='{}',
+            internal_chat_message_metadata_passthrough=dict(turn_id='turn'))
+        answer = dict(type='message', role='assistant', content=[dict(type='output_text', text='current answer')],
+            internal_chat_message_metadata_passthrough=dict(turn_id='turn'))
+        rows = [header, parent, dict(type='turn_context', payload=dict(turn_id='turn')),
+                *[dict(type='response_item', payload=payload) for payload in (message, call, answer)]]
+        binding = dict(input_digest=native_transcript.text_digest('current input'), input_char_count=13)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native.jsonl'
+            hook = dict(session_id='child', turn_id='turn', transcript_path=str(path))
+            for extra in (None, dict(type='session_meta', payload=dict(id='unrelated')),
+                          dict(type='turn_context', payload=dict(turn_id='later'))):
+                with self.subTest(extra=extra):
+                    path.write_text(''.join(json.dumps(row) + '\n' for row in rows + ([extra] if extra else [])))
+                    self.assertEqual(stop_response_text(hook), '' if extra else 'current answer')
+                    self.assertEqual(native_transcript.native_tool_activity('codex', 'child', hook,
+                        input_observation=binding)['status'], 'unavailable' if extra else 'observed')
+
+
 if __name__ == '__main__':
     unittest.main()

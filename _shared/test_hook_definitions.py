@@ -5,6 +5,7 @@ import ast
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -37,12 +38,13 @@ GATEWAY_MODULES = ("context_gateway_install", "context_gateway_plan", "context_g
 # shared module imports only the standard library and the shared modules this table names for it.
 SHARED_MODULES = {
     "hook_definitions": set(),
-    "install_lock": set(),
+    "install_lock": {"file_lock"},
     "content_digest": set(),
     "installed_payload": {"content_digest", "install_lock"},
     "install_destination": set(),
     "atomic_write": {"install_destination"},
     "file_lock": set(),
+    "pending_manifest": {"atomic_write", "file_lock", "install_destination"},
 }
 # The installer package (`_shared/installer/*.py`) is the installer layer too; it runs
 # the entry points above as child processes and imports none of the runtime.
@@ -135,6 +137,38 @@ class HookNameTests(unittest.TestCase):
 
     def test_provider_constant_is_the_gateway_provider_name(self):
         self.assertEqual(hook_definitions.PROVIDER, "ghost_alice_context")
+
+
+class CoreHostCliTests(unittest.TestCase):
+    def test_cli_host_choices_preserve_acceptance_rejection_and_display_order(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "source.txt"
+            source.write_text("original source", encoding="utf-8")
+            environment = {key: value for key, value in os.environ.items()
+                if not key.startswith(("GHOST_ALICE_", "GIT_")) and key not in {
+                    "CODEX_THREAD_ID", "CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CODEX_HOME",
+                    "CLAUDE_CONFIG_DIR", "PYTHONPATH"}}
+            environment.update(HOME=folder, USERPROFILE=folder, TMPDIR=folder)
+            cases = (
+                ("claude_stop_verification_hook", [], "claude,codex", 0, "stdout", '"continue": true'),
+                ("source_lookup", [str(source)], "codex,claude", 1, "stdout", "A declared use requires"),
+                ("context_lifecycle", ["--root", folder, "--native-dir", folder, "--session-id", "",
+                                       "--locate-text", "original"], "codex,claude", 1, "stderr",
+                 "The exact native session is required"),
+            )
+            for module, arguments, order, status, channel, expected in cases:
+                for platform in ("claude", "codex", "unknown-host"):
+                    with self.subTest(module=module, platform=platform):
+                        result = subprocess.run([sys.executable, str(SHARED / f"{module}.py"),
+                            *arguments, "--platform", platform], input="{}", text=True, capture_output=True,
+                            cwd=folder, env=environment)
+                        if platform == "unknown-host":
+                            self.assertEqual(result.returncode, 2, result.stderr)
+                            self.assertIn("invalid choice: 'unknown-host'", result.stderr)
+                            self.assertIn("{" + order + "}", result.stderr)
+                        else:
+                            self.assertEqual(result.returncode, status, result.stderr)
+                            self.assertIn(expected, getattr(result, channel))
 
 
 def hook_profile_gate_free_normalize(value):

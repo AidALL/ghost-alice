@@ -4,6 +4,7 @@ The ledger's own tests (session-intent-analyzer/scripts/test_sqlite_authority.py
 semantics: database authority over exports, corrupt databases and deleted databases.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -18,6 +19,7 @@ sys.path.insert(0, str(SHARED))
 sys.path.insert(0, str(SHARED.parent / "session-intent-analyzer" / "scripts"))
 import session_intent_ledger as ledger
 import io_trace_hook as trace
+import install_doctor
 
 
 class SQLiteIntentConsumerTests(unittest.TestCase):
@@ -53,19 +55,36 @@ class SQLiteIntentConsumerTests(unittest.TestCase):
                             row["path"] == "/tmp/source.txt" for row in rows))
 
     def test_doctor_read_does_not_create_a_database_or_rewrite_legacy_export(self):
-        legacy = {"schema_version": "session-intent-ledger.v1", "platform": self.platform,
-                  "session_id": self.sid, "ledger_revision": 1,
-                  "latest_input_event_id": "legacy-input", "latest_input_digest": "sha256:legacy",
-                  "latest_input_char_count": 1}
-        export = self.directory / "intent-state.json"
-        text = json.dumps(legacy)
-        export.write_text(text)
-        # The doctor reads the ledger this way (install_doctor's session-intent golden check).
-        state = ledger.read_session_state(root=self.root, platform=self.platform, session_id=self.sid,
-                                          recover_audit=False)
-        self.assertEqual(state["latest_input_event_id"], "legacy-input")
-        self.assertEqual(export.read_text(), text)
-        self.assertFalse((self.root / "ghost-state.sqlite3").exists())
+        run_process = install_doctor.subprocess.run
+        read_states = []
+
+        def run_with_legacy_input(command, **kwargs):
+            if "--root" in command:
+                # Supply legacy input at the writer boundary; execute the doctor's own reader below.
+                root = Path(command[command.index("--root") + 1])
+                payload = json.loads(kwargs["input"])
+                legacy = {"schema_version": "session-intent-ledger.v1", "platform": self.platform,
+                          "session_id": payload["session_id"], "ledger_revision": 1,
+                          "latest_input_event_id": "legacy-input",
+                          "latest_input_digest": "sha256:" + hashlib.sha256(payload["prompt"].encode()).hexdigest(),
+                          "latest_input_char_count": len(payload["prompt"])}
+                export = root / self.platform / payload["session_id"] / "intent-state.json"
+                export.parent.mkdir(parents=True)
+                export.write_text(json.dumps(legacy))
+                return install_doctor.subprocess.CompletedProcess(command, 0, '{"continue": true}', '')
+            root = Path(kwargs["env"]["GHOST_ALICE_SESSION_INTENT_ROOT"])
+            before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            result = run_process(command, **kwargs)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            read_states.append(json.loads(result.stdout)["material"]["state"])
+            self.assertEqual({path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}, before)
+            self.assertFalse((root / "ghost-state.sqlite3").exists())
+            return result
+
+        with patch.object(install_doctor.subprocess, "run", run_with_legacy_input):
+            status = install_doctor._runtime_session_intent_golden_status(SHARED, self.platform, repo_root=self.root)
+        self.assertEqual(status, (install_doctor.STATUS_OK, "golden-pass"))
+        self.assertEqual([state["latest_input_event_id"] for state in read_states], ["legacy-input"])
 
 
 if __name__ == "__main__":

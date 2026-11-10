@@ -85,6 +85,11 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
         _py("-m", "unittest", "discover", "-s", "skill-evolution/scripts", "-p", "test_*.py"),
     ),
     TestGroup(
+        "brainstorm-companion",
+        "companion launch, selected-server shutdown and persistent mockups",
+        _py("-m", "unittest", "discover", "-s", "coding-convention/brainstorming/scripts", "-p", "test_*.py"),
+    ),
+    TestGroup(
         "installer-runtime-detection",
         "thin shells: PowerShell 7.6 guard, Python 3.11+ runtime lookup and the cli call",
         _py(

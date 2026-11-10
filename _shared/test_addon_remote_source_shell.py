@@ -10,7 +10,6 @@ Run: python3 -m pytest _shared/test_addon_remote_source_shell.py -q
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -24,7 +23,7 @@ from _shared.test_addon_installer import _find_test_bash
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "_shared") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "_shared"))
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env  # noqa: E402
 
 
 def _python_311() -> bool:
@@ -108,18 +107,18 @@ def _write_remote_hook_addon(work: Path) -> None:
     )
 
 
-def _make_bare_remote(root: Path) -> str:
+def _make_bare_remote(root: Path, env: dict[str, str]) -> str:
     work = root / "addon-work"
     bare = root / "addon.git"
     work.mkdir()
     _write_remote_hook_addon(work)
-    subprocess.run(["git", "init"], cwd=work, check=True, capture_output=True, text=True)
-    subprocess.run(["git", "config", "user.name", "test"], cwd=work, check=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=work, check=True)
-    subprocess.run(["git", "checkout", "-b", "remote-hook-fixture"], cwd=work, check=True, capture_output=True, text=True)
-    subprocess.run(["git", "add", "."], cwd=work, check=True)
-    subprocess.run(["git", "commit", "-m", "remote addon fixture"], cwd=work, check=True, capture_output=True, text=True)
-    subprocess.run(["git", "clone", "--bare", str(work), str(bare)], cwd=root, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "init"], cwd=work, env=env, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=work, env=env, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=work, env=env, check=True)
+    subprocess.run(["git", "checkout", "-b", "remote-hook-fixture"], cwd=work, env=env, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "add", "."], cwd=work, env=env, check=True)
+    subprocess.run(["git", "commit", "-m", "remote addon fixture"], cwd=work, env=env, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "clone", "--bare", str(work), str(bare)], cwd=root, env=env, check=True, capture_output=True, text=True)
     return bare.as_uri()
 
 
@@ -152,13 +151,9 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             home.mkdir()
             claude.mkdir()
             project.mkdir()
-            remote_url = _make_bare_remote(root)
-            env = os.environ.copy()
-            env.update({
-                "HOME": str(home),
-                "CLAUDE_CONFIG_DIR": str(claude),
-                "GHOST_ALICE_INSTALL_PROGRESS": "off",
-            })
+            env = installer_env(home)
+            env["CLAUDE_CONFIG_DIR"] = str(claude)
+            remote_url = _make_bare_remote(root, env)
 
             source = checkout_copy(self)
 
@@ -239,13 +234,9 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             home.mkdir()
             claude.mkdir()
             project.mkdir()
-            remote_url = _make_bare_remote(root)
-            env = os.environ.copy()
-            env.update({
-                "HOME": str(home),
-                "CLAUDE_CONFIG_DIR": str(claude),
-                "GHOST_ALICE_INSTALL_PROGRESS": "off",
-            })
+            env = installer_env(home)
+            env["CLAUDE_CONFIG_DIR"] = str(claude)
+            remote_url = _make_bare_remote(root, env)
 
             source = checkout_copy(self)
 
@@ -321,13 +312,9 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             claude = root / "claude"
             home.mkdir()
             claude.mkdir()
-            remote_url = _make_bare_remote(root)
-            env = os.environ.copy()
-            env.update({
-                "HOME": str(home),
-                "CLAUDE_CONFIG_DIR": str(claude),
-                "GHOST_ALICE_INSTALL_PROGRESS": "off",
-            })
+            env = installer_env(home)
+            env["CLAUDE_CONFIG_DIR"] = str(claude)
+            remote_url = _make_bare_remote(root, env)
 
             source = checkout_copy(self)
             install = subprocess.run(
@@ -370,12 +357,8 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             claude.mkdir()
             addon.mkdir()
             _write_remote_hook_addon(addon)
-            env = os.environ.copy()
-            env.update({
-                "HOME": str(home),
-                "CLAUDE_CONFIG_DIR": str(claude),
-                "GHOST_ALICE_INSTALL_PROGRESS": "off",
-            })
+            env = installer_env(home)
+            env["CLAUDE_CONFIG_DIR"] = str(claude)
 
             source = checkout_copy(self)
             install = subprocess.run(

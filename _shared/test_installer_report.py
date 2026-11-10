@@ -129,12 +129,69 @@ class MessageTests(ReportCase):
 
 
 class LogTests(ReportCase):
+    def test_gateway_notes_skip_integer_parser_failure_and_keep_later_note(self):
+        event_file = self.home / "events.jsonl"
+        event_file.write_text('{"value":' + "9" * 5000 + '}\n'
+                              '{"type":"gateway-result","summary":"later-valid"}\n')
+        previous = sys.get_int_max_str_digits()
+        try:
+            sys.set_int_max_str_digits(4300)
+            self.assertEqual(report.read_gateway_notes(event_file), ["later-valid"])
+        finally:
+            sys.set_int_max_str_digits(previous)
+
+    def test_log_init_retains_thirty_legacy_and_unique_parent_runs_with_their_events(self):
+        root = self.home / ".ghost-alice" / "install"
+        root.mkdir(parents=True)
+        runs = ["2026-10-01-010203"] + [f"2026-11-01-010203-{number:032x}" for number in range(32)]
+        for run in runs:
+            (root / f"{run}.log").write_text("log\n")
+            (root / f"{run}.events.jsonl").write_text("{}\n")
+        report.log_init()
+        self.assertEqual(sorted(path.name for path in root.iterdir()),
+                         sorted(f"{run}.{suffix}" for run in runs[-30:] for suffix in ("log", "events.jsonl")))
+
+    def test_event_readers_wait_for_lf_and_keep_committed_unicode_strings(self):
+        event_file = self.home / "events.jsonl"
+        complete = json.dumps({"type": "target-result", "platform": "claude",
+                               "target_id": "a\u2028b", "target_kind": "skill"}, ensure_ascii=False)
+        unfinished = json.dumps({"type": "target-result", "platform": "codex",
+                                 "target_id": "a\u2028b", "target_kind": "skill"}, ensure_ascii=False)
+        event_file.write_text(complete + "\n" + unfinished)
+        self.assertEqual(report.read_all_common_target_progress(event_file, 2), 0)
+        self.assertEqual(report.read_weighted_common_target_progress(event_file, 1, 5), 1)
+        with event_file.open("a") as stream:
+            stream.write("\n")
+        self.assertEqual(report.read_all_common_target_progress(event_file, 2), 1)
+        event_file.write_bytes((complete + "\n").encode() + b'{"summary":"\xe2')
+        self.assertEqual(report.read_weighted_common_target_progress(event_file, 1, 5), 1)
+        event_file.write_text(complete + "\ninvalid\n")
+        with self.assertRaises(ValueError):
+            report.read_all_common_target_progress(event_file, 2)
+        with self.assertRaises(ValueError):
+            report.read_weighted_common_target_progress(event_file, 1, 5)
+
+    def test_gateway_notes_ignore_incomplete_tail_but_keep_valid_records_after_bad_lines(self):
+        event_file = self.home / "events.jsonl"
+        note = json.dumps({"type": "gateway-result", "summary": "one\u2028two"}, ensure_ascii=False)
+        unfinished = json.dumps({"type": "gateway-result", "summary": "pending"})
+        event_file.write_text("invalid\n" + note + "\n" + unfinished)
+        self.assertEqual(report.read_gateway_notes(event_file), ["one\u2028two"])
+        with event_file.open("a") as stream:
+            stream.write("\n")
+        self.assertEqual(report.read_gateway_notes(event_file), ["one\u2028two", "pending"])
+        event_file.write_bytes((note + "\n").encode() + b'{"summary":"\xe2')
+        self.assertEqual(report.read_gateway_notes(event_file), ["one\u2028two"])
+        event_file.write_bytes((note + "\n").encode() + b'{"summary":"\xe2\n')
+        with self.assertRaises(UnicodeDecodeError):
+            report.read_gateway_notes(event_file)
+
     def test_log_init_creates_the_install_log_path_once(self):
         # report.sh:78-89
         path = report.log_init()
         self.assertEqual(path.parent, self.home / ".ghost-alice" / "install")
         self.assertTrue(path.parent.is_dir())
-        self.assertRegex(path.name, r"^\d{4}-\d{2}-\d{2}-\d{6}\.log$")
+        self.assertRegex(path.name, r"^\d{4}-\d{2}-\d{2}-\d{6}-[0-9a-f]{32}\.log$")
         self.assertEqual(os.environ.get("GHOST_ALICE_INSTALL_LOG_FILE"), str(path))
         self.assertEqual(report.log_init(), path)
 
@@ -199,7 +256,7 @@ class LogTests(ReportCase):
     def test_child_tools_write_into_the_log_during_a_logged_step(self):
         # the child inherits the sink, like `>>"$LOG" 2>&1` (report.sh:106)
         def step():
-            return runner.run_tool("_shared/install_lock.py", "--help")
+            return runner.run_tool("_shared/install_transaction.py", "--help")
 
         with contextlib.redirect_stdout(io.StringIO()):
             result = report.run_logged(step)

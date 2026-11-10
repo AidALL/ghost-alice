@@ -5,6 +5,7 @@ import base64
 from contextlib import closing
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 
@@ -65,20 +66,32 @@ def reference_source(path, *, appendable=False):
     if not isinstance(path, str) or not Path(path).is_absolute() or type(appendable) is not bool:
         raise SourceReferenceError('An explicit absolute original source is required')
     digest, length, _ = _scan(path)
+    return reference_source_prefix(path, length, digest, appendable=appendable)
+
+
+
+def reference_source_prefix(path, byte_length, digest, *, appendable=True):
+    """Describe a captured prefix using the caller's length and digest, without reading its file.
+
+    Construction binds metadata; source_bytes or verify_source authenticates
+    the described bytes against the original file.
+    """
     value = dict(storage=FORMAT, locator=path, digest=digest,
-                 byte_length=length, appendable=appendable)
-    return dict(value, source_id=json_digest(value))
+                 byte_length=byte_length, appendable=appendable)
+    reference = dict(value, source_id=json_digest(value))
+    validate_source_reference(reference)
+    return reference
 
-
-def _validate(reference):
+def validate_source_reference(reference, *, exact=False):
+    """Validate file-reference metadata, optionally requiring only the stored v1 fields."""
     fields = ('storage', 'locator', 'digest', 'byte_length', 'appendable')
-    if (any(k not in reference for k in fields) or reference['storage'] != FORMAT
+    if (not isinstance(reference, dict) or any(k not in reference for k in fields)
+            or (exact and set(reference) != {*fields, 'source_id'}) or reference['storage'] != FORMAT
             or not isinstance(reference['locator'], str) or not Path(reference['locator']).is_absolute()
             or type(reference['byte_length']) is not int or reference['byte_length'] < 0
             or type(reference['appendable']) is not bool
             or reference.get('source_id') != json_digest({k: reference[k] for k in fields})):
         raise SourceReferenceError('Invalid original source reference')
-
 
 def core_source_reference(source, root, owner, candidate_reference):
     if 'text' not in source and 'bytes_base64' not in source:
@@ -116,11 +129,28 @@ def verify_source(reference):
     if reference.get('storage') == CORE_FORMAT:
         source_text(_core_source(reference))
         return
-    _validate(reference)
+    validate_source_reference(reference)
     digest, length, more = _scan(reference['locator'], reference['byte_length'])
     if (digest != reference['digest'] or length != reference['byte_length']
             or (more and not reference['appendable'])):
         raise SourceReferenceError('Original source bytes changed')
+
+def source_bytes(reference, *, identity=None):
+    """Return authenticated file bytes, checking optional device/inode on the same open file."""
+    validate_source_reference(reference)
+    with Path(reference['locator']).open('rb') as stream:
+        if identity is not None:
+            actual = os.fstat(stream.fileno())
+            if (not isinstance(identity, dict) or set(identity) != {'device', 'inode'}
+                    or (actual.st_dev, actual.st_ino) != (identity['device'], identity['inode'])):
+                raise SourceReferenceError('Original source file identity changed')
+        raw = stream.read(reference['byte_length'])
+        more = bool(stream.read(1))
+    if (len(raw) != reference['byte_length'] or (more and not reference['appendable'])
+            or text_digest(raw) != reference['digest']):
+        raise SourceReferenceError('Original source bytes changed')
+    return raw
+
 
 
 def source_text(reference):
@@ -134,11 +164,4 @@ def source_text(reference):
                 raise SourceReferenceError('Original source bytes changed')
             return raw.decode('utf-8', errors='replace')
         return reference['text']
-    _validate(reference)
-    with Path(reference['locator']).open('rb') as stream:
-        raw = stream.read(reference['byte_length'])
-        more = bool(stream.read(1))
-    if (len(raw) != reference['byte_length'] or (more and not reference['appendable'])
-            or 'sha256:' + hashlib.sha256(raw).hexdigest() != reference['digest']):
-        raise SourceReferenceError('Original source bytes changed')
-    return raw.decode('utf-8', errors='replace')
+    return source_bytes(reference).decode('utf-8', errors='replace')

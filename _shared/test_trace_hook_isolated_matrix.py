@@ -19,7 +19,7 @@ import sys
 import tempfile
 import unittest
 
-import test_completion_skill_evidence as skill_fixture
+from stop_hook_testing import review_format_fixture, reply, skill_call as skill, user_role_row
 import completion_check_validator as proof_validator
 from pathlib import Path
 
@@ -33,16 +33,7 @@ DIRECT_KEYS = ("last_assistant_message", "lastAssistantMessage", "prompt_respons
 
 
 def prompt(text="Synthetic matrix request.", **extra):
-    return {"type": "user", "message": {"role": "user", "content": text}, **extra}
-
-
-def skill():
-    return {"type": "assistant", "message": {"role": "assistant", "content": [
-        {"type": "tool_use", "name": "Skill", "input": {"skill": "verification-before-completion"}}]}}
-
-
-def reply(text):
-    return {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+    return dict(user_role_row(text), **extra)
 
 
 def valid_text(*, verdict="pass"):
@@ -52,6 +43,37 @@ def valid_text(*, verdict="pass"):
             f"- claim-evidence-map:\n  - claim: operating time was checked\n{reference}"
             f"    evidence: synthetic calculation subprocess exited {0 if verdict == 'pass' else 1}\n"
             f"    verdict: {verdict}\n- unverified:\n  - none\n")
+
+
+def native_rows(platform, session, entries):
+    """Encode matrix scenarios in the host's transcript envelope, without assigning input authorship."""
+    if platform == 'claude':
+        return [dict(entry, sessionId=session) for entry in entries], None
+    rows = [dict(type='session_meta', payload=dict(id=session))]
+    turn = None
+    for index, entry in enumerate(entries):
+        role, content = entry['message']['role'], entry['message']['content']
+        blocks = content if isinstance(content, list) else [dict(type='text', text=content)]
+        tool_results = any(block.get('type') == 'tool_result' for block in blocks)
+        if role == 'user' and not entry.get('isMeta') and not tool_results:
+            turn = f'matrix-turn-{index}'
+            rows.append(dict(type='turn_context', payload=dict(turn_id=turn)))
+        metadata = dict(turn_id=turn)
+        text_blocks = [dict(type='output_text' if role == 'assistant' else 'input_text', text=block['text'])
+                       for block in blocks if block.get('type') == 'text']
+        if text_blocks:
+            rows.append(dict(type='response_item', payload=dict(type='message',
+                role='developer' if entry.get('isMeta') or tool_results else role,
+                content=text_blocks, internal_chat_message_metadata_passthrough=metadata)))
+        for block in blocks:
+            if block.get('type') == 'tool_use':
+                rows.append(dict(type='response_item', payload=dict(type='function_call',
+                    name=block['name'], arguments=json.dumps(block['input']), call_id=block.get('id', f'call-{index}'),
+                    internal_chat_message_metadata_passthrough=metadata)))
+            elif block.get('type') == 'tool_result':
+                rows.append(dict(type='response_item', payload=dict(type='function_call_output',
+                    call_id=block.get('tool_use_id', f'call-{index}'), output=block.get('content', ''))))
+    return rows, turn
 
 
 class TraceHookIsolatedMatrixTests(unittest.TestCase):
@@ -97,7 +119,8 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         return result
 
     def stop(self, platform, text=None, *, entries=None, profile="dynamic", host=None,
-             direct_key="last_assistant_message", transcript_key="transcript_path", extra=None, purpose=None):
+             direct_key="last_assistant_message", transcript_key="transcript_path", extra=None, purpose=None,
+             expected_text=None):
         env = {**self.env, "GHOST_ALICE_AGENT_VISIBILITY": profile}
         if host is not None:
             env["CLAUDE_CODE_ENTRYPOINT"] = host
@@ -111,23 +134,36 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
             payload[direct_key] = text
         if entries is None:
             entries = [prompt(), skill(), reply(text or "")]
+        payload['session_id'] = 'fixture-stop'
         transcript = self.home / f"synthetic-{self.counter}.jsonl"
-        transcript.write_text("".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in entries), encoding="utf-8")
+        rows, turn = native_rows(platform, payload['session_id'], entries)
+        transcript.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
         payload[transcript_key] = str(transcript)
-        from native_transcript import assistant_text_this_turn
-        selected = text or assistant_text_this_turn(entries)
-        if selected:
-            self.bind_review(platform, selected, env, purpose=purpose)
-            payload['session_id'] = 'fixture-stop'
-        return json.loads(self.run_process([sys.executable, "-B", str(self.shared / "claude_stop_verification_hook.py"),
-                                           "--platform", platform], payload, env=env).stdout)
+        if turn is not None:
+            payload['turn_id'] = turn
+        expected_text = text if expected_text is None else expected_text
+        self.assertIsInstance(expected_text, str, 'Transcript cases must supply an independent expected answer.')
+        if expected_text:
+            self.bind_review(platform, expected_text, env, purpose=purpose)
+        observed = json.loads(self.run_process([sys.executable, "-B", str(self.shared / "claude_stop_verification_hook.py"),
+                                               "--platform", platform], payload, env=env).stdout)
+        self.assertEqual(observed['stop_notice']['body_digest'],
+                         'sha256:' + hashlib.sha256(expected_text.encode()).hexdigest())
+        return observed
 
-    def assert_allow(self, payload):
-        self.assertTrue(payload.get("continue"), msg=payload)
-        self.assertNotIn("decision", payload)
+    def assert_allow(self, payload, *, state='quiet'):
+        self.assertIs(payload.get("continue"), True, msg=payload)
+        for field in ('decision', 'reason', 'stopReason', 'additionalContext', 'hookSpecificOutput'):
+            self.assertNotIn(field, payload)
+        if 'stop_notice' in payload:
+            self.assertEqual(payload['stop_notice']['state'], state)
+            if state == 'quiet':
+                self.assertEqual(payload['stop_notice']['issues'], [])
+                self.assertEqual(payload['stop_notice']['unsupported_claims'], [])
+                self.assertNotIn('systemMessage', payload)
 
     def assert_unaccepted(self, payload):
-        self.assert_allow(payload)
+        self.assert_allow(payload, state='notice')
         message = payload.get("stop_notice", {})
         self.assertEqual(message.get("state"), "notice")
         self.assertTrue(message.get("issues"))
@@ -146,7 +182,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         reviewed = text if marked and proof_validator.validate_completion_text(
             text, require_completion_check=True) is None else valid_text()
         review_root = ledger_root or root / 'ledger'
-        skill_fixture.StopHookSkillEvidenceTests._review_format_fixture(root, platform, reviewed, env,
+        review_format_fixture(root, platform, reviewed, env,
             session_id=session, ledger_root=review_root, core_root=self.source,
             input_text='Synthetic matrix request.')
         if marked and purpose != 'completion':
@@ -155,7 +191,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         import completion_assessment as review
         coords = dict(root=review_root, platform=platform, session_id=session)
         state = fixtures.ledger.read_session_state(**coords)
-        route = fixtures.ResponseRouteTests().candidate()
+        route = fixtures.ResponseRouteTests.candidate()
         if purpose == 'completion':
             route['work_units'][0]['owner'] = dict(platform=platform, session_id=session)
             route['selected_criteria'][0]['criterion_id'] = 'calculation'
@@ -291,7 +327,8 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 (self.assert_allow if expected_valid else self.assert_unaccepted)(result)
         for platform, key in itertools.product(PLATFORMS, DIRECT_KEYS):
             good = valid_text()
-            self.assert_allow(self.stop(platform, "", direct_key=key, entries=[prompt(), skill(), reply(good)]))
+            self.assert_allow(self.stop(platform, "", direct_key=key, entries=[prompt(), skill(), reply(good)],
+                                        expected_text=good))
         bad = valid_text().replace("    evidence: synthetic calculation subprocess exited 0\n", "")
         self.assert_unaccepted(self.stop("codex", bad, direct_key="lastAssistantMessage",
                                     extra={"last_assistant_message": bad, "prompt_response": valid_text()}))
@@ -310,7 +347,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
             before, final = (bad, good) if final_valid else (good, bad)
             entries = [prompt(), skill(), reply(before), boundary, skill(), reply(final)]
             with self.subTest(platform=platform, boundary=boundary, final_valid=final_valid):
-                payload = self.stop(platform, final, entries=entries)
+                payload = self.stop(platform, None, entries=entries, expected_text=final)
                 if final_valid:
                     self.assert_allow(payload)
                 else:
@@ -322,7 +359,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                          prompt([{'type':'tool_result', 'content':'answer'}])):
             with self.subTest(boundary=boundary):
                 self.assert_allow(self.stop('claude', None,
-                    entries=[prompt(), skill(), reply(good), boundary, reply(good)]))
+                    entries=[prompt(), skill(), reply(good), boundary, reply(good)], expected_text=good))
 
 
     def test_no_current_reply_after_new_prompt_cannot_revalidate_previous_answer(self):
@@ -336,10 +373,10 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
             if not previous_valid:
                 previous = previous.replace("    evidence: synthetic calculation subprocess exited 0\n", "")
             with self.subTest(platform=platform, previous_valid=previous_valid, new_turn=new_turn, boundary=boundary):
-                payload = self.stop(platform, None, entries=[prompt(), skill(), reply(previous), boundary])
-                self.assert_allow(payload)
-                self.assertEqual(payload["stop_notice"]["body_digest"], "sha256:" + hashlib.sha256(b"").hexdigest())
-                self.assertNotIn("systemMessage", payload)
+                expected = '' if new_turn else previous
+                payload = self.stop(platform, None, entries=[prompt(), skill(), reply(previous), boundary],
+                                    expected_text=expected)
+                (self.assert_allow if new_turn or previous_valid else self.assert_unaccepted)(payload)
 
     def test_recovery_never_forces_business_replay_for_any_configured_host(self):
         for platform, profile, host, defect in itertools.product(PLATFORMS, PROFILES, HOSTS,
@@ -391,11 +428,16 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                     self.assert_audit_surface(self.installed_hook(hooks, event, "io-trace", payload, env), profile)
                 good = valid_text()
                 transcript = home / "synthetic-final.jsonl"
-                transcript.write_text("".join(json.dumps(e) + "\n" for e in [prompt(), skill(), reply(good)]), encoding="utf-8")
+                native, turn = native_rows(platform, session, [prompt(), skill(), reply(good)])
+                transcript.write_text("".join(json.dumps(row) + "\n" for row in native), encoding="utf-8")
                 self.bind_review(platform, good, env, session=session, ledger_root=self.ledger_root)
-                payload.update({"hook_event_name": "Stop", "last_assistant_message": good, "transcript_path": str(transcript)})
+                payload.update({"hook_event_name": "Stop", "transcript_path": str(transcript), "turn_id": turn})
                 self.assert_allow(json.loads(self.installed_hook(hooks, "Stop", "completion", payload, env).stdout))
                 rows = self.strict_rows(home, platform, session)
+                stop_result = json.loads(rows[-1]['stdout'])
+                self.assert_allow(stop_result)
+                self.assertEqual(stop_result['stop_notice']['body_digest'],
+                                 'sha256:' + hashlib.sha256(good.encode()).hexdigest())
                 self.assertEqual(len(rows), 6 + len(failure_events))
                 self.assertEqual({row["event"] for row in rows}, set(hooks))
                 for row in rows:
@@ -420,17 +462,22 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 scenarios = ((True, good, [prompt(), skill(), reply(good)]),
                              (False, bad, [prompt(), skill(), reply(bad)]),
                              (True, "", [prompt(), skill(), reply(bad), prompt("New prompt.")]))
-                for index, (allowed, direct, entries) in enumerate(scenarios):
+                for index, (quiet, expected, entries) in enumerate(scenarios):
                     with self.subTest(platform=platform, profile=profile, scenario=index):
                         transcript = home / f"synthetic-completion-{index}.jsonl"
-                        transcript.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
-                        payload = {"session_id": session, "hook_event_name": "Stop", "last_assistant_message": direct,
+                        native, turn = native_rows(platform, session, entries)
+                        transcript.write_text("".join(json.dumps(row) + "\n" for row in native), encoding="utf-8")
+                        payload = {"session_id": session, "hook_event_name": "Stop", "turn_id": turn,
                                    "transcript_path": str(transcript)}
                         if index == 0:
                             self.counter += 1
                             self.bind_review(platform, good, env, session=session, ledger_root=self.ledger_root)
                         output = self.installed_hook(hooks, "Stop", "completion", payload, env)
                         self.assert_allow(json.loads(output.stdout))
+                        observed = json.loads(self.strict_rows(home, platform, session)[-1]['stdout'])
+                        (self.assert_allow if quiet else self.assert_unaccepted)(observed)
+                        self.assertEqual(observed['stop_notice']['body_digest'],
+                                         'sha256:' + hashlib.sha256(expected.encode()).hexdigest())
                 rows = self.strict_rows(home, platform, session)
                 self.assertEqual(len(rows), len(scenarios))
                 self.assertTrue(all(row["hook_id"] == "completion" and row["event"] == "Stop" for row in rows))
@@ -519,6 +566,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 self.assertTrue(all(row["platform"] == platform and row["session"] == session for row in audit))
                 self.assertEqual(audit[0]["path"], "/synthetic/자료.txt")
                 self.assertEqual(audit[5]["pattern"], "cat /synthetic/file.txt")
+                self.assertEqual(audit[10]["pattern"], "cat /synthetic/file.txt")
                 self.assertTrue(all(row["hook_id"] == "io-trace" and row["stdout"] == "" for row in rows))
 
 

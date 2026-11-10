@@ -48,6 +48,8 @@ bash install.sh --platform codex --uninstall
 
 To remove only selected skills, provide both the platform and skill names. If other Ghost-ALICE skills remain, hooks and `_shared` stay installed.
 
+Selected removal expands family names to their actual leaves and checks dependencies on both the family and each leaf. It uses the full-uninstall ownership classifier, sends the complete removal plan to the gateway before deleting a target, and prunes only rows whose removal succeeded or whose target is absent. Both recorded inventory and source-known installed skills keep shared assets in use.
+
 ```bash
 bash install.sh --platform codex --uninstall task-router
 ```
@@ -86,6 +88,8 @@ When reading cleanup reports, treat schema version `2`, `mode=apply` and `<platf
 The live classifier writes `externally-modified-managed` for a managed target with an external change: a change after install that the installer's records do not hold, whose writer the installer does not record. It writes `unclaimed` when no management record claims the entry; that state does not permit deletion. When reading historical reports or pending entries, interpret `user-modified-managed` as `externally-modified-managed`, `user-owned` and diagnostic `owner=user` as `unclaimed`, `user-modified-purge` as `external-change-purge`, `user-modified-quarantine` as `external-change-quarantine`, and `retired-managed-user-changes-preserved` as `retired-managed-external-changes-preserved`. These names describe classification and preservation, not who changed a file. Do not rewrite historical entries, backup paths, hashes or recorded outcomes merely to update their names; removal and doctor classify the live targets again.
 
 Per-addon removal detaches the `Skill(...)` allow rules the installer added to Claude Code settings and Codex owned hook trust before removing files. The installer's ownership of a Claude Code allow rule is bound to the settings file and manifest-selected skill names; preexisting rules, later duplicate rules that this installer did not add and legacy rules with unknown ownership remain protected. Surviving Codex hook trust entries follow their actual group/handler positions, including repeated identical commands. The installer preserves the entries, fields and comments of hooks Ghost-ALICE did not install; it does not record who wrote them. An unresolved destination collision stops removal. Config writes preserve symlinks and use atomic replacement; if the subsequent hook settings write fails, removal restores the original trust bytes and modification time. The original config backup remains available if restoration itself fails.
+
+Claude permission attribution uses `addon-permissions/claude-v2.json` (schema `2`). The writer reads a legacy `claude.json` record when the new file is absent, writes the new schema to its separate filename and preserves the legacy file under a unique `.bak` name. Before removing a rule it records pending-detach fingerprints. If settings were saved but attribution was not, a retry recognizes the completed settings effect and finishes the record without removing another duplicate rule; a different current settings fingerprint leaves the item for review.
 
 The addon removal CLI returns exit `2` for errors or partial removal, including resume errors. Exit `1` means the addon was not found. A retained modified target, unknown permission ownership or configuration failure does not count as complete removal.
 

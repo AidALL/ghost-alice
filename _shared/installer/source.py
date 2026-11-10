@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 import install_transaction
 import installed_payload
+import file_lock
 from installer import locations, report, runner
 from installer.runner import InstallerExit
 
@@ -331,29 +332,38 @@ def setup_git_hooks() -> HookPathChange:
     install source that moved, or the relative `hooks` an earlier installer wrote over another value in this
     repository); else none for an unset value or the relative `hooks`; else the earlier value itself. A value
     already in place that no record names leaves the value to restore unknown, and the uninstall leaves the hook
-    path as it is. A known value is recorded in the same step as the write (`HOOK_PATH_RECORD`).
+    path as it is. A known value is recorded in the same step as the write (`HOOK_PATH_RECORD`). The sidecar's
+    persistent guard serializes the shared Git value and its first-before record across source adoptions. This
+    guard ends before the caller takes the installation lock; prerequisite preparation keeps its own lifetime.
     """
     root = runner.REPO_ROOT
     wanted = hooks_path_value(root)
-    found = _git(root, "config", "--local", "--get", "core.hooksPath")
-    current = found.stdout.strip() if found.ok and found.stdout.strip() else None
-    if current == wanted:
-        change = _recorded_hook_path(wanted) or HookPathChange(changed=False, recorded=False, after=wanted)
-    elif not _git(root, "config", "--local", "core.hooksPath", wanted).ok:
-        report.warn("Failed to set Git hook path. Post-merge hook may not fire")
+    record = locations.install_state_dir() / HOOK_PATH_RECORD
+    try:
+        record.parent.mkdir(parents=True, exist_ok=True)
+        with file_lock.exclusive(record.with_name(record.name + ".guard"), must_lock=True):
+            found = _git(root, "config", "--local", "--get", "core.hooksPath")
+            current = found.stdout.strip() if found.ok and found.stdout.strip() else None
+            if current == wanted:
+                change = _recorded_hook_path(wanted) or HookPathChange(changed=False, recorded=False, after=wanted)
+            elif not _git(root, "config", "--local", "core.hooksPath", wanted).ok:
+                report.warn("Failed to set Git hook path. Post-merge hook may not fire")
+                return HookPathChange(changed=False, recorded=False)
+            else:
+                earlier = _recorded_hook_path(current) if current is not None else None
+                if earlier is not None:
+                    change = HookPathChange(changed=True, recorded=True, before_present=earlier.before_present,
+                                            before=earlier.before, after=wanted)
+                else:
+                    kept = current not in (None, HOOKS_DIR)
+                    change = HookPathChange(changed=True, recorded=True, before_present=kept,
+                                            before=current if kept else "", after=wanted)
+                report.info(f"Git hook path → {wanted} (post-merge auto-refresh enabled)")
+            if change.recorded:
+                _write_hook_path_record(change)
+    except (OSError, file_lock.LockTimeout) as exc:
+        report.warn(f"Could not serialize the Git hook path write: {exc}")
         return HookPathChange(changed=False, recorded=False)
-    else:
-        earlier = _recorded_hook_path(current) if current is not None else None
-        if earlier is not None:
-            change = HookPathChange(changed=True, recorded=True, before_present=earlier.before_present,
-                                    before=earlier.before, after=wanted)
-        else:
-            kept = current not in (None, HOOKS_DIR)
-            change = HookPathChange(changed=True, recorded=True, before_present=kept, before=current if kept else "",
-                                    after=wanted)
-        report.info(f"Git hook path → {wanted} (post-merge auto-refresh enabled)")
-    if change.recorded:
-        _write_hook_path_record(change)
     hook = root / HOOKS_DIR / "post-merge"
     if hook.is_file() and not os.access(hook, os.X_OK):
         try:

@@ -25,7 +25,7 @@ import state_retention
 
 if TYPE_CHECKING:
     from installer.cli import Context
-    from installer.selection import Target
+    from installer.selection import Collected, Target
     from installer.source import HookPathChange
 
 # The runtime companion scripts the context gateway runs beside the runtime `_shared`, relative to the
@@ -56,12 +56,6 @@ class SyncCounts:
     installed: int = 0
     updated: int = 0
     skipped: int = 0
-
-
-def _targets(ctx: "Context", skills: list[str]) -> "list[Target]":
-    from installer import selection
-
-    return selection.iter_install_targets(skills, ctx.addon_targets)
 
 
 def record_source(ctx: "Context") -> dict:
@@ -323,14 +317,43 @@ def _remove_path(target: Path) -> None:
         shutil.rmtree(target)
 
 
-def remove_installed_target(label: str, target: Path) -> bool:
-    """Remove a link or directory and say `<label> removed`; False when nothing was there."""
+def remove_installed_target(ctx: "Context", label: str, target: Path, *,
+                            source_path: Path | None = None, apply_changes: bool = True,
+                            only_if_absent: bool = False) -> dict:
+    """Use full removal's ownership and preservation owner for one selected slot.
+
+    A preview returns its proposed action. An applied removal also retires only that
+    destination from the current host inventory; historical publish records stay.
+    """
+    import install_state_writer
+    from uninstall_cleanup import _target_item
+
     target = Path(target)
-    if target.is_symlink() or target.is_dir():
-        _remove_path(target)
-        report.ok(f"{label} removed")
-        return True
-    return False
+    state_path = locations.install_state_path(ctx.platform)
+    try:
+        manifest = install_state_writer.read_state(state_path)
+    except (OSError, ValueError) as exc:
+        return dict(target_name=label, path=str(target), action="manual-review",
+                    reason="install-state-unreadable", detail=str(exc))
+    manifest = manifest or dict(platform=ctx.platform, source_root=str(runner.REPO_ROOT), targets=[])
+    row = next((row for row in manifest["targets"] if Path(row["dest_path"]) == target), None)
+    if row is not None and row["target_name"] != label:
+        return dict(target_name=label, path=str(target), action="manual-review", reason="target-name-mismatch")
+    if row is None:
+        row = dict(target_name=label, dest_path=str(target), install_mode=detect_install_mode(target, False))
+        if source_path is not None:
+            row["source_path"] = str(source_path)
+    result = _target_item(row, manifest=manifest, manifest_path=state_path,
+                          platform=ctx.platform, apply_changes=apply_changes and not only_if_absent)
+    if only_if_absent and result["action"] != "missing":
+        result.update(action="manual-review", reason="target-appeared-after-preview")
+    if apply_changes and result["action"] in {"removed", "quarantined-removed", "missing"}:
+        install_state_writer.remove_targets(state_path, destinations=[target])
+        if result["action"] != "missing":
+            report.ok(f"{label} removed")
+            if result.get("backup_path"):
+                report.info(f"Preserved {label}: {result['backup_path']}")
+    return result
 
 
 def guard_gateway_removal(ctx: "Context", targets: list[Path]) -> int:
@@ -341,34 +364,16 @@ def guard_gateway_removal(ctx: "Context", targets: list[Path]) -> int:
     return gateway_participant.guard(locations.record_root(), [Path(target) for target in targets])
 
 
-def cleanup_shared_if_unused(ctx: "Context", skills_root: Path) -> int:
-    """0 when `_shared` was removed, 1 when kept, another code when the gateway guard refused."""
-    from installer import selection
-
-    skills_root = Path(skills_root)
-    if selection.has_managed_installs(skills_root):
-        return 1
-    shared = skills_root / "_shared"
-    if shared.is_symlink() or shared.is_dir():
-        rc = guard_gateway_removal(ctx, [shared])
-        if rc != 0:
-            return rc
-        _remove_path(shared)
-        report.ok("_shared removed")
-        return 0
-    return 1
-
-
-def verify_after_copy(ctx: "Context", skills_dir: Path, copy_only: bool, skills: list[str]) -> bool:
-    """`merge-companion/scripts/install_verifier.py --platform --state-root --target NAME SRC DEST MODE ...`."""
+def verify_after_copy(ctx: "Context", skills_dir: Path, copy_only: bool, collected: "Collected") -> bool:
+    """Verify every initially selected target, including a source or destination that disappeared after selection."""
     skills_dir = Path(skills_dir)
     shared_src = runner.REPO_ROOT / "_shared"
     args = ["--platform", ctx.platform, "--state-root", str(locations.install_state_path(ctx.platform).parent)]
     targets: list[str] = []
-    if shared_src.is_dir():
+    if collected.support_target_total:
         targets.extend(["--target", "_shared", str(shared_src), str(skills_dir / "_shared"),
                         detect_install_mode(skills_dir / "_shared", copy_only)])
-    for target in _targets(ctx, skills):
+    for target in collected.all_targets:
         dest = skills_dir / target.name
         targets.extend(["--target", target.name, str(target.path), str(dest), detect_install_mode(dest, copy_only)])
     if not targets:
@@ -379,15 +384,15 @@ def verify_after_copy(ctx: "Context", skills_dir: Path, copy_only: bool, skills:
     return True
 
 
-def write_ownership_markers(ctx: "Context", skills_dir: Path, copy_only: bool, skills: list[str]) -> bool:
+def write_ownership_markers(ctx: "Context", skills_dir: Path, copy_only: bool, collected: "Collected") -> bool:
     """`installer_assets_cli.py --platform --source-repo --source-commit --target ... --addon-target ...`."""
     skills_dir = Path(skills_dir)
     info = source.resolve_source()
     targets: list[str] = []
     shared_dest = skills_dir / "_shared"
-    if shared_dest.exists() or shared_dest.is_symlink():
+    if collected.support_target_total:
         targets.extend(["--target", "_shared", str(shared_dest), detect_install_mode(shared_dest, copy_only)])
-    for target in _targets(ctx, skills):
+    for target in collected.all_targets:
         dest = skills_dir / target.name
         mode = detect_install_mode(dest, copy_only)
         if target.addon_id:
@@ -405,7 +410,8 @@ def write_ownership_markers(ctx: "Context", skills_dir: Path, copy_only: bool, s
 
 
 def snapshot_after_install(ctx: "Context") -> bool:
-    """`merge-companion/scripts/snapshot_cli.py` then the empty pending manifest."""
+    """After selected targets pass verification, snapshot the currently installed managed copies, including
+    earlier installs, then create the pending manifest when absent. This inventory has its own observation time."""
     pending_root = locations.pending_root(ctx.platform)
     snapshot = pending_root / "snapshot.json"
     try:
@@ -428,7 +434,7 @@ def write_empty_pending_manifest_if_missing(ctx: "Context", platform_dir: str, m
     return runner.run_tool("_shared/pending_manifest_writer.py", str(manifest), platform_dir).ok
 
 
-def write_install_state_manifest(ctx: "Context", skills_dir: Path, copy_only: bool, skills: list[str],
+def write_install_state_manifest(ctx: "Context", skills_dir: Path, copy_only: bool, collected: "Collected",
                                  hook_change: "HookPathChange | None") -> bool:
     """`install_state_writer.py <platform> <root> <branch> <head> <dirty> <state> NAME SRC DEST MODE ...`
     with the `GHOST_ALICE_SOURCE_REPO_HOOK_*` environment: the shared git hook path this
@@ -443,10 +449,10 @@ def write_install_state_manifest(ctx: "Context", skills_dir: Path, copy_only: bo
     info = source.resolve_source()
     targets: list[str] = []
     shared_src = runner.REPO_ROOT / "_shared"
-    if shared_src.exists():
+    if collected.support_target_total:
         targets.extend(["_shared", str(shared_src), str(skills_dir / "_shared"),
                         detect_install_mode(skills_dir / "_shared", copy_only)])
-    for target in _targets(ctx, skills):
+    for target in collected.all_targets:
         dest = skills_dir / target.name
         targets.extend([target.name, str(target.path), str(dest), detect_install_mode(dest, copy_only)])
     recorded = hook_change if hook_change is not None and hook_change.recorded else None

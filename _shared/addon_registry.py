@@ -245,8 +245,15 @@ def write_record(record: dict[str, Any], *, addons_dir: str | os.PathLike[str]) 
 
 def _read_json_object(path: Path, *, what: str) -> dict[str, Any]:
     """Read a JSON object without following symlinks or hanging on FIFOs."""
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0)
+    before = None
     try:
+        if not nofollow:
+            before = path.lstat()
+            if (not stat.S_ISREG(before.st_mode)
+                    or getattr(before, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)):
+                raise SchemaValidationError(f"{what}: not a regular file")
         fd = os.open(path, flags)
     except FileNotFoundError as exc:
         raise RecordNotFound(f"{what}: not found") from exc
@@ -256,6 +263,19 @@ def _read_json_object(path: Path, *, what: str) -> dict[str, Any]:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
             raise SchemaValidationError(f"{what}: not a regular file")
+        if before is not None:
+            # Without O_NOFOLLOW, read only the regular file observed before open.
+            # Refuse replacements, links, and filesystems without usable identity.
+            try:
+                current = path.lstat()
+            except OSError as exc:
+                raise SchemaValidationError(f"{what}: changed while opening ({exc})") from exc
+            if (not before.st_ino or not st.st_ino
+                    or not os.path.samestat(before, st)
+                    or not os.path.samestat(current, st)
+                    or not stat.S_ISREG(current.st_mode)
+                    or getattr(current, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)):
+                raise SchemaValidationError(f"{what}: changed or unverifiable file identity while opening")
         if st.st_size > MAX_SIDECAR_BYTES:
             raise SchemaValidationError(f"{what}: exceeds {MAX_SIDECAR_BYTES} bytes")
         handle = os.fdopen(fd, "rb")  # consumes fd; the with-block below owns closing it
@@ -279,7 +299,7 @@ def _read_json_object(path: Path, *, what: str) -> dict[str, Any]:
 
 
 def _check_read_compat(record: dict[str, Any]) -> None:
-    """Fail closed unless the record's major equals the supported major.
+    """Require a supported major and the collection shapes consumers use.
 
     Rejecting ``major != SUPPORTED_MAJOR`` (not just ``>``) closes the
     zero/negative-major bypass. This never mutates the file.
@@ -289,6 +309,16 @@ def _check_read_compat(record: dict[str, Any]) -> None:
         raise UnsupportedSchemaVersion(
             f"record schema major {major} != supported {SUPPORTED_MAJOR}"
         )
+    for field in _REQUIRED_LIST_FIELDS:
+        if field not in record:
+            continue  # The caller reports all missing required fields together.
+        if not isinstance(record[field], list):
+            raise SchemaValidationError(f"{field} must be a list")
+        member_type = dict if field == "provided" else str
+        for index, member in enumerate(record[field]):
+            if not isinstance(member, member_type):
+                expected = "object" if field == "provided" else "string"
+                raise SchemaValidationError(f"{field}[{index}] must be a {expected}")
 
 
 def read_record(addon_id: str, *, addons_dir: str | os.PathLike[str]) -> dict[str, Any]:

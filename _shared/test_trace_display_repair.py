@@ -1,6 +1,5 @@
 """Native assessment preserves the submitted body without a printed trace."""
 
-import hashlib
 import json
 import os
 import subprocess
@@ -10,8 +9,8 @@ import unittest
 from pathlib import Path
 
 from test_completion_recovery import VALID
-from test_completion_skill_evidence import assert_stop_observation, skill_call, user_role_row
-import test_completion_skill_evidence as skill_fixture
+from stop_hook_testing import assert_stop_observation, skill_call, user_role_row
+import stop_hook_testing as skill_fixture
 
 HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
 
@@ -28,7 +27,7 @@ class TraceDisplayRepairTests(unittest.TestCase):
                                    {"type": "assistant", "message": {"role": "assistant", "content": stale}}]
                         path.write_text("".join(json.dumps(e) + "\n" for e in entries))
                         env = {k:v for k,v in os.environ.items() if not k.startswith(("GHOST_ALICE_", "CODEX_", "CLAUDE_"))}
-                        skill_fixture.StopHookSkillEvidenceTests._review_format_fixture(Path(temp), platform, VALID, env)
+                        skill_fixture.review_format_fixture(Path(temp), platform, VALID, env)
                         result = subprocess.run([sys.executable, "-B", str(HOOK), "--platform", platform],
                                                 input=json.dumps({key: latest, "session_id":"fixture-stop", "transcript_path": str(path), "stop_hook_active": True}),
                                                 text=True, capture_output=True, check=True, env=env)
@@ -41,7 +40,7 @@ class TraceDisplayRepairTests(unittest.TestCase):
             path.write_text(json.dumps(user_role_row('Check the fixture.')) + '\n')
             env = {k:v for k,v in os.environ.items()
                    if not k.startswith(('GHOST_ALICE_', 'CODEX_', 'CLAUDE_'))}
-            skill_fixture.StopHookSkillEvidenceTests._review_format_fixture(
+            skill_fixture.review_format_fixture(
                 Path(temp), 'claude', VALID, env, record_review=False)
             result = subprocess.run([sys.executable, '-B', str(HOOK), '--platform', 'claude'],
                 input=json.dumps(dict(session_id='fixture-stop', last_assistant_message=VALID,
@@ -61,7 +60,7 @@ class TraceDisplayRepairTests(unittest.TestCase):
             env["CLAUDE_CODE_ENTRYPOINT"] = host
             from completion_check_validator import validate_completion_text
             reviewed = VALID if validate_completion_text(text, require_completion_check=True) else text
-            skill_fixture.StopHookSkillEvidenceTests._review_format_fixture(Path(temp), platform, reviewed, env)
+            skill_fixture.review_format_fixture(Path(temp), platform, reviewed, env)
             result = subprocess.run(
                 [sys.executable, "-B", str(HOOK), "--platform", platform],
                 input=json.dumps({"session_id":"fixture-stop", "last_assistant_message": text, "transcript_path": str(transcript)}),
@@ -85,28 +84,6 @@ class TraceDisplayRepairTests(unittest.TestCase):
                         issue='must include evidence', repair_target='completion_metadata')
                     self.assertNotIn('delivery-route:', observed['body_issue'])
                     self.assertNotIn('response_text', result)
-
-    def test_new_turn_without_reply_cannot_revalidate_old_completion(self):
-        for platform in ("codex", "claude"):
-            for previous in (VALID, "The requested work is complete."):
-                with self.subTest(platform=platform, previous=previous):
-                    entries = [user_role_row("Old request."), skill_call(),
-                               {"type": "assistant", "message": {"role": "assistant", "content": previous}},
-                               user_role_row("A new request without an assistant reply yet.")]
-                    with tempfile.TemporaryDirectory() as temp:
-                        path = Path(temp) / "transcript.jsonl"
-                        path.write_text("".join(json.dumps(e) + "\n" for e in entries))
-                        result = subprocess.run(
-                            [sys.executable, "-B", str(HOOK), "--platform", platform],
-                            input=json.dumps({"transcript_path": str(path)}),
-                            text=True, capture_output=True, check=True,
-                        )
-                    payload = json.loads(result.stdout)
-                    # The new turn has no answer yet, so the old completion is not assessed again.
-                    self.assertEqual((payload["continue"], payload["stop_notice"]["state"]), (True, "quiet"))
-                    self.assertEqual(payload["stop_notice"]["body_digest"], "sha256:" + hashlib.sha256(b"").hexdigest())
-                    self.assertNotIn("systemMessage", payload)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -39,8 +39,8 @@ class RecordCase(unittest.TestCase):
         self.temp.cleanup()
 
     def hold_lock(self) -> None:
-        install_lock.acquire_lock(self.ghost / "install.lock", owner="installer:install:claude:test")
-        self.addCleanup(install_lock.release_lock, self.ghost / "install.lock")
+        generation = install_lock.acquire_lock(self.ghost / "install.lock", owner="installer:install:claude:test")
+        self.addCleanup(install_lock.release_lock, self.ghost / "install.lock", generation)
 
 
 class SchemaAndWriteTests(RecordCase):
@@ -102,7 +102,8 @@ class SchemaAndWriteTests(RecordCase):
         self.assertEqual(final, self.record)
         self.assertEqual(temporary.parent, self.ghost)
         self.assertNotEqual(temporary, final)
-        self.assertEqual(sorted(p.name for p in self.ghost.iterdir()), ["install.lock", "installed-payload.json"])
+        self.assertEqual(sorted(p.name for p in self.ghost.iterdir()),
+                         ["install.lock", "install.lock.guard", "installed-payload.json"])
 
     def test_a_failed_write_keeps_the_previous_record_and_leaves_no_temporary_file(self):
         self.hold_lock()
@@ -112,7 +113,8 @@ class SchemaAndWriteTests(RecordCase):
             with self.assertRaises(OSError):
                 installed_payload.update(self.ghost, {"targets": {"/b": _entry()}})
         self.assertEqual(self.record.read_bytes(), before)
-        self.assertEqual(sorted(p.name for p in self.ghost.iterdir()), ["install.lock", "installed-payload.json"])
+        self.assertEqual(sorted(p.name for p in self.ghost.iterdir()),
+                         ["install.lock", "install.lock.guard", "installed-payload.json"])
 
     def test_an_unknown_section_is_refused(self):
         self.hold_lock()
@@ -586,7 +588,14 @@ class ServiceMigrationTests(RecordCase):
     def test_an_unavailable_receipt_is_reported_and_nothing_is_written(self):
         self.hold_lock()
         receipt = json.loads(self.receipt.read_text(encoding="utf-8"))
-        for change in ("missing", "unreadable", "removed", "other-schema", "relative-path"):
+        binding = json.loads(self.binding.read_text(encoding="utf-8"))
+        for change, reason in (
+            ("missing", "receipt cannot be read"),
+            ("unreadable", "cannot be read"),
+            ("removed", "not an installed context-gateway-installation.v1 receipt"),
+            ("other-schema", "not an installed context-gateway-installation.v1 receipt"),
+            ("relative-path", "lacks absolute service file paths"),
+        ):
             with self.subTest(change=change):
                 if change == "missing":
                     self.receipt.unlink()
@@ -598,7 +607,10 @@ class ServiceMigrationTests(RecordCase):
                     self.receipt.write_text(json.dumps(dict(receipt, schema_version="v9")), encoding="utf-8")
                 else:
                     self.receipt.write_text(json.dumps(dict(receipt, launch_agent="relative.plist")), encoding="utf-8")
-                with self.assertRaises(installed_payload.RecordError):
+                if change != "missing":
+                    self.binding.write_text(json.dumps(dict(
+                        binding, installation_digest="sha256:" + _hex(self.receipt.read_bytes()))), encoding="utf-8")
+                with self.assertRaisesRegex(installed_payload.RecordError, reason):
                     installed_payload.migrate_service(self.ghost)
                 self.assertFalse(self.record.exists())
         self.binding.write_text("[]", encoding="utf-8")

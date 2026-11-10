@@ -11,16 +11,20 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import addon_registry  # noqa: E402
+import hash_utils  # noqa: E402
 from installer import cli, report  # noqa: E402
 from installer.runner import InstallerExit, ToolResult  # noqa: E402
 from installer.selection import ALL_SKILLS, Collected, Target  # noqa: E402
 from installer.source import HookPathChange  # noqa: E402
+from installer.transaction import report_gateway, verify_after_copy  # noqa: E402
 from installer_testing import FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
 
 
@@ -131,6 +135,58 @@ class CliCase(unittest.TestCase):
 
 
 class OptionTests(CliCase):
+    def test_addon_skip_avoids_collisions_hooks_grants_extras_and_sidecars(self):
+        checkout = Path(__file__).resolve().parents[1]
+        addon = checkout / "_shared" / "tests" / "fixtures" / "rich-addon"
+        settings = self.home / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(json.dumps({"permissions": {"allow": ["Skill(existing)"]},
+                                        "hooks": {"PostToolUse": [{"hooks": [{"type": "command",
+                                                                            "command": "existing-addon-hook"}]}]}}))
+        commands = self.home / ".claude" / "commands"
+        commands.mkdir()
+        (commands / "richcmd.md").write_text("user command\n")
+        existing = self.home / ".ghost-alice" / "addons" / "claude" / "existing.json"
+        existing_skill = self.home / ".claude" / "skills" / "existing"
+        existing_skill.mkdir(parents=True)
+        (existing_skill / "SKILL.md").write_text("existing addon\n")
+        addon_registry.write_record({
+            "schema_version": "1.0", "addon_id": "existing", "addon_version": "1.0.0",
+            "source": str(self.home / "existing-source"), "platform": "claude", "owner": "addon",
+            "origin": "addon:existing", "depends_on_core": [], "min_core_version": "0.1.0",
+            "installed_at": "2026-11-01T00:00:00Z", "provided": [{
+                "kind": "skill", "name": "existing", "target": str(existing_skill), "ownership": "addon",
+                "install_mode": "copy", "content_hash": hash_utils.hash_target(str(existing_skill), "copy"),
+                "marker": "", "metadata": {},
+            }],
+        }, addons_dir=existing.parent)
+        before = existing.read_bytes()
+        with use_source(checkout):
+            ctx = cli.build_context(cli.parse_options(["--addon-source", str(addon), "--addon-skip"]))
+            self.assertEqual(cli.selection.collect_targets(ctx, ["task-router"]).addon_targets, [])
+            # Collision checking must not inspect a source excluded from this request.
+            cli.selection.check_addon_collisions(ctx)
+            self.assertTrue(cli.hosts.install_hooks(ctx, "install", "claude"))
+            self.assertTrue(cli.addons.write_sidecars(ctx, ctx.skills_dir))
+        self.assertEqual(ctx.options.addon_sources, [str(addon)])
+        installed_settings = json.loads(settings.read_text())
+        self.assertIn("Skill(existing)", installed_settings["permissions"]["allow"])
+        self.assertNotIn("Skill(richskill)", installed_settings["permissions"]["allow"])
+        self.assertIn("existing-addon-hook", settings.read_text())
+        self.assertNotIn("richobs", settings.read_text())
+        self.assertEqual((commands / "richcmd.md").read_text(), "user command\n")
+        self.assertEqual(existing.read_bytes(), before)
+        self.assertEqual((existing_skill / "SKILL.md").read_text(), "existing addon\n")
+        self.assertFalse((existing.parent / "rich.json").exists())
+        self.assertFalse((ctx.skills_dir / "richskill").exists())
+        self.assertFalse((self.home / ".ghost-alice" / "resources" / "claude" / "rich").exists())
+
+    def test_addon_skip_filters_the_install_plan_but_keeps_the_raw_request(self):
+        options = cli.parse_options(["--addon-source", "/requested/addon", "--addon-skip"])
+        ctx = cli.build_context(options)
+        self.assertEqual(options.addon_sources, ["/requested/addon"])
+        self.assertEqual(ctx.addon_sources, [])
+
     def test_flags(self):
         # install.sh:115-201
         options = cli.parse_options(["--platform", "codex", "--skip-source-health", "--update-source", "--cleanup-pending",
@@ -309,7 +365,7 @@ class DispatchCase(CliCase):
         self.stub("installer.auto.run_uninstall_children", 0)
         self.stub("installer.cli.prepare_install")
         self.stub("installer.cli.run_install", 0)
-        self.stub("installer.lock.acquire", self.home / "lock")
+        self.stub("installer.lock.acquire", (self.home / "lock", "generation"))
         self.stub("installer.lock.release")
         self.stub("installer.runner.run_tool", mock.Mock(returncode=5))
 
@@ -418,6 +474,7 @@ class DispatchTests(DispatchCase):
                 self.assertEqual(self.names(), expected)
                 if command.lock:
                     self.assertEqual(self.calls[self.names().index("acquire")][1], (command.lock, "codex"))
+                    self.assertEqual(self.calls[self.names().index("release")][1], ((self.home / "lock", "generation"),))
 
     def test_only_platform_commands_prompt_and_prepare_addon_sources(self):
         with mock.patch("installer.cli.sys.stdin") as stdin:
@@ -561,7 +618,7 @@ class SourceCheckTests(DispatchCase):
         def adopted_elsewhere(command, platform):
             self.calls.append(("acquire", (command, platform), {}))
             self.record_source(self.other)
-            return self.home / "lock"
+            return self.home / "lock", "generation"
 
         self.patches.enter_context(mock.patch("installer.lock.acquire", side_effect=adopted_elsewhere))
         for argv, handler in ((["--platform", "codex"], "run_install"), (["--platform", "claude", "--repair"], "run_repair")):
@@ -574,7 +631,7 @@ class SourceCheckTests(DispatchCase):
                 self.assertNotIn(handler, self.names())
                 self.assertEqual(self.names()[-1], "release")
         # An unchanged source under the lock goes on without a second message.
-        self.patches.enter_context(mock.patch("installer.lock.acquire", return_value=self.home / "lock"))
+        self.patches.enter_context(mock.patch("installer.lock.acquire", return_value=(self.home / "lock", "generation")))
         self.record_source(self.source)
         self.calls.clear()
         rc, out = self.dispatch(["--platform", "codex"])
@@ -741,7 +798,7 @@ class InstallOrderTests(CliCase):
         (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
         self.stub("installer.prerequisites.install_prerequisites", True)
         self.stub("installer.source.setup_git_hooks", HookPathChange(changed=False, recorded=False))
-        self.stub("installer.lock.acquire", self.home / "lock")
+        self.stub("installer.lock.acquire", (self.home / "lock", "generation"))
         self.stub("installer.lock.release")
         self.stub("installer.transaction.migrate_record")
         self.stub("installer.source.check_source_health", True)
@@ -771,7 +828,34 @@ class InstallOrderTests(CliCase):
 
     def collect(self, ctx, skills):
         targets = [Target("task-router", self.source / "task-router"), Target("alpha", self.source / "alpha")]
-        return Collected(skill_targets=targets, addon_targets=[], skill_target_total=2, support_target_total=1)
+        self.collected = Collected(skill_targets=targets, addon_targets=[], skill_target_total=2, support_target_total=1)
+        return self.collected
+
+    def test_real_postflight_source_loss_stops_the_cli_before_snapshot(self):
+        checkout = Path(__file__).resolve().parents[1]
+        verifier = self.source / "merge-companion" / "scripts"
+        verifier.mkdir(parents=True)
+        for name in ("install_verifier.py", "file_walker.py"):
+            shutil.copy2(checkout / "merge-companion" / "scripts" / name, verifier / name)
+        ctx = make_context(self.home, "claude", args=["alpha"])
+        ctx.skills_dir.mkdir(parents=True)
+        for name in ("_shared", "task-router"):
+            (ctx.skills_dir / name).symlink_to(self.source / name)
+        shutil.copytree(self.source / "alpha", ctx.skills_dir / "alpha")
+
+        def source_disappears(*args):
+            shutil.rmtree(self.source / "alpha")
+            return 0
+
+        self.stub("installer.hosts.sync_commands", side_effect=source_disappears)
+        self.stub("installer.transaction.verify_after_copy", side_effect=verify_after_copy)
+        with mock.patch.dict(os.environ, {"PYTHONPATH": str(checkout / "_shared")}):
+            self.expect_exit(1, cli.run_command, cli.INSTALL, ctx)
+        self.assertNotIn("snapshot_after_install", self.names())
+        self.assertNotIn("write_install_state_manifest", self.names())
+        state = json.loads((self.home / ".ghost-alice" / "install-state" / "claude.json").read_text())
+        self.assertEqual([(row["target_name"], row["reason"]) for row in state["failures"]],
+                         [("alpha", "missing-source")])
 
     def order(self):
         names = []
@@ -795,6 +879,11 @@ class InstallOrderTests(CliCase):
         self.assertLess(names.index("check_addon_collisions"), names.index("install_shared"))
         self.assertLess(names.index("install_hooks"), names.index("ensure_claude_bootstrap"))
         self.assertLess(names.index("sync_runtime_shared"), names.index("install_hooks"))
+        for name, args, _ in self.calls:
+            if name in ("encoding_guard", "preflight"):
+                self.assertIs(args[1], self.collected)
+            if name in ("verify_after_copy", "write_ownership_markers", "write_install_state_manifest"):
+                self.assertIs(args[3], self.collected)
         self.assertIn("[OK] [5/5] Verification: install state recorded", out) if report.state().report_child else None
 
     def test_links_that_already_point_at_their_source_are_recorded_not_replaced(self):
@@ -813,8 +902,12 @@ class InstallOrderTests(CliCase):
         self.assertEqual(replaced, ["alpha"])
 
     def test_the_gateway_line_reaches_the_terminal_in_every_output_mode(self):
-        note = "Context gateway: registered from /src, 32 files, service not running"
-        self.patches.enter_context(mock.patch("installer.transaction.report_gateway", return_value=(note, False)))
+        runtime = str(self.home / "gateway-output-fixture" / "runtime")
+        note = f"Context gateway: registered, runtime {runtime}, service not running"
+        self.patches.enter_context(mock.patch("installer.transaction.installed_payload.read",
+                                              return_value={"service": {"runtime_root": runtime}}))
+        self.patches.enter_context(mock.patch("installer.transaction._gateway_service_running", return_value=False))
+        self.patches.enter_context(mock.patch("installer.transaction.report_gateway", side_effect=report_gateway))
         # Compact mode: steps go to the log, the report tail carries the note under Attention.
         report.configure(verbose=False, report_child=False, tty=False, progress_env="off", home=self.home)
         ctx = make_context(self.home, "claude", args=["task-router"])
@@ -826,6 +919,8 @@ class InstallOrderTests(CliCase):
         quiet(self.home, verbose=True)
         ctx = make_context(self.home, "claude", args=["task-router"])
         rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
+        self.assertEqual(rc, 0)
+        self.assertIn(note, out)
         self.assertNotIn("Attention", out)
         # A child of the auto mode writes the note as an event for the parent's tail.
         event_file = self.home / "run.events.jsonl"

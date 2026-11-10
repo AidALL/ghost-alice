@@ -152,12 +152,12 @@ class InstallTransactionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             lock_path = Path(temp_dir) / "install.lock"
 
-            lock.acquire_lock(lock_path, stale_seconds=60, owner="first")
+            generation = lock.acquire_lock(lock_path, stale_seconds=60, owner="first")
             try:
                 with self.assertRaises(lock.InstallLockError):
                     lock.acquire_lock(lock_path, stale_seconds=60, owner="second")
             finally:
-                lock.release_lock(lock_path)
+                lock.release_lock(lock_path, generation)
 
             self.assertFalse(lock_path.exists())
 
@@ -169,12 +169,12 @@ class InstallTransactionTest(unittest.TestCase):
             stale_time = time.time() - 7200
             os.utime(lock_path, (stale_time, stale_time))
 
-            lock.acquire_lock(lock_path, stale_seconds=1, owner="new")
+            generation = lock.acquire_lock(lock_path, stale_seconds=1, owner="new")
             try:
                 body = lock_path.read_text(encoding="utf-8")
                 self.assertIn('"owner": "new"', body)
             finally:
-                lock.release_lock(lock_path)
+                lock.release_lock(lock_path, generation)
 
     def test_cleanup_pending_apply_marks_clean_legacy_entry_decided_and_removes_backup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

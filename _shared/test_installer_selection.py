@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import sys
@@ -62,6 +63,62 @@ class SelectionCase(unittest.TestCase):
 
 
 class TargetTests(SelectionCase):
+    def test_remaining_core_uses_current_inventory_destinations(self):
+        skills = self.home / ".claude" / "skills"
+        skills.mkdir(parents=True)
+        state = self.home / ".ghost-alice" / "install-state" / "claude.json"
+        state.parent.mkdir(parents=True)
+        old = skills / "old-family-child"
+        old.mkdir()
+        row = dict(target_name=old.name, dest_path=str(old), source_path=str(self.source / "fam" / old.name))
+        state.write_text(json.dumps(dict(platform="claude", targets=[row])))
+        self.assertTrue(selection.has_managed_installs(skills, "claude"))
+        self.assertFalse(selection.has_managed_installs(skills, "claude", excluding=(old,)))
+        self.assertTrue(old.exists())
+        old.rmdir()
+        self.assertFalse(selection.has_managed_installs(skills, "claude"))
+
+    def test_inventory_does_not_hide_a_source_known_core_slot(self):
+        skills = self.home / ".claude" / "skills"
+        skills.mkdir(parents=True)
+        state = self.home / ".ghost-alice" / "install-state" / "claude.json"
+        state.parent.mkdir(parents=True)
+        (skills / "task-router").mkdir()
+        addon = skills / "addon-skill"
+        addon.mkdir()
+        elsewhere = self.home / "other-skills" / "old-family-child"
+        elsewhere.mkdir(parents=True)
+        targets = [dict(target_name="_shared", dest_path=str(skills / "_shared")),
+                   dict(target_name=addon.name, dest_path=str(addon), addon_id="addon", owner="addon"),
+                   dict(target_name=elsewhere.name, dest_path=str(elsewhere)),
+                   dict(target_name="missing", dest_path=str(skills / "missing"))]
+        state.write_text(json.dumps(dict(platform="claude", targets=targets)))
+        self.assertTrue(selection.has_managed_installs(skills, "claude"))
+        (skills / "task-router").rmdir()
+        self.assertFalse(selection.has_managed_installs(skills, "claude"))
+
+    def test_failed_install_inventory_keeps_conservative_legacy_presence_check(self):
+        skills = self.home / ".claude" / "skills"
+        (skills / "task-router").mkdir(parents=True)
+        state = self.home / ".ghost-alice" / "install-state" / "claude.json"
+        state.parent.mkdir(parents=True)
+        state.write_text(json.dumps(dict(platform="claude", targets=[], partial_failure=True)))
+        self.assertTrue(selection.has_managed_installs(skills, "claude"))
+
+    def test_unreadable_or_other_platform_inventory_preserves_support(self):
+        skills = self.home / ".claude" / "skills"
+        skills.mkdir(parents=True)
+        state = self.home / ".ghost-alice" / "install-state" / "claude.json"
+        state.parent.mkdir(parents=True)
+        for body in ('{broken', '{"platform":"codex","targets":[]}'):
+            with self.subTest(body=body):
+                state.write_text(body)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertTrue(selection.has_managed_installs(skills, "claude"))
+                self.assertEqual(state.read_text(), body)
+                self.assertIn("inventory", output.getvalue())
+
     def test_skill_lists(self):
         # install.sh:76-92
         self.assertEqual(selection.ALL_SKILLS, ("adversarial-verification", "boundary-contract", "coding-convention",
@@ -103,15 +160,18 @@ class TargetTests(SelectionCase):
         # targets.sh:296-320: core names are checked under the skills root even when the source lacks them
         skills_root = self.home / ".claude" / "skills"
         skills_root.mkdir(parents=True)
-        self.assertFalse(selection.has_managed_installs(skills_root))
+        self.assertFalse(selection.has_managed_installs(skills_root, "claude"))
         (skills_root / "task-router").mkdir()
-        self.assertTrue(selection.has_managed_installs(skills_root))
+        self.assertTrue(selection.has_managed_installs(skills_root, "claude"))
         (skills_root / "task-router").rmdir()
         (self.source / "coding-convention" / "writing-plans").mkdir(parents=True)
         (self.source / "coding-convention" / "writing-plans" / "SKILL.md").write_text("x", encoding="utf-8")
         (skills_root / "writing-plans").symlink_to(self.source / "coding-convention" / "writing-plans")
-        self.assertTrue(selection.has_managed_installs(skills_root))
-        self.assertFalse(selection.has_managed_installs(self.home / "nowhere"))
+        self.assertTrue(selection.has_managed_installs(skills_root, "claude"))
+        self.assertFalse(selection.has_managed_installs(skills_root, "claude",
+            excluding=(skills_root / "writing-plans",)))
+        self.assertTrue((skills_root / "writing-plans").is_symlink())
+        self.assertFalse(selection.has_managed_installs(self.home / "nowhere", "claude"))
 
 
 class CleanupTests(SelectionCase):
@@ -166,7 +226,6 @@ class CollectTests(SelectionCase):
         self.assertEqual(collected.skill_target_total, 4)
         self.assertEqual(collected.support_target_total, 1)
         self.assertEqual(collected.total_target_count, 5)
-        self.assertEqual(ctx.addon_targets, [addon])
 
     def test_collect_targets_rejects_unknown_skills_first(self):
         ctx = self.context("claude")

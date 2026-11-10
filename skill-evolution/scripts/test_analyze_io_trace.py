@@ -19,9 +19,81 @@ from unittest import mock
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[1]
 ANALYZER = SCRIPT_DIR / "analyze_io_trace.py"
+sys.path.insert(0, str(SCRIPT_DIR))
+import analyze_io_trace
 
 
 class AnalyzeIoTraceTests(unittest.TestCase):
+    def test_sqlite_context_reads_authority_and_keeps_report_fields(self) -> None:
+        ledger = analyze_io_trace.load_ledger()
+        root = self.write_trace([]).parent / "ledger"
+        paths = ledger.record_turn(root=root, platform="codex", session_id="report", intent_delta={
+            "current_goal": "authoritative report", "constraints": ["read only"],
+            "decisions": [{"id": "active", "summary": "use the ledger"}],
+            "latest_scope": {"allowed": ["read"]},
+        })
+        paths["state"].parent.mkdir(parents=True)
+        paths["state"].write_text('{"current_goal":"stale portable copy"}', encoding="utf-8")
+        before = {item: item.read_bytes() for item in root.rglob("*") if item.is_file()}
+        context = analyze_io_trace.load_intent_context(paths["state"])
+        self.assertEqual(set(context), {
+            "schema_version", "current_goal", "constraints", "non_goals", "open_questions",
+            "decision_count", "active_decisions", "latest_scope", "conduct_feedback",
+        })
+        self.assertEqual(context["current_goal"], "authoritative report")
+        self.assertEqual(context["decision_count"], 1)
+        self.assertEqual(context["active_decisions"][0]["id"], "active")
+        self.assertEqual(context["latest_scope"], {"allowed": ["read"]})
+        self.assertEqual({item: item.read_bytes() for item in before}, before)
+
+    def test_portable_context_keeps_its_contract_without_ledger_or_writes(self) -> None:
+        state = {
+            "schema_version": "portable.old", "current_goal": "offline report",
+            "constraints": ["read only"], "non_goals": ["install"], "open_questions": ["next?"],
+            "decisions": [None, {"id": "old", "superseded": True}, {"id": "active"}],
+            "latest_scope": {"allowed": ["read"]},
+            "conduct_feedback": [None, "not an object", {"id": "feedback"}],
+            "pending_native_inputs": "not a list", "acceptance_criteria": None,
+        }
+        path = self.write_intent_state(state)
+        before = {item.name: item.read_bytes() for item in path.parent.iterdir()}
+        with mock.patch.object(analyze_io_trace, "load_ledger", side_effect=ImportError("ledger unavailable")) as loader:
+            context = analyze_io_trace.load_intent_context(path)
+        self.assertEqual(context, {
+            "schema_version": "portable.old", "current_goal": "offline report",
+            "constraints": ["read only"], "non_goals": ["install"], "open_questions": ["next?"],
+            "decision_count": 1, "active_decisions": [{"id": "active"}],
+            "latest_scope": {"allowed": ["read"]}, "conduct_feedback": [{"id": "feedback"}],
+        })
+        self.assertEqual({item.name: item.read_bytes() for item in path.parent.iterdir()}, before)
+
+    def test_jsonl_waits_for_the_lf_after_an_incomplete_utf8_tail(self) -> None:
+        trace = self.write_trace([{"tool": "Read"}])
+        character = "가".encode("utf-8")
+        with trace.open("ab") as handle:
+            handle.write(b'{"tool":"' + character[:2])
+        self.assertEqual(analyze_io_trace.load_jsonl(trace, 0), [{"tool": "Read"}])
+        with trace.open("ab") as handle:
+            handle.write(character[2:] + b'"}\n')
+        self.assertEqual(analyze_io_trace.load_jsonl(trace, 0), [{"tool": "Read"}, {"tool": "가"}])
+
+    def test_jsonl_filters_committed_rows_before_applying_window(self) -> None:
+        first = {"tool": "Read", "pattern": "a\u2028b\u2029c\u0085d"}
+        second = {"tool": "Edit"}
+        tail = {"tool": "Bash"}
+        trace = self.write_trace([])
+        trace.write_bytes((
+            json.dumps(first, ensure_ascii=False) + "\r\n\nnot json\n[]\n42\n"
+            + '{"tool":"CR alone"}\r{"tool":"not a new line"}\n'
+            + "\u00a0" + json.dumps(second) + "\u00a0\n" + json.dumps(tail)
+        ).encode("utf-8"))
+        self.assertEqual(analyze_io_trace.load_jsonl(trace, 0), [first, second])
+        self.assertEqual(analyze_io_trace.load_jsonl(trace, -1), [first, second])
+        self.assertEqual(analyze_io_trace.load_jsonl(trace, 1), [second])
+        with trace.open("ab") as handle:
+            handle.write(b"\n")
+        self.assertEqual(analyze_io_trace.load_jsonl(trace, 1), [tail])
+
     # The fixtures stand in for the response model's recorded source claims, decisions and scope.
     # user-said does not authenticate a sender; allowed/prohibited do not establish human authorization.
     def write_trace(self, rows: list[dict[str, str]]) -> pathlib.Path:

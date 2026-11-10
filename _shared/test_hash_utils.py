@@ -9,6 +9,7 @@ Run: python3 -m pytest _shared/test_hash_utils.py -q
 from __future__ import annotations
 
 import sys
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,6 +29,33 @@ class HashTargetMarkerTest(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
+
+    def test_directory_hash_frames_binary_file_boundaries(self):
+        first = self.d / "a"
+        first.write_bytes(b"\0b\0c")
+        one_file = hash_utils.hash_target(self.d, "copy")
+        first.write_bytes(b"")
+        (self.d / "b").write_bytes(b"c")
+        self.assertNotEqual(one_file, hash_utils.hash_target(self.d, "copy"))
+
+    def test_legacy_record_uses_its_original_algorithm_without_rewriting_it(self):
+        from addon_installer import _same_addon_target_is_clean
+        from addon_uninstall import _process_target
+        legacy = hashlib.sha256(b"SKILL.md\0body\n\0").hexdigest()
+        entry = {"name": "skill", "target": str(self.d), "install_mode": "copy", "content_hash": legacy}
+        self.assertTrue(_same_addon_target_is_clean(self.d, legacy, "copy"))
+        self.assertEqual(_process_target(entry, allowed_roots=[self.d.parent], apply_changes=False)["action"], "would-remove")
+        self.assertEqual(entry["content_hash"], legacy)
+        self.assertTrue(hash_utils.hash_target(self.d, "copy").startswith("tree-v2:"))
+        (self.d / "SKILL.md").write_text("external change")
+        self.assertFalse(_same_addon_target_is_clean(self.d, legacy, "copy"))
+        self.assertEqual(_process_target(entry, allowed_roots=[self.d.parent], apply_changes=False)["action"], "manual-review")
+
+    def test_new_directory_baseline_still_authorizes_clean_removal(self):
+        from addon_uninstall import _process_target
+        entry = {"name": "skill", "target": str(self.d), "install_mode": "copy", "content_hash": hash_utils.hash_target(self.d, "copy")}
+        self.assertEqual(_process_target(entry, allowed_roots=[self.d.parent], apply_changes=True)["action"], "removed")
+        self.assertFalse(self.d.exists())
 
     def test_copy_hash_ignores_managed_marker(self):
         marker = self.d / ".ghost-alice-install.json"

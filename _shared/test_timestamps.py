@@ -1,6 +1,7 @@
 """timestamps: the one UTC time text, its formatter and its parser."""
 from datetime import datetime, timedelta, timezone
 import unittest
+from unittest import mock
 
 import timestamps
 
@@ -17,9 +18,11 @@ class FormatTest(unittest.TestCase):
         self.assertLessEqual(parsed, datetime.now(timezone.utc))
 
     def test_utc_now_with_microseconds_keeps_the_fraction_and_z(self):
-        text = timestamps.utc_now(microseconds=True)
-        self.assertTrue(text.endswith('Z'))
-        self.assertEqual(datetime.fromisoformat(text).utcoffset(), timedelta(0))
+        moment = datetime(2026, 11, 7, 0, 30, 15, 123456, tzinfo=timezone.utc)
+        with mock.patch.object(timestamps, 'datetime') as clock:
+            clock.now.return_value = moment
+            text = timestamps.utc_now(microseconds=True)
+        self.assertEqual(text, '2026-11-07T00:30:15.123456Z')
 
     def test_format_timestamp_converts_to_utc_and_drops_the_fraction_unless_asked(self):
         moment = datetime(2026, 11, 7, 9, 30, 15, 123456, tzinfo=timezone(timedelta(hours=9)))

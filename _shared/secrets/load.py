@@ -2,6 +2,8 @@
 
 Only get_or_prompt may prompt. API/CLI examples and storage rules are in the
 README.md beside this module.
+
+Dependencies: Python 3.11+ standard library and the parent Core atomic_write helper.
 """
 
 # Keep the filename as load.py so the module name does not collide with the stdlib `secrets` module; callers distinguish it by import path.
@@ -13,6 +15,9 @@ import re
 import sys
 from pathlib import Path
 from typing import Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from atomic_write import write_bytes
 
 __all__ = ["get", "set", "unset", "get_or_prompt", "list_keys", "SECRETS_FILE"]
 
@@ -40,7 +45,7 @@ def _ensure_file() -> Path:
     except OSError:
         pass
     if not path.exists():
-        path.write_text(_HEADER, encoding="utf-8")
+        write_bytes(path, _HEADER.encode("utf-8"))
     try:
         path.chmod(0o600)
     except OSError:
@@ -74,7 +79,7 @@ def _write_file(values: dict[str, str]) -> None:
     lines = [_HEADER]
     for key, val in values.items():
         lines.append(f"{key}={val}\n")
-    path.write_text("".join(lines), encoding="utf-8")
+    write_bytes(path, "".join(lines).encode("utf-8"))
     try:
         path.chmod(0o600)
     except OSError:

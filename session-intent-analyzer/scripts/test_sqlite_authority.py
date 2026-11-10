@@ -3,6 +3,7 @@
 Dependencies: Python standard library only.
 """
 import importlib.util
+from contextlib import closing
 import json
 import sqlite3
 import sys
@@ -172,7 +173,7 @@ class SQLiteAuthorityTests(unittest.TestCase):
         paths["events"].write_text(json.dumps(dict(platform="claude", session_id="other")))
         with self.assertRaisesRegex(ValueError, "identity"):
             ledger.migrate_session(**self.args)
-        with sqlite3.connect(self.root / "ghost-state.sqlite3") as connection:
+        with closing(sqlite3.connect(self.root / "ghost-state.sqlite3")) as connection:
             self.assertEqual(connection.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
 
     def test_reporting_consumers_read_without_exports(self):

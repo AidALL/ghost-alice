@@ -63,7 +63,7 @@ class PrivateHookOutputTests(unittest.TestCase):
 
     def test_internal_pending_check_receipt_still_prevents_duplicate_inspection(self):
         env = {"HOME": "/private/home", "GHOST_ALICE_PLATFORM": "codex"}
-        receipt = {"platform": "codex", "manifest_path": "/private/home/.ghost-alice/pending-merges/codex/manifest.json", "undecided_count": 1}
+        receipt = {"platform": "codex", "manifest_path": "/private/home/.ghost-alice/pending-merges/codex/manifest.json", "manifest_state": "parsed", "undecided_count": 1}
         raw = json.dumps({"continue": True, "ghostAlicePendingMergeCheck": receipt})
         with mock.patch.object(hook_profile_gate, "_has_pending_merge_undecided", side_effect=AssertionError("duplicate manifest inspection")):
             context = hook_profile_gate._visibility_context("session-start", raw, "", 0, env=env, declared="routine")

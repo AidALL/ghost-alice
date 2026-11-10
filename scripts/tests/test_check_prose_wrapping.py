@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -22,6 +23,14 @@ def initialize_repo(path: Path) -> None:
 
 
 class ProseWrappingCheckerTest(unittest.TestCase):
+    def test_fences_use_the_current_list_container(self):
+        result, payload = self.scan_cases({
+            'top_level': '- Item text.\n```\nfirst code line\nsecond code line\n```\n',
+            'nested': '3. Read documents.\n   - first nested item.\n4. Read memory.\n5. Check state.\n   ```zsh\n   uptime\n   git status\n   ```\n',
+        })
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(payload['violations'], [])
+
     def run_checker(self, repo: Path) -> tuple[subprocess.CompletedProcess[str], dict]:
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "--repo-root", str(repo), "--json"],
@@ -85,6 +94,66 @@ class ProseWrappingCheckerTest(unittest.TestCase):
             {item["path"] for item in payload["violations"]},
             {f"{name}.md" for name in cases},
         )
+
+    @unittest.skipIf(os.name == 'nt', 'Windows does not allow a literal backslash in a filename')
+    def test_git_paths_keep_literal_backslash_and_unicode_names(self) -> None:
+        cases = {'literal\\name': 'First line.\nSecond line.\n',
+                 '한글 space': 'First line.\nSecond line.\n'}
+        result, payload = self.scan_cases(cases)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual({item['path'] for item in payload['violations']},
+                         {name + '.md' for name in cases})
+
+    def test_container_fences_end_before_following_prose(self) -> None:
+        cases = {
+            "quote_ends": "> ```python\n> example()\nOutside prose\ncontinues here.\n",
+            "list_ends": "- Example:\n  ```python\n  example()\nOutside prose\ncontinues here.\n",
+            "sibling_item": "- Example:\n  ~~~\n  example()\n- Other prose\n  continues here.\n",
+            "list_marker_fence": "- ```python\n  example()\n  ```\n\n  Item prose\n  continues here.\n",
+            "nested_quote_ends": "> > ```\n> > example()\n> Outer prose\n> continues here.\n",
+        }
+        result, payload = self.scan_cases(cases)
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertEqual({item["path"]: (item["start_line"], item["end_line"])
+                          for item in payload["violations"]}, {
+            "quote_ends.md": (3, 4), "list_ends.md": (4, 5),
+            "sibling_item.md": (4, 5), "list_marker_fence.md": (5, 6),
+            "nested_quote_ends.md": (3, 4),
+        })
+
+    def test_indented_code_does_not_start_list_paragraphs(self) -> None:
+        cases = {
+            "root_code": "# Example\n\n    - code-like list marker\n      continuation in code\n",
+            "quoted_code": ">     - code-like list marker\n>       continuation in code\n",
+            "list_code": "- Item.\n\n      - code-like list marker\n        continuation in code\n",
+        }
+        result, payload = self.scan_cases(cases)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(payload["violations"], [])
+
+    def test_fence_content_preserves_its_quote_container(self) -> None:
+        result, payload = self.scan_cases({
+            "extra_quote_marker": "> ```\n> > ```\n> code line one\n> code line two\n> ```\n",
+        })
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(payload["violations"], [])
+
+    def test_quoted_list_lazy_continuation_remains_prose(self) -> None:
+        result, payload = self.scan_cases({
+            "lazy_list": "> - Quoted list prose\nand its lazy continuation.\n",
+        })
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertEqual([(item["start_line"], item["end_line"])
+                          for item in payload["violations"]], [(1, 2)])
+
+    def test_indentation_cannot_start_code_inside_an_active_paragraph(self) -> None:
+        result, payload = self.scan_cases({
+            'paragraph': 'Introductory prose\n    - continued prose\n      continues here.\n',
+            'code': 'Introductory prose\n\n    - code example\n      continued code.\n',
+        })
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual([(v['path'], v['start_line'], v['end_line']) for v in payload['violations']],
+                         [('paragraph.md', 1, 3)])
 
     def test_accepts_explicit_markdown_boundaries(self) -> None:
         cases = {
@@ -201,6 +270,7 @@ class ProseWrappingCheckerTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertEqual(payload["violation_count"], 0, payload["violations"])
+
 
 
 class ProseWrappingGateWiringTest(unittest.TestCase):

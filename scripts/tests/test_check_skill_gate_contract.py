@@ -1,8 +1,11 @@
 import json
+import os
+import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -127,6 +130,15 @@ class SkillGateContractTest(unittest.TestCase):
                         path.write_text(path.read_text().replace(heading, "## Unrelated section"))
                     self.assertTrue(any(issue.path == relative and "owner" in issue.message
                                         for issue in run_contract_checks(root)))
+
+    def test_real_owner_keeps_normative_fields_inside_fenced_examples(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            self._write_file(root, 'session-intent-analyzer/references/ledger-schema.md',
+                             'acceptance_criteria\n## Core Response Projection ##\n~~~example\n## Not a section\n'
+                             'record_response_route response-route.v2\n~~~\n')
+            self.assertEqual(run_contract_checks(root), [])
 
     def test_owner_contract_fields_must_remain_in_the_owned_section(self) -> None:
         cases = (
@@ -291,6 +303,46 @@ class SkillGateContractTest(unittest.TestCase):
             messages = "\n".join(f"{issue.path}: {issue.message}" for issue in issues).replace("\\", "/")
             self.assertIn(".claude/commands/legacy.md", messages)
             self.assertIn("legacy tool checkpoint name is forbidden", messages)
+
+    def test_excluded_subtrees_are_not_descended_during_contract_scan(self) -> None:
+        legacy_name = "action" + "-gate"
+        for relative in (".tmp", ".worktrees", ".claude/worktrees", "docs/node_modules"):
+            with self.subTest(excluded=relative), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self._write_valid_fixture(root)
+                self._write_file(root, ".claude/commands/retained.md", legacy_name)
+                excluded = root / relative
+                self._write_file(root, relative + "/running-test/AGENTS.md", legacy_name)
+                scandir = os.scandir
+
+                def cleanup_before_descent(path):
+                    if not isinstance(path, int) and Path(path) == excluded:
+                        shutil.rmtree(excluded)
+                    return scandir(path)
+
+                with mock.patch.object(os, "scandir", side_effect=cleanup_before_descent):
+                    issues = run_contract_checks(root)
+                legacy_issues = [issue for issue in issues if "legacy tool checkpoint name" in issue.message]
+                self.assertEqual([issue.path.replace("\\", "/") for issue in legacy_issues],
+                                 [".claude/commands/retained.md"])
+                self.assertTrue(excluded.is_dir(), "Excluded directories must be pruned before descent")
+
+    def test_unavailable_retained_subtree_cannot_become_a_clean_contract_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            retained = root / ".claude/commands"
+            self._write_file(root, ".claude/commands/retained.md", "action" + "-gate")
+            scandir = os.scandir
+
+            def cleanup_before_descent(path):
+                if not isinstance(path, int) and Path(path) == retained:
+                    shutil.rmtree(retained)
+                return scandir(path)
+
+            with mock.patch.object(os, "scandir", side_effect=cleanup_before_descent):
+                with self.assertRaises(FileNotFoundError):
+                    run_contract_checks(root)
 
     def test_pending_merge_hard_block_wording_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -17,6 +17,13 @@ import io_trace_hook
 
 
 class TestIoTraceHook(unittest.TestCase):
+    def test_shell_command_fields_preserve_the_existing_record_limit(self):
+        command = 'echo ' + 'synthetic-command ' * 25
+        for name, field in [('Bash', 'command'), ('exec_command', 'cmd'), ('shell', 'cmd')]:
+            with self.subTest(name=name):
+                row = io_trace_hook._extract({'tool_name': name, 'tool_input': {field: command}})
+                self.assertEqual(row['pattern'], command[:200])
+
     def test_main_logs_payload_with_surrogate_path(self):
         raw = (
             '{"session_id":"s-win","tool_name":"Read",'

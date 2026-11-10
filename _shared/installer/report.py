@@ -17,12 +17,14 @@ from pathlib import Path
 import re
 import sys
 import time
+import uuid
 from typing import IO, Callable, Sequence, TypeVar
 
 import hook_definitions
 import install_report_events
 from installer import locations
 import state_retention
+from text_lines import committed_byte_lines, committed_records
 
 T = TypeVar("T")
 
@@ -171,14 +173,14 @@ def live_counter_enabled() -> bool:
 
 
 def log_init() -> Path:
-    """Create `<home>/.ghost-alice/install/YYYY-MM-DD-HHMMSS.log` once and export
+    """Choose `<home>/.ghost-alice/install/YYYY-MM-DD-HHMMSS-<run-id>.log` once and export
     `GHOST_ALICE_INSTALL_LOG_FILE`; an already chosen log file is kept. Before it opens a new
     log, the folder keeps the last 30 runs (`state_retention` install-logs)."""
     if _state.log_file is None:
         root = locations.install_log_root(_state.home)
         root.mkdir(parents=True, exist_ok=True)
         state_retention.apply("install-logs", root)
-        _state.log_file = root / (datetime.now().strftime("%Y-%m-%d-%H%M%S") + ".log")
+        _state.log_file = root / f"{datetime.now().strftime('%Y-%m-%d-%H%M%S')}-{uuid.uuid4().hex}.log"
     os.environ["GHOST_ALICE_INSTALL_LOG_FILE"] = str(_state.log_file)
     return _state.log_file
 
@@ -359,17 +361,19 @@ def read_gateway_notes(event_file: Path) -> list[str]:
     path = Path(event_file)
     notes: list[str] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        content = path.read_bytes()
     except OSError:
         return notes
-    for line in lines:
+    for _, _, line in committed_byte_lines(content):
+        text = line.decode("utf-8")
         try:
-            event = json.loads(line)
+            events = committed_records(text).values()
         except ValueError:
             continue
-        if isinstance(event, dict) and event.get("type") == "gateway-result" and isinstance(event.get("summary"), str):
-            if event["summary"] not in notes:
-                notes.append(event["summary"])
+        for event in events:
+            if isinstance(event, dict) and event.get("type") == "gateway-result" and isinstance(event.get("summary"), str):
+                if event["summary"] not in notes:
+                    notes.append(event["summary"])
     return notes
 
 

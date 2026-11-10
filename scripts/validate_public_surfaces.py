@@ -14,6 +14,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "_shared"))
+from skill_metadata import load_skill_catalog  # noqa: E402
+from claude_commands import command_body_matches, skill_command_body  # noqa: E402
+
 
 # These names belong to addon skills installed through --addon-source. The core repo must not check them in as .claude/commands wrappers.
 ADDON_COMMAND_WRAPPERS_FORBIDDEN_IN_CORE_REPO = {
@@ -53,27 +57,31 @@ class Finding:
         }
 
 
-def load_catalog(repo: Path, findings: list[Finding]) -> list[dict[str, Any]]:
+def load_catalog(repo: Path, findings: list[Finding]) -> list[dict[str, Any]] | None:
     path = repo / "skill-catalog" / "skills.json"
     if not path.is_file():
         findings.append(
             Finding("ERROR", "catalog", "exist", "skill-catalog/skills.json is missing.")
         )
-        return []
+        return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = load_skill_catalog(path)
     except json.JSONDecodeError as exc:
         findings.append(
             Finding("ERROR", "catalog", "parse", f"skill-catalog/skills.json parse failed: {exc}")
         )
-        return []
-    skills = data.get("skills", [])
-    if not isinstance(skills, list):
+        return None
+    except (OSError, UnicodeError) as exc:
         findings.append(
-            Finding("ERROR", "catalog", "shape", "skill-catalog/skills.json field 'skills' is not a list.")
+            Finding("ERROR", "catalog", "read", f"skill-catalog/skills.json read failed: {exc}")
         )
-        return []
-    return [skill for skill in skills if isinstance(skill, dict)]
+        return None
+    except ValueError as exc:
+        findings.append(
+            Finding("ERROR", "catalog", "shape", f"skill-catalog/skills.json shape error: {exc}")
+        )
+        return None
+    return data["skills"]
 
 
 def split_skill_sets(skills: list[dict[str, Any]]) -> tuple[list[str], list[str], dict[str, str]]:
@@ -185,10 +193,6 @@ def check_repo_index(repo: Path, findings: list[Finding]) -> None:
         )
 
 
-def expected_claude_wrapper(path: str) -> str:
-    return f"@{path}\n\n$ARGUMENTS\n"
-
-
 def check_command_wrappers(
     repo: Path,
     paths: dict[str, str],
@@ -227,8 +231,8 @@ def check_command_wrappers(
             )
         else:
             actual = claude.read_text(encoding="utf-8")
-            expected = expected_claude_wrapper(skill_path)
-            if actual != expected:
+            expected = skill_command_body(skill_path)
+            if not command_body_matches(actual, expected):
                 findings.append(
                     Finding(
                         "ERROR",
@@ -243,8 +247,8 @@ def check_command_wrappers(
 def run(repo: Path) -> tuple[list[Finding], dict[str, Any]]:
     findings: list[Finding] = []
     skills = load_catalog(repo, findings)
-    top_level, coding, paths = split_skill_sets(skills)
-    if skills:
+    top_level, coding, paths = split_skill_sets(skills if skills is not None else [])
+    if skills is not None:
         check_readme(repo, findings)
         check_repo_index(repo, findings)
         command_wrappers = check_command_wrappers(repo, paths, findings)

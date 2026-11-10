@@ -13,6 +13,85 @@ VERIFY_SCRIPT = REPO_ROOT / "merge-companion" / "scripts" / "install_verifier.py
 
 
 class InstallPostflightValidationTest(unittest.TestCase):
+    def test_failed_postflight_preserves_inventory_through_corrected_retry(self) -> None:
+        for previous_install in (False, True):
+            with self.subTest(previous_install=previous_install), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source, dest, state = root / "source", root / "alpha", root / "state" / "codex.json"
+                source.mkdir()
+                dest.mkdir()
+                (source / "SKILL.md").write_text("expected\n", encoding="utf-8")
+                (dest / "SKILL.md").write_text("partial\n", encoding="utf-8")
+                beta = dict(target_name="beta", source_path=str(root / "old-source"),
+                            dest_path=str(root / "beta"), install_mode="copy", target_tree_hash="original-baseline",
+                            installed_at="2026-01-01T00:00:00Z")
+                changes = [dict(kind="source_repo_hook_path", repo_root=str(root / "repo"),
+                                before_present=True, before="user-hooks", after="managed-hooks")]
+                if previous_install:
+                    state.parent.mkdir()
+                    state.write_text(json.dumps(dict(schema_version=1, platform="codex", targets=[beta],
+                        installed_at="2026-01-01T00:00:00Z", system_env_changes=changes)), encoding="utf-8")
+                args = ("--platform", "codex", "--state-root", str(state.parent),
+                        "--target", "alpha", str(source), str(dest), "copy")
+                failed = self._run_verifier(*args)
+                self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+                observed = json.loads(state.read_text(encoding="utf-8"))
+                self.assertEqual(observed.get("targets"), [beta] if previous_install else [])
+                self.assertEqual(observed.get("system_env_changes"), changes if previous_install else [])
+                self.assertEqual(observed["failures"][0]["reason"], "tree-hash-mismatch")
+                if previous_install:
+                    self.assertEqual(observed["installed_at"], "2026-01-01T00:00:00Z")
+                (dest / "SKILL.md").write_text("expected\n", encoding="utf-8")
+                corrected = self._run_verifier(*args)
+                self.assertEqual(corrected.returncode, 0, corrected.stdout + corrected.stderr)
+                written = subprocess.run([sys.executable, str(REPO_ROOT / "_shared" / "install_state_writer.py"),
+                    "codex", str(source), "main", "fixture", "clean", str(state),
+                    "alpha", str(source), str(dest), "copy"], capture_output=True, text=True, encoding="utf-8")
+                self.assertEqual(written.returncode, 0, written.stdout + written.stderr)
+                current = json.loads(state.read_text(encoding="utf-8"))
+                rows = {row["target_name"]: row for row in current["targets"]}
+                self.assertEqual(set(rows), {"alpha", "beta"} if previous_install else {"alpha"})
+                if previous_install:
+                    self.assertEqual(rows["beta"], beta)
+                    self.assertEqual(current["system_env_changes"], changes)
+                self.assertNotIn("partial_failure", current)
+                self.assertNotIn("failures", current)
+
+    def test_failed_postflight_preserves_invalid_current_inventory_bytes(self) -> None:
+        for body in ('{broken', '[]', '{"targets": null}', '{"platform": "claude", "targets": []}'):
+            with self.subTest(body=body), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                state = root / "state" / "codex.json"
+                state.parent.mkdir()
+                state.write_text(body, encoding="utf-8")
+                before = state.read_bytes()
+                failed = self._run_verifier("--platform", "codex", "--state-root", str(state.parent),
+                    "--target", "alpha", str(root / "source"), str(root / "dest"), "missing")
+                self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+                self.assertEqual(state.read_bytes(), before)
+                self.assertIn("partial state could not be recorded", failed.stderr)
+
+    def test_verifier_rejects_missing_and_unsupported_targets(self) -> None:
+        cases = [("missing", True, False, "missing-target"),
+                 ("copy", False, False, "missing-source"),
+                 ("copy", False, True, "missing-source"),
+                 ("copy-fallback", True, False, "missing-target"),
+                 ("unrecognized", True, True, "unsupported-install-mode")]
+        for mode, source_exists, dest_exists, reason in cases:
+            with self.subTest(mode=mode, source=source_exists, dest=dest_exists), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                source, dest, state = root / "source", root / "dest", root / "state"
+                if source_exists:
+                    source.mkdir()
+                if dest_exists:
+                    dest.mkdir()
+                result = self._run_verifier("--platform", "codex", "--state-root", str(state),
+                                            "--target", "expected", str(source), str(dest), mode)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                record = json.loads((state / "codex.json").read_text())
+                self.assertEqual(record["status"], "partial_failure")
+                self.assertEqual(record["failures"][0]["reason"], reason)
+
     def _make_directory_symlink_or_skip(self, source: Path, dest: Path) -> None:
         try:
             os.symlink(source, dest, target_is_directory=True)

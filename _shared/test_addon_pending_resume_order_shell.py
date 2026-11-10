@@ -23,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 if str(REPO_ROOT / "_shared") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "_shared"))
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env  # noqa: E402
 
 
 def _python_311() -> bool:
@@ -46,8 +46,7 @@ class PendingResumeOrderTest(unittest.TestCase):
         if not _python_311():
             self.skipTest("python 3.11+ required")
         with tempfile.TemporaryDirectory() as home:
-            env = os.environ.copy()
-            env["HOME"] = home
+            env = installer_env(home)
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
 
             source = checkout_copy(self)

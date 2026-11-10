@@ -27,13 +27,16 @@ from typing import Any
 
 # Reuse build_catalog.py as a library.
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "_shared"))
+from skill_metadata import load_skill_catalog, parse_frontmatter, split_frontmatter  # noqa: E402
 from build_catalog import (  # noqa: E402
+    VALID_CALL_TYPES,
     build_catalog,
     discover_install_roots,
     discover_skills,
-    parse_frontmatter,
 )
 from check_skill_gate_contract import run_contract_checks  # noqa: E402
+from markdown_structure import atx_heading, iter_unfenced_lines  # noqa: E402
 
 NAME_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 DESCRIPTION_HARD_LIMIT = 1024
@@ -85,7 +88,9 @@ class Issue:
 def validate_phase1_frontmatter(skill_md: Path, fm: dict[str, Any], issues: list[Issue]) -> None:
     skill_name = skill_md.parent.name
     name = fm.get("name", "")
-    if not name:
+    if not isinstance(name, str):
+        issues.append(Issue("ERROR", skill_name, "1", "1-2", "name must be a string"))
+    elif not name:
         issues.append(Issue("ERROR", skill_name, "1", "1-1", "missing name field"))
     else:
         if not NAME_PATTERN.match(name) or len(name) > 64:
@@ -96,7 +101,9 @@ def validate_phase1_frontmatter(skill_md: Path, fm: dict[str, Any], issues: list
             )
 
     desc = fm.get("description", "")
-    if not desc:
+    if not isinstance(desc, str):
+        issues.append(Issue("ERROR", skill_name, "1", "1-4", "description must be a string"))
+    elif not desc:
         issues.append(Issue("ERROR", skill_name, "1", "1-4", "missing description field"))
     else:
         desc_len = len(desc)
@@ -106,8 +113,8 @@ def validate_phase1_frontmatter(skill_md: Path, fm: dict[str, Any], issues: list
             )
 
     compat = fm.get("compatibility")
-    if compat is not None and isinstance(compat, list):
-        compat_str = "\n".join(compat) if compat else ""
+    if isinstance(compat, (str, list)):
+        compat_str = "\n".join(compat) if isinstance(compat, list) else compat
         if len(compat_str) > 500:
             issues.append(
                 Issue("WARNING", skill_name, "1", "1-7", f"compatibility length {len(compat_str)} > 500")
@@ -116,12 +123,11 @@ def validate_phase1_frontmatter(skill_md: Path, fm: dict[str, Any], issues: list
 
 def _extract_body(text: str) -> str:
     """Return the SKILL.md body with frontmatter removed."""
-    if not text.startswith("---"):
+    try:
+        _, body_start = split_frontmatter(text)
+    except ValueError:
         return text
-    end_match = re.search(r"\n---\n", text)
-    if not end_match:
-        return text
-    return text[end_match.end():]
+    return text[body_start:]
 
 
 def validate_phase2_body(skill_md: Path, text: str, issues: list[Issue]) -> None:
@@ -214,31 +220,16 @@ def _parse_skill_nav(body: str) -> tuple[list[tuple[int, str]], set[str]]:
     """Single fence-aware pass over the body.
 
     Returns (headings, toc_anchors):
-    - headings: (level, title) for ATX headings that are NOT inside a fenced code
-      block. Variable-length backtick fences (``` or longer) are handled, so a
-      ``## X`` shown inside a ```` ```markdown ```` example is not a real section.
+    - headings: (level, title) for ATX headings outside backtick/tilde fences.
     - toc_anchors: lowercased anchors collected from the ``## Contents`` list.
     """
     headings: list[tuple[int, str]] = []
     toc_anchors: set[str] = set()
-    fence: int | None = None
     in_toc = False
-    for line in body.splitlines():
-        fence_match = re.match(r"^(`{3,})", line.lstrip())
-        if fence_match:
-            ticks = len(fence_match.group(1))
-            if fence is None:
-                fence = ticks
-            elif ticks >= fence:
-                fence = None
-            continue
-        if fence is not None:
-            continue
-        heading_match = re.match(r"^(#{2,6})\s+(.*\S)\s*$", line)
-        if heading_match:
-            title = heading_match.group(2).strip()
-            headings.append((len(heading_match.group(1)), title))
-            in_toc = title.lower() == "contents"
+    for offset, line in iter_unfenced_lines(body):
+        if heading := atx_heading(offset, line):
+            headings.append((heading.level, heading.title))
+            in_toc = heading.level == 2 and heading.title.lower() == "contents"
             continue
         if in_toc:
             for anchor in re.findall(r"\]\(#([A-Za-z0-9_-]+)\)", line):
@@ -261,15 +252,22 @@ def validate_phase_toc_parity(skill_md: Path, text: str, issues: list[Issue]) ->
     skill_name = skill_md.parent.name
     body = _extract_body(text)
     headings, toc_anchors = _parse_skill_nav(body)
-    if not any(title.lower() == "contents" for _level, title in headings):
+    if not any(level == 2 and title.lower() == "contents" for level, title in headings):
         return  # no Contents section -> exempt
-    heading_anchors = {
-        _github_anchor(title) for _level, title in headings if title.lower() != "contents"
-    }
+    anchored_headings: list[tuple[int, str, str]] = []
+    heading_anchors: set[str] = set()
     for level, title in headings:
+        base = _github_anchor(title)
+        anchor, duplicate = base, 0
+        while anchor in heading_anchors:
+            duplicate += 1
+            anchor = f"{base}-{duplicate}"
+        heading_anchors.add(anchor)
+        anchored_headings.append((level, title, anchor))
+    for level, title, anchor in anchored_headings:
         if level != 2 or title.lower() == "contents":
             continue
-        if _github_anchor(title) not in toc_anchors:
+        if anchor not in toc_anchors:
             issues.append(
                 Issue(
                     "ERROR", skill_name, "3", "3-5",
@@ -353,12 +351,7 @@ def validate_phase5_korean_tone(skill_md: Path, fm: dict[str, Any], text: str, i
     if skill_name in ENGLISH_ONLY_SKILLS:
         return
     # Description contains trigger keywords, so validate tone only in the body.
-    body_start = 0
-    if text.startswith("---"):
-        end_match = re.search(r"\n---\n", text)
-        if end_match:
-            body_start = end_match.end()
-    body = text[body_start:]
+    body = _extract_body(text)
     if KOREAN_TEXT_PATTERN.search(body):
         issues.append(Issue("WARNING", skill_name, "5", "5-2", "Korean text found in English-canonical skill body"))
 
@@ -402,8 +395,6 @@ def validate_install_list_sync(repo_root: Path, issues: list[Issue]) -> None:
         "_shared/installer/selection.py": _parse_python_install_skills(repo_root / "_shared" / "installer" / "selection.py"),
     }
     for filename, names in installers.items():
-        if not names:
-            continue
         for missing in sorted(install_roots - names):
             issues.append(
                 Issue(
@@ -443,10 +434,13 @@ def validate_description_collisions(repo_root: Path, issues: list[Issue]) -> Non
     descriptions: list[tuple[str, set[str]]] = []
     for skill_md in discover_skills(repo_root):
         try:
-            fm = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+            fm, _ = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        tokens = _description_tokens(str(fm.get("description", "")))
+        description = fm.get("description", "")
+        if not isinstance(description, str):
+            continue  # Phase 1 owns invalid description diagnostics.
+        tokens = _description_tokens(description)
         if len(tokens) >= 6:
             descriptions.append((skill_md.parent.name, tokens))
 
@@ -476,7 +470,10 @@ def validate_calls(repo_root: Path, issues: list[Issue]) -> None:
     catalog_path = repo_root / "skill-catalog" / "skills.json"
     if not catalog_path.is_file():
         return  # validate_catalog_sync catches this separately.
-    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    try:
+        catalog = load_skill_catalog(catalog_path)
+    except (OSError, ValueError):
+        return  # validate_catalog_sync owns catalog read and shape diagnostics.
     skill_names = {s["name"] for s in catalog["skills"]}
 
     # union_group member count: (skill_name, union_group) -> count.
@@ -486,13 +483,34 @@ def validate_calls(repo_root: Path, issues: list[Issue]) -> None:
     for skill in catalog["skills"]:
         name = skill["name"]
         relations = skill.get("calls_relation", [])
-        for r in relations:
-            rtype = r["type"]
+        if not isinstance(relations, list):
+            issues.append(Issue("ERROR", name, "P12", "calls.shape", "calls_relation must be a list"))
+            continue
+        for index, r in enumerate(relations):
+            field = f"calls_relation[{index}]"
+            if not isinstance(r, dict):
+                issues.append(Issue("ERROR", name, "P12", "calls.shape", f"{field} must be an object"))
+                continue
+            rtype = r.get("type")
             target = r.get("target")
-            if not target:
+            grp = r.get("union_group")
+            valid_fields = True
+            if not isinstance(rtype, str) or rtype not in VALID_CALL_TYPES:
                 issues.append(
-                    Issue("ERROR", name, "P12", "calls", f"missing target: {r}")
+                    Issue("ERROR", name, "P12", "calls.type", f"{field}.type must be one of {', '.join(sorted(VALID_CALL_TYPES))}")
                 )
+                valid_fields = False
+            if not isinstance(target, str) or not target:
+                issues.append(
+                    Issue("ERROR", name, "P12", "calls.target", f"{field}.target must be a nonempty string")
+                )
+                valid_fields = False
+            if "union_group" in r and not isinstance(grp, str):
+                issues.append(
+                    Issue("ERROR", name, "P12", "calls.union", f"{field}.union_group must be a string")
+                )
+                valid_fields = False
+            if not valid_fields:
                 continue
             if target == "*" and rtype == "meta":
                 pass  # meta:* means the whole catalog and is excluded from validation.
@@ -514,7 +532,6 @@ def validate_calls(repo_root: Path, issues: list[Issue]) -> None:
                 flow_edges[name].add(target)
             # union_group count.
             if rtype == "union":
-                grp = r.get("union_group")
                 if grp:
                     union_member_count[(name, grp)] = union_member_count.get((name, grp), 0) + 1
 
@@ -581,8 +598,12 @@ def validate_catalog_sync(repo_root: Path, issues: list[Issue]) -> None:
             Issue("ERROR", "<catalog>", "0", "sync", "skill-catalog/skills.json is missing. Run build_catalog.py.")
         )
         return
-    expected = build_catalog(repo_root)
-    actual = json.loads(catalog_path.read_text(encoding="utf-8"))
+    try:
+        expected = build_catalog(repo_root)
+        actual = load_skill_catalog(catalog_path)
+    except (OSError, ValueError) as error:
+        issues.append(Issue("ERROR", "<catalog>", "0", "sync", f"catalog comparison failed: {error}"))
+        return
     # Compare while excluding generated_at.
     expected.pop("generated_at", None)
     actual.pop("generated_at", None)
@@ -606,7 +627,10 @@ def validate_catalog_schema_contract(repo_root: Path, issues: list[Issue]) -> No
         return
 
     try:
-        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        catalog = load_skill_catalog(catalog_path)
+    except (OSError, ValueError):
+        return  # validate_catalog_sync owns catalog read and shape diagnostics.
+    try:
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         issues.append(
@@ -647,7 +671,7 @@ def main() -> int:
     for skill_md in skill_files:
         try:
             text = skill_md.read_text(encoding="utf-8")
-            fm = parse_frontmatter(text)
+            fm, _ = parse_frontmatter(text)
         except (OSError, ValueError) as e:
             issues.append(
                 Issue("ERROR", skill_md.parent.name, "0", "parse", f"parse failed: {e}")

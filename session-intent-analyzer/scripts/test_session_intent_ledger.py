@@ -5,7 +5,6 @@ Dependencies: Python 3.11+ standard library only.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import sqlite3
@@ -20,15 +19,8 @@ from unittest.mock import patch
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 LEDGER = SCRIPT_DIR / "session_intent_ledger.py"
-
-
-def load_module():
-    spec = importlib.util.spec_from_file_location("session_intent_ledger", LEDGER)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load {LEDGER}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+sys.path.insert(0, str(SCRIPT_DIR))
+import session_intent_ledger as ledger
 
 
 def authority_state(ledger, path):
@@ -59,11 +51,8 @@ def authority_dump(ledger, root):
 
 
 class TestListFieldStructuredMerge(unittest.TestCase):
-    def setUp(self):
-        self.mod = load_module()
-
     def test_merge_unique_preserves_dict_and_dedups_by_id(self):
-        result = self.mod.merge_unique(
+        result = ledger.merge_unique(
             [{"id": "c-readonly", "summary": "old"}],
             [{"id": "c-readonly", "summary": "new"}, {"id": "c-nogit", "summary": "no git"}],
         )
@@ -72,10 +61,10 @@ class TestListFieldStructuredMerge(unittest.TestCase):
         self.assertEqual([x["id"] for x in result], ["c-readonly", "c-nogit"])
 
     def test_merge_unique_keeps_plain_strings(self):
-        self.assertEqual(self.mod.merge_unique(["a", "b"], ["b", "c"]), ["a", "b", "c"])
+        self.assertEqual(ledger.merge_unique(["a", "b"], ["b", "c"]), ["a", "b", "c"])
 
     def test_merge_unique_mixed_str_and_dict(self):
-        result = self.mod.merge_unique(["plain"], [{"id": "x", "summary": "s"}])
+        result = ledger.merge_unique(["plain"], [{"id": "x", "summary": "s"}])
         self.assertIn("plain", result)
         self.assertTrue(any(isinstance(x, dict) and x.get("id") == "x" for x in result))
 
@@ -88,7 +77,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         identity = patch.dict(os.environ, {"CODEX_THREAD_ID": "", "GHOST_ALICE_SESSION_ID": ""})
         identity.start()
         self.addCleanup(identity.stop)
-        self.ledger = load_module()
+        self.ledger = ledger
 
     def test_input_keyword_aliases_preserve_fingerprints_without_storing_text(self) -> None:
         coordinates = dict(root=self.tmpdir / "aliases", platform="codex", session_id="aliases")
@@ -995,7 +984,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
 
 class IntentEventLabelTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.ledger = load_module()
+        self.ledger = ledger
 
     def test_record_turn_labels_delta_only_event_as_intent_updated(self) -> None:
         root = pathlib.Path(tempfile.mkdtemp(prefix="evt-label-"))

@@ -112,12 +112,12 @@ class PublishOrderTests(PublishCase):
                                  ("first", "after_publish"), ("second", "after_publish")])
 
     def test_publish_without_the_install_lock_changes_nothing(self):
-        install_lock.release_lock(self.ghost / "install.lock")
+        install_lock.release_lock(self.ghost / "install.lock", self.lock_generation)
         try:
             with self.assertRaisesRegex(install_transaction.InstallTransactionError, "install lock"):
                 install_transaction.publish(self.request("claude", self.target("alpha", self.claude / "alpha", "link")))
         finally:
-            install_lock.acquire_lock(self.ghost / "install.lock", owner="installer:install:claude:test")
+            self.lock_generation = install_lock.acquire_lock(self.ghost / "install.lock", owner="installer:install:claude:test")
         self.assertFalse((self.claude / "alpha").exists())
         self.assertFalse((self.ghost / "rollbacks").exists())
         self.assertIsNone(self.record())

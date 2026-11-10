@@ -1,5 +1,6 @@
 """Actual HTTP contracts for the installed context gateway."""
 import copy
+from contextlib import contextmanager
 import gzip
 import hashlib
 import http.client
@@ -28,7 +29,20 @@ import context_gateway
 import context_lifecycle
 import file_lock
 import state_retention
-from test_context_lifecycle import ContextLifecycleTests
+import test_context_lifecycle
+
+
+@contextmanager
+def serve(server):
+    """Own one fixture server's thread and socket until the test exits."""
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 class RedirectGatewayTests(unittest.TestCase):
@@ -40,8 +54,6 @@ class RedirectGatewayTests(unittest.TestCase):
         self.log = Path(self.tmp.name) / 'usage.jsonl'
         self.routes, self.seen, self.foreign = {}, [], []
         self.answer = b'native response bytes\x00\xff'
-        self.servers = []
-        self.addCleanup(self.stop)
         owner = self
 
         class Upstream(BaseHTTPRequestHandler):
@@ -72,9 +84,7 @@ class RedirectGatewayTests(unittest.TestCase):
         if tls_context is not None:
             server.socket = tls_context.wrap_socket(server.socket, server_side=True)
         server.foreign = foreign
-        self.servers.append(server)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        return server
+        return self.enterContext(serve(server))
 
     def start_gateway(self, *, tls=False):
         context = None
@@ -89,13 +99,7 @@ class RedirectGatewayTests(unittest.TestCase):
         self.origin = f'{"https" if tls else "http"}://127.0.0.1:{self.upstream.server_port}'
         self.gateway = context_gateway.make_server('redirect-fixture', self.log,
             origins={'codex': self.origin, 'anthropic': self.origin})
-        self.servers.append(self.gateway)
-        threading.Thread(target=self.gateway.serve_forever, daemon=True).start()
-
-    def stop(self):
-        for server in reversed(self.servers):
-            server.shutdown()
-            server.server_close()
+        self.enterContext(serve(self.gateway))
 
     def request(self, method='GET', provider='codex', path=None):
         suffix = 'models' if provider == 'codex' and method == 'GET' else (
@@ -270,7 +274,7 @@ class RedirectGatewayTests(unittest.TestCase):
 
 class ContextGatewayTests(unittest.TestCase):
     def setUp(self):
-        self.core = ContextLifecycleTests()
+        self.core = test_context_lifecycle.ContextLifecycleTests()
         self.core.setUp()
         self.addCleanup(self.core.doCleanups)
         self.core.record()
@@ -297,13 +301,7 @@ class ContextGatewayTests(unittest.TestCase):
             selectors={'codex': lambda request, _session: context_lifecycle.select_request(
                 request, self.core.fixture.root, self.core.home)})
         for server in (self.upstream, self.server):
-            threading.Thread(target=server.serve_forever, daemon=True).start()
-        self.addCleanup(self.stop)
-
-    def stop(self):
-        for server in (self.server, self.upstream):
-            server.shutdown()
-            server.server_close()
+            self.enterContext(serve(server))
 
     def request(self, body, scope='test-scope', encoding=None, path='/codex/responses'):
         headers = {'Authorization': 'Bearer PRIVATE_NATIVE_AUTH', 'Content-Type': 'application/json',
@@ -449,6 +447,74 @@ class ContextGatewayTests(unittest.TestCase):
 
 
 class ClaudeGatewayTransportTests(unittest.TestCase):
+    def test_native_server_choices_do_not_record_body_derived_text(self):
+        from test_context_lifecycle import ClaudeContextLifecycleTests
+        for disposition in ('omit', 'replace'):
+            with self.subTest(disposition=disposition):
+                core = ClaudeContextLifecycleTests()
+                core.setUp()
+                try:
+                    session = self.session
+                    core.fixture.coords['session_id'] = session
+                    core.source['GHOST_ALICE_SESSION_ID'] = session
+                    core.event = core.fixture.intake('continue actual work')
+                    core.log = core.log.with_name(session + '.jsonl')
+                    for row in core.rows:
+                        row['sessionId'] = session
+                    original_row = core.row
+                    core.row = lambda *args, **kwargs: dict(original_row(*args, **kwargs), sessionId=session)
+                    summary = 'R03-private-summary-' + disposition
+                    next_need = 'R03-private-next-need-' + disposition
+                    core.choice.update(disposition=disposition, summary=summary, next_need=next_need)
+                    core.rows[1]['message']['content'].insert(0, core.thinking)
+                    core.write_rows()
+                    if disposition == 'replace':
+                        core.append_publication_call()
+                        core.complete_publication(core.project())
+                    else:
+                        core.record()
+                    request = core.request()
+                    request.pop('thinking')
+                    if disposition == 'replace':
+                        request['messages'][7]['content'][0].pop('caller')
+                    native_before = core.log.read_bytes()
+                    def select(request, session, betas):
+                        return context_lifecycle.select_request(request, core.fixture.root, core.home,
+                            platform='claude', session_id=session, native_betas=betas)
+                    self.start(server_selectors={'claude': select})
+                    headers = {'X-Ghost-Context-Scope': 'fixture-scope', 'X-Ghost-Context-Session': session,
+                               'Anthropic-Beta': 'context-management-2025-06-27'}
+                    with urllib.request.urlopen(urllib.request.Request(
+                        f'http://127.0.0.1:{self.server.server_port}/anthropic/v1/messages',
+                        data=json.dumps(request).encode(), headers=headers)) as reply:
+                        self.assertEqual(reply.read(), self.answer)
+                    forwarded = json.loads(self.seen[-1][1])
+                    self.assertEqual(forwarded['messages'], request['messages'])
+                    self.assertEqual(forwarded['context_management']['edits'][-1]['type'], 'clear_tool_uses_20250919')
+                    self.assertEqual(core.log.read_bytes(), native_before)
+                    if disposition == 'replace':
+                        self.assertIn(summary, json.dumps(forwarded))
+                        self.assertIn(next_need, json.dumps(forwarded))
+                    log_text = self.log.read_text()
+                    selected = [json.loads(line) for line in log_text.splitlines()
+                                if json.loads(line).get('event') == 'request-selection'][-1]
+                    self.assertEqual(selected['state'], 'selected')
+                    self.assertEqual(selected['selected_blocks'][0]['provider_application'], 'requested')
+                    observation = selected['selected_blocks'][0]
+                    self.assertEqual(observation['disposition'], disposition)
+                    self.assertEqual(observation['record'], 4)
+                    self.assertEqual(observation['block_index'], 0)
+                    self.assertTrue(observation['reference'].startswith('sha256:'))
+                    for field in ('summary', 'next_need', 'replacement_text', 'replacement_context'):
+                        with self.subTest(disposition=disposition, field=field):
+                            self.assertNotIn(field, observation)
+                    for field, text in (('summary', summary), ('next_need', next_need)):
+                        with self.subTest(disposition=disposition, field=field):
+                            self.assertFalse(text in log_text, f'usage log retained private {field}')
+                finally:
+                    core.doCleanups()
+
+
     session = '32b88550-62f3-4d25-b76e-2ca261877b54'
 
     def setUp(self):
@@ -472,20 +538,13 @@ class ClaudeGatewayTransportTests(unittest.TestCase):
                 pass
 
         self.upstream = ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
-        threading.Thread(target=self.upstream.serve_forever, daemon=True).start()
-        self.addCleanup(self.close_server, self.upstream)
-
-    @staticmethod
-    def close_server(server):
-        server.shutdown()
-        server.server_close()
+        self.enterContext(serve(self.upstream))
 
     def start(self, **kwargs):
         origin = f'http://127.0.0.1:{self.upstream.server_port}'
         self.server = context_gateway.make_server('fixture-scope', self.log,
             origins={'codex': origin, 'anthropic': origin}, **kwargs)
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        self.addCleanup(self.close_server, self.server)
+        self.enterContext(serve(self.server))
 
     def selector(self, request, session_id):
         self.dispatched.append((request, session_id))
@@ -538,8 +597,7 @@ class ClaudeGatewayTransportTests(unittest.TestCase):
             return SimpleNamespace(serve_forever=lambda: None)
         with patch.object(context_gateway, 'make_server', side_effect=configure):
             context_gateway.main(['--config', str(config)])
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        self.addCleanup(self.close_server, self.server)
+        self.enterContext(serve(self.server))
         request = dict(core.request(), thinking={'type':'adaptive'})
         headers = {'X-Ghost-Context-Scope':'fixture-scope','X-Ghost-Context-Session':self.session,
             'Authorization':'Bearer LOCAL_FIXTURE_ONLY', 'Anthropic-Beta':'context-management-2025-06-27'}
@@ -1056,14 +1114,19 @@ class GatewayStreamEndTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
+        headers_waiting = self.headers_waiting = threading.Event()
+        client_closed = self.client_closed = threading.Event()
+
         class Upstream(BaseHTTPRequestHandler):
             protocol_version = 'HTTP/1.1'
 
             def do_POST(self):
                 self.rfile.read(int(self.headers.get('Content-Length', '0')))
                 if self.path.endswith('/slow-headers'):
-                    import time
-                    time.sleep(0.5)
+                    headers_waiting.set()
+                    if not client_closed.wait(5):
+                        self.close_connection = True
+                        return
                 if self.path.endswith('/stream') or self.path.endswith('/break'):
                     self.send_response(200)
                     self.send_header('Transfer-Encoding', 'chunked')
@@ -1095,17 +1158,12 @@ class GatewayStreamEndTests(unittest.TestCase):
         self.server = context_gateway.make_server('scope', self.log,
             origins={'codex': f'http://127.0.0.1:{self.upstream.server_port}'})
         for server in (self.upstream, self.server):
-            threading.Thread(target=server.serve_forever, daemon=True).start()
-        self.addCleanup(self.stop)
+            self.enterContext(serve(server))
+        self.addCleanup(client_closed.set)
         self.errors = io.StringIO()
         redirect = patch('sys.stderr', self.errors)
         redirect.start()
         self.addCleanup(redirect.stop)
-
-    def stop(self):
-        for server in (self.server, self.upstream):
-            server.shutdown()
-            server.server_close()
 
     def raw_request(self, path, *, close_after_headers=False, close_at_once=False):
         import socket
@@ -1119,15 +1177,15 @@ class GatewayStreamEndTests(unittest.TestCase):
             while b'\r\n\r\n' not in received:
                 received += connection.recv(65536)
         if close_at_once:
-            # Let the gateway read the request and wait for the slow upstream before the client goes away.
-            import time
-            time.sleep(0.2)
+            self.assertTrue(self.headers_waiting.wait(5), 'upstream never received the request')
         if close_after_headers or close_at_once:
             connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
         else:
             while connection.recv(65536):
                 pass
         connection.close()
+        if close_at_once:
+            self.client_closed.set()
 
     def response_end(self):
         import time

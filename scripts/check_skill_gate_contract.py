@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from markdown_structure import atx_headings
 
 @dataclass
 class ContractIssue:
@@ -286,14 +288,20 @@ def _is_excluded_contract_path(path: Path, root: Path) -> bool:
 
 
 def _iter_contract_text_files(root: Path):
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        if _is_excluded_contract_path(path, root):
-            continue
-        if path.suffix.lower() in SCAN_EXCLUDED_SUFFIXES:
-            continue
-        yield path
+    def scan_error(error: OSError) -> None:
+        if not isinstance(error, PermissionError):
+            raise error
+
+    for directory, dirs, files in os.walk(root, onerror=scan_error):
+        parent = Path(directory)
+        # Excluded trees can contain running tests and cleanup; never descend into them.
+        dirs[:] = [name for name in dirs if not _is_excluded_contract_path(parent / name, root)]
+        for name in files:
+            path = parent / name
+            if not path.is_file() or _is_excluded_contract_path(path, root):
+                continue
+            if path.suffix.lower() not in SCAN_EXCLUDED_SUFFIXES:
+                yield path
 
 
 def _read_text(path: Path) -> str:
@@ -301,12 +309,12 @@ def _read_text(path: Path) -> str:
 
 
 def _owner_section(text: str, heading: str) -> str | None:
-    match = re.search(r"(?m)^(#{1,6})[ \t]+" + re.escape(heading) + r"[ \t]*$", text)
-    if match is None:
-        return None
-    body = text[match.end():]
-    end = re.search(r"(?m)^#{1," + str(len(match[1])) + r"}[ \t]+", body)
-    return body[:end.start()] if end else body
+    headings = iter(atx_headings(text))
+    for owner in headings:
+        if owner.title == heading:
+            end = next((section.start for section in headings if section.level <= owner.level), len(text))
+            return text[owner.end:end]
+    return None
 
 
 def _check_owner_sections(root: Path) -> list[ContractIssue]:
@@ -366,7 +374,7 @@ def _is_prompt_or_policy_text(rel: Path) -> bool:
     parts = rel.parts
     return (parts[:1] == ("platforms",) or parts[:2] == ("docs", "policies") or parts[:3] == ("docs", "ko", "policies")
             or rel.name == "SKILL.md" or (len(parts) > 1 and parts[-2] == "references" and rel.suffix == ".md")
-            or rel.as_posix() == "_shared/reminder_texts.json")
+            or rel.as_posix() in ("AGENTS.md", "_shared/reminder_texts.json"))
 
 
 def _check_removed_contract_wording(root: Path) -> list[ContractIssue]:
@@ -392,7 +400,7 @@ def _check_claude_first_turn_contract(root: Path) -> list[ContractIssue]:
     common = root / "platforms/common-governance.md"
     common_text = common.read_text(encoding="utf-8") if common.is_file() else ""
     if (path.read_text(encoding="utf-8").count("{{COMMON_GOVERNANCE}}") != 1
-            or not all(_owner_section(common_text, heading) for heading in ("Session Intent", "Work Selection"))):
+            or not all(_owner_section(common_text, heading) is not None for heading in ("Session Intent", "Work Selection"))):
         return [ContractIssue(
             "ERROR", "platforms/claude/CLAUDE.md",
             "Claude bootstrap must reference one common governance contract with Session Intent and Work Selection sections",

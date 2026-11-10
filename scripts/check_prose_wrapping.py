@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # Canonical source: Ghost-ALICE core scripts/check_prose_wrapping.py.
-# Addon releases vendor this file byte-for-byte so their local gate remains runnable.
 """Reject Markdown prose paragraphs split across physical source lines."""
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ def release_markdown_paths(repo_root: Path) -> list[tuple[str, Path]]:
     root = repo_root.resolve()
     selected: dict[str, Path] = {}
     for raw_path in result.stdout.split(b"\0"):
-        relative = _decode(raw_path).replace("\\", "/") if raw_path else ""
+        relative = _decode(raw_path) if raw_path else ""
         candidate = repo_root / Path(relative)
         if Path(relative).suffix.lower() not in MARKDOWN_SUFFIXES:
             continue
@@ -168,6 +167,7 @@ def prose_wrapping_violations(relative_path: str, path: Path) -> list[Violation]
     segment: list[int] = []
     context: tuple[object, ...] | None = None
     fence: tuple[str, int] | None = None
+    fence_container = (0, 0)
     html: tuple[str, str | None] | None = None
     math_fence = link_continuation = False
     active_list: tuple[int, int, int] | None = None
@@ -193,6 +193,25 @@ def prose_wrapping_violations(relative_path: str, path: Path) -> list[Violation]
         if frontmatter_end is not None and index <= frontmatter_end:
             flush()
             continue
+        if fence:
+            # A fence belongs to the quote/list container that opened it. An
+            # omitted quote prefix or dedented list line ends that container;
+            # the current line must then be checked as ordinary Markdown.
+            fence_body = raw_line
+            quote_present = True
+            for _ in range(fence_container[0]):
+                match = BLOCKQUOTE_RE.match(fence_body)
+                if match is None:
+                    quote_present = False
+                    break
+                fence_body = fence_body[match.end():]
+            list_indent = fence_container[1]
+            if quote_present and (not fence_body.strip() or _indent(fence_body) >= list_indent):
+                flush()
+                if _fence_close(_drop_indent(fence_body, list_indent), fence):
+                    fence = None
+                continue
+            fence = None
         quote_depth, body = _strip_blockquote(raw_line)
         if not body.strip():
             flush()
@@ -201,7 +220,9 @@ def prose_wrapping_violations(relative_path: str, path: Path) -> list[Violation]
                 html = None
             continue
         leading = _indent(body)
-        lazy_list = bool(active_list and quote_depth == 0 and context == ("list", active_list[0], active_list[1]))
+        lazy_list = bool(active_list and quote_depth == 0
+                         and context == ("list", active_list[0], active_list[1])
+                         and not FENCE_RE.match(body) and not LIST_RE.match(body))
         if active_list and not lazy_list and (quote_depth != active_list[1] or leading < active_list[2]):
             active_list = None
         prefix = active_list[2] if active_list else 0
@@ -212,14 +233,10 @@ def prose_wrapping_violations(relative_path: str, path: Path) -> list[Violation]
             if html[0] == "marker" and html[1] in stripped.lower():
                 html = None
             continue
-        if fence:
-            flush()
-            if _fence_close(syntax, fence):
-                fence = None
-            continue
         if opened := _fence_open(syntax):
             flush()
             fence = opened
+            fence_container = (quote_depth, prefix)
             continue
         if stripped == "$$":
             flush()
@@ -243,6 +260,18 @@ def prose_wrapping_violations(relative_path: str, path: Path) -> list[Violation]
         if ATX_RE.match(syntax) or THEMATIC_RE.fullmatch(syntax) or PROTOCOL_RE.fullmatch(stripped) or DIRECTIVE_RE.match(stripped) or _standalone_code_span(stripped):
             flush()
             continue
+        if quote_depth == 0 and context and context[0] == "quote":
+            line_context = context
+        elif active_list:
+            line_context = ("list", active_list[0], active_list[1])
+        else:
+            line_context = ("quote", quote_depth) if quote_depth else ("paragraph",)
+        if active_list and leading >= active_list[2] + 4 or not active_list and leading >= 4:
+            if context == line_context:
+                prose(line_number, line_context, body)
+            else:
+                flush()
+            continue
         if list_match := LIST_RE.match(syntax):
             list_serial += 1
             marker_indent = prefix + _indent(list_match.group("indent"))
@@ -250,18 +279,12 @@ def prose_wrapping_violations(relative_path: str, path: Path) -> list[Violation]
             active_list = (list_serial, quote_depth, content_indent)
             flush()
             content = list_match.group("text") or ""
-            if content.strip():
+            if opened := _fence_open(content):
+                fence = opened
+                fence_container = (quote_depth, content_indent)
+            elif content.strip():
                 prose(line_number, ("list", list_serial, quote_depth), content)
             continue
-        if active_list and leading >= active_list[2] + 4 or not active_list and leading >= 4:
-            flush()
-            continue
-        if quote_depth == 0 and context and context[0] == "quote":
-            line_context = context
-        elif active_list:
-            line_context = ("list", active_list[0], active_list[1])
-        else:
-            line_context = ("quote", quote_depth) if quote_depth else ("paragraph",)
         prose(line_number, line_context, body)
     flush()
     return violations

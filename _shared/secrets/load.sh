@@ -21,17 +21,17 @@ secrets_file_init() {
   local dir
   dir=$(dirname "$GHOST_ALICE_SECRETS_FILE")
   if [ ! -d "$dir" ]; then
-    mkdir -p "$dir"
-    chmod 700 "$dir" 2>/dev/null || true
+    mkdir -p "$dir" || return 1
+    chmod 700 "$dir" 2>/dev/null || return 1
   fi
   if [ ! -f "$GHOST_ALICE_SECRETS_FILE" ]; then
-    cat > "$GHOST_ALICE_SECRETS_FILE" <<'HEADER'
+    cat > "$GHOST_ALICE_SECRETS_FILE" <<'HEADER' || return 1
 # Ghost-ALICE secrets. Plaintext KEY=value format.
 # Keep mode 600. Never commit this file to git.
 # One key per line. Quotes are optional (KEY=value and KEY="value" are both allowed).
 HEADER
   fi
-  chmod 600 "$GHOST_ALICE_SECRETS_FILE" 2>/dev/null || true
+  chmod 600 "$GHOST_ALICE_SECRETS_FILE" 2>/dev/null
 }
 
 # -- Single-key lookup (env -> file) -------------------------
@@ -51,13 +51,13 @@ secrets_get() {
   # 2. ~/.ghost-alice/secrets.env
   if [ -f "$GHOST_ALICE_SECRETS_FILE" ]; then
     val=$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$GHOST_ALICE_SECRETS_FILE" 2>/dev/null \
-          | head -1 \
+          | tail -1 \
           | sed -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//")
+    # Remove the line ending before stripping surrounding quotes.
+    val="${val%$'\r'}"
     # Remove surrounding quotes.
     val="${val%\"}"; val="${val#\"}"
     val="${val%\'}"; val="${val#\'}"
-    # Remove trailing CR.
-    val="${val%$'\r'}"
     if [ -n "$val" ]; then
       printf "%s" "$val"
       return 0
@@ -72,16 +72,17 @@ secrets_get() {
 secrets_set() {
   local key="$1"
   local value="$2"
-  secrets_file_init
+  secrets_file_init || return 1
 
   local tmp
-  tmp=$(mktemp)
+  tmp=$(mktemp "${GHOST_ALICE_SECRETS_FILE}.XXXXXX") || return 1
   if [ -f "$GHOST_ALICE_SECRETS_FILE" ]; then
-    grep -vE "^[[:space:]]*${key}[[:space:]]*=" "$GHOST_ALICE_SECRETS_FILE" > "$tmp" || true
+    grep -vE "^[[:space:]]*${key}[[:space:]]*=" "$GHOST_ALICE_SECRETS_FILE" > "$tmp" ||
+      [ "$?" -eq 1 ] || { rm -f "$tmp"; return 1; }
   fi
-  printf "%s=%s\n" "$key" "$value" >> "$tmp"
-  mv "$tmp" "$GHOST_ALICE_SECRETS_FILE"
-  chmod 600 "$GHOST_ALICE_SECRETS_FILE" 2>/dev/null || true
+  printf "%s=%s\n" "$key" "$value" >> "$tmp" || { rm -f "$tmp"; return 1; }
+  chmod 600 "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$GHOST_ALICE_SECRETS_FILE" || { rm -f "$tmp"; return 1; }
 }
 
 # -- Delete key ----------------------------------------------
@@ -92,15 +93,16 @@ secrets_unset() {
     return 0
   fi
   local tmp
-  tmp=$(mktemp)
-  grep -vE "^[[:space:]]*${key}[[:space:]]*=" "$GHOST_ALICE_SECRETS_FILE" > "$tmp" || true
-  mv "$tmp" "$GHOST_ALICE_SECRETS_FILE"
-  chmod 600 "$GHOST_ALICE_SECRETS_FILE" 2>/dev/null || true
+  tmp=$(mktemp "${GHOST_ALICE_SECRETS_FILE}.XXXXXX") || return 1
+  grep -vE "^[[:space:]]*${key}[[:space:]]*=" "$GHOST_ALICE_SECRETS_FILE" > "$tmp" ||
+    [ "$?" -eq 1 ] || { rm -f "$tmp"; return 1; }
+  chmod 600 "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$GHOST_ALICE_SECRETS_FILE" || { rm -f "$tmp"; return 1; }
 }
 
 # -- Lookup + prompt + save option ---------------------------
 # Usage: secrets_get_or_prompt KEY [LABEL]
-# stdout: value on success, exit 1 for empty input or non-TTY
+# stdout: value on success, exit 1 for empty input or non-TTY; a save failure warns and retains the entered value
 secrets_get_or_prompt() {
   local key="$1"
   local label="${2:-$1}"
@@ -129,8 +131,11 @@ secrets_get_or_prompt() {
   read -r save_choice
   case "$save_choice" in
     n|N|no|NO|No) ;;
-    *) secrets_set "$key" "$val"
-       printf "%s[OK]%s %s saved\n" "$C_GREEN" "$C_RESET" "$key" >&2 ;;
+    *) if secrets_set "$key" "$val"; then
+         printf "%s[OK]%s %s saved\n" "$C_GREEN" "$C_RESET" "$key" >&2
+       else
+         printf "%s[WARN]%s %s was not saved; using the entered value for this call.\n" "$C_YELLOW" "$C_RESET" "$key" >&2
+       fi ;;
   esac
 
   printf "%s" "$val"

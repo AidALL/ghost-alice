@@ -173,6 +173,20 @@ class ReplacementTests(ParticipantCase):
         self.assertEqual(failed.exception.exit_code, 3)
         self.assertEqual(self.runtime_files(), self.original)
 
+    def test_publish_preserves_a_loaded_service_with_a_different_or_unknown_agent(self):
+        for observed_agent in (self.root / "unowned.plist", None):
+            with self.subTest(observed_agent=observed_agent):
+                effects = self.effects(agent=observed_agent)
+                record_before = installed_payload.path(self.reg.ghost).read_bytes()
+                with self.assertRaises(install_transaction.InstallTransactionError) as failed:
+                    install_transaction.publish(self.runtime_request(), [self.participant(effects)])
+                self.assertEqual(failed.exception.exit_code, 3)
+                self.assertTrue(effects.running)
+                self.assertEqual(effects.agent, observed_agent)
+                self.assertEqual(effects.service_calls(), [])
+                self.assertEqual(self.runtime_files(), self.original)
+                self.assertEqual(installed_payload.path(self.reg.ghost).read_bytes(), record_before)
+
     def test_a_service_without_a_macos_owner_blocks_an_affected_publish(self):
         effects = self.effects()
         with self.assertRaises(install_transaction.InstallTransactionError) as failed:

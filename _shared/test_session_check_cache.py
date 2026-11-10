@@ -12,6 +12,108 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
+class PendingManifestCheckTest(unittest.TestCase):
+    def run_hook(self, home, *, cached=True, output_format="json"):
+        import io
+        import pending_merge_precheck_hook as hook
+        argv = ["hook", "--platform", "codex", "--format", output_format]
+        if cached:
+            argv += ["--root", str(home / "ledger")]
+        output, error_output = io.StringIO(), io.StringIO()
+        with (mock.patch.dict(os.environ, {"HOME": str(home)}, clear=True),
+              mock.patch.object(sys, "argv", argv),
+              mock.patch.object(hook, "_read_hook_input", return_value={"session_id": "manifest-check"}),
+              mock.patch.object(sys, "stdout", output),
+              mock.patch.object(sys, "stderr", error_output)):
+            self.assertEqual(hook.main(), 0)
+        self.assertEqual(error_output.getvalue(), "")
+        return json.loads(output.getvalue()) if output_format == "json" else output.getvalue()
+
+    def test_only_absent_and_parsed_manifests_produce_successful_counts(self):
+        cases = ((None, "absent", 0), ({"entries": []}, "parsed", 0),
+                 ({"entries": [{"id": "missing-decided"}, {"decided": False},
+                               {"decided": True}, "ignored-by-hook"]}, "parsed", 2))
+        for contents, state, count in cases:
+            with self.subTest(state=state, count=count), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory)
+                manifest = home / ".ghost-alice/pending-merges/codex/manifest.json"
+                if contents is not None:
+                    manifest.parent.mkdir(parents=True)
+                    manifest.write_text(json.dumps(contents))
+                first, reused = self.run_hook(home), self.run_hook(home)
+                for body in (first, reused):
+                    receipt = body["ghostAlicePendingMergeCheck"]
+                    self.assertEqual((receipt["manifest_state"], receipt["undecided_count"]), (state, count))
+                self.assertEqual(reused["ghostAlicePendingMergeCheck"]["status"], "reused")
+
+    def test_unreadable_manifest_has_no_receipt_cache_backup_or_new_notice(self):
+        import sqlite3
+        for contents in (b"not JSON", b"\xff", b"[]", b'{}', b'{"entries":null}', None):
+            for cached in (False, True):
+                for output_format in ("json", "text"):
+                    with self.subTest(contents=contents, cached=cached, output_format=output_format), tempfile.TemporaryDirectory() as directory:
+                        home = Path(directory)
+                        manifest = home / ".ghost-alice/pending-merges/codex/manifest.json"
+                        manifest.parent.mkdir(parents=True)
+                        if contents is None:
+                            manifest.mkdir()
+                        else:
+                            manifest.write_bytes(contents)
+                        body = self.run_hook(home, cached=cached, output_format=output_format)
+                        self.assertEqual(body, {"continue": True} if output_format == "json" else "\n")
+                        failure_bytes = (home / ".ghost-alice/state-retention-failures.jsonl").read_bytes()
+                        self.assertTrue(failure_bytes.endswith(b"\n"))
+                        [failure] = [json.loads(line) for line in failure_bytes.splitlines()]
+                        expected_error = ("IsADirectoryError" if contents is None else
+                                          "UnicodeDecodeError" if contents == b"\xff" else
+                                          "JSONDecodeError" if contents == b"not JSON" else "ValueError")
+                        self.assertEqual((failure["policy"], failure["path"], failure["error_type"]),
+                                         ("pending-merges-state", str(manifest), expected_error))
+                        self.assertTrue(failure["error"])
+                        if contents is None:
+                            self.assertTrue(manifest.is_dir())
+                            self.assertEqual(list(manifest.iterdir()), [])
+                        else:
+                            self.assertEqual(manifest.read_bytes(), contents)
+                        self.assertFalse(manifest.with_suffix(".json.corrupt-bak").exists())
+                        self.assertFalse(manifest.with_suffix(".json.lock").exists())
+                        if cached:
+                            with closing(sqlite3.connect(home / "ledger/session-checks.sqlite3")) as connection:
+                                self.assertEqual(connection.execute("SELECT value FROM checks").fetchall(), [])
+
+    def test_legacy_count_only_cache_cannot_certify_an_unchanged_malformed_manifest(self):
+        import sqlite3
+        from session_check_cache import observe_check
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            manifest = home / ".ghost-alice/pending-merges/codex/manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text("not JSON")
+            observe_check(home / "ledger", "codex", "manifest-check", "pending-merges", manifest,
+                          lambda: {"undecided_count": 0})
+            store = home / "ledger/session-checks.sqlite3"
+            with closing(sqlite3.connect(store)) as connection:
+                before = connection.execute("SELECT * FROM checks").fetchall()
+            self.assertEqual(self.run_hook(home), {"continue": True})
+            with closing(sqlite3.connect(store)) as connection:
+                self.assertEqual(connection.execute("SELECT * FROM checks").fetchall(), before)
+            self.assertEqual(manifest.read_bytes(), b"not JSON")
+
+    def test_failure_record_write_error_keeps_the_host_nonblocking_and_manifest_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            manifest = home / ".ghost-alice/pending-merges/codex/manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_bytes(b"not JSON")
+            failure_record = home / ".ghost-alice/state-retention-failures.jsonl"
+            failure_record.mkdir()
+            sentinel = failure_record / "preserved.txt"
+            sentinel.write_bytes(b"existing directory")
+            self.assertEqual(self.run_hook(home), {"continue": True})
+            self.assertEqual(manifest.read_bytes(), b"not JSON")
+            self.assertEqual(sentinel.read_bytes(), b"existing directory")
+
+
 class SessionCheckReuseTest(unittest.TestCase):
     def test_instruction_retry_returns_the_latest_stable_body(self):
         from session_check_cache import load_instruction
@@ -270,7 +372,7 @@ class SessionCheckReuseTest(unittest.TestCase):
         import pending_merge_precheck_hook as hook
         for count in (0, 2):
             result = dict(status='checked', checked_at='2026-10-12T21:00:00+00:00',
-                          value=dict(undecided_count=count))
+                          value=dict(manifest_state='parsed', undecided_count=count))
             body = json.loads(hook._json_payload('codex', result))
             # The user sees the screen notice; merge-companion re-checks the manifest itself (merge-companion/SKILL.md).
             self.assertNotIn('hookSpecificOutput', body)

@@ -38,22 +38,16 @@ _write = platform.write
 _service_state = platform.service_state
 _start_service = platform.start
 _ready = platform.ready
+_record = platform.record_service
 
 
 def _stop_service(domain):
     return platform.stop(domain, state=_service_state)
 
 
-def _record_service(section):
-    platform.record_service(Path.home(), section)
-
-
-_record = _record_service
-
-
-def _effects():
+def _effects(home):
     return platform.Platform(write=_write, state=_service_state, stop=_stop_service, start=_start_service, ready=_ready,
-                             record=lambda section: _record(section))
+                             record=lambda section: _record(home, section))
 
 
 def _require_gateway_runtime():
@@ -92,7 +86,7 @@ def install(codex_dir, ledger_root, state_dir, launch_agent, claude_dir=None, *,
     if sys.platform != 'darwin' or any(not Path(p).is_absolute() for p in supplied):
         raise GatewayBlocked('macOS and explicit absolute installation coordinates are required')
     home = Path.home()
-    io = _effects()
+    io = _effects(home)
     with platform.operation_lock(home):
         record = _read_record(home)
         service = record.get('service') if isinstance(record.get('service'), dict) else None
@@ -132,7 +126,7 @@ def detach(*, apply_changes=APPLY_UNSET, confirm=APPLY_UNSET, home=None, io=None
     """Unregister the service the install record names; `missing` when it names none."""
     apply_changes = resolve_apply_changes(apply_changes, confirm, default=False)
     home = Path.home() if home is None else Path(home)
-    io = _effects() if io is None else io
+    io = _effects(home) if io is None else io
     host_platform = sys.platform if host_platform is None else host_platform
     with platform.operation_lock(home):
         record = _read_record(home)

@@ -16,7 +16,9 @@ import install_destination
 from typing import Any
 
 from session_identity import is_exact
+from hook_input import parse_json_object, read_stdin_utf8 as _read_stdin_utf8
 from session_intent_analyzer_hook import bound_session_identity
+from strict_session_log import _safe_text
 import state_retention
 from timestamps import utc_now
 
@@ -110,40 +112,10 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _read_stdin_utf8() -> str:
-    """Read stdin as UTF-8 regardless of the platform default encoding.
-
-    Claude Code delivers the hook payload as UTF-8 JSON. On Windows the default
-    stdin encoding is cp949/cp1252, so a bare ``sys.stdin.read()`` decodes the
-    bytes with the wrong codec and corrupts non-ASCII (Korean) text into mojibake
-    and lone surrogates before it is ever logged. Reading the raw byte buffer and
-    decoding UTF-8 explicitly avoids that; ``errors="replace"`` keeps a stray
-    non-UTF-8 byte from crashing the audit hook.
-    """
-    buffer = getattr(sys.stdin, "buffer", None)
-    if buffer is not None:
-        try:
-            data = buffer.read()
-        except Exception:
-            return ""
-        if isinstance(data, bytes):
-            return data.decode("utf-8", errors="replace")
-        return str(data)
-    return sys.stdin.read()
-
-
-def _safe_text(value: Any) -> str:
-    text = str(value)
-    return "".join(
-        f"\\u{ord(character):04x}" if 0xD800 <= ord(character) <= 0xDFFF else character
-        for character in text
-    )
-
-
 def _text(value: Any, fallback: str = "") -> str:
     if value is None:
         return fallback
-    text = _safe_text(value)
+    text = _safe_text(str(value))
     return text if text else fallback
 
 
@@ -167,8 +139,8 @@ def _extract(payload: dict[str, Any]) -> dict[str, str]:
     elif tool in {"Grep", "Glob"}:
         path = _text(tool_input.get("path"), "cwd")
         pattern = _text(tool_input.get("pattern"))
-    elif tool == "Bash":
-        command = _text(tool_input.get("command"))
+    elif tool in {"Bash", "exec_command", "shell"}:
+        command = _text(tool_input.get("command" if tool == "Bash" else "cmd"))
         pattern = command[:200]
         op, extracted = _shell_op_and_path(command)
         if extracted:
@@ -177,7 +149,7 @@ def _extract(payload: dict[str, Any]) -> dict[str, str]:
         paths = _patch_paths(_text(tool_input.get("command")))
         if paths:
             path = paths[0]
-            # The file list is the audit record, so unlike a shell command it is never cut.
+            # The file list is the audit record and is never cut.
             pattern = "; ".join(paths)
     elif tool == "Agent":
         pattern = _text(tool_input.get("description"))
@@ -202,10 +174,7 @@ def _append_log(row: dict[str, str]) -> None:
 
 def main() -> int:
     try:
-        raw = _read_stdin_utf8()
-        payload = json.loads(raw) if raw.strip() else {}
-        if not isinstance(payload, dict):
-            payload = {}
+        payload = parse_json_object(_read_stdin_utf8())
         _append_log(_extract(payload))
     except Exception:
         return 0

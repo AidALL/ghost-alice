@@ -17,7 +17,7 @@ from _installer_source import installer_bash_source, installer_ps1_source
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
 import uninstall_cleanup as cleanup
-from installer_testing import checkout_copy, installer_home_effects  # noqa: E402
+from installer_testing import checkout_copy, installer_home_effects, installer_env  # noqa: E402
 
 UNINSTALL_CLEANUP = REPO_ROOT / "_shared" / "uninstall_cleanup.py"
 INSTALL_SH = REPO_ROOT / "install.sh"
@@ -382,6 +382,35 @@ class UninstallCleanupTest(unittest.TestCase):
             with self.subTest(flags=flags):
                 self.assertTrue(parser.parse_args([*base, *flags]).apply_changes)
 
+    def test_global_rule_preview_uses_the_same_owned_blocks_as_removal(self):
+        from global_rule_blocks import CLAUDE_SPEC, CODEX_SPEC
+
+        for platform, spec, filename in (("claude", CLAUDE_SPEC, "CLAUDE.md"),
+                                         ("codex", CODEX_SPEC, "AGENTS.md")):
+            managed = f"{spec.marker}\n{spec.begin}\nmanaged\n{spec.end}\n"
+            lookalike = "# Ghost-ALICE notes\nuser rules\n"
+            incomplete = f"user rules\n{spec.begin}\nunclosed user example\n"
+            for body, removed, remaining in ((lookalike, False, lookalike),
+                                              (incomplete, False, incomplete),
+                                              (managed, True, None),
+                                              (managed + "user rules\n", True, "user rules\n")):
+                with self.subTest(platform=platform, body=body):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        root = Path(tmp)
+                        path = root / filename
+                        path.write_text(body, encoding="utf-8")
+                        before = (path.read_bytes(), path.stat().st_mtime_ns)
+                        with mock.patch.object(cleanup, "_" + platform + "_home", return_value=root):
+                            preview = cleanup._global_rule_item(platform, apply_changes=False)
+                            self.assertEqual(preview["action"], "would-remove-global-rule" if removed else "unchanged")
+                            self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
+                            applied = cleanup._global_rule_item(platform, apply_changes=True)
+                        self.assertEqual(applied["action"], "removed-global-rule" if removed else "unchanged")
+                        if remaining is None:
+                            self.assertFalse(path.exists())
+                        else:
+                            self.assertEqual(path.read_text(encoding="utf-8"), remaining)
+
     def test_claude_global_rule_cleanup_has_one_reported_owner(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -407,8 +436,7 @@ class UninstallCleanupTest(unittest.TestCase):
         *,
         apply_changes: bool = False,
         ) -> subprocess.CompletedProcess[str]:
-        env = os.environ.copy()
-        env["HOME"] = str(root)
+        env = installer_env(str(root))
         env["USERPROFILE"] = str(root)
         args = [
             sys.executable,
@@ -441,8 +469,7 @@ class UninstallCleanupTest(unittest.TestCase):
                 [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
             )
 
-            env = os.environ.copy()
-            env["HOME"] = str(root)
+            env = installer_env(str(root))
             env["USERPROFILE"] = str(root)
             env["CODEX_HOME"] = str(root / ".codex")
             result = subprocess.run(
@@ -490,7 +517,7 @@ class UninstallCleanupTest(unittest.TestCase):
             kept_copy = root / ".ghost-alice" / "uninstall-backup" / "codex" / "support-state" / "x-1" / "original"
             kept_copy.mkdir(parents=True)
             manifest = _write_manifest(root, [])
-            env = os.environ.copy()
+            env = installer_env(root)
             env.update(HOME=str(root), USERPROFILE=str(root), CODEX_HOME=str(root / ".codex"),
                        GHOST_ALICE_GHOST_ROOT=str(root / ".ghost-alice"))
             result = subprocess.run(
@@ -1248,8 +1275,7 @@ class UninstallCleanupTest(unittest.TestCase):
         )
         for args in cases:
             with self.subTest(args=args), tempfile.TemporaryDirectory() as temp_dir:
-                env = os.environ.copy()
-                env["HOME"] = temp_dir
+                env = installer_env(temp_dir)
                 env["USERPROFILE"] = temp_dir
                 env["GHOST_ALICE_LANG"] = "en"
 
@@ -1281,8 +1307,7 @@ class UninstallCleanupTest(unittest.TestCase):
                 root,
                 [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
             )
-            env = os.environ.copy()
-            env["HOME"] = str(root)
+            env = installer_env(str(root))
             env["GHOST_ALICE_LANG"] = "en"
 
             source = checkout_copy(self)
@@ -1316,8 +1341,7 @@ class UninstallCleanupTest(unittest.TestCase):
                 root,
                 [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
             )
-            env = os.environ.copy()
-            env["HOME"] = str(root)
+            env = installer_env(str(root))
             env["GHOST_ALICE_LANG"] = "en"
 
             source = checkout_copy(self)
@@ -1338,8 +1362,7 @@ class UninstallCleanupTest(unittest.TestCase):
 
 class UninstallExternalChangeQuarantineTest(unittest.TestCase):
     def _run(self, root, manifest, report, *, apply_changes=False, purge_modified=False):
-        env = os.environ.copy()
-        env["HOME"] = str(root)
+        env = installer_env(str(root))
         env["USERPROFILE"] = str(root)
         args = [
             sys.executable,

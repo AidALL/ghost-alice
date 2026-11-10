@@ -11,35 +11,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
 from merge_companion_messages import render_pending_merge_message
-import install_destination
+from hook_input import parse_json_object, read_stdin_utf8
+import pending_manifest
+import state_retention
 from session_check_cache import observe_check, UnstableCheckTarget
 from session_intent_analyzer_hook import bound_session_identity
-
-
-def _pending_manifest_path(platform: str) -> Path:
-    return install_destination.ghost_root(install_destination.home_directory()) / "pending-merges" / platform / "manifest.json"
-
-
-def _pending_entries(platform: str) -> list[dict[str, Any]]:
-    path = _pending_manifest_path(platform)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    if not isinstance(data, dict):
-        return []
-    entries = data.get("entries", [])
-    if not isinstance(entries, list):
-        return []
-    return [
-        entry for entry in entries
-        if isinstance(entry, dict) and entry.get("decided") is False
-    ]
 
 
 def _pending_line(platform: str, count: int) -> str:
@@ -67,19 +47,14 @@ def _clean_contract_line(platform: str) -> str:
 
 def _read_hook_input() -> dict[str, Any]:
     try:
-        if sys.stdin.isatty():
-            return {}
-        raw = sys.stdin.read()
-        if not raw.strip():
-            return {}
-        data = json.loads(raw)
+        return parse_json_object(read_stdin_utf8())
     except Exception:
         return {}
-    return data if isinstance(data, dict) else {}
 
 
 def _text_payload(platform: str, result: dict | None = None) -> str:
-    count = len(_pending_entries(platform)) if result is None else result["value"]["undecided_count"]
+    value = pending_manifest.check_pending(pending_manifest.manifest_path(platform)) if result is None else result["value"]
+    count = value["undecided_count"]
     if count:
         if result is not None and result["status"] == "reused":
             return f"merge-companion precheck: pending={count} (unchanged; session check reused)."
@@ -89,8 +64,10 @@ def _text_payload(platform: str, result: dict | None = None) -> str:
 
 
 def _json_payload(platform: str, result: dict | None = None) -> str:
-    count = len(_pending_entries(platform)) if result is None else result["value"]["undecided_count"]
-    receipt = {"platform": platform, "manifest_path": str(_pending_manifest_path(platform)), "undecided_count": count}
+    value = pending_manifest.check_pending(pending_manifest.manifest_path(platform)) if result is None else result["value"]
+    count = value["undecided_count"]
+    receipt = {"platform": platform, "manifest_path": str(pending_manifest.manifest_path(platform)),
+               "manifest_state": value["manifest_state"], "undecided_count": count}
     if result is not None:
         receipt.update({"status": result["status"], "checked_at": result["checked_at"]})
     body: dict[str, Any] = {"continue": True, "ghostAlicePendingMergeCheck": receipt}
@@ -115,26 +92,22 @@ def main() -> int:
     input_payload = _read_hook_input()
     result = None
     session_id = bound_session_identity(args.platform, input_payload)
-    if args.root is not None:
-        session_id = bound_session_identity(args.platform, input_payload) or "unknown"
-        # Cache only normalized check metadata, not backup contents or raw manifest entries.
-        try:
-            result = observe_check(args.root, args.platform, session_id, "pending-merges", _pending_manifest_path(args.platform),
-                                   lambda: {"undecided_count": len(_pending_entries(args.platform))},
-                                   validate=lambda value: type(value.get("undecided_count")) is int and value["undecided_count"] >= 0)
-        except UnstableCheckTarget:
-            # A manifest that keeps changing has no stable count; a direct read could see a half-written file
-            # and report a clean pass. The user sees that the check did not finish, and the session goes on.
+    try:
+        if args.root is not None:
+            # Cache only a successful observation and count, never raw manifest entries.
+            path = pending_manifest.manifest_path(args.platform)
+            result = observe_check(args.root, args.platform, session_id or "unknown", "pending-merges", path,
+                                   lambda: pending_manifest.check_pending(path), validate=pending_manifest.valid_check)
+        output = _json_payload(args.platform, result) if args.format == "json" else _text_payload(args.platform, result)
+    except (OSError, ValueError) as error:
+        # A failed observation cannot supply a clean receipt. It does not stop the host.
+        if isinstance(error, UnstableCheckTarget):
             message = _unstable_line(args.platform)
-            if args.format == "json":
-                print(json.dumps({"continue": True, "systemMessage": message}, ensure_ascii=False))
-            else:
-                print(message)
-            return 0
-    if args.format == "json":
-        print(_json_payload(args.platform, result))
-    else:
-        print(_text_payload(args.platform, result))
+            output = json.dumps({"continue": True, "systemMessage": message}, ensure_ascii=False) if args.format == "json" else message
+        else:
+            state_retention.record_failure("pending-merges-state", pending_manifest.manifest_path(args.platform), error)
+            output = json.dumps({"continue": True}) if args.format == "json" else ""
+    print(output)
     return 0
 
 

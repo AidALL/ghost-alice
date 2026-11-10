@@ -12,11 +12,11 @@ from session_identity import session_candidates
 import state_retention
 from source_reference import text_digest
 from timestamps import utc_now
+from agent_visibility_policy import VISIBLE_DECISIONS
+from runtime_config import canonical_agent_visibility_profile as agent_visibility_profile
 from typing import Any
 
 SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
-VISIBLE_DECISIONS = {"show", "hide", "force_show"}
-AGENT_VISIBILITY_PROFILES = {"strict", "dynamic", "minimal"}
 OBSERVED_DURATION_SOURCES = {"hook-runner", "tool-wrapper", "ledger", "agent-reported"}
 
 
@@ -84,13 +84,6 @@ def visible_decision(value: str | None) -> str:
     return "show"
 
 
-def agent_visibility_profile(value: str | None) -> str:
-    profile = str(value or "").strip().lower().replace("_", "-")
-    if profile in AGENT_VISIBILITY_PROFILES:
-        return profile
-    return "strict"
-
-
 def observed_duration_s(value: Any) -> float | None:
     if value is None:
         return None
@@ -125,7 +118,7 @@ def append_event(home: Path | None, platform: str, session_id: str, event: dict[
         "event": _safe_text(event.get("event") or event.get("hook_event_name") or ""),
         "agent_visibility_profile": agent_visibility_profile(event.get("agent_visibility_profile")),
         "visible_decision": visible_decision(event.get("visible_decision")),
-        "exit_code": int(event.get("exit_code", 0) or 0),
+        "exit_code": None if event.get("exit_code", 0) is None else int(event.get("exit_code", 0) or 0),
         "stdout": _safe_text(event.get("stdout") or ""),
         "stderr": _safe_text(event.get("stderr") or ""),
         "payload_digest": _payload_digest(event),

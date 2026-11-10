@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -17,6 +19,7 @@ from installer import report  # noqa: E402
 from installer import runner  # noqa: E402
 from installer.runner import ToolResult  # noqa: E402
 from installer_testing import FakeRunner  # noqa: E402
+import file_lock  # noqa: E402
 
 
 class LockTests(unittest.TestCase):
@@ -42,7 +45,8 @@ class LockTests(unittest.TestCase):
 
     def test_acquire_release_and_second_holder(self):
         # installer_lib/install.sh:39-73
-        path = lock.acquire("install", "claude")
+        handle = lock.acquire("install", "claude")
+        path, generation = handle
         self.assertEqual(path, self.home / ".ghost-alice" / "install.lock")
         self.assertTrue(path.is_file())
         self.assertIn("installer:install:claude:", path.read_text(encoding="utf-8"))
@@ -51,18 +55,99 @@ class LockTests(unittest.TestCase):
             lock.acquire("uninstall", "codex")
         self.assertEqual(held.exception.code, 1)
         self.assertIn(f"Another install is already running; aborting uninstall: {path}", out.getvalue())
-        lock.release(path)
+        self.assertEqual(json.loads(path.read_text())["generation"], generation)
+        lock.release(handle)
         self.assertFalse(path.exists())
-        lock.release(path)
+        lock.release(handle)
         lock.release(None)
-        self.assertEqual(lock.acquire("repair", "claude"), path)
-        lock.release(path)
+        next_handle = lock.acquire("repair", "claude")
+        self.assertEqual(next_handle[0], path)
+        self.assertNotEqual(next_handle[1], generation)
+        lock.release(next_handle)
 
     def test_explicit_lock_path(self):
         custom = self.home / "custom.lock"
-        self.assertEqual(lock.acquire("cleanup-pending", "claude", lock_path=custom), custom)
+        handle = lock.acquire("cleanup-pending", "claude", lock_path=custom)
+        self.assertEqual(handle[0], custom)
         self.assertTrue(custom.is_file())
-        lock.release(custom)
+        lock.release(handle)
+
+    def test_a_stale_holder_cannot_release_its_replacement(self):
+        path = self.home / 'generation.lock'
+        first = lock.acquire('install', 'claude', path)
+        old = time.time() - 1801
+        os.utime(path, (old, old))
+        second = lock.acquire('repair', 'codex', path)
+        replacement = path.read_bytes()
+        try:
+            lock.release(first)
+            self.assertTrue(path.exists(), 'the previous holder deleted its replacement')
+            self.assertEqual(path.read_bytes(), replacement)
+            with self.assertRaises(runner.InstallerExit):
+                lock.acquire('uninstall', 'claude', path)
+        finally:
+            lock.release(second)
+
+    def test_duplicate_release_cannot_delete_a_same_pid_reacquisition(self):
+        path = self.home / 'generation.lock'
+        first = lock.acquire('install', 'claude', path)
+        lock.release(first)
+        second = lock.acquire('repair', 'claude', path)
+        replacement = path.read_bytes()
+        try:
+            lock.release(first)
+            self.assertTrue(path.exists(), 'a repeated release deleted a newer generation in the same process')
+            self.assertEqual(path.read_bytes(), replacement)
+        finally:
+            lock.release(second)
+
+    @unittest.skipIf(file_lock.fcntl is None, 'requires the native POSIX guard')
+    def test_stale_takeover_cannot_cross_the_release_read_unlink_boundary(self):
+        path = self.home / 'generation.lock'
+        first = lock.acquire('install', 'claude', path)
+        old = time.time() - 1801
+        os.utime(path, (old, old))
+        at_unlink, resume = threading.Event(), threading.Event()
+        failures = []
+        original_unlink = Path.unlink
+
+        def pause_release(target, *args, **kwargs):
+            if target == path and threading.current_thread().name == 'old-holder-release':
+                at_unlink.set()
+                if not resume.wait(5):
+                    raise AssertionError('release was never resumed')
+            return original_unlink(target, *args, **kwargs)
+
+        def release_first():
+            try:
+                lock.release(first)
+            except BaseException as exc:
+                failures.append(exc)
+
+        second = None
+        blocked = False
+        with mock.patch.object(Path, 'unlink', pause_release), mock.patch.object(file_lock, 'LOCK_WAIT_S', 0.05):
+            thread = threading.Thread(target=release_first, name='old-holder-release')
+            thread.start()
+            try:
+                self.assertTrue(at_unlink.wait(5), 'release never reached deletion')
+                try:
+                    second = lock.acquire('repair', 'codex', path)
+                except runner.InstallerExit:
+                    blocked = True
+            finally:
+                resume.set()
+                thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(failures, [])
+        try:
+            self.assertTrue(blocked, 'takeover crossed the guarded release boundary')
+            second = lock.acquire('repair', 'codex', path)
+            replacement = path.read_bytes()
+            lock.release(first)
+            self.assertEqual(path.read_bytes(), replacement)
+        finally:
+            lock.release(second)
 
 
 class UnfinishedPublishTests(unittest.TestCase):
@@ -92,10 +177,10 @@ class UnfinishedPublishTests(unittest.TestCase):
         self.journal("20261020T000000Z-1-aaaaaaaa", "done")
         self.journal("20261020T000001Z-1-bbbbbbbb", "restored")
         with self.runner.patch():
-            path = lock.acquire("install", "claude")
+            handle = lock.acquire("install", "claude")
         self.assertEqual(self.runner.calls, [])
-        self.assertTrue(path.is_file())
-        lock.release(path)
+        self.assertTrue(handle[0].is_file())
+        lock.release(handle)
 
     def test_unfinished_publishes_are_restored_newest_first_while_the_lock_is_held(self):
         self.journal("20261020T000000Z-1-aaaaaaaa", "prepare")
@@ -109,13 +194,13 @@ class UnfinishedPublishTests(unittest.TestCase):
 
         self.runner.respond(lambda script, args: script.endswith("install_transaction.py"), recover)
         with self.runner.patch():
-            path = lock.acquire("repair", "codex")
+            handle = lock.acquire("repair", "codex")
         self.assertEqual(self.runner.tool_calls("install_transaction.py"), [
             ["recover", "--ghost-root", str(self.ghost), "--txid", "20261020T000001Z-1-bbbbbbbb"],
             ["recover", "--ghost-root", str(self.ghost), "--txid", "20261020T000000Z-1-aaaaaaaa"]])
         self.assertEqual(held, [True, True])
-        self.assertTrue(path.is_file())
-        lock.release(path)
+        self.assertTrue(handle[0].is_file())
+        lock.release(handle)
 
     def test_a_publish_that_cannot_be_restored_stops_the_command_and_releases_the_lock(self):
         folder = self.journal("20261020T000000Z-1-aaaaaaaa", "prepare")
@@ -151,14 +236,14 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(runner.InstallerExit(2).code, 2)
 
     def test_run_tool_captures_stdout_and_exit_code(self):
-        result = runner.run_tool("_shared/install_lock.py", "--help", capture=True)
+        result = runner.run_tool("_shared/install_transaction.py", "--help", capture=True)
         self.assertTrue(result.ok)
         self.assertEqual(result.returncode, 0)
         self.assertIn("usage:", result.stdout)
-        failed = runner.run_tool("_shared/install_lock.py", "release", capture=True)
+        failed = runner.run_tool("_shared/install_transaction.py", "recover", capture=True)
         self.assertFalse(failed.ok)
         self.assertNotEqual(failed.returncode, 0)
-        self.assertIn("--lock", failed.stderr)
+        self.assertIn("--ghost-root", failed.stderr)
 
     def test_run_tool_passes_bytecode_flag_env_and_cwd(self):
         calls = []
@@ -180,7 +265,7 @@ class RunnerTests(unittest.TestCase):
     def test_run_tool_without_capture_writes_to_the_current_sink(self):
         # a logged step sends child output to the log, like `>>"$LOG" 2>&1`
         with contextlib.redirect_stdout(io.StringIO()):
-            result = report.run_logged(runner.run_tool, "_shared/install_lock.py", "--help")
+            result = report.run_logged(runner.run_tool, "_shared/install_transaction.py", "--help")
         self.assertTrue(result.ok)
         self.assertIsNone(result.stdout)
         self.assertIn("usage:", report.state().log_file.read_text(encoding="utf-8"))

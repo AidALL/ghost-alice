@@ -28,6 +28,7 @@ from installer_assets import (
     classify_skill_root,
 )
 from manifest_io import read_manifest, write_manifest
+import pending_manifest
 
 
 CLEANUP_REASON = "clean-ghost-alice-managed-false-positive"
@@ -217,68 +218,76 @@ def cleanup_false_positive_legacy(
     apply: bool,
     install_state_path: Path | None = None,
 ) -> dict:
-    data = read_manifest(manifest_path)
-    entries = data.setdefault("entries", [])
-    managed = _managed_skill_roots(install_state_path, repo_root)
-    cleanable: list[tuple[dict, Path, str]] = []
-    removable: list[dict] = []
-    skipped: list[dict] = []
+    summary = {}
 
-    for entry in entries:
-        if not isinstance(entry, dict):
-            skipped.append({"id": None, "reason": "entry-not-object"})
-            continue
-        unmanaged, _ = _unmanaged_root_status(entry, pending_dir=pending_dir, repo_root=repo_root, managed=managed)
-        if unmanaged:
-            removable.append(entry)
-            continue
-        ok, reason = _false_positive_status(entry, pending_dir=pending_dir, repo_root=repo_root)
-        if ok:
-            cleanable.append((entry, Path(str(entry["backup_path"])), reason))
-        else:
-            if not entry.get("decided", False):
-                skipped.append({"id": entry.get("id"), "reason": reason})
+    def change(data):
+        entries = data.setdefault("entries", [])
+        managed = _managed_skill_roots(install_state_path, repo_root)
+        cleanable: list[tuple[dict, Path, str]] = []
+        removable: list[dict] = []
+        skipped: list[dict] = []
 
-    removed_backups = 0
-    cleanup_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    if apply and (cleanable or removable):
-        for entry, backup, reason in cleanable:
-            # This script discards its false-positive entry without a human user's discard choice.
-            # cleanup_reason and cleanup_at distinguish this outcome from mark_decided's discard.
-            entry["decided"] = True
-            entry["decision"] = "discarded"
-            entry["cleanup_reason"] = reason
-            entry["cleanup_at"] = cleanup_at
-            if _remove_backup(backup):
-                removed_backups += 1
-        # Such an entry never was a change to a Ghost-ALICE skill, so it leaves the store with its backup.
-        for entry in removable:
-            backup_raw = entry.get("backup_path")
-            if backup_raw and _remove_backup(Path(str(backup_raw))):
-                removed_backups += 1
-        removed_ids = {id(entry) for entry in removable}
-        data["entries"] = [entry for entry in entries if id(entry) not in removed_ids]
-        legacy_root = pending_dir / "legacy-targets"
-        if legacy_root.exists() and legacy_root.is_dir():
-            try:
-                next(legacy_root.iterdir())
-            except StopIteration:
-                legacy_root.rmdir()
-        write_manifest(manifest_path, data)
+        for entry in entries:
+            if not isinstance(entry, dict):
+                skipped.append({"id": None, "reason": "entry-not-object"})
+                continue
+            unmanaged, _ = _unmanaged_root_status(entry, pending_dir=pending_dir, repo_root=repo_root, managed=managed)
+            if unmanaged:
+                removable.append(entry)
+                continue
+            ok, reason = _false_positive_status(entry, pending_dir=pending_dir, repo_root=repo_root)
+            if ok:
+                cleanable.append((entry, Path(str(entry["backup_path"])), reason))
+            else:
+                if not entry.get("decided", False):
+                    skipped.append({"id": entry.get("id"), "reason": reason})
 
-    return {
-        "manifest": manifest_path.as_posix(),
-        "pending": pending_dir.as_posix(),
-        "apply": apply,
-        "scanned": len(entries),
-        "cleanable": len(cleanable),
-        "cleaned": len(cleanable) if apply else 0,
-        "removable": len(removable),
-        "removed_entries": len(removable) if apply else 0,
-        "removed_backups": removed_backups,
-        "skipped": len(skipped),
-        "skipped_entries": skipped[:20],
-    }
+        removed_backups = 0
+        cleanup_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        if apply and (cleanable or removable):
+            for entry, backup, reason in cleanable:
+                # This script discards its false-positive entry without a human user's discard choice.
+                # cleanup_reason and cleanup_at distinguish this outcome from mark_decided's discard.
+                entry["decided"] = True
+                entry["decision"] = "discarded"
+                entry["cleanup_reason"] = reason
+                entry["cleanup_at"] = cleanup_at
+                if _remove_backup(backup):
+                    removed_backups += 1
+            # Such an entry never was a change to a Ghost-ALICE skill, so it leaves the store with its backup.
+            for entry in removable:
+                backup_raw = entry.get("backup_path")
+                if backup_raw and _remove_backup(Path(str(backup_raw))):
+                    removed_backups += 1
+            removed_ids = {id(entry) for entry in removable}
+            data["entries"] = [entry for entry in entries if id(entry) not in removed_ids]
+            legacy_root = pending_dir / "legacy-targets"
+            if legacy_root.exists() and legacy_root.is_dir():
+                try:
+                    next(legacy_root.iterdir())
+                except StopIteration:
+                    legacy_root.rmdir()
+
+        summary.update({
+            "manifest": manifest_path.as_posix(),
+            "pending": pending_dir.as_posix(),
+            "apply": apply,
+            "scanned": len(entries),
+            "cleanable": len(cleanable),
+            "cleaned": len(cleanable) if apply else 0,
+            "removable": len(removable),
+            "removed_entries": len(removable) if apply else 0,
+            "removed_backups": removed_backups,
+            "skipped": len(skipped),
+            "skipped_entries": skipped[:20],
+        })
+        return bool(apply and (cleanable or removable))
+
+    if apply and manifest_path.exists():
+        pending_manifest.update_manifest(manifest_path, read_manifest, change, must_exist=True)
+    else:
+        change(read_manifest(manifest_path))
+    return summary
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:

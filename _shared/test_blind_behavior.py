@@ -107,6 +107,43 @@ class BlindBehaviorModulePresenceTest(unittest.TestCase):
 
 
 class BlindBehaviorContractTest(unittest.TestCase):
+    def test_copy_provenance_accepts_framed_tree_hash_and_rejects_malformed_versions(self):
+        from hash_utils import hash_target
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            installed = home / "installed-shared"
+            installed.mkdir()
+            (installed / "module.py").write_text("installed payload", encoding="utf-8")
+            value = hash_target(installed, "copy")
+            with mock.patch.dict(os.environ, home_environment(home), clear=False):
+                for tree_hash in (value, "b" * 64):
+                    path = write_manifest(home, {**MANIFEST, "targets": [
+                        {**MANIFEST["targets"][0], "target_tree_hash": tree_hash}]})
+                    provenance = self.blind.load_installed_provenance("codex", path)
+                    self.assertEqual(provenance["platform"], "codex")
+                    self.assertEqual(provenance["source_head"], MANIFEST["source_head"])
+                for tree_hash in ("tree-v2:bad", "tree-v3:" + "a" * 64, "tree-v2:" + "A" * 64, "tree-v2:" + "a" * 64 + "extra"):
+                    with self.subTest(malformed=tree_hash):
+                        path = write_manifest(home, {**MANIFEST, "targets": [
+                            {**MANIFEST["targets"][0], "target_tree_hash": tree_hash}]})
+                        with self.assertRaises(ValueError):
+                            self.blind.load_installed_provenance("codex", path)
+
+    def test_unknown_host_has_no_installed_provenance(self):
+        with self.assertRaisesRegex(ValueError, 'platform must be claude or codex'):
+            self.blind.load_installed_provenance('unknown-host')
+
+    def test_case_id_matching_executable_name_does_not_become_subject_metadata(self):
+        case = {**CASE, 'id': 'codex'}
+        for executable in ('codex', '/fixture/bin/codex'):
+            with self.subTest(executable=executable):
+                outcome, calls = self._execute(case=case, subject_command=[executable])
+                self.assertEqual(outcome['record']['verdict'], 'pass')
+                self.assertEqual(calls[0][0][0], executable)
+                self.assertEqual(calls[0][1]['input'], case['prompt'])
+        with self.assertRaises(ValueError):
+            self._execute(case=case, subject_command=['codex', '--case=codex'])
+
     @classmethod
     def setUpClass(cls):
         cls.blind = load_blind_behavior()

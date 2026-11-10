@@ -17,12 +17,12 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import atomic_write
 from fresh_agent_session import FreshAgentSessionError, run_fresh_agent_session
+from hook_definitions import SUPPORTED_PLATFORMS
 from project_runtime import ProjectRuntime, project_runtime
 from source_reference import canonical_json
 from timestamps import parse_timestamp
 
 CODE_OWNER_ROOT = Path(__file__).resolve().parents[1]
-PLATFORMS = {"claude", "codex"}
 MANIFEST_KEYS = {
     "schema_version", "platform", "installed_at", "source_root", "source_branch",
     "source_head", "source_dirty_state", "remote_freshness_state", "targets",
@@ -132,7 +132,7 @@ def load_sealed_case(path: Path | str) -> tuple[dict[str, Any], str]:
 
 
 def _canonical_manifest(platform: str) -> Path:
-    if platform not in PLATFORMS:
+    if platform not in SUPPORTED_PLATFORMS:
         raise ValueError("platform must be claude or codex")
     from installer import locations
     return locations.install_state_path(platform)
@@ -179,7 +179,8 @@ def load_installed_provenance(platform: str, manifest_path: Path | str | None = 
         raise ValueError("_shared target marker is missing")
     _text(shared["source_path"], "target source_path")
     _text(shared["dest_path"], "target dest_path")
-    _digest(shared["target_tree_hash"], "target tree hash")
+    tree_hash = _text(shared["target_tree_hash"], "target tree hash")
+    _digest(tree_hash.removeprefix("tree-v2:"), "target tree hash")
     _timestamp(shared["installed_at"], "target installed_at")
     return {
         "platform": platform, "installed_at": installed_at,
@@ -295,7 +296,9 @@ def run_blind_behavior_case(
     if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
     private = list(_strings(case))
-    if any(value in "\0".join(subject) for value in private):
+    # The caller selects the executable independently of the sealed case. A name
+    # coincidence does not mean the controller passed case data as an argument.
+    if any(value in "\0".join(subject[1:]) for value in private):
         raise ValueError("subject argv contains case or evaluator-private state")
     record = _record(case, installed, suite_digest)
     runtime_root = Path(repo_root).resolve() if repo_root else CODE_OWNER_ROOT
@@ -380,7 +383,7 @@ def _safe_record(value: Any) -> dict[str, Any]:
     provenance = _object(record["installed_provenance"], {
         "platform", "installed_at", "source_head", "source_dirty_state",
     }, "record provenance")
-    if provenance["platform"] not in PLATFORMS:
+    if provenance["platform"] not in SUPPORTED_PLATFORMS:
         raise ValueError("record platform is invalid")
     _timestamp(provenance["installed_at"], "record installed_at")
     if provenance["source_head"] != "unknown" and not GIT_SHA.fullmatch(provenance["source_head"]):
@@ -423,7 +426,7 @@ def _command_argument(value: str) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run one canonical blind behavior case.")
     parser.add_argument("--case", required=True, type=Path)
-    parser.add_argument("--platform", required=True, choices=sorted(PLATFORMS))
+    parser.add_argument("--platform", required=True, choices=SUPPORTED_PLATFORMS)
     parser.add_argument("--install-manifest", type=Path)
     parser.add_argument("--subject-command", required=True, type=_command_argument)
     parser.add_argument("--evaluator-command", required=True, type=_command_argument)

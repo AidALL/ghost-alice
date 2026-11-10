@@ -1,6 +1,7 @@
-import json
 import sys
 from pathlib import Path
+
+import pending_manifest
 
 manifest_path, platform = sys.argv[1:]
 payload = {
@@ -9,6 +10,8 @@ payload = {
     "entries": [],
 }
 path = Path(manifest_path)
-path.parent.mkdir(parents=True, exist_ok=True)
-if not path.exists():
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+pending_manifest.update_manifest(
+    path,
+    lambda target: None if target.exists() else payload,
+    lambda data: data is not None,
+)

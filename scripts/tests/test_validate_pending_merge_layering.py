@@ -110,7 +110,35 @@ class TestPendingMergeLayeredGate(unittest.TestCase):
                         with patch.object(validator, "REPO", root):
                             ok, message = validator.check_layer(replace(check, file=caller, owner=target))
                         self.assertFalse(ok, message)
+    def test_owner_heading_must_exist_outside_code_fences(self):
+        for marker in ("```", "~~~~"):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                caller, owner = root / "consumer.md", root / "owner.md"
+                caller.write_text("owner.md", encoding="utf-8")
+                owner.write_text(f"{marker}markdown\n## Required Owner\nRequired rule\n{marker}\n", encoding="utf-8")
+                check = validator.LayerCheck("example", "owner reference", caller, r"owner\.md",
+                                             owner=owner, owner_section="Required Owner", owner_pattern="Required rule")
+                with patch.object(validator, "REPO", root):
+                    ok, message = validator.check_layer(check)
+                self.assertFalse(ok, message)
+                self.assertIn("section missing", message)
 
+    def test_real_owner_keeps_normative_code_and_ignores_example_boundaries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            caller, owner = root / "consumer.md", root / "owner.md"
+            caller.write_text("owner.md", encoding="utf-8")
+            owner.write_text("## Required Owner ##\n\n~~~text\n## Example boundary\nRequired rule\n~~~\n\n## Next\n", encoding="utf-8")
+            check = validator.LayerCheck("example", "owner reference", caller, r"owner\.md",
+                                         owner=owner, owner_section="Required Owner", owner_pattern="Required rule")
+            with patch.object(validator, "REPO", root):
+                ok, message = validator.check_layer(check)
+            self.assertTrue(ok, message)
+            owner.write_text("## Required Owner\n\n## Next\nRequired rule\n", encoding="utf-8")
+            with patch.object(validator, "REPO", root):
+                ok, message = validator.check_layer(check)
+            self.assertFalse(ok, message)
 
 
 if __name__ == "__main__":

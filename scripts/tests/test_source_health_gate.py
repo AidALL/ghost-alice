@@ -323,6 +323,22 @@ class HarnessAuditSourceHealthTest(unittest.TestCase):
 
         self.assertEqual([issue.message for issue in issues], [])
 
+    def test_empty_install_list_reports_each_missing_install_root(self) -> None:
+        from validate_skills import validate_install_list_sync
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            self.make_skill(repo, "skill-a")
+            self.make_skill(repo, "skill-b")
+            self.write_installers(repo, [])
+            issues = []
+            validate_install_list_sync(repo, issues)
+
+        self.assertEqual(len(issues), 2)
+        self.assertTrue(all(issue.rule == "install-list.missing" for issue in issues))
+        self.assertTrue(any("skill-a" in issue.message for issue in issues))
+        self.assertTrue(any("skill-b" in issue.message for issue in issues))
+
     def test_duplicate_description_token_collision_warns(self) -> None:
         from validate_skills import Issue, validate_description_collisions
 

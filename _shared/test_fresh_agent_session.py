@@ -60,6 +60,26 @@ class FreshAgentSessionPresenceTest(unittest.TestCase):
 
 
 class FreshAgentSessionTest(unittest.TestCase):
+    def test_unknown_host_cannot_start_a_fresh_agent(self):
+        with self.assertRaisesRegex(ValueError, 'platform must be claude or codex'):
+            self.session.run_fresh_agent_session(platform='unknown-host', prompt='A valid prompt')
+
+    def test_windows_resolver_prefers_cmd_for_bare_codex(self):
+        runtimes = {"codex.cmd": r"C:\fixture\codex.cmd", "codex": r"C:\fixture\codex.CMD",
+                    "codex.exe": r"C:\other\codex.exe"}
+        command = self.session.resolve_cli_command("codex", which=runtimes.get, platform="nt")
+        self.assertEqual(command, [r"C:\fixture\codex.cmd"])
+
+    def test_main_reports_missing_powershell_without_a_traceback(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, {'PATH': ''}):
+            result = self.session.main(
+                ['--platform', 'codex', '--codex-bin', str(self.fixture / 'codex.ps1')],
+                stdin=io.StringIO('synthetic prompt'), stdout=stdout, stderr=stderr)
+        self.assertEqual(result, 1)
+        self.assertEqual(stdout.getvalue(), '')
+        self.assertEqual(stderr.getvalue(), '[fresh-agent-session] PowerShell runtime is unavailable\n')
+
     @classmethod
     def setUpClass(cls):
         cls.session = load_fresh_agent_session()

@@ -623,11 +623,14 @@ def publish(request: dict, participants: Sequence = (), *, rollback_keep: int | 
 
     When the request replaces targets, every participant's `before_publish` runs after
     the staging and before any install location changes, and `after_publish` once the
-    files and the record are published. A failure anywhere restores every file and the
-    record (around the restore, `before_restore` and `after_restore`), says `restored`
-    in the journal and raises InstallTransactionError with the cause's exit code; a
-    restore step that fails with its own code raises with that code. A restore that
-    fails leaves the journal unfinished and names its folder.
+    files and the record are published. On failure, `before_restore` runs first;
+    the batch restores files and the record and writes `restored` to the journal;
+    then `after_restore` runs. A failure before that journal update leaves it
+    unfinished. An `after_restore` failure leaves the completed file/record restore
+    marked `restored`, even when the participant could not restore its service.
+    InstallTransactionError retains the original cause's exit code unless the
+    failed recovery supplies its own code. A recovery failure also names the
+    folder for review.
     """
     request = _validated_request(request)
     _require_lock(request["ghost_root"])
@@ -697,6 +700,8 @@ def _recovery_action(folder: Path, target: dict):
     kept = Path(target["rollback"]) if target.get("rollback") else None
     current = content_digest.state(dest)
     if kept is not None and os.path.lexists(kept):
+        if content_digest.state(kept) != target.get("before"):
+            raise InstallTransactionError(f"{kept} no longer matches its original; review {folder}")
         if current is None:
             return "put-back", dest, kept
         if current == target["candidate"]:
@@ -717,8 +722,8 @@ def recover(ghost_root, txid: str) -> list[str]:
 
     Every target is checked before any changes: the install location must still hold
     what the publish left there (or its original), and a moved original must still be
-    kept. Then the originals return, the install record returns to its saved copy and
-    the journal says `restored`. Returns one line per restored target.
+    kept with its recorded before state. Then the originals return, the install record
+    returns to its saved copy and the journal says `restored`. Returns one line per restored target.
     """
     journal = Journal.load(ghost_root, txid)
     if journal.phase in FINISHED_PHASES:

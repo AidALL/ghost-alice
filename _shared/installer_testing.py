@@ -20,6 +20,29 @@ CHECKOUT = Path(__file__).resolve().parents[1]
 _copy_template: Path | None = None
 
 
+def installer_env(home: str | Path) -> dict[str, str]:
+    """Use fixture-owned home/config paths and the explicit Git checkout, without a host session identity."""
+    home = Path(home)
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("GHOST_ALICE_", "GIT_"))
+           and key not in {"CODEX_HOME", "CLAUDE_CONFIG_DIR", "CODEX_THREAD_ID", "CLAUDE_SESSION_ID",
+                           "CLAUDE_CODE_SESSION_ID"}}
+    env.update(HOME=str(home), USERPROFILE=str(home), TMPDIR=str(home), XDG_CONFIG_HOME=str(home / ".config"),
+               GIT_CONFIG_GLOBAL=str(home / ".gitconfig"), GIT_CONFIG_NOSYSTEM="1",
+               CLAUDE_CONFIG_DIR=str(home / ".claude"),
+               CODEX_HOME=str(home / ".codex"), GHOST_ALICE_INSTALL_PROGRESS="off")
+    return env
+
+
+def destination_fixture(root: Path, **overrides) -> dict:
+    """An explicit destination under `root`, with the locations a caller needs to vary."""
+    value = dict(mode="isolated", owned_root=str(root), platform_dir=str(root / "platform"),
+                 skills_dir=str(root / "skills"), ghost_root=str(root / "ghost"), ledger_root=str(root / "ledger"),
+                 project_root=str(root / "project"), core_source_root=str(CHECKOUT))
+    value.update(overrides)
+    return value
+
+
 def make_source(root: Path) -> Path:
     """A minimal checkout: `_shared`, skill `alpha`, family `fam/{one,two}`, catalog, platform bootstraps."""
     (root / "_shared").mkdir(parents=True)

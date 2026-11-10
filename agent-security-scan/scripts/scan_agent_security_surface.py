@@ -26,13 +26,19 @@ SECRET_PATTERNS = [
 EXTERNAL_FETCH_RE = re.compile(r"(?i)\b(curl|wget|fetch|httpie)\b[^\n]*https?://")
 URL_RE = re.compile(r"(?i)https?://")
 REMOTE_INSTRUCTION_RE = re.compile(r"(?i)\b(read|fetch|open|load|visit|download|retrieve)\b[^\n]{0,200}https?://")
+# Preserve quoting until command-list boundaries have been identified. This
+# covers simple commands, not substitutions, redirections, or shell control flow.
+SHELL_TOKEN_RE = re.compile(
+    r'''\#[^\n]*|(?:[^\s'"\\;&|]+|\\[\s\S]|'[^']*'|"(?:\\[\s\S]|[^"\\])*")+|[;&|]+|\n'''
+)
 
 CREDENTIAL_ACCESS_RE = re.compile(
     r"(?is)\b(print|reveal|dump|exfiltrate|read|cat|show)\b.{0,140}"
     r"\b(~/?\.ghost-alice/secrets\.env|secrets\.env|api\s+keys?|tokens?|passwords?|credentials?)\b"
 )
 WRITE_SIDE_EFFECT_COMMAND_RE = re.compile(
-    r"(?i)\b(rm\s+-r[f]?|rm\s+-f|mv\s+|cp\s+|chmod\s+|chown\s+|install\.sh|install\.ps1)\b"
+    r"(?i)\b(rm\s+(?:-[a-z]+\s+)*(?:-[a-z]*[rf][a-z]*|--(?:recursive|force))"
+    r"|mv\s+|cp\s+|chmod\s+|chown\s+|install\.sh|install\.ps1)\b"
 )
 MCP_PACKAGE_MANAGER_RE = re.compile(
     r"(?i)\b(uvx|pipx|bunx|pnpm\s+dlx|yarn\s+dlx|npm\s+(install|i|exec)|"
@@ -85,27 +91,6 @@ class Finding:
         return row
 
 
-def read_text(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
-
-
-def load_json(path: Path) -> Any:
-    try:
-        return json.loads(read_text(path))
-    except json.JSONDecodeError:
-        return None
-
-
-def load_toml(path: Path) -> Any:
-    try:
-        return tomllib.loads(read_text(path))
-    except tomllib.TOMLDecodeError:
-        return None
-
-
 def iter_json_strings(value: Any) -> Iterable[str]:
     if isinstance(value, str):
         yield value
@@ -128,9 +113,37 @@ def iter_command_strings(value: Any) -> Iterable[str]:
             yield from iter_command_strings(item)
 
 
+def hook_command_vectors(command: str) -> Iterable[list[str]]:
+    """Yield simple-command argv without treating quoted separators as syntax."""
+    tokens: list[str] = []
+    for match in SHELL_TOKEN_RE.finditer(command):
+        token = match.group()
+        if token in {";", "&&", "||", "|", "&", "\n"}:
+            if tokens:
+                yield command_words(" ".join(tokens))
+                tokens = []
+        elif not token.startswith("#"):
+            if not tokens and re.match(r"[A-Za-z_]\w*=", token):
+                continue
+            tokens.append(token)
+    if tokens:
+        yield command_words(" ".join(tokens))
+
+
 def is_shell_command(command: str) -> bool:
-    lowered = command.lower()
-    return any(token in lowered for token in ("bash -c", "sh -c", "zsh -c", "curl ", "wget "))
+    for words in hook_command_vectors(command):
+        if not words:
+            continue
+        name, args = effective_argv(words)
+        if name in {"curl", "wget"}:
+            return True
+        if name in SHELL_COMMANDS:
+            for arg in args:
+                if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", arg) or arg.lower() in {"/c", "-command"}:
+                    return True
+                if not arg.startswith("-"):
+                    break
+    return False
 
 
 def is_profiled(command: str) -> bool:
@@ -189,10 +202,7 @@ def normalized_arg_list(args: Any) -> list[str]:
     return []
 
 
-def scan_json_commands(path: Path) -> list[Finding]:
-    data = load_json(path)
-    if data is None:
-        return []
+def scan_json_commands(path: Path, data: Any) -> list[Finding]:
     findings: list[Finding] = []
     for command in iter_command_strings(data):
         if has_ghost_alice_marker(command) and not is_profiled(command):
@@ -292,17 +302,61 @@ def has_inline_interpreter_args(command: str, args: list[str]) -> bool:
 
 
 def has_inline_interpreter_command(command: str) -> bool:
-    words = command_words(command)
-    for index, word in enumerate(words):
-        if has_inline_interpreter_args(command_name(word), words[index + 1 :]):
+    for words in hook_command_vectors(command):
+        if not words:
+            continue
+        name, args = effective_argv(words)
+        if has_inline_interpreter_args(name, args):
             return True
     return False
 
 
 def effective_command_and_args(command: Any, args: Any) -> tuple[str, list[str]]:
-    command_parts = command_words(command) if isinstance(command, str) else []
-    command = command_family(command_name(command_parts[0])) if command_parts else ""
-    normalized_args = [*command_parts[1:], *normalized_arg_list(args)]
+    # A recognized leading launcher supports legacy command-plus-argument text.
+    # Otherwise the native command remains one argv item, including its spaces.
+    command_parts: list[str] = []
+    if isinstance(command, str):
+        command_parts = command_words(command)
+        if len(command_parts) > 1:
+            first_name = command_family(command_name(command_parts[0]))
+            known_launcher = first_name in (
+                SHELL_COMMANDS | ENV_COMMANDS | INLINE_INTERPRETER_COMMANDS
+                | DIRECT_RUN_PACKAGE_MANAGERS | CONTAINER_COMMANDS
+            )
+            package_action = MCP_PACKAGE_MANAGER_RE.match(" ".join([first_name, *command_parts[1:]]))
+            if not known_launcher and not package_action:
+                command_parts = [command]
+    return effective_argv([*(command_parts or [""]), *normalized_arg_list(args)])
+
+
+def effective_argv(words: list[str]) -> tuple[str, list[str]]:
+    """Classify a literal argv after known launchers consume their own options."""
+    command = command_family(command_name(words[0])) if words else ""
+    normalized_args = words[1:]
+    wrapper_values = {
+        'exec': {'-a'}, 'nohup': set(),
+        'sudo': {'-u', '--user', '-g', '--group', '-h', '--host', '-p', '--prompt', '-C', '--close-from', '-T', '--command-timeout', '-R', '--chroot', '-D', '--chdir'},
+        'timeout': {'-k', '--kill-after', '-s', '--signal'},
+        'nice': {'-n', '--adjustment'}, 'command': set(),
+        'time': {'-f', '--format', '-o', '--output'},
+        'stdbuf': {'-i', '--input', '-o', '--output', '-e', '--error'},
+        'xargs': {'-a', '--arg-file', '-d', '--delimiter', '-E', '-I', '-L', '-n', '--max-args', '-P', '--max-procs', '-s', '--max-chars'},
+    }
+    if command in wrapper_values:
+        if command == 'command' and any(arg in {'-v', '-V'} for arg in normalized_args):
+            return command, normalized_args
+        index = 0
+        while index < len(normalized_args):
+            arg = normalized_args[index]
+            if arg == '--':
+                index += 1
+                break
+            if not arg.startswith('-'):
+                break
+            index += 2 if arg in wrapper_values[command] else 1
+        if command == 'timeout':
+            index += 1  # timeout consumes a duration before the command.
+        return effective_argv(normalized_args[index:]) if index < len(normalized_args) else (command, normalized_args)
     if command not in ENV_COMMANDS:
         return command, normalized_args
 
@@ -320,7 +374,7 @@ def effective_command_and_args(command: Any, args: Any) -> tuple[str, list[str]]
     for index, arg in enumerate(expanded_args):
         if not arg or arg.startswith("-") or ("=" in arg and not arg.startswith(("/", "."))):
             continue
-        return command_family(command_name(arg)), expanded_args[index + 1 :]
+        return effective_argv(expanded_args[index:])
     return command, expanded_args
 
 
@@ -415,10 +469,7 @@ def mount_source_path(text: str) -> str:
     return ""
 
 
-def scan_mcp(path: Path, home: Path) -> list[Finding]:
-    data = load_json(path)
-    if data is None:
-        return []
+def scan_mcp(path: Path, data: Any, home: Path) -> list[Finding]:
     findings: list[Finding] = []
     servers = mcp_servers(data)
     for server, raw_config in servers.items():
@@ -468,7 +519,7 @@ def scan_mcp(path: Path, home: Path) -> list[Finding]:
                     severity=SEVERITY_CREDENTIAL,
                     rule="mcp-secret-inline",
                     path=str(path),
-                    message="MCP server command or args contain a credential-like value; raw value redacted",
+                    message="MCP server command, args, or env contain a credential-like value; raw value redacted",
                     mitigation="reject",
                     details=details,
                 )
@@ -486,10 +537,7 @@ def scan_mcp(path: Path, home: Path) -> list[Finding]:
     return findings
 
 
-def scan_codex_config(path: Path) -> list[Finding]:
-    data = load_toml(path)
-    if data is None:
-        return []
+def scan_codex_config(path: Path, data: Any) -> list[Finding]:
     features = data.get("features") if isinstance(data, dict) else None
     hooks_enabled = isinstance(features, dict) and features.get("hooks") is True
     if hooks_enabled:
@@ -505,8 +553,7 @@ def scan_codex_config(path: Path) -> list[Finding]:
     ]
 
 
-def scan_skill(path: Path) -> list[Finding]:
-    text = read_text(path)
+def scan_skill(path: Path, text: str) -> list[Finding]:
     findings: list[Finding] = []
     if EXTERNAL_FETCH_RE.search(text) or REMOTE_INSTRUCTION_RE.search(text):
         findings.append(
@@ -531,8 +578,7 @@ def scan_skill(path: Path) -> list[Finding]:
     return findings
 
 
-def scan_secret_file(path: Path) -> list[Finding]:
-    text = read_text(path)
+def scan_secret_file(path: Path, text: str) -> list[Finding]:
     if any(pattern.search(text) for pattern in SECRET_PATTERNS):
         return [
             Finding(
@@ -586,18 +632,38 @@ def candidate_paths(root: Path, home: Path) -> dict[str, list[Path]]:
 
 
 def scan(root: Path, home: Path) -> dict[str, Any]:
+    """Report read/parse coverage for selected files separately from findings."""
     findings: list[Finding] = []
-    paths = candidate_paths(root, home)
-    for path in paths["settings"]:
-        findings.extend(scan_json_commands(path))
-    for path in paths["codex_config"]:
-        findings.extend(scan_codex_config(path))
-    for path in paths["skills"]:
-        findings.extend(scan_skill(path))
-    for path in paths["mcp"]:
-        findings.extend(scan_mcp(path, home))
-    for path in paths["secrets"]:
-        findings.extend(scan_secret_file(path))
+    coverage: list[dict[str, str]] = []
+    for surface, paths in candidate_paths(root, home).items():
+        for path in paths:
+            observation = {"path": str(path), "surface": surface, "status": "unobserved"}
+            coverage.append(observation)
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                observation["reason"] = "read-error"
+                continue
+            try:
+                if surface == "codex_config":
+                    data = tomllib.loads(text)
+                elif surface in {"settings", "mcp"}:
+                    data = json.loads(text)
+            except (json.JSONDecodeError, tomllib.TOMLDecodeError):
+                observation["reason"] = "parse-error"
+                continue
+            observation["status"] = "observed"
+            if surface == "settings":
+                findings.extend(scan_json_commands(path, data))
+            elif surface == "codex_config":
+                findings.extend(scan_codex_config(path, data))
+                findings.extend(scan_mcp(path, {"servers": data.get("mcp_servers", {})}, home))
+            elif surface == "skills":
+                findings.extend(scan_skill(path, text))
+            elif surface == "mcp":
+                findings.extend(scan_mcp(path, data, home))
+            elif surface == "secrets":
+                findings.extend(scan_secret_file(path, text))
 
     rows = [finding.to_dict() for finding in findings]
     rows.sort(key=lambda item: (item["severity"], item["rule"], item["path"]))
@@ -606,11 +672,15 @@ def scan(root: Path, home: Path) -> dict[str, Any]:
         "home": str(home),
         "finding_count": len(rows),
         "findings": rows,
+        "coverage": coverage,
     }
 
 
 def render_text(report: dict[str, Any]) -> str:
     lines = [f"finding_count: {report['finding_count']}"]
+    for observation in report["coverage"]:
+        reason = f" [{observation['reason']}]" if "reason" in observation else ""
+        lines.append(f"coverage: {observation['status']} {observation['path']}{reason}")
     for finding in report["findings"]:
         lines.append(
             f"- {finding['severity']} {finding['rule']} {finding['path']} [{finding['mitigation']}]"

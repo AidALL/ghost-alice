@@ -23,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RICH = REPO_ROOT / "_shared" / "tests" / "fixtures" / "rich-addon"
 if str(REPO_ROOT / "_shared") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "_shared"))
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env  # noqa: E402
 
 
 def _python_311() -> bool:
@@ -46,9 +46,8 @@ class CommandResourceLifecycleTest(unittest.TestCase):
         if not _python_311():
             self.skipTest("python 3.11+ required")
         with tempfile.TemporaryDirectory() as home:
-            env = os.environ.copy()
+            env = installer_env(home)
             env.pop("GHOST_ALICE_CORE_ROOT", None)
-            env["HOME"] = home
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
 
             source = checkout_copy(self)
@@ -110,8 +109,7 @@ class CommandResourceLifecycleTest(unittest.TestCase):
         if not _python_311():
             self.skipTest("python 3.11+ required")
         with tempfile.TemporaryDirectory() as home:
-            env = os.environ.copy()
-            env["HOME"] = home
+            env = installer_env(home)
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
 
             source = checkout_copy(self)
@@ -141,8 +139,7 @@ class CommandResourceLifecycleTest(unittest.TestCase):
         if not _python_311():
             self.skipTest("python 3.11+ required")
         with tempfile.TemporaryDirectory() as home:
-            env = os.environ.copy()
-            env["HOME"] = home
+            env = installer_env(home)
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
 
             source = checkout_copy(self)

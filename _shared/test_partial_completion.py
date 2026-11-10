@@ -2,8 +2,8 @@
 import unittest
 
 import completion_check_validator as validator
-import test_completion_skill_evidence as skill_evidence
-from test_completion_skill_evidence import assert_stop_observation, user_role_row, skill_call, reply
+import stop_hook_testing as skill_evidence
+from stop_hook_testing import assert_stop_observation, user_role_row, skill_call, reply
 
 # The test writes these source labels as the response model's claims about the criteria's origin.
 PARTIAL_BODY = """[partial-check]
@@ -104,8 +104,7 @@ class PartialCompletionTests(unittest.TestCase):
             with self.subTest(claim=claim):
                 text = claim + '\n' + PARTIAL
                 self.assertIsNone(self.check(text))
-                result = skill_evidence.StopHookSkillEvidenceTests.run_hook(
-                    self, platform='codex', message=text, review_verdict='unsupported')
+                result = skill_evidence.run_reviewed_stop( platform='codex', message=text, review_verdict='unsupported')
                 assert_stop_observation(self, result, issue='response-unsupported:')
         self.assertIsNotNone(self.check(PARTIAL + '\n[completion-check]\n- unverified:\n  - none'))
 
@@ -129,24 +128,23 @@ class PartialCompletionTests(unittest.TestCase):
 
 
 class SuppliedKoreanAnswerTests(unittest.TestCase):
-    run_hook = skill_evidence.StopHookSkillEvidenceTests.run_hook
 
     def test_literal_first_answer_without_a_control_block_is_not_a_submission(self):
-        result = self.run_hook(platform='codex', message=SUPPLIED_KOREAN_ANSWER, record_review=False)
+        result = skill_evidence.run_reviewed_stop(platform='codex', message=SUPPLIED_KOREAN_ANSWER, record_review=False)
         assert_stop_observation(self, result)
 
     def test_literal_answer_with_qualified_partial_evidence_accepts_retained_results(self):
-        result = self.run_hook(platform='codex', message=SUPPLIED_KOREAN_ANSWER + '\n\n' + SUPPLIED_PARTIAL_EVIDENCE)
+        result = skill_evidence.run_reviewed_stop(platform='codex', message=SUPPLIED_KOREAN_ANSWER + '\n\n' + SUPPLIED_PARTIAL_EVIDENCE)
         assert_stop_observation(self, result)
 
     def test_finalized_unresolved_response_points_to_partial_instead_of_prose_loop(self):
         finalized = SUPPLIED_PARTIAL_EVIDENCE.replace('[partial-check]', '[completion-check]')
-        result = self.run_hook(platform='codex', message=SUPPLIED_KOREAN_ANSWER + '\n\n' + finalized)
+        result = skill_evidence.run_reviewed_stop(platform='codex', message=SUPPLIED_KOREAN_ANSWER + '\n\n' + finalized)
         observed = assert_stop_observation(self, result,
             issue="unverified section to be 'none'", repair_target='completion_metadata')
         self.assertIn('use [partial-check]', observed['body_issue'])
         repaired = SUPPLIED_KOREAN_ANSWER + '\n\n' + SUPPLIED_PARTIAL_EVIDENCE
-        assert_stop_observation(self, self.run_hook(platform='codex', message=repaired))
+        assert_stop_observation(self, skill_evidence.run_reviewed_stop(platform='codex', message=repaired))
 
     def test_korean_negative_and_conditional_finished_status_remain_partial(self):
         for lead in ('모든 수정이 끝나지 않았습니다.', '모든 수정이 끝났을 때 다시 확인합니다.'):
@@ -157,23 +155,23 @@ class SuppliedKoreanAnswerTests(unittest.TestCase):
     def test_explicit_korean_all_repairs_finished_cannot_use_partial_evidence(self):
         text = '모든 수정이 끝났습니다.\n' + SUPPLIED_PARTIAL_EVIDENCE
         self.assertIsNone(validator.validate_completion_text(text, require_completion_check=True))
-        result = self.run_hook(platform='codex', message=text, review_verdict='unsupported')
+        result = skill_evidence.run_reviewed_stop(platform='codex', message=text, review_verdict='unsupported')
         assert_stop_observation(self, result, issue='response-unsupported:')
 
 
 
 class PartialRecoveryTests(unittest.TestCase):
-    run_hook = skill_evidence.StopHookSkillEvidenceTests.run_hook
 
     def test_partial_diagnostic_does_not_request_replacement_output(self):
-        payload = self.run_hook(platform='codex', message=PARTIAL_BODY, record_review=False)
+        payload = skill_evidence.run_reviewed_stop(platform='codex', message=PARTIAL_BODY, record_review=False)
         observed = assert_stop_observation(self, payload,
             issue='assessment-required:', repair_target='completion_metadata')
         self.assertNotIn('delivery-route:', observed['body_issue'])
-        self.assertNotIn('prior_answer_ref', observed)
+        self.assertNotIn('prior_answer_ref', payload)
+        self.assertNotIn('prior_answer_ref', payload['stop_notice'])
 
     def test_supported_partial_keeps_unresolved_business_conditions(self):
-        payload = self.run_hook(platform='codex', message=PARTIAL_BODY)
+        payload = skill_evidence.run_reviewed_stop(platform='codex', message=PARTIAL_BODY)
         assert_stop_observation(self, payload)
         self.assertEqual(validator.extract_partial_unverified_ids(PARTIAL_BODY), ['lint', 'console'])
         self.assertNotIn('response_text', payload)
@@ -181,19 +179,18 @@ class PartialRecoveryTests(unittest.TestCase):
 
 
 class PartialStopTests(unittest.TestCase):
-    run_hook = skill_evidence.StopHookSkillEvidenceTests.run_hook
 
     def test_codex_accepts_supported_partial_without_forcing_none(self):
-        assert_stop_observation(self, self.run_hook(platform='codex', message=PARTIAL))
+        assert_stop_observation(self, skill_evidence.run_reviewed_stop(platform='codex', message=PARTIAL))
 
     def test_claude_partial_uses_review_independently_of_skill_call(self):
-        assert_stop_observation(self, self.run_hook([user_role_row('Check it'), reply(PARTIAL)]))
-        assert_stop_observation(self, self.run_hook([user_role_row('Check it'), skill_call(), reply(PARTIAL)]))
+        assert_stop_observation(self, skill_evidence.run_reviewed_stop([user_role_row('Check it'), reply(PARTIAL)]))
+        assert_stop_observation(self, skill_evidence.run_reviewed_stop([user_role_row('Check it'), skill_call(), reply(PARTIAL)]))
 
     def test_skill_call_and_partial_marker_cannot_replace_response_review(self):
         body = PARTIAL_BODY.replace('targeted tests passed', 'checked the targeted behavior')
         assert_stop_observation(self,
-            self.run_hook([user_role_row('Check it'), skill_call(), reply(body)], record_review=False),
+            skill_evidence.run_reviewed_stop([user_role_row('Check it'), skill_call(), reply(body)], record_review=False),
             issue='assessment-required:', repair_target='completion_metadata')
 
 

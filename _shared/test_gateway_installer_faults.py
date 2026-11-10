@@ -102,7 +102,8 @@ if mode in ('config-write-error', 'recovery-write-error'):
             raise OSError('injected error after atomic replacement')
     gateway._write = write
 if mode == 'record-write-error':
-    def record(section):
+    def record(home, section):
+        print('injecting OSError at service record write', file=sys.stderr)
         raise OSError('injected record write failure')
     gateway._record = record
 if mode in ('readiness-error', 'candidate-stop-error', 'unowned-state-content'):
@@ -148,7 +149,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
     def write_record(self, patches=None):
         """The install record the installer's runtime publish would have written, under this process's lock."""
         lock = self.ghost / 'install.lock'
-        install_lock.acquire_lock(lock, owner='installer:test:codex:test')
+        generation = install_lock.acquire_lock(lock, owner='installer:test:codex:test')
         try:
             if patches is None:
                 entry = dict(kind='runtime', mode='copy', provider='core', source=str(ROOT / '_shared'),
@@ -160,7 +161,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
                                                         files=content_digest.tree(self.runtime / COMPANION))}}
             installed_payload.update(self.ghost, patches)
         finally:
-            install_lock.release_lock(lock)
+            install_lock.release_lock(lock, generation)
 
     def stop_private_processes(self):
         path = self.root / 'native.json'
@@ -223,50 +224,57 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE((self.codex / 'config.toml').stat().st_mode), original[self.codex / 'config.toml'][1])
 
     def selected_removal(self, names, *, remaining=True, fault=''):
-        """Run the installer's selected removal (`--uninstall --force <names>`) for codex against the
-        fixture runtime and the native-service simulator; return its exit code."""
-        from installer import addons, cli, hosts, lifecycle, selection, transaction
+        """Remove owned discovery copies while the gateway runs from its separate runtime."""
+        from installer import cli, hosts, lifecycle
         from installer.runner import InstallerExit
+        from installer_assets import write_ownership_marker
+        skills = self.home / '.agents/skills'
+        for name in [*names, *(['task-router'] if remaining else []), '_shared']:
+            target = skills / name
+            shutil.copytree(ROOT / name, target,
+                            ignore=shutil.ignore_patterns('__pycache__', 'test_*.py', '.pytest_cache'))
+            write_ownership_marker(target, platform='codex', asset_id=name,
+                source_repo=str(ROOT), source_commit='fixture', install_mode='copy')
         environment = dict(self.environment, FAULT_CASE=fault,
             PATH=self.environment['PATH'] + os.pathsep + os.environ.get('PATH', ''))
-        ctx = cli.Context(options=cli.Options(platform='codex'), platform='codex', skills_dir=self.runtime)
+        ctx = cli.Context(options=cli.Options(platform='codex'), platform='codex', skills_dir=skills)
+        lock = self.ghost / 'install.lock'
+        generation = install_lock.acquire_lock(lock, owner='installer:test:codex:selected-removal')
+        self.addCleanup(install_lock.release_lock, lock, generation)
         with mock.patch.dict(os.environ, environment, clear=True), \
                 mock.patch.object(gateway.sys, 'platform', 'darwin'), \
-                mock.patch.object(selection, 'expand_skill_targets',
-                    lambda name: [selection.Target(name, Path('fixture'), None)]), \
-                mock.patch.object(selection, 'validate_requested_skills', lambda names: None), \
-                mock.patch.object(selection, 'has_managed_installs', lambda skills_dir: remaining), \
-                mock.patch.object(addons, 'resume_pending_uninstalls', lambda ctx: None), \
-                mock.patch.object(transaction, 'migrate_record', lambda ctx: None), \
-                mock.patch.object(hosts, 'remove_codex_bootstrap_if_unused', lambda ctx, skills_dir: False), \
+                mock.patch.object(hosts, 'install_hooks', return_value=True), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             try:
                 return lifecycle.uninstall(ctx, ['--force', *names])
             except InstallerExit as stop:
                 return stop.code
 
-    def test_selected_skill_removal_guards_companion_before_deleting_it(self):
+    def test_selected_discovery_removal_preserves_independent_gateway_runtime(self):
         self.seed()
-        target = self.runtime / 'session-intent-analyzer'
-        independent = self.runtime / 'writing-plans'
-        independent.mkdir()
-        for fault, expected in [('stop-error', 3), ('', 0)]:
-            with self.subTest(fault=fault):
-                code = self.selected_removal(['writing-plans', 'session-intent-analyzer'], fault=fault)
-                self.assertEqual(code, expected)
-                self.assertEqual(target.exists(), bool(fault))
-                self.assertEqual(independent.exists(), bool(fault))
-                self.assertEqual(json.loads((self.root / 'native.json').read_text())['active'], bool(fault))
-                self.assertEqual(self.service() is not None, bool(fault))
+        runtime, native, service = self.runtime_files(), (self.root / 'native.json').read_bytes(), self.service()
+        code = self.selected_removal(['boundary-contract', 'session-intent-analyzer'], fault='stop-error')
+        self.assertEqual(code, 0)
+        skills = self.home / '.agents/skills'
+        self.assertFalse((skills / 'boundary-contract').exists())
+        self.assertFalse((skills / 'session-intent-analyzer').exists())
+        self.assertTrue((skills / 'task-router/SKILL.md').is_file())
+        self.assertTrue((skills / '_shared/context_gateway.py').is_file())
+        self.assertEqual(self.runtime_files(), runtime)
+        self.assertEqual((self.root / 'native.json').read_bytes(), native)
+        self.assertEqual(self.service(), service)
 
-    def test_unconfirmed_shared_cleanup_is_not_reported_as_success(self):
+    def test_last_discovery_removal_preserves_independent_gateway_runtime(self):
         self.seed()
-        independent = self.runtime / 'writing-plans'
-        independent.mkdir()
-        code = self.selected_removal(['writing-plans'], remaining=False, fault='stop-error')
-        self.assertEqual(code, 3)
-        self.assertTrue(self.shared.is_dir())
-        self.assertTrue(json.loads((self.root / 'native.json').read_text())['active'])
+        runtime, native, service = self.runtime_files(), (self.root / 'native.json').read_bytes(), self.service()
+        code = self.selected_removal(['session-intent-analyzer'], remaining=False, fault='stop-error')
+        self.assertEqual(code, 0)
+        skills = self.home / '.agents/skills'
+        self.assertFalse((skills / 'session-intent-analyzer').exists())
+        self.assertFalse((skills / '_shared').exists())
+        self.assertEqual(self.runtime_files(), runtime)
+        self.assertEqual((self.root / 'native.json').read_bytes(), native)
+        self.assertEqual(self.service(), service)
 
     def test_dry_run_prints_a_plan_and_exits_without_applying_it(self):
         original = (self.codex / 'config.toml').read_bytes()
@@ -327,6 +335,8 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
                 original = self.snapshot_owned()
                 result, body = self.run_cli(fault=fault)
                 self.assertEqual((result.returncode, body['error_code']), (4, 'GATEWAY_OPERATION_RESTORED'), result.stderr)
+                if fault == 'record-write-error':
+                    self.assertIn('injecting OSError at service record write', result.stderr)
                 self.assertEqual(self.snapshot_owned(), original)
                 self.assertTrue(json.loads(native_path.read_text())['active'])
 

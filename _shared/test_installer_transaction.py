@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import sys
 import tempfile
 import unittest
@@ -21,7 +22,7 @@ import gateway_testing  # noqa: E402
 import install_transaction  # noqa: E402
 import installed_payload  # noqa: E402
 from context_gateway_model import LABEL  # noqa: E402
-from installer import gateway_participant, report, transaction  # noqa: E402
+from installer import gateway_participant, report, selection, transaction  # noqa: E402
 from installer.runner import ToolResult  # noqa: E402
 from installer.selection import Target  # noqa: E402
 from installer.source import HookPathChange, SourceInfo  # noqa: E402
@@ -280,48 +281,32 @@ class PlacementTests(TransactionCase):
         self.assertEqual(len(self.requests), 3)
 
     def test_detect_install_mode_and_removal(self):
-        # install.sh:411-426; targets.sh:284-294
-        link = self.home / "link"
+        ctx = self.context("claude")
+        link = ctx.skills_dir / "alpha"
         link.symlink_to(self.source / "alpha")
-        copy = self.home / "copy"
+        copy = ctx.skills_dir / "copy"
         copy.mkdir()
         self.assertEqual(transaction.detect_install_mode(link, False), "symlink")
         self.assertEqual(transaction.detect_install_mode(copy, True), "copy")
         self.assertEqual(transaction.detect_install_mode(copy, False), "copy-fallback")
         self.assertEqual(transaction.detect_install_mode(self.home / "none", False), "missing")
-        ok, out = self.captured(transaction.remove_installed_target, "alpha", link)
-        self.assertTrue(ok)
+        result, out = self.captured(transaction.remove_installed_target, ctx, "alpha", link,
+                                    source_path=self.source / "alpha")
+        self.assertEqual(result["action"], "removed")
         self.assertFalse(link.is_symlink())
         self.assertTrue((self.source / "alpha" / "SKILL.md").is_file())
         self.assertIn("[OK] alpha removed", out)
-        self.assertTrue(transaction.remove_installed_target("copy", copy))
-        self.assertFalse(copy.exists())
-        self.assertFalse(transaction.remove_installed_target("none", self.home / "none"))
+        self.assertEqual(transaction.remove_installed_target(ctx, "copy", copy)["action"], "manual-review")
+        self.assertTrue(copy.exists())
+        self.assertEqual(transaction.remove_installed_target(ctx, "none", ctx.skills_dir / "none")["action"], "missing")
 
-    def test_gateway_guard_and_shared_cleanup(self):
-        # targets.sh:275-282, 322-338
+    def test_gateway_guard_uses_exact_roots_and_empty_set_is_a_noop(self):
         ctx = self.context("claude")
         self.assertEqual(transaction.guard_gateway_removal(ctx, []), 0)
         with mock.patch("installer.gateway_participant.guard", return_value=0) as guard:
             self.assertEqual(transaction.guard_gateway_removal(ctx, [self.home / "a", self.home / "b"]), 0)
         guard.assert_called_once_with(self.ghost, [self.home / "a", self.home / "b"])
         self.assertEqual(self.runner.calls, [])
-        shared = ctx.skills_dir / "_shared"
-        shared.symlink_to(self.source / "_shared")
-        (ctx.skills_dir / "task-router").mkdir()
-        self.assertEqual(transaction.cleanup_shared_if_unused(ctx, ctx.skills_dir), 1)
-        self.assertTrue(shared.is_symlink())
-        (ctx.skills_dir / "task-router").rmdir()
-        with mock.patch("installer.gateway_participant.guard", return_value=2):
-            self.assertEqual(transaction.cleanup_shared_if_unused(ctx, ctx.skills_dir), 2)
-        self.assertTrue(shared.is_symlink())
-        with mock.patch("installer.gateway_participant.guard", return_value=0) as guard:
-            rc, out = self.captured(transaction.cleanup_shared_if_unused, ctx, ctx.skills_dir)
-        guard.assert_called_once_with(self.ghost, [shared])
-        self.assertEqual(rc, 0)
-        self.assertFalse(shared.is_symlink())
-        self.assertIn("[OK] _shared removed", out)
-        self.assertEqual(transaction.cleanup_shared_if_unused(ctx, ctx.skills_dir), 1)
 
 
 def unrecorded_launchd(effects, platform="darwin"):
@@ -535,6 +520,75 @@ class RecordMigrationTests(TransactionCase):
 
 
 class RecordTests(TransactionCase):
+    def test_postflight_keeps_initial_support_expectation_when_source_disappears(self):
+        ctx = self.context("claude")
+        checkout = Path(__file__).resolve().parents[1]
+        verifier = self.source / "merge-companion" / "scripts"
+        verifier.mkdir(parents=True)
+        for name in ("install_verifier.py", "file_walker.py"):
+            shutil.copy2(checkout / "merge-companion" / "scripts" / name, verifier / name)
+        collected = selection.collect_targets(ctx, ["alpha"])
+        self.assertEqual(collected.support_target_total, 1)
+        for name in ("_shared", "alpha"):
+            shutil.copytree(self.source / name, ctx.skills_dir / name)
+        shutil.rmtree(self.source / "_shared")
+        with mock.patch.dict(os.environ, {"PYTHONPATH": str(checkout / "_shared")}):
+            self.assertFalse(transaction.verify_after_copy(ctx, ctx.skills_dir, False, collected))
+        state = json.loads((self.ghost / "install-state" / "claude.json").read_text())
+        self.assertEqual([(row["target_name"], row["reason"]) for row in state["failures"]],
+                         [("_shared", "missing-source")])
+
+    def test_record_writers_keep_selected_family_members_after_source_changes(self):
+        ctx = self.context("claude")
+        collected = selection.collect_targets(ctx, ["fam"])
+        self.assertEqual([target.name for target in collected.all_targets], ["one", "two"])
+        shutil.rmtree(self.source / "fam" / "one")
+        (self.source / "fam" / "three").mkdir()
+        (self.source / "fam" / "three" / "SKILL.md").write_text("new source member")
+        with self.runner.patch():
+            self.assertTrue(transaction.write_ownership_markers(ctx, ctx.skills_dir, False, collected))
+            self.assertTrue(transaction.write_install_state_manifest(ctx, ctx.skills_dir, False, collected, None))
+        marker_args = self.runner.tool_calls("installer_assets_cli.py")[0]
+        marker_names = [marker_args[index + 1] for index, value in enumerate(marker_args) if value == "--target"]
+        state_args = self.runner.tool_calls("install_state_writer.py")[0]
+        self.assertEqual([name for name in marker_names if name != "_shared"], ["one", "two"])
+        self.assertEqual(state_args[6::4], ["_shared", "one", "two"])
+
+    def test_postflight_keeps_a_selected_source_that_disappears(self):
+        ctx = self.context("claude")
+        checkout = Path(__file__).resolve().parents[1]
+        verifier = self.source / "merge-companion" / "scripts"
+        verifier.mkdir(parents=True)
+        for name in ("install_verifier.py", "file_walker.py"):
+            shutil.copy2(checkout / "merge-companion" / "scripts" / name, verifier / name)
+        (ctx.skills_dir / "_shared").symlink_to(self.source / "_shared")
+        collected = selection.collect_targets(ctx, ["alpha"])
+        self.assertEqual([target.name for target in collected.all_targets], ["alpha"])
+        shutil.copytree(self.source / "alpha", ctx.skills_dir / "alpha")
+        shutil.rmtree(self.source / "alpha")
+        with mock.patch.dict(os.environ, {"PYTHONPATH": str(checkout / "_shared")}):
+            self.assertFalse(transaction.verify_after_copy(ctx, ctx.skills_dir, False, collected))
+        state = json.loads((self.ghost / "install-state" / "claude.json").read_text())
+        self.assertEqual(state["status"], "partial_failure")
+        self.assertEqual([(row["target_name"], row["reason"]) for row in state["failures"]],
+                         [("alpha", "missing-source")])
+
+    def test_postflight_calls_the_real_verifier_for_a_disappeared_target(self):
+        ctx = self.context("claude")
+        checkout = Path(__file__).resolve().parents[1]
+        verifier = self.source / "merge-companion" / "scripts"
+        verifier.mkdir(parents=True)
+        for name in ("install_verifier.py", "file_walker.py"):
+            shutil.copy2(checkout / "merge-companion" / "scripts" / name, verifier / name)
+        (ctx.skills_dir / "_shared").symlink_to(self.source / "_shared")
+        collected = selection.collect_targets(ctx, ["alpha"])
+        with mock.patch.dict(os.environ, {"PYTHONPATH": str(checkout / "_shared")}):
+            self.assertFalse(transaction.verify_after_copy(ctx, ctx.skills_dir, False, collected))
+        state = json.loads((self.ghost / "install-state" / "claude.json").read_text())
+        self.assertEqual(state["status"], "partial_failure")
+        self.assertEqual([(row["target_name"], row["reason"]) for row in state["failures"]],
+                         [("alpha", "missing-target")])
+
     def setUp(self):
         super().setUp()
         self.info = SourceInfo(root=self.source, branch="main", head="abc123def", dirty="clean")
@@ -548,11 +602,12 @@ class RecordTests(TransactionCase):
     def test_verify_after_copy(self):
         # install.sh:428-470
         ctx = self.context("claude")
-        ctx.addon_targets = [Target("noop", self.home / "addon" / "noop", "noop")]
+        with mock.patch("installer.addons.collect_addon_targets", return_value=[Target("noop", self.home / "addon" / "noop", "noop")]):
+            collected = selection.collect_targets(ctx, ["alpha", "fam"])
         (ctx.skills_dir / "_shared").symlink_to(self.source / "_shared")
         (ctx.skills_dir / "alpha").mkdir()
         with self.runner.patch():
-            self.assertTrue(transaction.verify_after_copy(ctx, ctx.skills_dir, False, ["alpha", "fam"]))
+            self.assertTrue(transaction.verify_after_copy(ctx, ctx.skills_dir, False, collected))
         args = self.runner.tool_calls("install_verifier.py")[0]
         self.assertEqual(args[:4], ["--platform", "claude", "--state-root", str(self.ghost / "install-state")])
         self.assertEqual(args[4:9], ["--target", "_shared", str(self.source / "_shared"), str(ctx.skills_dir / "_shared"), "symlink"])
@@ -562,18 +617,19 @@ class RecordTests(TransactionCase):
         failing = FakeRunner()
         failing.respond_to("install_verifier.py", ToolResult(1))
         with failing.patch():
-            ok, out = self.captured(transaction.verify_after_copy, ctx, ctx.skills_dir, False, ["alpha"])
+            ok, out = self.captured(transaction.verify_after_copy, ctx, ctx.skills_dir, False, collected)
         self.assertFalse(ok)
         self.assertIn("[ERROR] Post-install source/destination verification failed; aborting before snapshot", out)
 
     def test_write_ownership_markers(self):
         # install.sh:487-536
         ctx = self.context("codex")
-        ctx.addon_targets = [Target("noop", self.home / "addon" / "noop", "noop")]
+        with mock.patch("installer.addons.collect_addon_targets", return_value=[Target("noop", self.home / "addon" / "noop", "noop")]):
+            collected = selection.collect_targets(ctx, ["alpha"])
         (ctx.skills_dir / "_shared").mkdir()
         (ctx.skills_dir / "noop").mkdir()
         with self.runner.patch():
-            self.assertTrue(transaction.write_ownership_markers(ctx, ctx.skills_dir, True, ["alpha"]))
+            self.assertTrue(transaction.write_ownership_markers(ctx, ctx.skills_dir, True, collected))
         args = self.runner.tool_calls("installer_assets_cli.py")[0]
         self.assertEqual(args[:6], ["--platform", "codex", "--source-repo", str(self.source), "--source-commit", "abc123def"])
         self.assertEqual(args[6:10], ["--target", "_shared", str(ctx.skills_dir / "_shared"), "copy"])
@@ -582,7 +638,7 @@ class RecordTests(TransactionCase):
         failing = FakeRunner()
         failing.respond_to("installer_assets_cli.py", ToolResult(1))
         with failing.patch():
-            ok, out = self.captured(transaction.write_ownership_markers, ctx, ctx.skills_dir, True, ["alpha"])
+            ok, out = self.captured(transaction.write_ownership_markers, ctx, ctx.skills_dir, True, collected)
         self.assertFalse(ok)
         self.assertIn("[ERROR] Ownership marker write failed; aborting before snapshot", out)
 
@@ -611,11 +667,12 @@ class RecordTests(TransactionCase):
     def test_write_install_state_manifest(self):
         # install.sh:571-610
         ctx = self.context("claude")
+        collected = selection.collect_targets(ctx, ["alpha"])
         (ctx.skills_dir / "_shared").symlink_to(self.source / "_shared")
         hooks = (self.source / "hooks").as_posix()
         change = HookPathChange(changed=True, recorded=True, before_present=True, before="old-hooks", after=hooks)
         with self.runner.patch():
-            ok, out = self.captured(transaction.write_install_state_manifest, ctx, ctx.skills_dir, False, ["alpha"], change)
+            ok, out = self.captured(transaction.write_install_state_manifest, ctx, ctx.skills_dir, False, collected, change)
         self.assertTrue(ok)
         state = self.ghost / "install-state" / "claude.json"
         self.assertIn(f"[INFO] Install-state manifest: {state}", out)
@@ -634,7 +691,7 @@ class RecordTests(TransactionCase):
                                  applied_at="2026-10-01T00:00:00Z")
         again = FakeRunner()
         with again.patch():
-            transaction.write_install_state_manifest(ctx, ctx.skills_dir, False, [], carried)
+            transaction.write_install_state_manifest(ctx, ctx.skills_dir, False, collected, carried)
         _, _, kwargs = next(c for c in again.calls if c[0].endswith("install_state_writer.py"))
         self.assertEqual(kwargs["env"], {"GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED": "1",
                                          "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT": "0",
@@ -644,13 +701,13 @@ class RecordTests(TransactionCase):
         for unknown in (None, HookPathChange(changed=False, recorded=False, after=hooks)):
             plain = FakeRunner()
             with plain.patch():
-                transaction.write_install_state_manifest(ctx, ctx.skills_dir, False, [], unknown)
+                transaction.write_install_state_manifest(ctx, ctx.skills_dir, False, collected, unknown)
             _, _, kwargs = next(c for c in plain.calls if c[0].endswith("install_state_writer.py"))
             self.assertEqual(kwargs["env"]["GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED"], "0")
         failing = FakeRunner()
         failing.respond_to("install_state_writer.py", ToolResult(1))
         with failing.patch():
-            ok, out = self.captured(transaction.write_install_state_manifest, ctx, ctx.skills_dir, False, [], None)
+            ok, out = self.captured(transaction.write_install_state_manifest, ctx, ctx.skills_dir, False, collected, None)
         self.assertFalse(ok)
         self.assertIn(f"[ERROR] Install-state manifest write failed; aborting install: {state}", out)
 

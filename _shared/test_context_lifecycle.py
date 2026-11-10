@@ -14,14 +14,14 @@ from contextlib import redirect_stdout
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_response_route import ResponseRouteTests
+import test_response_route
 import context_lifecycle as lifecycle
 import test_claude_context_intake as intake_fixtures
 
 
 class ContextLifecycleTests(unittest.TestCase):
     def setUp(self):
-        self.fixture = ResponseRouteTests()
+        self.fixture = test_response_route.ResponseRouteTests()
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
         f = self.fixture
@@ -57,6 +57,64 @@ class ContextLifecycleTests(unittest.TestCase):
     def select(self, request=None):
         result = lifecycle.select_request(request or self.request, self.fixture.root, self.home)
         return result.request, list(result.observations)
+
+    def test_codex_mixed_input_binds_text_and_preserves_the_complete_native_message(self):
+        self.first_prompt['content'] = [dict(type='input_text', text='implement '),
+            dict(type='input_image', image_url='data:image/png;base64,original'),
+            dict(type='input_text', text='first')]
+        self.write_rows()
+        self.record()
+        result = lifecycle.select_request(self.request, self.fixture.root, self.home)
+        self.assertEqual(result.state, 'selected')
+        self.assertEqual(result.request['input'][0], self.first_prompt)
+        changed = copy.deepcopy(self.request)
+        changed['input'][0]['content'][1]['image_url'] = 'data:image/png;base64,changed'
+        result = lifecycle.select_request(changed, self.fixture.root, self.home)
+        self.assertEqual(result.state, 'preserved')
+        self.assertEqual(result.request, changed)
+
+
+    def test_codex_recorded_input_does_not_require_user_text_metadata(self):
+        self.first_prompt['internal_chat_message_metadata_passthrough'] = dict(content_item_kinds=['environment.context'])
+        self.write_rows()
+        self.record()
+        result = lifecycle.select_request(self.request, self.fixture.root, self.home)
+        self.assertEqual(result.state, 'selected')
+
+    def test_codex_fork_header_keeps_child_input_and_inherited_selection(self):
+        import response_context_use
+        self.rows[0]['payload'].update(forked_from_id='parent', parent_thread_id='parent')
+        self.rows.insert(1, dict(type='session_meta', payload=dict(id='parent')))
+        self.selection['record'] += 1
+        self.write_rows()
+        self.record()
+        native = response_context_use._native(self.log, 'codex', 'current')
+        self.assertEqual(native.user_role_prompts, (3,))
+        self.assertEqual(lifecycle.select_request(self.request, self.fixture.root, self.home).state, 'selected')
+
+    def test_codex_input_before_later_host_context_keeps_its_full_wire_message(self):
+        self.first_prompt['internal_chat_message_metadata_passthrough'] = dict(content_item_kinds=['user.text'])
+        context = dict(type='message', role='user', content=[dict(type='input_text', text='environment context')],
+            internal_chat_message_metadata_passthrough=dict(content_item_kinds=['environments.environment_context']))
+        self.rows.insert(2, dict(type='response_item', payload=context))
+        self.selection['record'] += 1
+        self.write_rows()
+        self.request['input'] = [lifecycle._item(self.first_prompt), lifecycle._item(context), self.call, self.output]
+        self.record()
+        result = lifecycle.select_request(self.request, self.fixture.root, self.home)
+        self.assertEqual(result.state, 'selected')
+        self.assertEqual(result.request['input'][:2], self.request['input'][:2])
+        unknown = copy.deepcopy(self.request)
+        unknown['input'].append(dict(type='message', role='user', content=[dict(type='input_text', text='new unrecorded prompt')]))
+        self.assertEqual(lifecycle.select_request(unknown, self.fixture.root, self.home).state, 'preserved')
+
+    def test_unknown_platform_preserves_request_without_applying_codex_selection(self):
+        self.record()
+        result = lifecycle.select_request(self.request, self.fixture.root, self.home,
+            platform='unknown-host', session_id='current')
+        self.assertEqual((result.state, result.reason), ('preserved', 'platform-unclassified'))
+        self.assertEqual(result.request, self.request)
+        self.assertEqual(result.observations, ())
 
     def test_storage_failure_is_unavailable_instead_of_original_success(self):
         self.record()
@@ -102,9 +160,9 @@ class ContextLifecycleTests(unittest.TestCase):
 
     def test_use_storage_failure_stops_an_otherwise_valid_manual_selection(self):
         self.record()
-        adapter = types.SimpleNamespace(select_uses=lambda request, *a, **k:
-            lifecycle.RequestSelection(request, 'unavailable', 'use-storage-unavailable'))
-        with patch.dict(sys.modules, {'response_context_use':adapter}):
+        import response_context_use
+        with patch.object(response_context_use, 'select_uses', side_effect=lambda request, *a, **k:
+                lifecycle.RequestSelection(request, 'unavailable', 'use-storage-unavailable')):
             result = lifecycle.select_request(self.request, self.fixture.root, self.home)
         self.assertEqual(result.state, 'unavailable')
         self.assertEqual(result.observations, ())
@@ -351,6 +409,8 @@ class ContextLifecycleTests(unittest.TestCase):
                 context_use_judgments=judgments, context_source=self.source)
         self.assertEqual(received, [(f.event, judgments)])
         self.assertEqual(result['context_use_judgments']['status'], 'recorded')
+        with closing(sqlite3.connect(f.root / 'ghost-state.sqlite3')) as connection:
+            self.assertEqual(connection.execute('SELECT value FROM integrated_use_marker').fetchall(), [('bound',)])
 
     def test_rejected_post_use_judgment_rolls_back_the_work_action(self):
         f = self.fixture
@@ -471,6 +531,16 @@ class ContextLifecycleTests(unittest.TestCase):
             with self.subTest(request=changed):
                 self.assertEqual(self.select(changed), (changed, []))
 
+    def test_codex_exchange_pairs_with_its_preceding_call_and_result_species(self):
+        self.rows.extend([
+            dict(type='response_item', payload=copy.deepcopy(self.call)),
+            dict(type='response_item', payload=dict(type='function_call_output',
+                call_id=self.call['call_id'], output='a different result species'))])
+        self.write_rows()
+        receipt = self.record([dict(self.selection, kind='exchange')])
+        self.assertEqual(receipt['status'], 'recorded')
+
+
     def test_unknown_blocks_and_ambiguous_native_inputs_cannot_be_selected(self):
         with self.assertRaises(ValueError):
             self.record([dict(self.selection, block_index=9)])
@@ -511,7 +581,7 @@ class ContextLifecycleTests(unittest.TestCase):
 
     def test_consumption_requires_native_input_but_no_work_route(self):
         import test_response_route as fixtures
-        fresh = ResponseRouteTests()
+        fresh = test_response_route.ResponseRouteTests()
         fresh.setUp()
         self.addCleanup(fresh.doCleanups)
         fresh.event = fresh.intake()
@@ -537,7 +607,7 @@ class ContextLifecycleTests(unittest.TestCase):
 class ClaudeContextLifecycleTests(unittest.TestCase):
     """Existing material uses native coordinates without pre-binding every read."""
     def setUp(self):
-        self.fixture = ResponseRouteTests()
+        self.fixture = test_response_route.ResponseRouteTests()
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
         self.fixture.coords['platform'] = 'claude'
@@ -619,6 +689,96 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
         request = copy.deepcopy(request); request.pop('thinking', None)
         return lifecycle.select_request(request, self.fixture.root, self.home, platform='claude',
             session_id='current', native_betas=('context-management-2025-06-27',))
+
+    def test_queued_human_carries_forward_the_choice_without_losing_image_blocks(self):
+        import test_native_transcript as shapes
+        import test_response_route as fixture_module
+        self.record()
+        request = self.request()
+        for make_row in (shapes.queued_human, shapes.queued_human_with_image):
+            queued = make_row('new input ' + make_row.__name__)
+            queued['sessionId'] = 'current'
+            prompt = queued['attachment']['prompt']
+            text = prompt if isinstance(prompt, str) else prompt[-1]['text']
+            fixture_module.ledger.stage_native_input(**self.fixture.coords, raw_input=text,
+                prompt_id=None, transcript_path=str(self.log))
+            self.rows.append(queued)
+            with self.log.open('a') as stream:
+                stream.write(json.dumps(queued) + '\n')
+            state = fixture_module.ledger.reconcile_native_inputs(**self.fixture.coords)
+            request['messages'].append(dict(role='user', content=copy.deepcopy(prompt)))
+            result = self.select(request)
+            self.assertEqual(result.state, 'selected')
+            self.assertEqual(result.observations[0]['current_input_event_id'], state['latest_input_event_id'])
+            self.assertEqual(result.request['messages'][-1], request['messages'][-1])
+
+
+    def test_literal_notification_text_remains_a_human_input_after_native_binding(self):
+        self.record()
+        text = '<task-notification>the user typed this</task-notification>'
+        core = self.stage_next_input(text)
+        core.reconcile_native_inputs(**self.fixture.coords)
+        self.rows.append(self.row('user', 'notification without markup', promptSource='system',
+            turnOrigin='task_notification', origin={'kind':'task-notification','producer':'session-task'}))
+        self.write_rows()
+        result = self.select()
+        self.assertEqual(result.state, 'selected')
+        self.assertEqual(result.request['messages'][-2:], self.request()['messages'][-2:])
+
+
+    def test_queued_notifications_preserve_current_input_and_apply_existing_choice(self):
+        import test_native_transcript as shapes
+        import test_response_route as fixture_module
+        self.record()
+        request = self.request()
+        queued_task = shapes.queued(dict(type='queued_command', commandMode='task-notification',
+            prompt='<task-notification>queued result</task-notification>',
+            origin=dict(kind='task-notification', producer='session-task')))
+        for row in (queued_task, shapes.queued_peer(), shapes.queued_app_event()):
+            with self.subTest(origin=row['attachment'].get('origin', 'app-event')):
+                row['sessionId'] = 'current'
+                prompt = row['attachment']['prompt']
+                fixture_module.ledger.stage_native_input(**self.fixture.coords, raw_input=prompt,
+                    prompt_id=None, transcript_path=str(self.log))
+                self.rows.append(row)
+                with self.log.open('a') as stream:
+                    stream.write(json.dumps(row) + '\n')
+                state = fixture_module.ledger.reconcile_native_inputs(**self.fixture.coords)
+                request['messages'].append(dict(role='user', content=prompt))
+                result = self.select(request)
+                self.assertEqual(state['latest_input_event_id'], self.event)
+                self.assertEqual(result.state, 'selected')
+                self.assertEqual(result.observations[0]['current_input_event_id'], self.event)
+                self.assertEqual(result.request['messages'][-1], request['messages'][-1])
+        row['sessionId'] = 'foreign'
+        self.write_rows()
+        rejected = self.select(request)
+        self.assertEqual(rejected.state, 'preserved')
+        self.assertEqual(rejected.request, request)
+
+
+    def test_same_text_notification_cannot_substitute_for_missing_current_wire_input(self):
+        self.record()
+        request = self.request()
+        notification = self.row('user', 'continue actual work', promptSource='system',
+            turnOrigin='task_notification', origin={'kind':'task-notification','producer':'session-task'})
+        self.rows.append(notification)
+        self.write_rows()
+        request['messages'].append(copy.deepcopy(notification['message']))
+        self.assertEqual(self.select(request).state, 'preserved')
+        del request['messages'][4]
+        result = self.select(request)
+        self.assertEqual(result.state, 'preserved')
+        self.assertEqual(result.request, request)
+
+
+    def test_native_replacement_rejects_a_carrier_replayed_across_the_current_input(self):
+        self.append_publication_call()
+        self.rows[1]['message']['content'].append(copy.deepcopy(self.rows[-1]['message']['content'][0]))
+        self.write_rows()
+        with self.assertRaises(lifecycle.ContextSelectionRejected):
+            self.project()
+
 
     def test_native_replacement_publication_reaches_signed_request_before_source_clearing(self):
         self.rows[1]['message']['content'].insert(0, self.thinking)

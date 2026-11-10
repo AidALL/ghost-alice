@@ -61,9 +61,8 @@ class Context:
     options: Options
     platform: str = "claude"
     skills_dir: Path | None = None
-    addon_sources: list[str] = field(default_factory=list)
+    addon_sources: list[str] = field(default_factory=list)  # Effective install sources; Options retains the raw request.
     addon_sources_prepared: bool = False
-    addon_targets: list = field(default_factory=list)
     visibility: str = "dynamic"
     hook_change: object | None = None
     record_source: dict | None = None
@@ -334,7 +333,8 @@ def print_help() -> int:
 def build_context(options: Options) -> Context:
     """Platform, skills dir, prepared addon sources and the effective visibility for one command."""
     return Context(options=options, platform=options.platform,
-                   skills_dir=locations.skills_dir(options.platform), addon_sources=list(options.addon_sources),
+                   skills_dir=locations.skills_dir(options.platform),
+                   addon_sources=[] if options.addon_skip else list(options.addon_sources),
                    visibility=config.resolve_effective_visibility(options.visibility))
 
 
@@ -354,7 +354,7 @@ def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool
     current_links: list[tuple[selection.Target, Path, str]] = []
     installed = skipped = 0
     if copy_only:
-        if shared_src.is_dir():
+        if collected.support_target_total:
             if shared_dest.exists() or shared_dest.is_symlink():
                 counts.updated += 1
                 status = "updated"
@@ -363,7 +363,7 @@ def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool
                 counts.installed += 1
                 status = "new"
             batch.add(shared_src, shared_dest, "_shared", "support", status)
-    elif shared_src.is_dir():
+    elif collected.support_target_total:
         if shared_dest.is_symlink() and os.readlink(shared_dest) == str(shared_src):
             counts.skipped += 1
             status = "current"
@@ -453,10 +453,10 @@ def run_install(ctx: Context) -> int:
     # discovery path first, so that the encoding guard does not scan their content.
     if not report.run_logged(selection.cleanup_deprecated_installed_skills, ctx, skills_dir):
         raise InstallerExit(1)
-    if not report.run_logged(preservation.encoding_guard, ctx, skills):
+    if not report.run_logged(preservation.encoding_guard, ctx, collected):
         report.error(f"encoding guard failed; invalid-utf8 or semantic asset details: {report.state().log_file}")
         raise InstallerExit(1)
-    if not report.run_logged(preservation.preflight, ctx, skills):
+    if not report.run_logged(preservation.preflight, ctx, collected):
         raise InstallerExit(1)
     report.run_logged(addons.resume_pending_uninstalls, ctx)
     selection.check_addon_collisions(ctx)
@@ -504,16 +504,16 @@ def run_install(ctx: Context) -> int:
     if report.run_logged(hosts.sync_commands, ctx, "sync", ctx.platform) != 0:
         report.warn("Commands sync failed (continuing)")
     # Records
-    if not report.run_logged(transaction.verify_after_copy, ctx, skills_dir, copy_only, skills):
+    if not report.run_logged(transaction.verify_after_copy, ctx, skills_dir, copy_only, collected):
         raise InstallerExit(1)
-    if not report.run_logged(transaction.write_ownership_markers, ctx, skills_dir, copy_only, skills):
+    if not report.run_logged(transaction.write_ownership_markers, ctx, skills_dir, copy_only, collected):
         raise InstallerExit(1)
     if not report.run_logged(transaction.snapshot_after_install, ctx):
         raise InstallerExit(1)
     report.run_logged(addons.migrate_state_once, ctx)
     if not report.run_logged(addons.write_sidecars, ctx, skills_dir):
         raise InstallerExit(1)
-    if not report.run_logged(transaction.write_install_state_manifest, ctx, skills_dir, copy_only, skills, ctx.hook_change):
+    if not report.run_logged(transaction.write_install_state_manifest, ctx, skills_dir, copy_only, collected, ctx.hook_change):
         raise InstallerExit(1)
     # Result
     report.write_event(ctx.platform, collected.total_target_count, counts.skipped, counts.updated, counts.installed)
@@ -567,13 +567,13 @@ def run_command(command: Command, ctx: Context) -> int:
         command.before_lock(ctx)
     if command.lock is None:
         return command.run(ctx)
-    lock_path = lock.acquire(command.lock, ctx.platform)
+    lock_handle = lock.acquire(command.lock, ctx.platform)
     try:
         if command.checks_source:
             source.recheck_install_source(ctx, can_adopt=command.adopts_source)
         return command.run(ctx)
     finally:
-        lock.release(lock_path)
+        lock.release(lock_handle)
 
 
 def dispatch(options: Options) -> int:
