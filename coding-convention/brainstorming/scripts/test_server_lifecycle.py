@@ -10,6 +10,7 @@ import signal
 import socket
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -103,6 +104,18 @@ class CompanionLifecycleTests(unittest.TestCase):
         with self.assertRaises(OSError):
             socket.create_connection((info["host"], info["port"]), timeout=0.2)
 
+    def assert_node_process(self, pid):
+        if sys.platform == "linux":
+            # Linux comm is a mutable thread name, not the executable path.
+            expected = Path(subprocess.check_output(
+                ["node", "-p", "process.execPath"], cwd=SCRIPTS, env=self.env, text=True,
+            ).strip()).resolve(strict=True)
+            executable = Path(f"/proc/{pid}/exe").resolve(strict=True)
+            self.assertEqual(executable, expected, f"PID marker points at {executable}")
+        else:
+            command = subprocess.check_output(["ps", "-p", str(pid), "-o", "comm="], text=True).strip()
+            self.assertIn("node", Path(command).name.lower(), f"PID marker points at {command}")
+
     def stop(self, session):
         result = subprocess.run(["bash", str(SCRIPTS / "stop-server.sh"), str(session)],
                                 env=self.env, cwd=self.root, capture_output=True,
@@ -150,9 +163,8 @@ class CompanionLifecycleTests(unittest.TestCase):
         info = self.session_info()
         session = Path(info["state_dir"]).parent
         pid = int((session / "state/server.pid").read_text())
-        command = subprocess.check_output(["ps", "-p", str(pid), "-o", "comm="], text=True).strip()
         self.assertEqual(pid, process.pid)
-        self.assertIn("node", Path(command).name.lower(), f"PID marker points at {command}")
+        self.assert_node_process(pid)
         self.connect(info).close()
         mockup = session / "content/mockup.html"
         mockup.write_text("<h1>Preserve me</h1>")
@@ -177,8 +189,7 @@ class CompanionLifecycleTests(unittest.TestCase):
         self.assertEqual(launcher.wait(timeout=4), 0)
         session = Path(info["state_dir"]).parent
         pid = int((session / "state/server.pid").read_text())
-        command = subprocess.check_output(["ps", "-p", str(pid), "-o", "comm="], text=True).strip()
-        self.assertIn("node", Path(command).name.lower())
+        self.assert_node_process(pid)
         self.connect(info).close()
         result = self.stop(session)
         self.assertEqual(result.returncode, 0)
