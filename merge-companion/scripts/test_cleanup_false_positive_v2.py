@@ -5,11 +5,15 @@ Dependencies: Python 3.11+ standard library + local merge-companion/_shared modu
 
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import cleanup_false_positive_legacy as cleanup_module
 from cleanup_false_positive_legacy import cleanup_false_positive_legacy
-from manifest_io import read_manifest, write_manifest
+import file_lock
+from manifest_io import mark_decided, read_manifest, write_manifest
 
 
 class TestUnmanagedRootCleanup(unittest.TestCase):
@@ -85,6 +89,57 @@ class TestUnmanagedRootCleanup(unittest.TestCase):
         self.assertEqual(summary["removed_entries"], 0)
         self.assertEqual(len(read_manifest(self.manifest)["entries"]), 1)
         self.assertTrue((self.pending / "synced-open.bak").exists())
+
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_cleanup_preserves_concurrent_decision(self):
+        write_manifest(self.manifest, {"entries": [
+            self.entry("unmanaged", "my-notes/SKILL.md"),
+            self.entry("retained", "task-router/SKILL.md"),
+        ]})
+        observed, release, decision_done = threading.Event(), threading.Event(), threading.Event()
+        errors = []
+        real_read = cleanup_module.read_manifest
+
+        def pause_after_read(path):
+            data = real_read(path)
+            observed.set()
+            if not release.wait(5):
+                raise TimeoutError("cleanup reader was not released")
+            return data
+
+        def cleanup():
+            try:
+                self.cleanup(apply=True)
+            except Exception as error:
+                errors.append(error)
+
+        def decide():
+            try:
+                mark_decided(self.manifest, "retained", "merged")
+            except Exception as error:
+                errors.append(error)
+            finally:
+                decision_done.set()
+
+        with mock.patch.object(cleanup_module, "read_manifest", side_effect=pause_after_read):
+            cleaner = threading.Thread(target=cleanup)
+            cleaner.start()
+            try:
+                self.assertTrue(observed.wait(5))
+                decider = threading.Thread(target=decide)
+                decider.start()
+                # The old unlocked cleanup permits the decision before its stale write.
+                decision_done.wait(0.2)
+            finally:
+                release.set()
+                cleaner.join(5)
+            decider.join(5)
+        self.assertFalse(cleaner.is_alive())
+        self.assertFalse(decider.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual([e["id"] for e in read_manifest(self.manifest)["entries"]], ["retained"])
+        self.assertEqual(read_manifest(self.manifest)["entries"][0]["decision"], "merged")
+        self.assertFalse((self.pending / "unmanaged.bak").exists())
 
 
 if __name__ == "__main__":

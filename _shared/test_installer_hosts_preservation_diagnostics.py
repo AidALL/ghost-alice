@@ -9,6 +9,7 @@ import contextlib
 import io
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import unittest
@@ -18,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import content_digest  # noqa: E402
 import install_lock  # noqa: E402
 import installed_payload  # noqa: E402
-from installer import diagnostics, hosts, preservation  # noqa: E402
+from installer import diagnostics, hosts, preservation, selection  # noqa: E402
 from installer.runner import ToolResult  # noqa: E402
 from installer.selection import ALL_SKILLS, Target  # noqa: E402
 from installer_testing import FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
@@ -180,13 +181,34 @@ class HookRegistrationTests(HostCase):
 
 
 class PreservationTests(HostCase):
+    def test_preservation_keeps_the_selected_family_after_source_changes(self):
+        ctx = self.context("codex")
+        collected = selection.collect_targets(ctx, ["fam"])
+        self.assertEqual([target.name for target in collected.all_targets], ["one", "two"])
+        shutil.rmtree(self.source / "fam" / "one")
+        (self.source / "fam" / "three").mkdir()
+        (self.source / "fam" / "three" / "SKILL.md").write_text("new source member")
+        pending = self.ghost / "pending-merges" / "codex"
+        pending.mkdir(parents=True)
+        (pending / "snapshot.json").write_text("{}")
+        with self.runner.patch():
+            self.assertTrue(preservation.preflight(ctx, collected))
+            self.assertTrue(preservation.encoding_guard(ctx, collected))
+        args = self.runner.tool_calls("diff_collector_cli.py")[0]
+        self.assertEqual([args[index + 1] for index, value in enumerate(args) if value == "--target"],
+                         ["_shared", "one", "two"])
+        guard_args = self.runner.tool_calls("encoding_guard.py")[-1]
+        self.assertEqual([guard_args[index + 1] for index, value in enumerate(guard_args) if value == "--exclude-root"],
+                         [str(ctx.skills_dir / "one"), str(ctx.skills_dir / "two")])
+
     def test_encoding_guard_sequence(self):
         # install.sh:225-271
         ctx = self.context("claude")
-        ctx.addon_targets = [Target("noop", self.home / "addon" / "noop", "noop")]
+        with mock.patch("installer.addons.collect_addon_targets", return_value=[Target("noop", self.home / "addon" / "noop", "noop")]):
+            collected = selection.collect_targets(ctx, ["alpha", "fam"])
         (ctx.skills_dir / "_shared").symlink_to(self.source / "_shared")
         with self.runner.patch():
-            self.assertTrue(preservation.encoding_guard(ctx, ["alpha", "fam"]))
+            self.assertTrue(preservation.encoding_guard(ctx, collected))
         calls = self.runner.tool_calls("encoding_guard.py")
         self.assertEqual(calls[0], ["--repo-root", str(self.source)])
         self.assertEqual(calls[1], ["--repo-root", str(self.home / "addon" / "noop")])
@@ -196,23 +218,24 @@ class PreservationTests(HostCase):
         failing = FakeRunner()
         failing.respond_to("encoding_guard.py", ToolResult(1))
         with failing.patch():
-            ok, out = self.captured(preservation.encoding_guard, ctx, ["alpha"])
+            ok, out = self.captured(preservation.encoding_guard, ctx, collected)
         self.assertFalse(ok)
         self.assertIn(f"[ERROR] encoding guard failed; aborting install: {self.source}", out)
         missing = self.context("codex")
         missing.skills_dir.rmdir()
         with FakeRunner().patch() as _:
-            self.assertTrue(preservation.encoding_guard(missing, ["alpha"]))
+            self.assertTrue(preservation.encoding_guard(missing, selection.collect_targets(missing, ["alpha"])))
 
     def test_preflight_without_snapshot_quarantines_unclean_targets(self):
         # install.sh:273-337
         ctx = self.context("codex")
+        collected = selection.collect_targets(ctx, ["alpha", "fam"])
         (ctx.skills_dir / "_shared").mkdir()
         (ctx.skills_dir / "alpha").mkdir()
         (ctx.skills_dir / "one").symlink_to(self.source / "fam" / "one")
         self.runner.respond(lambda s, a: a[:1] == ["classify-clean"] and "alpha" in a, ToolResult(1))
         with self.runner.patch():
-            self.assertTrue(preservation.preflight(ctx, ["alpha", "fam"]))
+            self.assertTrue(preservation.preflight(ctx, collected))
         classify = self.runner.tool_calls("installer_assets_cli.py")
         self.assertEqual(classify, [["classify-clean", "--asset-id", "_shared", "--path", str(ctx.skills_dir / "_shared"),
                                      "--repo-root", str(self.source)],
@@ -227,19 +250,20 @@ class PreservationTests(HostCase):
         failing.respond_to("installer_assets_cli.py", ToolResult(1))
         failing.respond_to("quarantine_legacy_cli.py", ToolResult(1))
         with failing.patch():
-            ok, out = self.captured(preservation.preflight, ctx, ["alpha"])
+            ok, out = self.captured(preservation.preflight, ctx, collected)
         self.assertFalse(ok)
         self.assertIn("[ERROR] unowned target quarantine failed; aborting install: _shared", out)
 
     def test_preflight_with_snapshot_runs_the_diff_collector(self):
         # install.sh:339-362
         ctx = self.context("codex")
-        ctx.addon_targets = [Target("noop", self.home / "addon" / "noop", "noop")]
+        with mock.patch("installer.addons.collect_addon_targets", return_value=[Target("noop", self.home / "addon" / "noop", "noop")]):
+            collected = selection.collect_targets(ctx, ["alpha"])
         pending = self.ghost / "pending-merges" / "codex"
         pending.mkdir(parents=True)
         (pending / "snapshot.json").write_text("{}", encoding="utf-8")
         with self.runner.patch():
-            self.assertTrue(preservation.preflight(ctx, ["alpha"]))
+            self.assertTrue(preservation.preflight(ctx, collected))
         self.assertEqual(self.runner.tool_calls("diff_collector_cli.py")[0],
                          ["--snapshot", str(pending / "snapshot.json"), "--pending", str(pending),
                           "--manifest", str(pending / "manifest.json"), "--platform", "codex",
@@ -247,7 +271,7 @@ class PreservationTests(HostCase):
         failing = FakeRunner()
         failing.respond_to("diff_collector_cli.py", ToolResult(1))
         with failing.patch():
-            ok, out = self.captured(preservation.preflight, ctx, ["alpha"])
+            ok, out = self.captured(preservation.preflight, ctx, collected)
         self.assertFalse(ok)
         self.assertIn("[ERROR] merge-companion preflight change detection failed; aborting install", out)
 
@@ -280,7 +304,7 @@ class InspectTests(HostCase):
     def test_run_install_doctor_arguments(self):
         # uninstall.sh:157-218
         ctx = self.context("codex")
-        with self.runner.patch():
+        with self.runner.patch(), mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(self.home / "other-root")}):
             self.assertEqual(diagnostics.run_install_doctor(ctx, "doctor", ctx.skills_dir), 0)
         args = self.runner.tool_calls("install_doctor.py")[0]
         self.assertEqual(args[:2], ["--platform", "codex"])
@@ -365,11 +389,11 @@ class InstallRecordReportTests(HostCase):
 
     def write_record(self, targets, **sections):
         lock = self.ghost / "install.lock"
-        install_lock.acquire_lock(lock, owner="test")
+        generation = install_lock.acquire_lock(lock, owner="test")
         try:
             installed_payload.update(self.ghost, {"targets": targets, **sections})
         finally:
-            install_lock.release_lock(lock)
+            install_lock.release_lock(lock, generation)
 
     @staticmethod
     def entry(mode, used_by, **fields):

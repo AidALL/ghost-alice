@@ -45,7 +45,8 @@ import atomic_write
 import hook_profile_gate
 import hook_definitions
 import install_hooks
-from test_completion_skill_evidence import assert_stop_observation
+from installer_testing import installer_env
+from stop_hook_testing import assert_stop_observation, review_format_fixture
 
 
 def setUpModule():
@@ -73,6 +74,11 @@ def setUpModule():
         command_patcher = patch.object(install_hooks, name, command)
         command_patcher.start()
         unittest.addModuleCleanup(command_patcher.stop)
+
+
+def tearDownModule():
+    # pytest invokes the xunit module hooks but does not drain unittest's module cleanups.
+    unittest.doModuleCleanups()
 
 
 LEGACY_PROMPT_PENDING_MERGE_ENTRY = {
@@ -177,7 +183,6 @@ def _run_hook_command(
 def _run_reviewed_stop_command(command, input_text, env=None, *, platform="claude", record_review=True):
     """Exercise generated commands against explicitly owned synthetic evidence."""
     from native_transcript import assistant_text_this_turn
-    from test_completion_skill_evidence import StopHookSkillEvidenceTests
     payload = json.loads(input_text)
     text = payload.get("last_assistant_message")
     if text is None:
@@ -200,7 +205,7 @@ def _run_reviewed_stop_command(command, input_text, env=None, *, platform="claud
             transcript.write_text(''.join(json.dumps(dict(row, sessionId=payload['session_id'])) + '\n'
                 for row in entries))
             payload['transcript_path'] = str(transcript)
-        StopHookSkillEvidenceTests._review_format_fixture(Path(temporary), platform, text, hook_env,
+        review_format_fixture(Path(temporary), platform, text, hook_env,
             session_id=payload["session_id"], record_review=record_review)
         if callable(command):
             with patch.dict(os.environ, hook_env, clear=True), patch.object(
@@ -959,24 +964,15 @@ class TempHomeTestCase(unittest.TestCase):
     """Base class that uses a temporary home directory for each test."""
 
     def setUp(self):
-        self.temp_dir = tempfile.mkdtemp()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.temp_dir = temporary.name
         self.fake_home = Path(self.temp_dir)
-        self._patcher = patch.object(install_hooks, "_home", return_value=self.fake_home)
-        self._patcher.start()
-        self._hook_shared_patcher = patch.dict(os.environ, {
-            "HOME": str(self.fake_home), "USERPROFILE": str(self.fake_home),
-            "GHOST_ALICE_SESSION_INTENT_ROOT": str(self.fake_home / "intent-ledger"),
-            "GHOST_ALICE_GHOST_ROOT": str(self.fake_home / ".ghost-alice"),
-            install_hooks.HOOK_SHARED_DIR_ENV: str(Path(install_hooks.__file__).parent),
-        })
-        self._hook_shared_patcher.start()
-        # Platform detect functions use the patched _home, so no separate patch is needed.
-
-    def tearDown(self):
-        self._hook_shared_patcher.stop()
-        self._patcher.stop()
-        import shutil
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
+        env = installer_env(self.fake_home)
+        env[install_hooks.HOOK_SHARED_DIR_ENV] = str(Path(install_hooks.__file__).parent)
+        environment = patch.dict(os.environ, env, clear=True)
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def _create_platform_dir(self, platform: str) -> Path:
         """Create a test platform directory."""
@@ -1084,6 +1080,46 @@ class TempHomeTestCase(unittest.TestCase):
             encoding="utf-8",
         )
         return source
+
+
+class TestInstallerFixtureIsolation(unittest.TestCase):
+    def test_temp_home_fixture_isolates_inherited_platform_directories(self):
+        with tempfile.TemporaryDirectory() as inherited:
+            parent_env = {
+                "HOME": inherited,
+                "CODEX_HOME": str(Path(inherited) / "codex-live"),
+                "CLAUDE_CONFIG_DIR": str(Path(inherited) / "claude-live"),
+            }
+            with patch.dict(os.environ, parent_env):
+                before = {key: os.environ.get(key) for key in parent_env}
+                fixture = TempHomeTestCase()
+                fixture.setUp()
+                try:
+                    self.assertEqual(install_hooks._resolve_codex_dir(), fixture.fake_home / ".codex")
+                    self.assertEqual(install_hooks._resolve_claude_dir(), fixture.fake_home / ".claude")
+                finally:
+                    fixture.tearDown()
+                    fixture.doCleanups()
+                self.assertEqual({key: os.environ.get(key) for key in parent_env}, before)
+
+    def test_session_start_fixture_restores_all_parent_environment_values(self):
+        with tempfile.TemporaryDirectory() as inherited:
+            parent_env = {
+                "HOME": inherited,
+                "CODEX_HOME": str(Path(inherited) / "codex-live"),
+                "CLAUDE_CONFIG_DIR": str(Path(inherited) / "claude-live"),
+            }
+            with patch.dict(os.environ, parent_env):
+                before = {key: os.environ.get(key) for key in parent_env}
+                fixture = TestSessionStartHook()
+                fixture.setUp()
+                try:
+                    self.assertEqual(install_hooks._resolve_codex_dir(), Path(fixture.tmp.name))
+                    self.assertEqual(install_hooks._resolve_claude_dir(), Path(fixture.tmp.name))
+                finally:
+                    fixture.tearDown()
+                    fixture.doCleanups()
+                self.assertEqual({key: os.environ.get(key) for key in parent_env}, before)
 
 
 class TestInstallHook(TempHomeTestCase):
@@ -2657,6 +2693,20 @@ class TestIdempotency(TempHomeTestCase):
             if install_hooks.HOOK_MARKER in hook.get("command", "")
         )
         self.assertEqual(marker_count, 0)
+        registrations = [
+            (event, hook_definitions.parse_hook_runner_command(hook["command"])["hook_id"])
+            for event, groups in settings["hooks"].items()
+            for group in groups for hook in group["hooks"]
+        ]
+        self.assertCountEqual(registrations, [
+            ("UserPromptSubmit", "session-intent"),
+            ("PreToolUse", "tool-checkpoint"),
+            ("Stop", "completion"),
+            ("SessionStart", "session-start"),
+            ("SessionStart", "session-receipt"),
+            ("PostToolUse", "io-trace"),
+            ("PostToolUseFailure", "io-trace"),
+        ])
 
 
 class TestUninstallHook(TempHomeTestCase):
@@ -2962,63 +3012,45 @@ class TestCheckStatus(TempHomeTestCase):
 
     def test_status_missing_when_session_intent_hook_is_missing(self):
         """Missing session-intent-analyzer hook is missing."""
-        self._write_settings("claude", {
-            "hooks": {
-                "UserPromptSubmit": [
-                    LEGACY_HOOK_REMINDER_ENTRY,
-                    LEGACY_WEB_SEARCH_ENTRY,
-                ],
-                "Stop": [install_hooks.STOP_HOOK_ENTRY],
-                "SessionStart": [install_hooks.SESSION_START_ENTRY],
-                "PostToolUse": [
-                    {
-                        "matcher": "",
-                        "hooks": [{"type": "command", "command": "bash '/tmp/io-trace-hook.sh' # [io-trace] Ghost-ALICE"}],
-                    }
-                ],
-            },
-        })
-        result = install_hooks.check_status("claude")
-        self.assertEqual(result, "missing")
+        self._write_settings("claude", {})
+        install_hooks.install_hook("claude")
+        self.assertEqual(install_hooks.check_status("claude"), "installed")
+        settings = self._read_settings("claude")
+        settings["hooks"]["UserPromptSubmit"] = []
+        self._write_settings("claude", settings)
+        status = install_hooks.check_status_detail("claude")
+        self.assertEqual(status.status_token, "HOOK_MISSING")
+        self.assertEqual(status.details["missing"], ["session-intent"])
+        self.assertEqual(status.details["drifted"], [])
 
     def test_status_missing_when_session_start_hook_is_missing(self):
         """Missing SessionStart hook is missing."""
-        self._write_settings("claude", {
-            "hooks": {
-                "UserPromptSubmit": [
-                    LEGACY_PROMPT_PENDING_MERGE_ENTRY,
-                    LEGACY_HOOK_REMINDER_ENTRY,
-                    install_hooks.SESSION_INTENT_ENTRY,
-                    LEGACY_WEB_SEARCH_ENTRY,
-                ],
-                "Stop": [install_hooks.STOP_HOOK_ENTRY],
-                "PostToolUse": [
-                    {
-                        "matcher": "",
-                        "hooks": [{"type": "command", "command": "bash '/tmp/io-trace-hook.sh' # [io-trace] Ghost-ALICE"}],
-                    }
-                ],
-            },
-        })
-        result = install_hooks.check_status("claude")
-        self.assertEqual(result, "missing")
+        self._write_settings("claude", {})
+        install_hooks.install_hook("claude")
+        self.assertEqual(install_hooks.check_status("claude"), "installed")
+        settings = self._read_settings("claude")
+        settings["hooks"]["SessionStart"] = [
+            group for group in settings["hooks"]["SessionStart"]
+            if not any(install_hooks.SESSION_START_MARKER in hook["command"] for hook in group["hooks"])
+        ]
+        self._write_settings("claude", settings)
+        status = install_hooks.check_status_detail("claude")
+        self.assertEqual(status.status_token, "HOOK_MISSING")
+        self.assertEqual(status.details["missing"], ["session-start"])
+        self.assertEqual(status.details["drifted"], [])
 
     def test_status_missing_when_io_trace_hook_is_missing(self):
-        """Missing Claude/Codex PostToolUse io-trace hook is missing."""
-        self._write_settings("claude", {
-            "hooks": {
-                "UserPromptSubmit": [
-                    LEGACY_PROMPT_PENDING_MERGE_ENTRY,
-                    LEGACY_HOOK_REMINDER_ENTRY,
-                    install_hooks.SESSION_INTENT_ENTRY,
-                    LEGACY_WEB_SEARCH_ENTRY,
-                ],
-                "Stop": [install_hooks.STOP_HOOK_ENTRY],
-                "SessionStart": [install_hooks.SESSION_START_ENTRY],
-            },
-        })
-        result = install_hooks.check_status("claude")
-        self.assertEqual(result, "missing")
+        """Status identifies the missing Claude PostToolUse io-trace registration."""
+        self._write_settings("claude", {})
+        install_hooks.install_hook("claude")
+        self.assertEqual(install_hooks.check_status("claude"), "installed")
+        settings = self._read_settings("claude")
+        settings["hooks"]["PostToolUse"] = []
+        self._write_settings("claude", settings)
+        status = install_hooks.check_status_detail("claude")
+        self.assertEqual(status.status_token, "HOOK_MISSING")
+        self.assertEqual(status.details["missing"], ["io-trace"])
+        self.assertEqual(status.details["drifted"], [])
 
     def test_status_missing(self):
         """Return missing when no hooks exist."""
@@ -3249,6 +3281,31 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             self.assertIn(VERSIONED_HOMEBREW_PYTHON, command)
             self.assertLess(command.index("${GHOST_ALICE_PYTHON:-}"), command.index(VERSIONED_HOMEBREW_PYTHON))
             self.assertLess(command.index("/bin/python3.[0-9]*"), command.index(VERSIONED_HOMEBREW_PYTHON))
+
+    @unittest.skipIf(os.name == "nt", "POSIX launcher only")
+    def test_hook_python_invocation_preserves_literal_script_and_argument_paths(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            literal = root / "space 'quote' $HOME `touch injected` \\literal"
+            literal.mkdir()
+            runtime = literal / "python"
+            runtime.symlink_to(sys.executable)
+            script = literal / "hook_profile_gate.py"
+            script.write_text("import json, sys; print(json.dumps([sys.executable, __file__, sys.argv[1:]]))\n", encoding="utf-8")
+            argument = str(literal / "input.json")
+            with patch.dict(os.environ, {install_hooks.HOOK_SHARED_DIR_ENV: str(literal)}):
+                resolved = install_hooks._resolve_hook_runner_script()
+                command = install_hooks._hook_python_invocation(resolved, argument)
+            result = subprocess.run(
+                ["/bin/sh", "-c", command], cwd=root,
+                env={"PATH": "/usr/bin:/bin", "HOME": str(root), "GHOST_ALICE_PYTHON": str(runtime)},
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            actual_runtime, actual_script, actual_args = json.loads(result.stdout)
+            self.assertEqual(Path(actual_runtime).resolve(), runtime.resolve())
+            self.assertEqual([actual_script, actual_args], [str(script), [argument]])
+            self.assertFalse((root / "injected").exists())
 
     @unittest.skipIf(os.name == "nt", "POSIX launcher only")
     def test_hook_python_invocation_retains_install_runtime_outside_path(self):
@@ -3811,19 +3868,12 @@ class TestBackupRotation(unittest.TestCase):
 class TestSessionStartHook(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.prev_home = os.environ.get("HOME")
-        os.environ["HOME"] = self.tmp.name
-        os.environ["CLAUDE_CONFIG_DIR"] = self.tmp.name
-        os.environ["CODEX_HOME"] = self.tmp.name
-
-    def tearDown(self):
-        self.tmp.cleanup()
-        if self.prev_home is None:
-            os.environ.pop("HOME", None)
-        else:
-            os.environ["HOME"] = self.prev_home
-        os.environ.pop("CLAUDE_CONFIG_DIR", None)
-        os.environ.pop("CODEX_HOME", None)
+        self.addCleanup(self.tmp.cleanup)
+        env = installer_env(self.tmp.name)
+        env.update(CLAUDE_CONFIG_DIR=self.tmp.name, CODEX_HOME=self.tmp.name)
+        environment = patch.dict(os.environ, env, clear=True)
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def test_session_start_hook_installed_for_claude(self):
         from install_hooks import install_hook, SESSION_START_MARKER
@@ -3853,9 +3903,8 @@ class TestSessionStartHook(unittest.TestCase):
         self.assertEqual(sum(SESSION_RECEIPT_MARKER in c for c in cmds), 1)
         for platform in ("claude", "codex"):
             command = _platform_session_receipt_entry(platform, "SessionStart")["hooks"][0]["command"]
-            encoded_args = re.findall(r'"([A-Za-z0-9_-]{40,}=*)"', command)
-            self.assertTrue(encoded_args, msg=command)
-            wrapped = base64.urlsafe_b64decode(encoded_args[0]).decode("utf-8")
+            argv = shlex.split(command, comments=True)
+            wrapped = base64.urlsafe_b64decode(argv[argv.index("run") + 3]).decode("utf-8")
             self.assertIn("session_intent_analyzer_hook.py", wrapped)
             self.assertIn(f"--platform {platform}", wrapped)
             self.assertIn("--context session_start", wrapped)
@@ -3909,9 +3958,8 @@ class TestSessionStartHook(unittest.TestCase):
         commands = [hook["command"] for entry in entries for hook in entry["hooks"]]
 
         for command in commands:
-            encoded_args = re.findall(r'"([A-Za-z0-9_-]{40,}=*)"', command)
-            self.assertTrue(encoded_args, msg=command)
-            wrapped_command = base64.urlsafe_b64decode(encoded_args[0]).decode("utf-8")
+            argv = shlex.split(command, comments=True)
+            wrapped_command = base64.urlsafe_b64decode(argv[argv.index("run") + 3]).decode("utf-8")
             self.assertNotIn("--format text", wrapped_command)
             if "--format" in wrapped_command:
                 self.assertIn("--format json", wrapped_command)
@@ -4200,10 +4248,11 @@ class TestForegroundHookPayloads(TempHomeTestCase):
             (install_hooks.SESSION_START_COMMAND, None),
         ):
             result = _run_hook_command_via_cmd(cmd, env=env)
-            self.assertEqual(result.returncode, 0)
-            self.assertIn("Internal instruction:", result.stdout)
-            self.assertIn("For the human user:", result.stdout)
-            self.assertIn("Tech:", result.stdout)
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertIn("merge-companion-precheck: clean (hook-verified) at session start.", result.stdout)
+            self.assertIn("~/.ghost-alice/pending-merges/claude/manifest.json", result.stdout)
+            self.assertIn("re-check it before changing an installed skill.", result.stdout)
+            self.assertNotIn("Internal instruction:", result.stdout)
 
     def test_claude_stop_hook_runs_under_cmd_exe(self):
         result = _run_hook_command_via_cmd(install_hooks.STOP_HOOK_COMMAND)

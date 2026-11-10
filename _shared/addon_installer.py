@@ -520,12 +520,12 @@ def detect_collisions(
     resources_dir: str | Path | None = None,
     platform: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Find install collisions against the live skills dir and extra dests.
+    """Find install collisions within the plan and against live destinations.
 
-    A collision is a target whose dest already exists on disk and is owned by
-    something other than the installing addon. Each collision reports the owner
-    as ``core`` / ``addon`` / ``domain`` / ``unclaimed``. A dest already owned by the
-    SAME addon (reinstall/update) is not a collision.
+    Different addons cannot claim the same destination in one plan, even when
+    the destination is empty. An occupied destination must belong to the
+    installing addon. Each collision reports the owner as ``core`` / ``addon`` /
+    ``domain`` / ``unclaimed``; clean same-addon reinstalls remain allowed.
     """
     skills_root = Path(skills_dir).resolve()
     core = set(core_skill_names)
@@ -550,8 +550,22 @@ def detect_collisions(
                     entry.get("install_mode") or "missing",
                 )
     collisions: list[dict[str, Any]] = []
+    planned_owners: dict[str, str] = {}
+
+    def _claim_destination(name: str, dest: Path, addon_id: str) -> bool:
+        owner_id = planned_owners.setdefault(_norm(dest), addon_id)
+        if owner_id == addon_id:
+            return True
+        collisions.append({
+            "name": name, "dest": str(dest), "owner": "addon",
+            "owner_addon_id": owner_id,
+        })
+        return False
+
     for target in targets:
         dest = skills_root / target.name
+        if not _claim_destination(target.name, dest, target.addon_id):
+            continue
         if not os.path.lexists(dest):
             continue
         owner_id, recorded_hash, recorded_mode = owned.get(_norm(dest), (None, "", "missing"))
@@ -592,6 +606,8 @@ def detect_collisions(
         if resources_root is not None:
             extra_dests += [(rel, resources_root / target.addon_id / rel) for rel, _src in target.resources]
         for extra_name, dest in extra_dests:
+            if not _claim_destination(extra_name, dest, target.addon_id):
+                continue
             if not os.path.lexists(dest):
                 continue
             owner_id, recorded_hash, recorded_mode = owned.get(_norm(dest), (None, "", "missing"))
@@ -618,7 +634,7 @@ def _same_addon_target_is_clean(dest: Path, recorded_hash: str, recorded_mode: s
     if _detect_install_mode(dest) != recorded_mode:
         return False
     try:
-        return hash_utils.hash_target(str(dest), recorded_mode) == recorded_hash
+        return hash_utils.hash_target(str(dest), recorded_mode, recorded_hash=recorded_hash) == recorded_hash
     except Exception:
         return False
 

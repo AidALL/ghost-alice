@@ -18,10 +18,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
+from uuid import uuid4
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from project_runtime import ProjectRuntime, project_runtime
+from fresh_agent_session import FreshAgentSessionError, resolve_cli_command
 from text_lines import split_lines
 
 
@@ -118,7 +120,12 @@ def _contains_pattern(pattern: re.Pattern[str], text: str) -> bool:
 
 
 def _runtime_diagnostic_log_text(log_text: str) -> str:
-    """Keep runtime diagnostics from Codex stdout without agent answer prose."""
+    """Select diagnostic-looking lines from the merged human-mode CLI log.
+
+    The collector cannot authenticate each line's producer: Codex also prints
+    answers and tool output on stderr. This filter can omit bare tracebacks or
+    select quoted diagnostics; its result does not establish their provenance.
+    """
 
     diagnostic_lines: list[str] = []
     timestamped = re.compile(r"^\d{4}-\d{2}-\d{2}T\S+\s+(?:ERROR|WARN|INFO|DEBUG)\s+")
@@ -185,7 +192,8 @@ def classify_smoke_result(
         and all(marker in output_text for marker in markers)
     )
 
-    # Runtime-error patterns are scanned against the runtime LOG only, never the agent's own answer text, so an agent that legitimately quotes an error string in its summary is not false-failed.
+    # Scan the filtered log rather than output_text. The merged log can still
+    # contain an echoed answer or tool result, so these matches are heuristic.
     for reason, pattern in FAILURE_PATTERNS:
         if (
             _contains_pattern(pattern, runtime_log)
@@ -232,41 +240,6 @@ def _default_log_root() -> Path:
 
 def _timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-
-
-def resolve_codex_command(
-    codex_bin: str,
-    *,
-    which=shutil.which,
-    platform: str = os.name,
-) -> list[str]:
-    """Resolve the Codex executable without relying on Windows PATHEXT order."""
-
-    requested = Path(codex_bin)
-    explicit_path = requested.is_absolute() or requested.parent != Path(".")
-    if explicit_path:
-        if requested.suffix.lower() == ".ps1":
-            pwsh = which("pwsh.exe") or which("pwsh")
-            if not pwsh:
-                return []
-            return [pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(requested)]
-        return [str(requested)]
-
-    if platform == "nt" and codex_bin.lower() == "codex":
-        cmd = which("codex.cmd")
-        if cmd:
-            return [cmd]
-        ps1 = which("codex.ps1")
-        if ps1:
-            pwsh = which("pwsh.exe") or which("pwsh")
-            if pwsh:
-                return [pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1]
-        exe = which("codex.exe")
-        if exe:
-            return [exe]
-
-    resolved = which(codex_bin)
-    return [resolved] if resolved else []
 
 
 def codex_exec_help_text(
@@ -363,7 +336,14 @@ def run_codex_case(
 ) -> dict[str, object]:
     """Run one Codex exec smoke case and return a raw-free summary."""
 
-    codex_command = resolve_codex_command(codex_bin)
+    try:
+        codex_command = resolve_cli_command(codex_bin)
+    except FreshAgentSessionError:
+        codex_command = []
+    requested = Path(codex_bin)
+    if (codex_command == [codex_bin] and not requested.is_absolute()
+        and requested.parent == Path('.') and shutil.which(codex_bin) is None):
+        codex_command = []
     if not codex_command:
         classification = SmokeClassification(
             status=STATUS_INCONCLUSIVE,
@@ -400,8 +380,8 @@ def _run_resolved_codex_case(
     timeout_seconds: int,
     runtime: ProjectRuntime,
 ) -> dict[str, object]:
-    run_dir = log_root / _timestamp() / f"codex-{case.case_id}"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = log_root / _timestamp() / f"codex-{case.case_id}-{uuid4().hex}"
+    run_dir.mkdir(parents=True)
     log_file = run_dir / "agent.log"
     output_file = run_dir / "last-message.txt"
     summary_file = run_dir / "summary.json"
@@ -481,14 +461,22 @@ def classify_existing(args: argparse.Namespace) -> dict[str, object]:
     output_file = Path(args.output_file) if args.output_file else None
     output_exists = bool(output_file and output_file.exists())
     output_text = _read_text(output_file) if output_file else ""
+    try:
+        log_text = log_file.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        log_text = None
     classification = classify_smoke_result(
         exit_code=args.exit_code,
         timed_out=args.timed_out,
-        log_text=_read_text(log_file),
+        log_text=log_text or "",
         output_text=output_text,
         output_exists=output_exists,
         required_markers=args.required_marker,
     )
+    if log_text is None:
+        classification = SmokeClassification(
+            status=STATUS_INCONCLUSIVE if classification.status == STATUS_PASS else classification.status,
+            reasons=[*classification.reasons, "runtime-log-unavailable"])
     return {
         "status": classification.status,
         "reasons": classification.reasons,
@@ -509,7 +497,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=int, default=240)
     parser.add_argument("--classify-log")
     parser.add_argument("--output-file")
-    parser.add_argument("--exit-code", type=int, default=0)
+    parser.add_argument("--exit-code", type=int)
     parser.add_argument("--timed-out", action="store_true")
     parser.add_argument("--required-marker", action="append", default=[])
     return parser

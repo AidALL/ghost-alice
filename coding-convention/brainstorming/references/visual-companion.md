@@ -48,6 +48,8 @@ Content fragment vs. full document: if the HTML file starts with `<!DOCTYPE` or 
 
 Resolve every `scripts/` path below relative to the loaded brainstorming skill directory, and invoke it through the host's shell tool. Bind the project path from the task that the human user requested, not the shell's incidental working directory.
 
+The companion requires Bash and Node.js. The valued options `--project-dir`, `--host` and `--url-host` require a nonempty value before the next option; invalid arguments return an error before creating session files.
+
 ```bash
 # Start the server with persistence for the project (mockups are saved)
 scripts/start-server.sh --project-dir /path/to/project
@@ -269,7 +271,11 @@ If `$STATE_DIR/events` does not exist, no browser-event evidence is available. U
 bash <loaded-skill-directory>/scripts/stop-server.sh "$SESSION_DIR"
 ```
 
-Use the exact `SESSION_DIR` retained from startup. Read exit status and JSON `status`: `stopped` confirms the process stopped, `not_running` reports no recorded running process, and `failed` leaves cleanup unresolved. If the session used `--project-dir`, the mockup files persist in `.coding-convention/brainstorm/` for later reference. Only `/tmp` sessions are deleted on stop. Cleanup status is separate from whether the design is accepted.
+Use the exact `SESSION_DIR` retained from startup. Read exit status and JSON `status`: `stopped` confirms the recorded process is absent, `not_running` reports no recorded PID, and `failed` leaves cleanup unresolved. If the session used `--project-dir`, the mockup files persist in `.coding-convention/brainstorm/` for later reference, including projects under `/tmp`. Only direct `/tmp/brainstorm-*` sessions are deleted on stop. Cleanup status is separate from whether the design is accepted.
+
+The server writes its own PID and private session identity under `state_dir`. The stop script requests shutdown from that session's HTTP listener using the private identity, then observes process disappearance before cleanup. Missing or mismatched identity, permission-denied process observation and a process that remains present return `failed`. A numeric PID alone cannot distinguish the server from another process that later receives that PID. Keep `server-control` private and do not copy its token into user-facing output.
+
+Stop requests, owner exit, idle timeout and terminal signals use the same server shutdown procedure. It closes the file watcher, pending debounce timers, lifecycle timer, HTTP listener and HTTP/WebSocket connections. The `server-stopping` log records the request; `server-stopped` is written from the process exit hook. That marker alone does not replace the stop script's process observation.
 
 ## References
 

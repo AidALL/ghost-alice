@@ -360,10 +360,10 @@ class ContextGatewayInstallTests(unittest.TestCase):
                             raise RuntimeError('injected bootstrap failure')
                         active[0] = True
 
-                    def record(section):
+                    def record(home, section):
                         if failure == 'record':
                             raise OSError('injected record failure')
-                        return install._record_service(section)
+                        return install.platform.record_service(home, section)
 
                     with patch.object(install.sys, 'platform', 'darwin'), \
                          patch.object(install, '_service_state', side_effect=service), \
@@ -573,7 +573,6 @@ class ContextGatewayInstallTests(unittest.TestCase):
 
     def test_the_provider_block_fingerprint_covers_the_two_managed_blocks(self):
         text = planning.render_provider('model = "native-model"\n[features]\nhooks = true\n', 12345, 'local-scope')
-        self.assertEqual(planning.provider_blocks(text), gateway_testing.provider_blocks(text))
         # The blocks alone: the same fingerprint whatever surrounds them.
         self.assertEqual(planning.provider_blocks(text),
                          planning.provider_blocks(planning.render_provider('', 12345, 'local-scope')))

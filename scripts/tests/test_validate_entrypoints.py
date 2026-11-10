@@ -7,6 +7,7 @@ from scripts.validate_entrypoints import (
     Finding,
     SSOT_RULES_FILE,
     check_platform_ports,
+    check_ssot_imports,
     check_ssot_rules,
     check_task_router_body,
     check_using_cc_body,
@@ -14,6 +15,36 @@ from scripts.validate_entrypoints import (
 
 
 class EntrypointBodyContractTest(unittest.TestCase):
+    def test_loader_requires_agents_import_outside_code(self) -> None:
+        cases = (
+            ('@AGENTS.md\n', True),
+            ('See @AGENTS.md for project instructions.\n', True),
+            ('See @./AGENTS.md for project instructions.\n', True),
+            ('Read AGENTS.md for project instructions.\n', False),
+            ('Use `@AGENTS.md` as an example.\n', False),
+            ('Use ``example ` @AGENTS.md `` literally.\n', False),
+            ('Use \\` @AGENTS.md \\` as ordinary text.\n', True),
+            ('Use \\\\` @AGENTS.md ` as code.\n', False),
+            ('A lone `\n\n@AGENTS.md\n\nAnother `\n', True),
+            ('A span `\n@AGENTS.md\n` on multiple lines.\n', False),
+            ('\\`` @AGENTS.md `\n', False),
+            ('# Heading with a lone `\n@AGENTS.md\nAnother lone `\n', True),
+            ('A lone `\n~~~text\nexample\n~~~\n@AGENTS.md\nAnother `\n', True),
+            ('```text\n@AGENTS.md\n```\n', False),
+            ('~~~text\n@AGENTS.md\n~~~\n', False),
+            ('```text\n@AGENTS.md\n', False),
+            ('@AGENTS.md.backup\n', False),
+            ('```text\n@AGENTS.md\n```\nSee @AGENTS.md now.\n', True),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            for text, imports in cases:
+                with self.subTest(text=text):
+                    (repo / 'CLAUDE.md').write_text(text, encoding='utf-8')
+                    findings = []
+                    check_ssot_imports(repo, findings)
+                    self.assertEqual([f.check for f in findings], [] if imports else ['chain'])
+
     def copy_owner_contract(self, repo: Path) -> None:
         source = Path(__file__).resolve().parents[2]
         for rel in (

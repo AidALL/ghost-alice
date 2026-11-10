@@ -383,6 +383,33 @@ class GatewayUninstallTests(RegisteredHomeCase):
 class DetachCommandTests(RegisteredHomeCase):
     """`context_gateway_install.py detach`: the explicit unregistration of the recorded service."""
 
+    def test_detach_updates_only_the_selected_home_even_when_another_home_holds_a_lock(self):
+        from installer import gateway_participant
+
+        for operation in ("detach", "removal"):
+            for ambient_locked in (False, True):
+                with self.subTest(operation=operation, ambient_locked=ambient_locked):
+                    case = self.root / f"{operation}-{ambient_locked}"
+                    selected = gateway_testing.registered_home(self, case / "selected")
+                    ambient = gateway_testing.registered_home(self, case / "ambient")
+                    if not ambient_locked:
+                        (ambient.ghost / "install.lock").unlink()
+                    untouched = {p: p.read_bytes() for p in (
+                        installed_payload.path(ambient.ghost), ambient.config, ambient.agent)}
+                    self.active = True
+                    with patch.object(gateway.Path, "home", return_value=ambient.root):
+                        if operation == "detach":
+                            result = gateway.detach(confirm=True, home=selected.root)
+                        else:
+                            result = gateway_participant.removal(
+                                selected.ghost, [selected.shared], platform="darwin")
+                    self.assertEqual(result["action"], "detached")
+                    self.assertIsNone(selected.service())
+                    self.assertFalse(selected.agent.exists())
+                    self.assertEqual(tomllib.loads(selected.config.read_text()), {"model": "native"})
+                    self.assertFalse(self.active)
+                    self.assertEqual({p: p.read_bytes() for p in untouched}, untouched)
+
     def test_detach_unregisters_the_service_and_keeps_its_state_dir(self):
         config = self.reg.config
         config.write_text(config.read_text(encoding='utf-8') + '\n[features]\nhooks=true\n', encoding='utf-8')

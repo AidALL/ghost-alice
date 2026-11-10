@@ -6,7 +6,6 @@ Node.js when it is available and skip otherwise.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import shutil
@@ -21,6 +20,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILL_DIR = REPO_ROOT / "coding-convention" / "verification-before-completion"
 HOOK_DISPATCHER = REPO_ROOT / "_shared" / "ghost-alice-hook.mjs"
 RULE_BLOCKS = REPO_ROOT / "_shared" / "global_rule_blocks.py"
+sys.path.insert(0, str(REPO_ROOT / "_shared"))
+import global_rule_blocks as blocks
 
 VERIFY_OR_REUSE_PRECHECK = "Reuse unchanged evidence with its original source and verification time."
 
@@ -68,11 +69,6 @@ class RuntimeSurfaceTests(unittest.TestCase):
         return " ".join(dest.read_text(encoding="utf-8").split())
 
     def test_installer_rule_block_merge_carries_contract_for_both_platforms(self) -> None:
-        spec = importlib.util.spec_from_file_location("global_rule_blocks_under_test", RULE_BLOCKS)
-        blocks = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = blocks  # dataclasses resolve their defining module through sys.modules
-        self.addCleanup(sys.modules.pop, spec.name, None)
-        spec.loader.exec_module(blocks)
         targets = {
             "claude-merge": (REPO_ROOT / "platforms" / "claude" / "CLAUDE.md", blocks.CLAUDE_SPEC),
             "codex-merge": (REPO_ROOT / "platforms" / "codex" / "AGENTS.md", blocks.CODEX_SPEC),

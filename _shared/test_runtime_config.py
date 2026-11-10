@@ -354,6 +354,70 @@ class TestNodeRuntimeUsability(unittest.TestCase):
             windows_os.access.assert_not_called()
 
 
+class TestNodeRuntimeCandidates(unittest.TestCase):
+    def test_codex_config_location_preserves_explicit_precedence_without_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            locations = {name: root / name for name in ("platform", "override", "codex-home", ".codex")}
+            for location in locations.values():
+                location.mkdir()
+                node = location / "node"
+                node.write_text("node fixture", encoding="utf-8")
+                node.chmod(node.stat().st_mode | 0o100)
+                (location / "config.toml").write_text(
+                    "[mcp_servers.node_repl.env]\n"
+                    f"NODE_REPL_NODE_PATH = {json.dumps(node.as_posix())}\n", encoding="utf-8")
+            env = {"HOME": directory, "USERPROFILE": directory, "PATH": "",
+                   "GHOST_ALICE_PLATFORM": "codex", "GHOST_ALICE_PLATFORM_DIR": str(locations["platform"]),
+                   "GHOST_ALICE_CODEX_DIR": str(locations["override"]), "CODEX_HOME": str(locations["codex-home"])}
+            with (mock.patch.dict(os.environ, env, clear=True),
+                  mock.patch("shutil.which", return_value=None)):
+                for selected, removed in (("platform", None), ("override", "GHOST_ALICE_PLATFORM_DIR"),
+                                          ("codex-home", "GHOST_ALICE_CODEX_DIR"), (".codex", "CODEX_HOME")):
+                    if removed:
+                        env.pop(removed)
+                    with self.subTest(selected=selected):
+                        self.assertEqual(runtime_config.node_runtime_candidates(env, "codex"),
+                                         [(locations[selected] / "node").resolve()])
+                env["GHOST_ALICE_PLATFORM_DIR"] = str(root / "missing")
+                self.assertEqual(runtime_config.node_runtime_candidates(env, "codex"), [])
+
+    def test_candidates_preserve_platform_order_and_only_first_path_runtime(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nodes = {}
+            for name in ("override", "repl", "codex", "registered", "path-first", "path-second"):
+                node = root / name / ("node.exe" if name == "path-second" else "node")
+                node.parent.mkdir()
+                node.write_text("node fixture", encoding="utf-8")
+                node.chmod(node.stat().st_mode | 0o100)
+                nodes[name] = node.resolve()
+            codex_home = root / ".codex"
+            codex_home.mkdir()
+            (codex_home / "config.toml").write_text(
+                "[mcp_servers.node_repl.env]\n"
+                f"NODE_REPL_NODE_PATH = {json.dumps(nodes['codex'].as_posix())}\n", encoding="utf-8")
+            env = {"HOME": directory, "USERPROFILE": directory, "CODEX_HOME": str(codex_home),
+                   "PATH": "fixture-path", "GHOST_ALICE_NODE": str(nodes["override"]),
+                   "NODE_REPL_NODE_PATH": str(nodes["repl"])}
+            runtimes = {"node": str(nodes["path-first"]), "node.exe": str(nodes["path-second"])}
+            expected = {
+                "codex": ("override", "repl", "codex", "registered", "path-first"),
+                "claude": ("override", "repl", "registered", "path-first", "codex"),
+                "unknown-host": ("override", "repl", "path-first", "codex"),
+                None: ("override", "repl", "path-first", "codex"),
+            }
+            with (mock.patch.dict(os.environ, env, clear=True),
+                  mock.patch("shutil.which", side_effect=lambda name, path=None: runtimes.get(name))):
+                runtime_config.save_config({"hook_runtime": {"node": {
+                    "claude": str(nodes["registered"]), "codex": str(nodes["registered"]),
+                    "unknown-host": str(nodes["registered"])}}}, home=root)
+                for platform, order in expected.items():
+                    with self.subTest(platform=platform):
+                        self.assertEqual(runtime_config.node_runtime_candidates(env, platform),
+                                         [nodes[name] for name in order])
+
+
 class TestRuntimeConfigNodeRegistrations(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()

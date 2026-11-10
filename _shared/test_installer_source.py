@@ -182,6 +182,72 @@ class GitHooksTests(SourceCase):
                                 capture_output=True, text=True)
         return result.stdout.strip() if result.returncode == 0 else None
 
+    def test_concurrent_worktree_adoptions_keep_the_original_hook_path(self):
+        git(self.repo, "config", "--local", "core.hooksPath", "user-hooks")
+        other = self.root / "other"
+        git(self.repo, "worktree", "add", "-q", "-b", "other", str(other))
+        script = r'''
+import contextlib, io, json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import file_lock
+from installer import runner, source
+runner.REPO_ROOT = Path(sys.argv[2])
+role = sys.argv[3]
+write = source._write_hook_path_record
+git = source._git
+lock = file_lock.exclusive
+def paused_write(change):
+    print("before-record", file=sys.__stdout__, flush=True)
+    sys.stdin.readline()
+    write(change)
+def observed_git(root, *args):
+    if args == ("config", "--local", "--get", "core.hooksPath"):
+        print("read-current", file=sys.__stdout__, flush=True)
+    return git(root, *args)
+@contextlib.contextmanager
+def observed_lock(*args, **kwargs):
+    print("lock-request", file=sys.__stdout__, flush=True)
+    with lock(*args, **kwargs) as held:
+        yield held
+if role == "first":
+    source._write_hook_path_record = paused_write
+else:
+    source._git = observed_git
+    file_lock.exclusive = observed_lock
+with contextlib.redirect_stdout(io.StringIO()):
+    change = source.setup_git_hooks()
+print(json.dumps(vars(change)), flush=True)
+'''
+        args = [sys.executable, "-u", "-c", script, str(Path(__file__).resolve().parent)]
+        first = subprocess.Popen([*args, str(self.repo), "first"], stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        second = None
+        try:
+            self.assertEqual(first.stdout.readline().strip(), "before-record")
+            second = subprocess.Popen([*args, str(other), "second"], stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True)
+            boundary = second.stdout.readline().strip()
+            self.assertIn(boundary, {"lock-request", "read-current"})
+            # Without serialization, let B finish while A has written Git but not its record.
+            if boundary == "read-current":
+                second_out, second_err = second.communicate(timeout=10)
+            first_out, first_err = first.communicate("continue\n", timeout=10)
+            if boundary == "lock-request":
+                second_out, second_err = second.communicate(timeout=10)
+            self.assertEqual(first.returncode, 0, first_err)
+            self.assertEqual(second.returncode, 0, second_err)
+            self.assertEqual(json.loads(first_out.splitlines()[-1])["before"], "user-hooks")
+            self.assertEqual(json.loads(second_out.splitlines()[-1])["before"], "user-hooks")
+            record = self.root / "home" / ".ghost-alice" / "install-state" / source.HOOK_PATH_RECORD
+            self.assertEqual(json.loads(record.read_text())["before"], "user-hooks")
+            self.assertEqual(self.shared_value(), source.hooks_path_value(other))
+        finally:
+            for process in (first, second):
+                if process is not None and process.poll() is None:
+                    process.kill()
+                    process.communicate()
+
     def setup_hooks(self) -> tuple[source.HookPathChange, str]:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):

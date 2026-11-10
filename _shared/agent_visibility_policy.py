@@ -6,15 +6,12 @@ from __future__ import annotations
 from typing import Any
 
 from runtime_config import canonical_agent_visibility_profile
+from hook_definitions import normalize_hook_id
 
 # Profiles are visibility levels from the config file or runtime environment: strict, dynamic, minimal.
 # Decisions are per-message UI actions after the hook has already run and the
 # strict session log has already captured output.
 VISIBLE_DECISIONS = {"show", "hide", "force_show"}
-
-
-def _normalize_hook_id(value: str | None) -> str:
-    return str(value or "").strip().lower().replace("_", "-")
 
 
 def _text_contains_any(text: str, needles: tuple[str, ...]) -> bool:
@@ -33,6 +30,8 @@ def _forced_reason(
 ) -> str | None:
     if exit_code != 0:
         return "forced-nonzero-exit"
+    if context.get("removed_host_control"):
+        return "forced-removed-host-control"
 
     # A hook that declared its surface is judged by real state in `context`, not by the words of its own message.
     text = "" if context.get("declared_surface") else f"{hook_id}\n{event}\n{stdout}\n{stderr}"
@@ -64,7 +63,7 @@ def decide(
     """Return the user-facing visibility decision for one hook result."""
 
     normalized_profile = canonical_agent_visibility_profile(profile)
-    normalized_hook_id = _normalize_hook_id(hook_id)
+    normalized_hook_id = normalize_hook_id(hook_id)
     decision_context: dict[str, Any] = dict(context or {})
 
     forced_reason = _forced_reason(

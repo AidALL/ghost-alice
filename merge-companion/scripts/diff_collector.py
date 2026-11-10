@@ -3,10 +3,12 @@
 Dependencies: Python 3.11+ standard library + local merge-companion modules.
 """
 from __future__ import annotations
-import hashlib
 import json
+import os
 import shutil
 import sys
+import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
@@ -18,6 +20,7 @@ _SHARED_DIR = Path(__file__).resolve().parents[2] / "_shared"
 if str(_SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(_SHARED_DIR))
 from merge_companion_messages import render_pending_merge_message
+from retired_assets import _restore_no_replace
 
 README_FIRST_TEMPLATE = f"""# READ-ME-FIRST. Ghost-ALICE External Change Quarantine Directory
 
@@ -58,7 +61,7 @@ def _file_kind(path: Path) -> str:
 
 
 def _encoding_label(path: Path) -> str | None:
-    if not path.is_file():
+    if path.is_symlink() or not path.is_file():
         return None
     try:
         path.read_bytes().decode("utf-8")
@@ -67,18 +70,20 @@ def _encoding_label(path: Path) -> str | None:
     return "utf-8"
 
 
-def _is_excluded_generated_path(path: Path, snapshot_record: Optional[dict] = None) -> bool:
-    paths = [path]
-    if snapshot_record:
-        relative_path = snapshot_record.get("relative_path")
-        if isinstance(relative_path, str) and relative_path:
-            paths.append(Path(relative_path))
-    for candidate in paths:
-        if any(part in EXCLUDED_DIR_NAMES for part in candidate.parts):
-            return True
-        if candidate.name in EXCLUDED_FILE_NAMES or candidate.suffix in EXCLUDED_FILE_SUFFIXES:
-            return True
-    return False
+def _is_excluded_generated_path(path: Path, snapshot_record: Optional[dict] = None, skills_dir: Optional[Path] = None) -> bool:
+    # Only names inside the selected root describe generated content. Without
+    # a root, a snapshot's relative coordinate is the available scope.
+    candidate = Path(path.name)
+    relative_path = snapshot_record.get("relative_path") if snapshot_record else None
+    if isinstance(relative_path, str) and relative_path and not Path(relative_path).is_absolute():
+        candidate = Path(relative_path)
+    if skills_dir is not None:
+        try:
+            candidate = path.relative_to(skills_dir)
+        except ValueError:
+            pass
+    return (any(part in EXCLUDED_DIR_NAMES for part in candidate.parts)
+            or candidate.name in EXCLUDED_FILE_NAMES or candidate.suffix in EXCLUDED_FILE_SUFFIXES)
 
 
 def _install_marker_hash(path: Path, snapshot_record: Optional[dict], skills_dir: Optional[Path]) -> Optional[str]:
@@ -193,6 +198,7 @@ def _change_record(
     relative_path = relative_path or path.name
     snapshot_file_kind = snapshot_record.get("file_kind") if snapshot_record else None
     snapshot_encoding = snapshot_record.get("encoding") if snapshot_record else None
+    current_file_kind = current_file_kind or _file_kind(path)
     return {
         "path": path_str,
         "snapshot_hash": snapshot_record.get("sha256") if snapshot_record else None,
@@ -201,7 +207,8 @@ def _change_record(
         "asset_id": asset_id,
         "relative_path": relative_path,
         "snapshot_file_kind": snapshot_file_kind,
-        "current_file_kind": current_file_kind or _file_kind(path),
+        "current_file_kind": current_file_kind,
+        "current_link_target": os.readlink(path) if current_file_kind == "symlink" else None,
         "snapshot_encoding": snapshot_encoding,
         "current_encoding": current_encoding if current_encoding is not None else _encoding_label(path),
         "snapshot_install_marker_hash": snapshot_record.get("install_marker_hash") if snapshot_record else None,
@@ -238,13 +245,13 @@ def collect_external_changes(
 ) -> list[dict]:
     snap = load_snapshot(snapshot_path)
     records = snapshot_records(snap, skills_dir=skills_dir)
-    current_paths = {str(f): f for f in files if not _is_excluded_generated_path(f)}
+    current_paths = {str(f): f for f in files if not _is_excluded_generated_path(f, records.get(str(f)), skills_dir)}
     changes = []
     for path_str, f in current_paths.items():
         old_record = records.get(path_str)
         old = old_record.get("sha256") if old_record else None
-        new = file_hash(f)
         current_kind = _file_kind(f)
+        new = file_hash(f) if current_kind == "file" else None
         current_encoding = _encoding_label(f)
         current_marker_hash = _install_marker_hash(f, old_record, skills_dir)
         benign_ghost_alice_refresh = _is_benign_ghost_alice_marker_refresh(
@@ -297,7 +304,7 @@ def collect_external_changes(
         if path_str in current_paths:
             continue
         f = Path(path_str)
-        if _is_excluded_generated_path(f, old_record):
+        if _is_excluded_generated_path(f, old_record, skills_dir):
             continue
         current_kind = _file_kind(f)
         if current_kind != "absent" and old_record.get("file_kind") == current_kind:
@@ -363,32 +370,18 @@ def _safe_filename(src: Path) -> str:
     return src.name.replace("/", "_").replace("\\", "_").replace("..", "_")
 
 
-def _pending_entry_id(entry_seed: dict) -> str:
-    payload = json.dumps(entry_seed, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    return f"pending-{hashlib.sha256(payload).hexdigest()[:16]}"
-
-
 def _manifest_entry(
     change: dict,
     src: Path,
     backup_path: Optional[Path],
     platform: str,
-    timestamp: str,
 ) -> dict:
     skill = change.get("asset_id") or src.parent.name or src.name
     safe_name = _safe_filename(src)
     change_kind = change.get("change_kind", "modified")
-    entry_seed = {
-        "platform": platform,
-        "source_path": str(src),
-        "snapshot_hash": change["snapshot_hash"],
-        "current_hash": change["current_hash"],
-        "change_kind": change_kind,
-        "relative_path": change.get("relative_path") or safe_name,
-    }
-    # The installer registers the change as pending; no merge, discard or defer outcome is recorded yet.
+    # The installer records a pending occurrence, not a human merge decision.
     entry = {
-        "id": _pending_entry_id(entry_seed),
+        "id": f"pending-{uuid.uuid4().hex}",
         "platform": platform,
         "skill": skill,
         "source_path": str(src),
@@ -399,6 +392,7 @@ def _manifest_entry(
         "relative_path": change.get("relative_path") or safe_name,
         "snapshot_file_kind": change.get("snapshot_file_kind"),
         "current_file_kind": change.get("current_file_kind"),
+        "current_link_target": change.get("current_link_target"),
         "snapshot_encoding": change.get("snapshot_encoding"),
         "current_encoding": change.get("current_encoding"),
         "snapshot_install_marker_hash": change.get("snapshot_install_marker_hash"),
@@ -424,6 +418,8 @@ def _append_pending_entry_if_absent(manifest_path: Path, entry: dict) -> bool:
             "snapshot_hash",
             "current_hash",
             "change_kind",
+            "current_file_kind",
+            "current_link_target",
         ],
     )
 
@@ -431,17 +427,18 @@ def _append_pending_entry_if_absent(manifest_path: Path, entry: dict) -> bool:
 def _backup_change(change: dict, src: Path, pending_dir: Path, timestamp: str) -> Optional[Path]:
     if change.get("change_kind") == "deleted":
         return None
-    if not src.exists() or not src.is_file():
+    if src.is_symlink() or not src.exists() or not src.is_file():
         return None
     skill = change.get("asset_id") or src.parent.name or src.name
     safe_name = _safe_filename(src)
-    backup_name = f"{timestamp}-{skill}-{safe_name}.bak"
-    backup_path = pending_dir / backup_name
-    suffix = 1
-    while backup_path.exists():
-        backup_path = pending_dir / f"{timestamp}-{skill}-{safe_name}-{suffix}.bak"
-        suffix += 1
-    shutil.copy2(src, backup_path)
+    fd, backup_name = tempfile.mkstemp(prefix=f"{timestamp}-{skill}-{safe_name}-", suffix=".bak", dir=pending_dir)
+    os.close(fd)
+    backup_path = Path(backup_name)
+    try:
+        shutil.copy2(src, backup_path)
+    except BaseException:
+        backup_path.unlink()
+        raise
     return backup_path
 
 
@@ -464,10 +461,10 @@ def register_changes_in_manifest(
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     for change in changes:
         src = Path(change["path"])
-        if change.get("change_kind") != "deleted" and not src.exists():
+        if change.get("change_kind") != "deleted" and not os.path.lexists(src):
             continue
         backup_path = _backup_change(change, src, pending_dir, timestamp)
-        entry = _manifest_entry(change, src, backup_path, platform, timestamp)
+        entry = _manifest_entry(change, src, backup_path, platform)
         if not _append_pending_entry_if_absent(manifest_path, entry) and backup_path is not None:
             try:
                 backup_path.unlink()
@@ -493,14 +490,14 @@ def quarantine_legacy_target(
     legacy_root.mkdir(parents=True, exist_ok=True)
     backup_path = legacy_root / f"{timestamp}-{safe_name}"
     suffix = 1
-    while backup_path.exists():
+    while backup_path.exists() or backup_path.is_symlink():
         backup_path = legacy_root / f"{timestamp}-{safe_name}-{suffix}"
         suffix += 1
 
     shutil.move(str(target_path), str(backup_path))
     # The installer registers the backup to await the human user's merge, discard or defer choice.
     entry = {
-        "id": f"{timestamp}-{safe_name}-legacy-target",
+        "id": f"pending-{uuid.uuid4().hex}",
         "platform": platform,
         "skill": target_name,
         "source_path": str(target_path),
@@ -512,5 +509,15 @@ def quarantine_legacy_target(
         "decision": None,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
-    append_entry(manifest_path, entry)
+    try:
+        append_entry(manifest_path, entry)
+    except Exception as original:
+        try:
+            _restore_no_replace(backup_path, target_path)
+        except Exception as rollback:
+            raise RuntimeError(
+                f"quarantine failed for active entry {target_path}; recovery backup remains at {backup_path}; "
+                f"rollback failed: {rollback}"
+            ) from original
+        raise
     return backup_path

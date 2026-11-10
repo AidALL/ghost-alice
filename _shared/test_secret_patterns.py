@@ -29,14 +29,22 @@ class SecretPatternsTest(unittest.TestCase):
         # The scanner skill runs without _shared, so it keeps a copy; the copy must not drift.
         scanner = _load('scan_agent_security_surface_under_test', 'agent-security-scan/scripts/scan_agent_security_surface.py')
         self.addCleanup(sys.modules.pop, 'scan_agent_security_surface_under_test', None)
-        self.assertEqual([p.pattern for p in scanner.SECRET_PATTERNS[:4]],
-                         [p.pattern for p in secret_patterns.SECRET_PATTERNS])
+        self.assertEqual([(p.pattern, p.flags) for p in scanner.SECRET_PATTERNS[:4]],
+                         [(p.pattern, p.flags) for p in secret_patterns.SECRET_PATTERNS])
 
     def test_compact_handoff_uses_the_owner_and_adds_only_its_own_pattern(self):
         handoff = _load('compact_handoff_under_test', 'compact-handoff/scripts/compact_handoff.py')
         self.addCleanup(sys.modules.pop, 'compact_handoff_under_test', None)
         self.assertEqual(handoff.SECRET_PATTERNS[:4], list(secret_patterns.SECRET_PATTERNS))
         self.assertEqual(len(handoff.SECRET_PATTERNS), 5)
+        for value in ('API_KEY: ' + 'a' * 20, 'token="' + 'b' * 20, "secret = '" + 'c' * 20):
+            with self.subTest(value=value):
+                self.assertFalse(any(pattern.search(value) for pattern in secret_patterns.SECRET_PATTERNS))
+                self.assertTrue(handoff.contains_secret_like_value(value))
+        for value in ('token: ' + 'a' * 19, 'secret=' + 'b' * 19,
+                      'token ' + 'c' * 20, 'password: ' + 'd' * 20):
+            with self.subTest(value=value):
+                self.assertFalse(handoff.contains_secret_like_value(value))
 
 
 if __name__ == '__main__':

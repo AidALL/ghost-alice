@@ -21,10 +21,10 @@ does not change the next work decision.
 from __future__ import annotations
 
 from typing import Any
+from runtime_config import VALID_AGENT_VISIBILITY_PROFILES
 
 VALUE_KINDS = {"gate", "risk", "verification", "routine"}
 EXPOSURE_CLASSES = {"forced", "essential", "routine"}
-PROFILES = {"strict", "dynamic", "minimal"}
 
 # exposure_class -> {profile -> (user_surface, model_surface_hint)} for the non-forced, non-fail-closed cases. User surface follows the visibility profile. Model surface hints follow work impact, so they do not vary by profile for routine and essential values.
 _TABLE: dict[str, dict[str, tuple[str, str]]] = {
@@ -60,7 +60,7 @@ def project_surfaces(
         return _FORCED
     if klass not in EXPOSURE_CLASSES or kind not in VALUE_KINDS:
         return _FULL_FULL
-    if prof not in PROFILES:
+    if prof not in VALID_AGENT_VISIBILITY_PROFILES:
         return _FULL_FULL
     if prof == "strict":
         return ("full", _model_surface_for_work_impact(klass))

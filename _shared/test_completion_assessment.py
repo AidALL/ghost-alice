@@ -1,6 +1,7 @@
 """The response model makes per-claim and whole-response judgments; Core records and binds its exact reviewed material."""
 import copy
-import importlib
+from contextlib import closing
+import completion_assessment
 import json
 from pathlib import Path
 import sqlite3
@@ -8,6 +9,7 @@ import unittest
 from unittest import mock
 
 import test_response_route as fixtures
+from stop_hook_testing import assert_stop_observation
 
 
 class ReviewReceiptTests(unittest.TestCase):
@@ -28,7 +30,7 @@ class ReviewReceiptTests(unittest.TestCase):
 
 class CompletionAssessmentTests(unittest.TestCase):
     def test_legacy_explanation_route_reuse_authenticates_original_before_alias_comparison(self):
-        api = self.api()
+        api = completion_assessment
         text = 'The captured result shows the footer clear of the list.'
         current = api.prepare_response_review(self.source, response_text=text,
             source_paths=[str(self.observation)], claim_statements=[text])
@@ -63,7 +65,7 @@ class CompletionAssessmentTests(unittest.TestCase):
             api.lookup_current_response(self.source, text)
 
     def test_legacy_proof_contract_reuses_original_binding_and_rejects_changed_condition(self):
-        api = self.api()
+        api = completion_assessment
         original = self.prepare()
         legacy = json.loads(json.dumps({k: v for k, v in original.items() if k != 'candidate_reference'}))
         for row in legacy['contract']['criteria']:
@@ -97,7 +99,7 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_source_use_judgment_shares_the_response_review_transaction(self):
         from unittest.mock import patch
-        api = self.api()
+        api = completion_assessment
         candidate = api.prepare_response_review(self.source, response_text=self.proof(),
             source_paths=[str(self.observation)], verified_at=self.time)
         review = self.response_review(candidate)
@@ -105,6 +107,8 @@ class CompletionAssessmentTests(unittest.TestCase):
         def record(source, event, judgments, *, transaction):
             self.assertIsNotNone(transaction)
             received.append((event, judgments))
+            transaction.execute('CREATE TABLE integrated_use_marker(value TEXT)')
+            transaction.execute("INSERT INTO integrated_use_marker VALUES ('bound')")
             return dict(status='recorded', references=['use-judgment'])
         judgments = [dict(use_reference='use', disposition='replace', summary='Conclusion', next_need='Changed purpose')]
         with patch('response_context_use.record_use_judgments', record, create=True):
@@ -112,10 +116,12 @@ class CompletionAssessmentTests(unittest.TestCase):
                 context_use_judgments=judgments, expected_input_event_id=self.fixture.event)
         self.assertEqual(received, [(self.fixture.event, judgments)])
         self.assertEqual(result['context_use_judgments']['status'], 'recorded')
+        with closing(sqlite3.connect(self.fixture.root / 'ghost-state.sqlite3')) as connection:
+            self.assertEqual(connection.execute('SELECT value FROM integrated_use_marker').fetchall(), [('bound',)])
 
     def test_rejected_source_use_judgment_rolls_back_the_response_review(self):
         from unittest.mock import patch
-        api = self.api()
+        api = completion_assessment
         candidate = api.prepare_response_review(self.source, response_text=self.proof(),
             source_paths=[str(self.observation)], verified_at=self.time)
         review = self.response_review(candidate)
@@ -131,7 +137,7 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_selected_original_claim_lookup_preserves_owner_binding(self):
         candidate = self.prepare()
-        api = self.api()
+        api = completion_assessment
         selected = api.read_review_claims(self.source, candidate['candidate_reference'], [0])
         self.assertEqual(selected, [candidate['bindings'][0]])
         with self.assertRaises(api.CompletionAssessmentError):
@@ -141,7 +147,7 @@ class CompletionAssessmentTests(unittest.TestCase):
     def test_retained_inline_original_is_referenced_without_copying_its_body(self):
         import base64
         from source_reference import source_text, CORE_FORMAT
-        api = self.api()
+        api = completion_assessment
         raw = self.observation.read_bytes()
         original = dict(locator=str(self.observation), digest=api.text_digest(raw),
             bytes_base64=base64.b64encode(raw).decode(), text=raw.decode())
@@ -178,7 +184,7 @@ class CompletionAssessmentTests(unittest.TestCase):
                 connection.execute('SELECT 1')
 
     def test_assessment_stores_candidate_reference_without_duplicate_candidate(self):
-        api = self.api()
+        api = completion_assessment
         candidate = self.prepare()
         receipt = self.review(candidate)
         core, root, _ = api._coordinates(self.source)
@@ -188,7 +194,7 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.assertEqual(self.lookup(candidate).candidate['sources'], candidate['sources'])
 
     def test_new_review_stores_source_reference_without_original_body(self):
-        api = self.api()
+        api = completion_assessment
         original = 'original source body not copied into review records ' * 1000
         self.observation.write_text(original)
         body = 'The captured result shows the footer clear of the list.'
@@ -201,7 +207,7 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.assertNotIn(original, json.dumps(stored))
 
     def test_completion_review_after_new_input_retains_sources_but_current_application_checks_them(self):
-        api = self.api()
+        api = completion_assessment
         text = self.proof()
         candidate = self.prepare(response_text=text)
         review = self.response_review(candidate)
@@ -226,7 +232,7 @@ class CompletionAssessmentTests(unittest.TestCase):
             api.lookup_current_response(self.source, text)
 
     def stored_candidate(self, receipt):
-        api = self.api()
+        api = completion_assessment
         core, root, _ = api._coordinates(self.source)
         with core._read_connection(root) as connection:
             return api._stored(connection, 'core_completion_candidates', receipt['candidate_reference'])
@@ -238,7 +244,7 @@ class CompletionAssessmentTests(unittest.TestCase):
             rationale='The complete answer matches the original captured observation.'))
 
     def test_response_api_receipts_do_not_reinject_long_answer(self):
-        api = self.api()
+        api = completion_assessment
         body = self.proof() + '\n\n' + ('A detailed retained answer.\n' * 2000)
         candidate = api.prepare_response_review(self.source, response_text=body,
             source_paths=[str(self.observation)], verified_at=self.time)
@@ -256,7 +262,7 @@ class CompletionAssessmentTests(unittest.TestCase):
         api.lookup_current_response(self.source, body)
 
     def test_explanation_api_receipts_do_not_reinject_long_answer(self):
-        api = self.api()
+        api = completion_assessment
         route = self.fixture.candidate(units=())
         self.fixture.record(route)
         claim = 'The captured result shows the footer clear of the list.'
@@ -274,7 +280,7 @@ class CompletionAssessmentTests(unittest.TestCase):
     def test_explanation_lookup_accepts_boundary_whitespace(self):
         route = self.fixture.candidate(units=())
         self.fixture.record(route)
-        api = self.api()
+        api = completion_assessment
         text = 'The captured result shows the footer clear of the list.'
         candidate = api.prepare_response_review(self.source, response_text=text,
             source_paths=[str(self.observation)], claim_statements=[text])
@@ -294,7 +300,7 @@ class CompletionAssessmentTests(unittest.TestCase):
     def test_missing_explanation_review_does_not_require_a_completion_contract(self):
         route = self.fixture.candidate(units=())
         self.fixture.record(route)
-        api = self.api()
+        api = completion_assessment
         body = 'The retained email requests an invention proposal.'
         self.observation.write_text('Original email: please send an invention proposal.')
         self.source.pop('GHOST_ALICE_CORE_ROOT')
@@ -316,7 +322,7 @@ class CompletionAssessmentTests(unittest.TestCase):
     def test_explanation_requires_claim_review_as_well_as_response_review(self):
         route = self.fixture.candidate(units=())
         self.fixture.record(route)
-        api = self.api()
+        api = completion_assessment
         body = 'The captured result shows the footer clear of the list.'
         candidate = api.prepare_response_review(self.source, response_text=body,
             source_paths=[str(self.observation)], claim_statements=[body])
@@ -336,19 +342,20 @@ class CompletionAssessmentTests(unittest.TestCase):
     def test_explanation_claims_must_identify_actual_draft_statements(self):
         route = self.fixture.candidate(units=())
         self.fixture.record(route)
-        api = self.api()
+        api = completion_assessment
         for claims in (None, [], ['not in the draft'], ['footer', 'footer']):
             with self.subTest(claims=claims), self.assertRaises(api.CompletionAssessmentError):
                 api.prepare_response_review(self.source, response_text='The footer is clear.',
                     source_paths=[str(self.observation)], claim_statements=claims)
 
     def test_explanation_review_survives_planning_changes_on_the_same_owned_input(self):
-        api = self.api()
+        api = completion_assessment
         route = self.fixture.candidate()
         self.fixture.record(route)
         body = 'The retained observation shows the footer clear of the list.'
         candidate = api.prepare_response_review(self.source, response_text=body,
             source_paths=[str(self.observation)], claim_statements=[body])
+        stored_original = copy.deepcopy(self.stored_candidate(candidate))
         judgment = dict(binding_id=candidate['response_binding']['binding_id'], verdict='supported',
             source_ids=[candidate['sources'][0]['source_id']],
             rationale='The answer states only what the original footer observation records.')
@@ -367,18 +374,18 @@ class CompletionAssessmentTests(unittest.TestCase):
                 retained = api.prepare_response_review(self.source, response_text=body,
                     source_paths=[str(self.observation)], claim_statements=[body])
                 self.assertEqual(retained['candidate_reference'], candidate['candidate_reference'])
-                self.assertEqual(self.stored_candidate(retained)['observed_at'], self.stored_candidate(candidate)['observed_at'])
-                self.assertEqual(self.stored_candidate(retained)['route'], self.stored_candidate(candidate)['route'])
+                self.assertEqual(self.stored_candidate(retained)['observed_at'], stored_original['observed_at'])
+                self.assertEqual(self.stored_candidate(retained)['route'], stored_original['route'])
                 self.assertEqual(api.record_response_review(self.source, retained['candidate_reference'],
                     dict(claims=self.claim_judgments(retained), response=judgment)), original)
 
         import json, os, subprocess, sys
-        hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
+        hook = Path(__file__).parent / 'claude_stop_verification_hook.py'
         stopped = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
             input=json.dumps(dict(session_id='current', last_assistant_message=body)),
             text=True, capture_output=True, check=True,
             env=dict(os.environ, **self.source, PYTHONDONTWRITEBYTECODE='1'))
-        self.assertNotEqual(json.loads(stopped.stdout).get('decision'), 'block', stopped.stdout)
+        assert_stop_observation(self, json.loads(stopped.stdout))
 
         changed = copy.deepcopy(route)
         changed['selected_criteria'] = []
@@ -389,7 +396,7 @@ class CompletionAssessmentTests(unittest.TestCase):
     def test_changed_explanation_source_appends_review_without_replacing_original(self):
         route = self.fixture.candidate(units=())
         self.fixture.record(route)
-        api = self.api()
+        api = completion_assessment
         body = 'The captured result shows the footer clear of the list.'
 
         def prepare():
@@ -436,11 +443,12 @@ class CompletionAssessmentTests(unittest.TestCase):
     def test_fresh_explanation_review_without_completion_contract(self):
         route = self.fixture.candidate(units=())
         self.fixture.record(route)
-        api = self.api()
+        api = completion_assessment
         body = 'The retained log shows the adapter was rejected before execution.'
         self.observation.write_text('registered adapter hash mismatch. Adapter was not executed.')
         candidate = api.prepare_response_review(self.source, response_text=body,
             source_paths=[str(self.observation)], claim_statements=[body])
+        stored_original = copy.deepcopy(self.stored_candidate(candidate))
         judgment = dict(binding_id=candidate['response_binding']['binding_id'], verdict='supported',
             source_ids=[candidate['sources'][0]['source_id']],
             rationale='The original log explicitly records rejection before adapter execution.')
@@ -451,19 +459,19 @@ class CompletionAssessmentTests(unittest.TestCase):
         repeated = api.prepare_response_review(self.source, response_text=body,
             source_paths=[str(self.observation)], claim_statements=[body])
         self.assertEqual(repeated['candidate_reference'], candidate['candidate_reference'])
-        self.assertEqual(self.stored_candidate(repeated)['observed_at'], self.stored_candidate(candidate)['observed_at'])
+        self.assertEqual(self.stored_candidate(repeated)['observed_at'], stored_original['observed_at'])
         api.record_response_review(self.source, repeated['candidate_reference'], dict(claims=claims, response=judgment))
         api.lookup_current_response(self.source, body)
         import native_completion
         result = native_completion.assess_native_completion(self.source, text=body)
         self.assertIsNone(result['body_issue'])
         import json, os, subprocess, sys
-        hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
+        hook = Path(__file__).parent / 'claude_stop_verification_hook.py'
         stopped = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
             input=json.dumps(dict(session_id='current', last_assistant_message=body)),
             text=True, capture_output=True, check=True,
             env=dict(os.environ, **self.source, PYTHONDONTWRITEBYTECODE='1'))
-        self.assertNotEqual(json.loads(stopped.stdout).get('decision'), 'block')
+        assert_stop_observation(self, json.loads(stopped.stdout))
         with self.assertRaises(api.CompletionAssessmentError):
             api.lookup_current_response(self.source, body + ' All work is complete.')
         with self.assertRaises(api.CompletionAssessmentError):
@@ -494,10 +502,6 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.observation.write_text('Folders footer no longer overlaps the list in the captured result.')
         self.time = '2026-10-10T16:20:10.253906+00:00'
 
-    def api(self):
-        self.assertTrue(Path(__file__).with_name('completion_assessment.py').is_file(),
-                        'Core owning assessment service is missing')
-        return importlib.import_module('completion_assessment')
 
     def proof(self, claim='폴더 탭의 푸터가 목록을 더 이상 가리지 않습니다.', declaration=None):
         # The test writes user-said as the response model's source claim; it does not authenticate a sender.
@@ -508,17 +512,17 @@ class CompletionAssessmentTests(unittest.TestCase):
             '- unverified:', '  - none', '- evidence: original observation'])
 
     def prepare(self, proof=None, **kwargs):
-        return self.api().prepare_assessment(self.source, proof=proof or self.proof(),
+        return completion_assessment.prepare_assessment(self.source, proof=proof or self.proof(),
             verified_at=self.time, source_paths=[str(self.observation)], **kwargs)
 
     def review(self, candidate, verdict='supported', rationale='The original observation shows the footer clear of the list.'):
         judgments = [dict(binding_id=b['binding_id'], verdict=verdict,
             source_ids=[candidate['sources'][0]['source_id']], rationale=rationale)
             for b in candidate['bindings']]
-        return self.api().record_assessment(self.source, candidate['candidate_reference'], judgments)
+        return completion_assessment.record_assessment(self.source, candidate['candidate_reference'], judgments)
 
     def lookup(self, candidate, **kwargs):
-        return self.api().lookup_assessment(self.source, candidate['contract'], candidate['proof'],
+        return completion_assessment.lookup_assessment(self.source, candidate['contract'], candidate['proof'],
             candidate['verified_at'], **kwargs)
 
     def test_original_footer_arm_mismatch_is_reviewed_unsupported(self):
@@ -527,20 +531,20 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.assertEqual(candidate['bindings'][0]['criterion']['summary'], self.summary)
         self.review(candidate, 'unsupported', 'The claim concerns an arm, while AC1 requires a footer overlap fix.')
         assessment = self.lookup(candidate)
-        self.assertEqual(self.api().assessment_coverage(assessment, candidate['contract'],
+        self.assertEqual(completion_assessment.assessment_coverage(assessment, candidate['contract'],
             candidate['proof'], self.time), set())
 
     def test_copied_canonical_summary_cannot_replace_review_of_wrong_claim(self):
         candidate = self.prepare(self.proof('The writing arm is now visible.'))
         self.review(candidate, 'unsupported', 'Copying the footer criterion does not make an arm claim establish it.')
-        self.assertEqual(self.api().assessment_coverage(self.lookup(candidate), candidate['contract'],
+        self.assertEqual(completion_assessment.assessment_coverage(self.lookup(candidate), candidate['contract'],
             candidate['proof'], self.time), set())
 
     def test_translated_correct_claim_and_original_sources_are_supported(self):
         candidate = self.prepare()
         self.assertIn('Folders footer', __import__('source_reference').source_text(candidate['sources'][0]))
         self.review(candidate)
-        self.assertEqual(self.api().assessment_coverage(self.lookup(candidate), candidate['contract'],
+        self.assertEqual(completion_assessment.assessment_coverage(self.lookup(candidate), candidate['contract'],
             candidate['proof'], self.time), {('first', 1, 'AC1')})
         self.assertEqual(self.lookup(candidate).candidate['verified_at'], self.time)
 
@@ -548,21 +552,21 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.observation.write_text('All unit tests for pen angle passed.')
         candidate = self.prepare()
         self.review(candidate, 'unsupported', 'Pen angle tests do not observe footer overlap.')
-        self.assertFalse(self.api().assessment_coverage(self.lookup(candidate), candidate['contract'],
+        self.assertFalse(completion_assessment.assessment_coverage(self.lookup(candidate), candidate['contract'],
             candidate['proof'], self.time))
 
     def test_missing_assessment_and_caller_verdict_are_not_coverage(self):
         candidate = self.prepare()
-        with self.assertRaises(self.api().CompletionAssessmentError) as caught:
+        with self.assertRaises(completion_assessment.CompletionAssessmentError) as caught:
             self.lookup(candidate)
         self.assertEqual(caught.exception.reason, 'assessment-required')
-        with self.assertRaises(self.api().CompletionAssessmentError):
-            self.api().assessment_coverage({'verdict': 'supported'}, candidate['contract'],
+        with self.assertRaises(completion_assessment.CompletionAssessmentError):
+            completion_assessment.assessment_coverage({'verdict': 'supported'}, candidate['contract'],
                 candidate['proof'], self.time)
 
     def test_changed_proof_definition_or_time_cannot_borrow_review(self):
         candidate = self.prepare(); self.review(candidate)
-        api = self.api(); assessment = self.lookup(candidate)
+        api = completion_assessment; assessment = self.lookup(candidate)
         for field in ('proof', 'contract', 'verified_at'):
             args = copy.deepcopy(candidate)
             if field == 'contract': args[field]['criteria'][0]['summary'] = 'Different requirement'
@@ -576,14 +580,14 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.assertNotIn('reuse_evidence', candidate)
         self.review(candidate)
         self.observation.write_text('Changed after original observation')
-        with self.assertRaises(self.api().CompletionAssessmentError) as caught:
+        with self.assertRaises(completion_assessment.CompletionAssessmentError) as caught:
             self.lookup(candidate)
         self.assertEqual(caught.exception.reason, 'source-changed')
-        retained = self.api().prepare_assessment(self.source, proof=self.proof('Corrected footer claim.'),
+        retained = completion_assessment.prepare_assessment(self.source, proof=self.proof('Corrected footer claim.'),
             verified_at=self.time, source_paths=[], reuse_candidate=candidate['candidate_reference'])
         self.assertEqual(retained['sources'], candidate['sources'])
         self.assertEqual(retained['verified_at'], self.time)
-        with self.assertRaises(self.api().CompletionAssessmentError) as unavailable:
+        with self.assertRaises(completion_assessment.CompletionAssessmentError) as unavailable:
             self.review(retained)
         self.assertEqual(unavailable.exception.reason, 'source-changed')
 
@@ -593,17 +597,17 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.review(candidate)
         self.lookup(candidate)
         foreign = dict(self.source, GHOST_ALICE_SESSION_ID='foreign')
-        with self.assertRaises(self.api().CompletionAssessmentError):
-            self.api().record_assessment(foreign, candidate['candidate_reference'], [])
+        with self.assertRaises(completion_assessment.CompletionAssessmentError):
+            completion_assessment.record_assessment(foreign, candidate['candidate_reference'], [])
 
     def test_unconnected_or_duplicate_judgment_and_rewrite_fail_closed(self):
         candidate = self.prepare()
         judgment = dict(binding_id=candidate['bindings'][0]['binding_id'], verdict='supported',
                         source_ids=['invented'], rationale='Footer is clear')
-        with self.assertRaises(self.api().CompletionAssessmentError):
-            self.api().record_assessment(self.source, candidate['candidate_reference'], [judgment])
+        with self.assertRaises(completion_assessment.CompletionAssessmentError):
+            completion_assessment.record_assessment(self.source, candidate['candidate_reference'], [judgment])
         self.review(candidate)
-        with self.assertRaises(self.api().CompletionAssessmentError):
+        with self.assertRaises(completion_assessment.CompletionAssessmentError):
             self.review(candidate, 'unsupported', 'Attempt to rewrite review')
         with fixtures.ledger.storage_transaction(self.fixture.root) as connection:
             with self.assertRaises(sqlite3.IntegrityError):
@@ -618,12 +622,12 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_unavailable_review_keeps_the_criterion_out_of_coverage(self):
         candidate = self.prepare(); self.review(candidate, 'unavailable', 'The original observation is inconclusive.')
-        self.assertEqual(self.api().assessment_coverage(self.lookup(candidate), candidate['contract'],
+        self.assertEqual(completion_assessment.assessment_coverage(self.lookup(candidate), candidate['contract'],
             candidate['proof'], self.time), set())
 
     def test_core_review_api_exposes_no_correction_or_archive_entry_points(self):
         import inspect
-        api = self.api()
+        api = completion_assessment
         for name in ('authorize_correction', 'assessed_definitions', 'assessment_definitions',
                      'assessment_capture_binding', 'assessment_rejections', 'assessment_reviewed',
                      'lookup_publication_assessment'):
@@ -633,15 +637,14 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_current_proof_lookup_accepts_boundary_whitespace_and_preserves_raw_proof(self):
         candidate = self.prepare(); self.review(candidate)
-        self.assertTrue(callable(getattr(self.api(), 'lookup_current_proof', None)), 'Current proof lookup is missing')
-        actual = self.api().lookup_current_proof(self.source, '\n' + candidate['proof'] + '\n')
+        actual = completion_assessment.lookup_current_proof(self.source, '\n' + candidate['proof'] + '\n')
         self.assertEqual(actual.candidate['proof'], candidate['proof'])
-        with self.assertRaises(self.api().CompletionAssessmentError):
-            self.api().lookup_current_proof(self.source, candidate['proof'].replace('criterion: AC1', 'criterion: AC2'))
+        with self.assertRaises(completion_assessment.CompletionAssessmentError):
+            completion_assessment.lookup_current_proof(self.source, candidate['proof'].replace('criterion: AC1', 'criterion: AC2'))
 
     def test_control_marker_spacing_preserves_original_review_through_stop(self):
         import json, os, subprocess, sys
-        api = self.api()
+        api = completion_assessment
         body = 'The recorded observation supports this result.\n\n' + self.proof()
         candidate = api.prepare_response_review(self.source, response_text=body,
             source_paths=[str(self.observation)], verified_at=self.time)
@@ -658,12 +661,12 @@ class CompletionAssessmentTests(unittest.TestCase):
                 self.assertEqual(actual.candidate['proof_digest'], self.stored_candidate(candidate)['proof_digest'])
                 self.assertEqual(actual.candidate['sources'], self.stored_candidate(candidate)['sources'])
                 self.assertEqual(actual.candidate['verified_at'], self.time)
-        hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
+        hook = Path(__file__).parent / 'claude_stop_verification_hook.py'
         stopped = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
             input=json.dumps(dict(session_id='current', last_assistant_message=delivered)),
             text=True, capture_output=True, check=True,
             env=dict(os.environ, **self.source, PYTHONDONTWRITEBYTECODE='1'))
-        self.assertNotEqual(json.loads(stopped.stdout).get('decision'), 'block', stopped.stdout)
+        assert_stop_observation(self, json.loads(stopped.stdout))
         for changed in (delivered.replace('criterion: AC1', 'criterion: AC2'),
                         delivered.replace('verdict: pass', 'verdict: fail'),
                         delivered.replace('original observation', 'different observation'),
@@ -688,7 +691,6 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_final_block_extraction_does_not_digest_summary_as_original_proof(self):
         import completion_check_validator as parser
-        self.assertTrue(callable(getattr(parser, 'extract_original_proof', None)), 'Original proof extraction is missing')
         proof = self.proof()
         self.assertEqual(parser.extract_original_proof(proof + '\n\nThe footer is fixed.').strip(), proof)
         for prefix in ('```text\n' + proof + '\n```\n\n', '> [completion-check]\n> example only\n\n'):
@@ -709,7 +711,7 @@ class CompletionAssessmentTests(unittest.TestCase):
     def test_partial_unverified_condition_never_becomes_supported_coverage(self):
         proof = self.proof().replace('[completion-check]', '[partial-check]\n- scope: partial').replace('  - none', '  - AC1: unresolved')
         candidate = self.prepare(proof); self.review(candidate)
-        self.assertEqual(self.api().assessment_coverage(self.lookup(candidate), candidate['contract'], proof, self.time), set())
+        self.assertEqual(completion_assessment.assessment_coverage(self.lookup(candidate), candidate['contract'], proof, self.time), set())
 
     def test_current_proof_resolves_one_selected_unit_and_rejects_ambiguity(self):
         fixtures.ledger.record_turn(**self.fixture.coords, expected_input_event_id=self.fixture.event,
@@ -717,14 +719,14 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.fixture.record(self.fixture.candidate(units=('first', 'second')))
         candidate = self.prepare(work_unit_id='first'); self.review(candidate)
         try:
-            actual = self.api().lookup_current_proof(self.source, candidate['proof'])
-        except self.api().CompletionAssessmentError as exc:
+            actual = completion_assessment.lookup_current_proof(self.source, candidate['proof'])
+        except completion_assessment.CompletionAssessmentError as exc:
             self.fail('One reviewed selected unit must resolve: ' + str(exc))
         self.assertEqual(actual.candidate['contract']['work_unit_id'], 'first')
         other = self.prepare(work_unit_id='second')
         self.review(other, 'unsupported', 'This proof does not establish the second condition.')
-        with self.assertRaises(self.api().CompletionAssessmentError):
-            self.api().lookup_current_proof(self.source, candidate['proof'])
+        with self.assertRaises(completion_assessment.CompletionAssessmentError):
+            completion_assessment.lookup_current_proof(self.source, candidate['proof'])
 
     def test_supported_honest_failure_is_reviewable_but_never_pass_coverage(self):
         from completion_check_validator import parse_original_completion_evidence
@@ -732,10 +734,10 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.observation.write_text('The footer still covers the list.')
         try:
             candidate = self.prepare(proof)
-        except self.api().CompletionAssessmentError as exc:
+        except completion_assessment.CompletionAssessmentError as exc:
             self.fail('A structurally valid honest failure must be reviewable: ' + str(exc))
         self.review(candidate, rationale='The original observation supports the reported footer failure.')
-        self.assertEqual(self.api().assessment_coverage(self.lookup(candidate), candidate['contract'], proof, self.time), set())
+        self.assertEqual(completion_assessment.assessment_coverage(self.lookup(candidate), candidate['contract'], proof, self.time), set())
         with self.assertRaises(ValueError):
             parse_original_completion_evidence(proof, allow_partial=True)
 
@@ -743,14 +745,14 @@ class CompletionAssessmentTests(unittest.TestCase):
         body = self.proof() + '\n\nThe footer correction is verified.'
         candidate = self.prepare(response_text=body)
         self.assertEqual(candidate['response_binding']['text'], body)
-        with self.assertRaises(self.api().CompletionAssessmentError) as caught:
+        with self.assertRaises(completion_assessment.CompletionAssessmentError) as caught:
             self.review(candidate)
         self.assertEqual(caught.exception.reason, 'response-assessment-required')
-        with self.assertRaises(self.api().CompletionAssessmentError):
+        with self.assertRaises(completion_assessment.CompletionAssessmentError):
             self.lookup(candidate)
 
     def test_response_cannot_substitute_a_different_proof(self):
-        with self.assertRaises(self.api().CompletionAssessmentError) as caught:
+        with self.assertRaises(completion_assessment.CompletionAssessmentError) as caught:
             self.prepare(response_text=self.proof('The cloud rollout is complete.'))
         self.assertEqual(caught.exception.reason, 'proof-invalid')
 
@@ -762,8 +764,8 @@ class CompletionAssessmentTests(unittest.TestCase):
             source_ids=[candidate['sources'][0]['source_id']], rationale='Later observation.')
             for b in candidate['bindings']]
         response = dict(judgments[0], binding_id=candidate['response_binding']['binding_id'])
-        with self.assertRaises(self.api().CompletionAssessmentError) as caught:
-            self.api().record_assessment(self.source, candidate['candidate_reference'], judgments,
+        with self.assertRaises(completion_assessment.CompletionAssessmentError) as caught:
+            completion_assessment.record_assessment(self.source, candidate['candidate_reference'], judgments,
                 response_judgment=response)
         self.assertEqual(caught.exception.reason, 'assessment-conflict')
 

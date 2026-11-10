@@ -77,6 +77,60 @@ class TestManifestIO(unittest.TestCase):
         with self.assertRaises(ManifestError):
             mark_decided(self.path, "no-such-id", decision="merged")
 
+    def test_ambiguous_historical_id_cannot_decide_an_arbitrary_occurrence(self):
+        append_entry(self.path, {"id": "old-shared-id", "decided": False, "decision": None})
+        append_entry(self.path, {"id": "old-shared-id", "decided": False, "decision": None})
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(ManifestError, "ambiguous"):
+            mark_decided(self.path, "old-shared-id", "discarded")
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_legacy_history_does_not_hide_the_unique_pending_occurrence(self):
+        append_entry(self.path, {"id": "old-id", "decided": True, "decision": "merged"})
+        append_entry(self.path, {"id": "old-id", "decided": False, "decision": None})
+        mark_decided(self.path, "old-id", "discarded")
+        self.assertEqual([entry["decision"] for entry in read_manifest(self.path)["entries"]], ["merged", "discarded"])
+
+    def test_missing_decided_and_deferred_entries_remain_pending_and_prevent_duplicates(self):
+        entry = {"id": "pending", "source_path": "/skill"}
+        append_entry(self.path, entry)
+        for deferred in (False, True):
+            with self.subTest(deferred=deferred):
+                if deferred:
+                    mark_decided(self.path, "pending", "deferred")
+                before = self.path.read_bytes()
+                self.assertEqual([e["id"] for e in list_pending(self.path)], ["pending"])
+                self.assertFalse(append_entry_if_absent(self.path, dict(entry, id="duplicate"), ["source_path"]))
+                self.assertEqual(self.path.read_bytes(), before)
+
+    def test_companion_does_not_silently_ignore_non_object_entries(self):
+        manifest_io.write_manifest(self.path, {"entries": ["invalid-entry"]})
+        with self.assertRaises(AttributeError):
+            list_pending(self.path)
+        with self.assertRaises(AttributeError):
+            append_entry_if_absent(self.path, {"id": "new"}, ["id"])
+        self.assertEqual(read_manifest(self.path), {"entries": ["invalid-entry"]})
+
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_concurrent_duplicate_checks_share_the_locked_read_and_write(self):
+        start = threading.Barrier(2)
+        results, errors = [], []
+        def writer(identity):
+            try:
+                start.wait(timeout=5)
+                results.append(append_entry_if_absent(self.path, {"id": identity, "source_path": "/same"}, ["source_path"]))
+            except Exception as error:
+                errors.append(error)
+        threads = [threading.Thread(target=writer, args=(identity,)) for identity in ("first", "second")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(5)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(sorted(results), [False, True])
+        self.assertEqual(len(read_manifest(self.path)["entries"]), 1)
+
     def test_atomic_write_no_temp_left_behind(self):
         entry = {"id":"x","platform":"codex","skill":"f","backup_path":"/","snapshot_hash":"a","current_hash":"b","decided":False,"decision":None,"created_at":"t"}
         append_entry(self.path, entry)
@@ -148,8 +202,8 @@ class TestManifestIO(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
         self.assertEqual(read_manifest(self.path), {"version": 1, "entries": []})
 
-    def test_append_if_absent_works_without_fcntl(self):
-        with mock.patch.object(file_lock, "fcntl", None):
+    def test_append_if_absent_preserves_manifest_without_a_lock_backend(self):
+        with mock.patch.object(file_lock, "fcntl", None), mock.patch.object(file_lock, "msvcrt", None):
             entry = {
                 "id": "pending-a",
                 "platform": "codex",
@@ -163,22 +217,13 @@ class TestManifestIO(unittest.TestCase):
                 "decision": None,
                 "created_at": "t",
             }
-            self.assertTrue(
+            with self.assertRaises(OSError):
                 append_entry_if_absent(
                     self.path,
                     entry,
                     ["platform", "source_path", "snapshot_hash", "current_hash", "change_kind"],
                 )
-            )
-            self.assertFalse(
-                append_entry_if_absent(
-                    self.path,
-                    dict(entry, id="pending-b"),
-                    ["platform", "source_path", "snapshot_hash", "current_hash", "change_kind"],
-                )
-            )
-
-        self.assertEqual(len(read_manifest(self.path)["entries"]), 1)
+        self.assertFalse(self.path.exists())
         self.assertFalse(self.path.with_suffix(self.path.suffix + ".lock").exists())
 
 if __name__ == "__main__":

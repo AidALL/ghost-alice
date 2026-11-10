@@ -1,6 +1,7 @@
 import json, os, sys
 from pathlib import Path
 from retired_assets import retire_command
+from claude_commands import skill_command_body
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -107,7 +108,7 @@ def claude_content(name, path):
             "Allowed profiles: `strict`, `dynamic`, `minimal`.",
             "",
         ])
-    return f"@{path}\n\n$ARGUMENTS\n"
+    return skill_command_body(path)
 
 if target in ("all", "claude"):
     print(f"  {info_c} Claude Code .claude/commands/")

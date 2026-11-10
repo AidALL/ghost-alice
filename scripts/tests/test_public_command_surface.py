@@ -45,6 +45,7 @@ class PublicCommandSurfaceTest(unittest.TestCase):
         REPO_ROOT / "README.md",
         REPO_ROOT / "README_ko.md",
         REPO_ROOT / "index.html",
+        REPO_ROOT / "index_ko.html",
         *_markdown_files(REPO_ROOT / "docs"),
     ]
     WINDOWS_NATIVE_WRAPPER_REQUIREMENTS = {
@@ -89,12 +90,7 @@ class PublicCommandSurfaceTest(unittest.TestCase):
         self.assertEqual([], _scan_files(self.PUBLIC_DOC_SURFACES, self.PUBLIC_DOC_FORBIDDEN_PATTERNS))
 
     def test_repo_docs_do_not_publish_removed_or_unimplemented_commands(self) -> None:
-        paths = [
-            REPO_ROOT / "README.md",
-            REPO_ROOT / "README_ko.md",
-            *_markdown_files(REPO_ROOT / "docs"),
-        ]
-        self.assertEqual([], _scan_files(paths, self.PATTERNS))
+        self.assertEqual([], _scan_files(self.PUBLIC_DOC_SURFACES, self.PATTERNS))
 
     def test_repo_docs_have_ko_counterpart_for_each_english_markdown_file(self) -> None:
         english_root = REPO_ROOT / "docs"

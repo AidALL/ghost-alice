@@ -57,7 +57,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import public_text_rules  # noqa: E402
 
 # [text](target) — non-greedy text, target up to the first closing paren.
-_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+_LINK_RE = re.compile(r"\[[^\[\]]*\]\(([^)]+)\)")
 
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "tel:", "ftp://", "//", "/")
 
@@ -117,8 +117,15 @@ def link_target_to_slug(raw: str) -> str | None:
 
 def _internal_targets(text: str) -> list[str]:
     targets = []
-    for raw in _LINK_RE.findall(text):
-        target = link_target_to_slug(raw)
+    for match in _LINK_RE.finditer(text):
+        prefix = text[:match.start()]
+        if prefix.endswith('!'):
+            before_marker = prefix[:-1]
+            if (len(before_marker) - len(before_marker.rstrip('\\'))) % 2 == 0:
+                continue
+        elif (len(prefix) - len(prefix.rstrip('\\'))) % 2:
+            continue
+        target = link_target_to_slug(match[1])
         if target is not None:
             targets.append(target)
     return targets

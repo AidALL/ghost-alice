@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -16,8 +17,13 @@ class GithubWorkflowNodeVersionTest(unittest.TestCase):
         for workflow in WORKFLOWS:
             with self.subTest(workflow=workflow):
                 text = (REPO_ROOT / workflow).read_text(encoding="utf-8")
-                self.assertIn("actions/setup-node@v7", text)
-                self.assertIn('node-version: "24"', text)
+                # Keep the action and its input in the same step of these block-style workflows.
+                steps = re.split(r'(?m)^\s*- (?=name:|uses:)', text)
+                node_steps = [step for step in steps if 'actions/setup-node@' in step]
+                self.assertTrue(node_steps, 'workflow must contain a setup-node step')
+                for step in node_steps:
+                    self.assertRegex(step, r'(?m)^\s*uses: actions/setup-node@v7\s*$')
+                    self.assertRegex(step, r'''(?m)^\s*with:\s*\n\s+node-version: ['"]24['"]\s*$''')
 
 
 if __name__ == "__main__":

@@ -65,15 +65,15 @@ class ClaudeContextAdapterTests(unittest.TestCase):
 
     def test_input_binding_matches_unique_whole_block_without_dropping_host_sibling(self):
         delivered_message = message('user', text('host guidance retained'), text('implement now\n'))
-        self.assertEqual(adapter.bound_input_message([delivered_message], self.binding()), delivered_message)
+        self.assertEqual(adapter.bound_input_index([delivered_message], {1: delivered_message}, 1, self.binding()), 0)
         with self.assertRaises(adapter.NativeContextRejected):
-            adapter.bound_input_message([message('user', text('implement now\n'), text('implement now\n'))], self.binding())
+            adapter.bound_input_index([message('user', text('implement now\n'), text('implement now\n'))], {1: delivered_message}, 1, self.binding())
 
     def test_input_binding_matches_exact_newline_joined_host_envelope(self):
         delivered_message = message('user', text('host guidance retained'), text('latest correction'))
-        self.assertEqual(adapter.bound_input_message([delivered_message], self.binding('host guidance retained\nlatest correction')), delivered_message)
+        self.assertEqual(adapter.bound_input_index([delivered_message], {1: delivered_message}, 1, self.binding('host guidance retained\nlatest correction')), 0)
         with self.assertRaises(adapter.NativeContextRejected):
-            adapter.bound_input_message([delivered_message], self.binding('host guidance retained\n\nlatest correction'))
+            adapter.bound_input_index([delivered_message], {1: delivered_message}, 1, self.binding('host guidance retained\n\nlatest correction'))
 
     def server_omit(self, request=None, choices=None):
         request = copy.deepcopy(self.request if request is None else request)
@@ -139,8 +139,8 @@ class ClaudeContextAdapterTests(unittest.TestCase):
         self.assertEqual(observed[0]['disposition'], 'replace')
         self.assertEqual(observed[0]['replacement_carrier']['tool_use_id'], 'publication')
         self.assertEqual(observed[0]['provider_application'], 'requested')
-        self.assertEqual(adapter.bound_input_message(forwarded['messages'],
-            self.binding('latest user-role prompt remains unchanged')), message('user', text('latest user-role prompt remains unchanged')))
+        self.assertEqual(adapter.input_messages(forwarded['messages'])[-1][1],
+            message('user', text('latest user-role prompt remains unchanged')))
 
     def test_server_replace_requires_exact_unique_capsule_and_complete_context_schema(self):
         request, choices = self.replacement_case()
@@ -428,27 +428,53 @@ class ClaudeContextAdapterTests(unittest.TestCase):
             with self.assertRaises(adapter.NativeContextRejected):
                 adapter.native_path(home, '../exact-session')
 
-    def test_bound_input_message_uses_latest_user_role_prompt_and_canonical_identity(self):
+    def test_bound_input_uses_native_boundary_without_classifying_notification_text(self):
         items = dict(self.originals, **{})
-        items[5] = message('user', text('<task-notification>finished</task-notification>'))
+        items[5] = message('user', text('ordinary notification text'))
         items[6] = message('user', dict(type='tool_result', tool_use_id='other', content='tool output'))
-        self.assertEqual(adapter.bound_input_message(items, self.binding()), self.user_role_message)
-        self.assertEqual(adapter.bound_input_message(list(items.values()), self.binding()), self.user_role_message)
+        self.assertEqual(adapter.bound_input_index(list(items.values()), items, 1, self.binding()), 0)
+        literal = '<task-notification>text typed by a person</task-notification>'
+        human = message('user', text(literal))
+        self.assertEqual(adapter.bound_input_index([human], {1: human}, 1, self.binding(literal)), 0)
 
-    def test_bound_input_message_does_not_fall_back_to_an_older_matching_prompt(self):
+    def test_bound_input_rejects_unrecorded_later_prompt_and_missing_current_original(self):
         items = dict(self.originals)
         items[7] = message('user', text('new user-role prompt'))
         with self.assertRaises(adapter.NativeContextRejected):
-            adapter.bound_input_message(items, self.binding())
+            adapter.bound_input_index(list(items.values()), self.originals, 1, self.binding())
+        with self.assertRaises(adapter.NativeContextRejected):
+            adapter.bound_input_index(list(self.originals.values()), items, 7, self.binding('new user-role prompt'))
 
-    def test_bound_input_message_preserves_unicode_and_whitespace(self):
+    def test_bound_input_preserves_unicode_and_whitespace(self):
         value = '한글 α\n '
         item = message('user', text(value))
-        self.assertEqual(adapter.bound_input_message([item], self.binding(value)), item)
+        self.assertEqual(adapter.bound_input_index([item], {1: item}, 1, self.binding(value)), 0)
         wrong = self.binding(value)
         wrong['input_char_count'] += 1
         with self.assertRaises(adapter.NativeContextRejected):
-            adapter.bound_input_message([item], wrong)
+            adapter.bound_input_index([item], {1: item}, 1, wrong)
+
+    def test_bound_input_rejects_ambiguous_equal_notification_and_changed_image(self):
+        items = {1: self.user_role_message, 2: copy.deepcopy(self.user_role_message)}
+        for wire in (list(items.values()), [items[2]]):
+            with self.subTest(wire=wire):
+                with self.assertRaises(adapter.NativeContextRejected):
+                    adapter.bound_input_index(wire, items, 1, self.binding())
+        image = dict(type='image', source=dict(type='base64', media_type='image/png', data='original'))
+        delivered_message = message('user', text('implement now\n'), image)
+        changed = copy.deepcopy(delivered_message)
+        changed['content'][1]['source']['data'] = 'changed'
+        with self.assertRaises(adapter.NativeContextRejected):
+            adapter.bound_input_index([changed], {1: delivered_message}, 1, self.binding())
+
+
+    def test_pairing_preserves_the_native_reader_support_for_string_messages(self):
+        originals = copy.deepcopy(self.originals)
+        originals[1]['content'] = 'implement now\n'
+        updated, observations = self.apply(originals=originals)
+        self.assertEqual(len(observations), 1)
+        self.assertNotEqual(updated, self.request)
+
 
     def test_selected_value_supports_native_text_and_result_content(self):
         self.assertEqual(adapter.selected_value(self.answer, self.choice(4, kind='assistant')), self.answer['content'][0])

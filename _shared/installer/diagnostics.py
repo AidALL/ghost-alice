@@ -47,11 +47,11 @@ def run_install_doctor(ctx: "Context", mode: str, skills_dir: Path) -> int:
     from installer import selection
 
     skills_dir = Path(skills_dir)
-    ghost = locations.home() / ".ghost-alice"
+    ghost = locations.record_root()
     args = ["--platform", ctx.platform, "--repo-root", str(source.resolve_source().root),
             "--encoding-root", str(runner.REPO_ROOT), "--encoding-root", str(skills_dir),
             "--ghost-alice-root", str(ghost),
-            "--install-state-manifest", str(ghost / "install-state" / f"{ctx.platform}.json"),
+            "--install-state-manifest", str(locations.install_state_path(ctx.platform)),
             "--runtime-shared", str(locations.runtime_shared_dir()), "--skills-root", str(skills_dir)]
     if mode == "doctor":
         args.append("--strict")
@@ -162,7 +162,7 @@ def run_doctor(ctx: "Context") -> int:
     report.emit(f"Installer doctor ({skills_dir}):")
     report_install_record(ctx)
     rc = 0
-    addons_dir = locations.home() / ".ghost-alice" / "addons" / ctx.platform
+    addons_dir = locations.addons_dir(ctx.platform)
     if addons_dir.is_dir() and any(addons_dir.glob("*.json.removing")):
         report.warn("A pending addon uninstall could not complete (the human user must review the kept items); see .removing markers "
                     "under ~/.ghost-alice/addons")

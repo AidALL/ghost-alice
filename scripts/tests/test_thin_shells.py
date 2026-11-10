@@ -19,7 +19,7 @@ INSTALL_SH = REPO_ROOT / "install.sh"
 INSTALL_PS1 = REPO_ROOT / "install.ps1"
 INSTALL_CMD = REPO_ROOT / "install.cmd"
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env  # noqa: E402
 
 # The parameter names of the earlier install.ps1 param block and the cli flag each becomes.
 # `-Skills` disappears: the skill names after it pass through as they are.
@@ -281,9 +281,8 @@ class ThinInstallPs1RuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)
             (home / ".codex").mkdir()
-            env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home), "CODEX_HOME": str(home / ".codex"),
-                   "GHOST_ALICE_INSTALL_PROGRESS": "off"}
-            env.pop("CLAUDE_CONFIG_DIR", None)
+            env = installer_env(home)
+            env["USERPROFILE"] = str(home)
             result = self.run_ps1("-Platform", "codex", "-SkipSourceHealth", "-Skills", "coding-convention", env=env,
                                   timeout=600, checkout=checkout_copy(self))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -306,6 +305,41 @@ class ThinInstallCmdTests(unittest.TestCase):
         for token in ("7.6", "PowerShell 7", "winget", "_shared/installer", "python"):
             self.assertNotIn(token, text, msg=token)
         self.assertIn(REQUIREMENT, INSTALL_PS1.read_text(encoding="utf-8-sig"))
+
+    @unittest.skipUnless(os.name == "nt", "native CMD is required")
+    def test_native_cmd_forwards_child_exit_and_arguments_with_pwsh_and_fallback(self):
+        cmd = shutil.which("cmd.exe")
+        self.assertIsNotNone(cmd)
+        system32 = Path(os.environ["SystemRoot"]) / "System32"
+        for executable in ("pwsh.exe", "powershell.exe"):
+            runtime = shutil.which(executable)
+            if runtime is None:
+                with self.subTest(runtime=executable):
+                    self.skipTest(f"{executable} is required for this branch")
+                continue
+            with self.subTest(runtime=executable), tempfile.TemporaryDirectory(prefix="cmd wrapper ") as temp:
+                root = Path(temp)
+                wrapper = root / "install.cmd"
+                shutil.copy2(INSTALL_CMD, wrapper)
+                (root / "install.ps1").write_text(
+                    "[Console]::WriteLine(($args -join '|')); "
+                    "[Console]::WriteLine(\"$env:PYTHONUTF8|$env:PYTHONIOENCODING\"); "
+                    "exit [int]$env:FIXTURE_CHILD_EXIT\n", encoding="utf-8-sig",
+                )
+                env = installer_env(root)
+                env["PATH"] = os.pathsep.join((str(Path(runtime).parent), str(system32)))
+                if executable == "powershell.exe":
+                    self.assertIsNone(shutil.which("pwsh.exe", path=env["PATH"]), "fallback fixture must hide pwsh")
+                for code in (0, 37):
+                    with self.subTest(exit_code=code):
+                        env["FIXTURE_CHILD_EXIT"] = str(code)
+                        result = subprocess.run(
+                            [cmd, "/d", "/c", "install.cmd", "first value", "second"],
+                            cwd=root, env=env, capture_output=True, text=True, check=False,
+                        )
+                        self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+                        self.assertIn("first value|second", result.stdout)
+                        self.assertIn("1|utf-8", result.stdout)
 
 
 if __name__ == "__main__":

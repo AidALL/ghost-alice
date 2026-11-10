@@ -143,6 +143,41 @@ class TocParityTest(unittest.TestCase):
         # Short skills without a Contents section are not forced to have one.
         self.assertEqual(_run(NO_CONTENTS), [])
 
+    def test_tilde_fences_hide_example_headings_and_links(self):
+        text = "## Contents\n- [Overview](#overview)\n\n~~~markdown\n- [Fake](#fake)\n## Fake\n```\n~~~\n\n## Overview\n"
+        self.assertEqual(_run(text), [])
+
+    def test_fence_closing_requires_same_marker_and_empty_info(self):
+        for marker in ("```", "~~~~"):
+            with self.subTest(marker=marker):
+                text = ("## Contents\n- [Overview](#overview)\n\n## Overview\n"
+                        + marker + "markdown\n" + marker + "still-code\n## Fake\n"
+                        + marker + "\n")
+                self.assertEqual(_run(text), [])
+
+    def test_duplicate_headings_resolve_distinct_anchors(self):
+        text = "## Contents\n- [First](#overview)\n- [Second](#overview-1)\n\n## Overview\n## Overview\n"
+        self.assertEqual(_run(text), [])
+        issues = _run(text.replace("- [Second](#overview-1)\n", ""))
+        self.assertEqual(len(issues), 1)
+        self.assertIn("missing", issues[0].message)
+
+    def test_duplicate_anchor_numbering_includes_other_heading_levels(self):
+        text = "# Overview\n## Contents\n- [Overview section](#overview-1)\n\n## Overview\n"
+        self.assertEqual(_run(text), [])
+
+    def test_closing_atx_hashes_preserve_contents_and_section_titles(self):
+        text = "## Contents ##\n- [Overview](#overview)\n\n## Overview ###\n"
+        self.assertEqual(_run(text), [])
+        issues = _run(text.replace("- [Overview](#overview)", "- [Missing](#missing)"))
+        self.assertEqual(len(issues), 2)
+
+    def test_hashes_without_separating_space_remain_heading_text(self):
+        self.assertEqual(_run("## Contents\n- [Overview](#overview)\n## Overview##\n"), [])
+
+    def test_indented_code_heading_does_not_create_a_section(self):
+        self.assertEqual(_run("## Contents\n- [Overview](#overview)\n\n## Overview\n\n    ## Example\n"), [])
+
 
 if __name__ == "__main__":
     unittest.main()

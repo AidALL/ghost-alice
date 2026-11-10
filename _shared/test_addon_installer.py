@@ -8,13 +8,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env  # noqa: E402
 
 
 def _find_test_bash() -> str | None:
@@ -74,16 +75,6 @@ def _python_311_or_newer() -> str | None:
         if result.returncode == 0:
             return candidate
     return None
-
-
-def _isolated_shell_install_env(temp_home: str | Path) -> dict[str, str]:
-    home = Path(temp_home)
-    env = os.environ.copy()
-    env["HOME"] = str(home)
-    env["CLAUDE_CONFIG_DIR"] = str(home / ".claude")
-    env["CODEX_HOME"] = str(home / ".codex")
-    env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
-    return env
 
 
 class AddonInstallerTest(unittest.TestCase):
@@ -226,6 +217,82 @@ class AddonInstallerTest(unittest.TestCase):
             )
             self.assertEqual([], collisions)
 
+    def test_detect_collisions_reserves_empty_command_destinations_for_one_addon(self) -> None:
+        from addon_installer import detect_collisions, load_addon_targets
+
+        rich = load_addon_targets([self._RICH_FIXTURE], platform="claude")[0]
+        other = replace(rich, addon_id="other", name="otherskill")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp = Path(temp_dir)
+            collisions = detect_collisions(
+                [rich, other], skills_dir=tmp / "skills", addons_dir=tmp / "addons",
+                claude_commands_dir=tmp / "commands", resources_dir=tmp / "resources",
+                platform="claude",
+            )
+            self.assertEqual(collisions, [{
+                "name": "richcmd", "dest": str(tmp / "commands" / "richcmd.md"),
+                "owner": "addon", "owner_addon_id": "rich",
+            }])
+            self.assertEqual(list(tmp.iterdir()), [])
+
+    def test_detect_collisions_accepts_same_addon_metadata_and_namespaced_resources(self) -> None:
+        from addon_installer import detect_collisions, load_addon_targets
+
+        rich = load_addon_targets([self._RICH_FIXTURE], platform="claude")[0]
+        second_skill = replace(rich, name="secondskill")
+        other = replace(rich, addon_id="other", name="otherskill", commands=())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp = Path(temp_dir)
+            self.assertEqual(detect_collisions(
+                [rich, second_skill, other], skills_dir=tmp / "skills", addons_dir=tmp / "addons",
+                claude_commands_dir=tmp / "commands", resources_dir=tmp / "resources",
+                platform="claude",
+            ), [])
+            self.assertEqual(list(tmp.iterdir()), [])
+
+    def test_shell_rejects_new_command_collision_before_payload_placement(self) -> None:
+        bash = _find_test_bash()
+        if bash is None:
+            self.skipTest("Git Bash is required for install.sh")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp = Path(temp_dir)
+            addon_source = tmp / "addon-source"
+            shutil.copytree(self._RICH_FIXTURE, addon_source)
+            other = addon_source / "addons" / "other"
+            shutil.copytree(addon_source / "addons" / "rich", other)
+            manifest = json.loads((other / "addon.json").read_text(encoding="utf-8"))
+            manifest["addon_id"] = "other"
+            manifest["skills"][0]["name"] = "otherskill"
+            manifest["hooks"][0]["id"] = "otherobs"
+            (other / "addon.json").write_text(json.dumps(manifest), encoding="utf-8")
+            index_path = addon_source / "addons-manifest.json"
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            index["addons"].append({"id": "other", "path": "addons/other", "min_core_version": "0.1.0"})
+            index_path.write_text(json.dumps(index), encoding="utf-8")
+            home = tmp / "home"
+            settings = home / ".claude" / "settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_bytes(b'{"userSetting": true}\n')
+            source = checkout_copy(self)
+            result = subprocess.run(
+                [bash, str(source / "install.sh"), "--platform", "claude",
+                 "--addon-source", str(addon_source), "--skip-source-health", "task-router"],
+                cwd=source, env=installer_env(home), capture_output=True,
+                text=True, encoding="utf-8", errors="replace", check=False, timeout=60,
+            )
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(settings.read_bytes(), b'{"userSetting": true}\n')
+            skills = home / ".claude" / "skills"
+            self.assertEqual(list(skills.iterdir()) if skills.exists() else [], [])
+            for path in (
+                home / ".claude" / "commands" / "richcmd.md",
+                home / ".ghost-alice" / "resources" / "claude",
+                home / ".ghost-alice" / "addons" / "claude" / "rich.json",
+                home / ".ghost-alice" / "addons" / "claude" / "other.json",
+            ):
+                self.assertFalse(os.path.lexists(path), str(path))
+            self.assertIn("Addon install collision detected", result.stdout + result.stderr)
+
     def test_cli_list_outputs_machine_readable_targets(self) -> None:
         result = subprocess.run(
             [
@@ -284,9 +351,7 @@ class AddonInstallerTest(unittest.TestCase):
             self.skipTest("install.sh requires Python 3.11+")
 
         with tempfile.TemporaryDirectory() as temp_home:
-            env = os.environ.copy()
-            env["HOME"] = temp_home
-            env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
+            env = installer_env(temp_home)
             source = checkout_copy(self)
             result = subprocess.run(
                 [
@@ -354,9 +419,7 @@ class AddonInstallerTest(unittest.TestCase):
             self.skipTest("install.sh requires Python 3.11+")
 
         with tempfile.TemporaryDirectory() as temp_home:
-            env = os.environ.copy()
-            env["HOME"] = temp_home
-            env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
+            env = installer_env(temp_home)
             source = checkout_copy(self)
             result = subprocess.run(
                 [

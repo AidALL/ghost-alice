@@ -54,7 +54,7 @@ jobs:
       - name: Run the skill script test groups
         # ci.yml runs shared-all and scripts-all; this step runs the other groups of the default run.
         run: |
-          python3 scripts/run_installer_compat_tests.py --group merge-companion-core --group session-intent-ledger --group agent-security-scan --group compact-handoff --group skill-evolution
+          python3 scripts/run_installer_compat_tests.py --group merge-companion-core --group session-intent-ledger --group agent-security-scan --group compact-handoff --group skill-evolution --group brainstorm-companion
 
       - name: Summarize results
         if: always()

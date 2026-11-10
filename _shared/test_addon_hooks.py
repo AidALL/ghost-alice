@@ -100,7 +100,20 @@ class AddonHookParseTest(unittest.TestCase):
         self._assert_rejected([{"id": "s", "event": "Stop", "script": "hooks/obs.py"}], "hook")
 
     def test_escaping_script_rejected(self):
-        self._assert_rejected([{"id": "e", "event": "post_tool_use", "script": "../../../etc/passwd"}], "")
+        src = _make_addon(self.tmp, [{"id": "e", "event": "post_tool_use", "script": "hooks/obs.py"}])
+        addon = src / "addons" / "hookaddon"
+        targets = ai.load_addon_targets([src], platform="claude")
+        self.assertEqual(targets[0].hooks, (("e", "post_tool_use", str((addon / "hooks" / "obs.py").resolve())),))
+        outside = self.tmp / "outside.py"
+        outside.write_text("import sys; sys.exit(0)\n", encoding="utf-8")
+        manifest = addon / "addon.json"
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["hooks"][0]["script"] = "../../../outside.py"
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual((addon / data["hooks"][0]["script"]).resolve(), outside.resolve())
+        with self.assertRaises(ai.AddonManifestError) as caught:
+            ai.load_addon_targets([src], platform="claude")
+        self.assertEqual(str(caught.exception), f"{manifest}: hooks[].script escapes addon source")
 
     def test_absolute_script_rejected(self):
         self._assert_rejected([{"id": "a", "event": "post_tool_use", "script": "/etc/passwd"}], "")

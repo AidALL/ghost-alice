@@ -17,7 +17,7 @@ import unittest
 
 SHARED = Path(__file__).resolve().parent
 sys.path.insert(0, str(SHARED))
-import test_completion_skill_evidence as evidence
+import stop_hook_testing as evidence
 import test_stop_notice as notice_tests
 RUNNER = SHARED / "hook_profile_gate.py"
 STOP_SCRIPT = SHARED / "claude_stop_verification_hook.py"
@@ -104,7 +104,7 @@ class StopNoticeHandoffTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
             ledger = {}
-            evidence.StopHookSkillEvidenceTests._review_format_fixture(
+            evidence.review_format_fixture(
                 home, "codex", notice_tests.COMPLETE, ledger, session_id=SESSION, claim_verdicts=["supported", "unsupported"])
             self.core(home, answer=notice_tests.COMPLETE, ledger=ledger)
             recorded = self.notice(home).read_text(encoding="utf-8")

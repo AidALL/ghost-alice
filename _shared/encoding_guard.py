@@ -86,20 +86,12 @@ def is_semantic_path(path: Path) -> bool:
     return path.name in SEMANTIC_NAMES or path.suffix.lower() in SEMANTIC_SUFFIXES
 
 
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
-
-
 def iter_semantic_paths(root: Path, *, exclude_roots: Sequence[Path | str] = ()) -> Iterable[Path]:
     root = root.resolve()
     resolved_excludes = [Path(exclude).resolve() for exclude in exclude_roots]
     for path in root.rglob("*"):
         resolved_path = path.resolve()
-        if any(_is_relative_to(resolved_path, excluded) for excluded in resolved_excludes):
+        if any(resolved_path.is_relative_to(excluded) for excluded in resolved_excludes):
             continue
         if any(part in EXCLUDED_DIRS for part in path.relative_to(root).parts[:-1]):
             continue

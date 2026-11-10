@@ -5,7 +5,6 @@ Dependencies: Python 3.11+ standard library only.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
@@ -17,22 +16,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LEDGER_PATH = REPO_ROOT / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
-AGGREGATOR_PATH = REPO_ROOT / "skill-evolution" / "scripts" / "aggregate_recommendations.py"
 SCHEMA_DOC = REPO_ROOT / "session-intent-analyzer" / "references" / "ledger-schema.md"
 INSTALL_HOOKS = REPO_ROOT / "_shared" / "install_hooks.py"
 TIMESTAMP = "2026-09-28T00:00:00Z"
 
 
-def _load(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module  # dataclasses and type lookups resolve through sys.modules
-    spec.loader.exec_module(module)
-    return module
-
-
-LEDGER = _load(LEDGER_PATH, "session_intent_ledger_under_test")
-AGGREGATOR = _load(AGGREGATOR_PATH, "aggregate_recommendations_under_test")
+sys.path.insert(0, str(LEDGER_PATH.parent))
+sys.path.insert(0, str(REPO_ROOT / "skill-evolution" / "scripts"))
+import session_intent_ledger as LEDGER
+import aggregate_recommendations as AGGREGATOR
 
 
 def _entry(entry_id: str, pattern_class: str | None = None) -> dict:
@@ -73,8 +65,11 @@ class PatternClassNormalizationTests(unittest.TestCase):
 
     def test_stored_entries_are_not_revalidated(self) -> None:
         stored = {**_entry("legacy-odd"), "source": "legacy-value", "pattern_class": "retired-class"}
+        original = dict(stored)
         merged = LEDGER.merge_conduct_feedback([stored], [_entry("fresh", "restatement-loop")], TIMESTAMP)
         self.assertEqual([entry["id"] for entry in merged], ["legacy-odd", "fresh"])
+        self.assertEqual(merged[0], original)
+        self.assertEqual(stored, original)
 
     def test_new_correction_requires_a_supported_source(self) -> None:
         missing = _entry("missing")

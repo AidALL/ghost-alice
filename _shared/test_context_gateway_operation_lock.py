@@ -6,11 +6,13 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import context_gateway_platform as platform  # noqa: E402
+import install_lock  # noqa: E402
 from context_gateway_model import GatewayBlocked  # noqa: E402
 
 
@@ -69,6 +71,20 @@ class OperationLockTests(unittest.TestCase):
         with platform.operation_lock(self.home):
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["owner"], "context-gateway")
         self.assertFalse(path.exists())
+
+    def test_a_gateway_releases_only_its_own_generation(self):
+        path = self.home / '.ghost-alice' / 'install.lock'
+        with platform.operation_lock(self.home):
+            first = json.loads(path.read_text())['generation']
+            old = time.time() - 1801
+            os.utime(path, (old, old))
+            second = install_lock.acquire_lock(path, owner='replacement')
+            replacement = path.read_bytes()
+        try:
+            self.assertNotEqual(first, second)
+            self.assertEqual(path.read_bytes(), replacement)
+        finally:
+            install_lock.release_lock(path, second)
 
     def test_the_install_lock_module_decides_who_holds_the_lock(self):
         # One judgment for the gateway and the install record: `install_lock.held_by_process_tree`.

@@ -1,4 +1,3 @@
-import importlib.util
 import sys
 import tempfile
 import unittest
@@ -11,20 +10,8 @@ if str(MERGE_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(MERGE_SCRIPTS))
 
 from diff_collector import collect_external_changes
+from file_walker import walk_installed_copy_files
 from snapshot import capture_snapshot
-
-
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load module: {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-SNAPSHOT_CLI = _load_module("snapshot_cli_under_test", MERGE_SCRIPTS / "snapshot_cli.py")
-DIFF_COLLECTOR_CLI = _load_module("diff_collector_cli_under_test", MERGE_SCRIPTS / "diff_collector_cli.py")
 
 
 class GeneratedFileExclusionTest(unittest.TestCase):
@@ -59,28 +46,27 @@ class GeneratedFileExclusionTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def test_snapshot_and_diff_walkers_exclude_generated_cache_files(self) -> None:
+    def test_installed_copy_walker_excludes_generated_cache_files(self) -> None:
         expected = {
             str(self.skill / "SKILL.md"),
             str(self.skill / "config.toml"),
             str(self.skill / "scripts" / "helper.py"),
         }
 
-        for walker in [SNAPSHOT_CLI._walk_installed_copy_files, DIFF_COLLECTOR_CLI._walk_installed_copy_files]:
-            walked = {str(path) for path in walker(self.skills_dir)}
-            self.assertEqual(walked, expected)
+        walked = {str(path) for path in walk_installed_copy_files(self.skills_dir)}
+        self.assertEqual(walked, expected)
 
     def test_generated_file_change_does_not_enter_pending_diff(self) -> None:
         snapshot = self.root / "snapshot.json"
-        capture_snapshot(snapshot, SNAPSHOT_CLI._walk_installed_copy_files(self.skills_dir), "codex")
+        capture_snapshot(snapshot, walk_installed_copy_files(self.skills_dir), "codex")
 
         generated = self.skill / "__pycache__" / "skill.cpython-312.pyc"
         generated.write_text("changed generated\n", encoding="utf-8")
-        self.assertEqual(collect_external_changes(snapshot, DIFF_COLLECTOR_CLI._walk_installed_copy_files(self.skills_dir)), [])
+        self.assertEqual(collect_external_changes(snapshot, walk_installed_copy_files(self.skills_dir)), [])
 
         real_config = self.skill / "config.toml"
         real_config.write_text("version = 2\n", encoding="utf-8")
-        changes = collect_external_changes(snapshot, DIFF_COLLECTOR_CLI._walk_installed_copy_files(self.skills_dir))
+        changes = collect_external_changes(snapshot, walk_installed_copy_files(self.skills_dir))
         self.assertEqual([change["path"] for change in changes], [str(real_config)])
 
 

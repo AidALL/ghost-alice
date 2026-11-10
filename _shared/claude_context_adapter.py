@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 
 import install_destination
+from native_transcript import native_input_actor, correlate_prompt_index
 from source_reference import json_digest
 
 platform = 'claude'
@@ -82,6 +83,9 @@ def native_records_from_rows(rows):
     for record, row in rows.items():
         if not isinstance(row, dict):
             raise NativeContextRejected('A native JSONL object is required')
+        if row.get('type') == 'attachment' and native_input_actor(row) in ('human', 'notification', 'context'):
+            records[record] = _normalize_message('user', row['attachment']['prompt'])
+            continue
         if row.get('type') not in ('user', 'assistant'):
             continue
         message = row.get('message')
@@ -91,39 +95,38 @@ def native_records_from_rows(rows):
     return records
 
 
-def _ordered_items(items):
+def input_messages(items):
+    """Return indexed user messages without tool results; this does not identify their actors."""
     if isinstance(items, dict) and all(type(record) is int and record > 0 for record in items):
-        return [item for _, item in sorted(items.items())]
-    if isinstance(items, list):
-        return items
-    raise NativeContextRejected('Ordered native messages are required')
-
-
-def bound_input_message(items, binding):
-    """Bind the latest user-role prompt message to the input identity that Core code recorded."""
-    if (not isinstance(binding, dict) or not isinstance(binding.get('input_digest'), str)
-        or type(binding.get('input_char_count')) is not int):
-        raise NativeContextRejected('The canonical input digest and character count are required')
-    latest = None
-    for item in _ordered_items(items):
+        ordered = sorted(items.items())
+    elif isinstance(items, list):
+        ordered = enumerate(items)
+    else:
+        raise NativeContextRejected('Ordered native or wire messages are required')
+    prompts = []
+    for index, item in ordered:
         if not isinstance(item, dict) or item.get('role') != 'user':
             continue
-        normalized = _normalize_message('user', item.get('content'))
-        content = normalized['content']
-        if any(block.get('type') == 'tool_result' for block in content):
+        content = item.get('content')
+        if isinstance(content, list) and any(isinstance(block, dict) and block.get('type') == 'tool_result'
+                                             for block in content):
             continue
-        texts = [block['text'] for block in content
-                 if block.get('type') == 'text' and isinstance(block.get('text'), str)]
-        if any(value.lstrip().startswith('<task-notification>') for value in texts):
-            continue
-        latest = normalized
-    if latest is None:
-        raise NativeContextRejected('The user-role message for the bound input is unavailable')
-    from native_transcript import matches_input_text
-    if not matches_input_text(latest['content'], binding):
-        raise NativeContextRejected('Native input differs from the canonical intake receipt')
-    return latest
+        prompts.append((index, _normalize_message('user', content)))
+    return prompts
 
+def bound_input_index(messages, native_records, input_record, binding):
+    """Correlate the caller's bound native input with wire order; wording supplies no actor."""
+    from native_transcript import matches_input_text
+    prompts = input_messages(native_records)
+    original = next((item for record, item in prompts if record == input_record), None)
+    if original is None or not matches_input_text(original['content'], binding):
+        raise NativeContextRejected('Native input differs from the canonical intake receipt')
+    try:
+        return correlate_prompt_index(
+            [(record, semantic_fingerprint(item)) for record, item in prompts],
+            [(index, semantic_fingerprint(item)) for index, item in input_messages(messages)], input_record)
+    except ValueError as error:
+        raise NativeContextRejected(str(error)) from error
 
 def _signed(block):
     return (isinstance(block, dict)
@@ -207,25 +210,21 @@ def _call_fingerprint(block):
 
 
 def _paired(originals, wire_blocks, record, index, target):
+    from response_context_use import _Native
     identifier = target[3].get('tool_use_id')
     if not isinstance(identifier, str) or not identifier:
         return False
-    native = list(_native_blocks(originals))
-    native_calls = [block for block in native if block[2] == 'assistant'
-                    and block[3].get('type') == 'tool_use' and block[3].get('id') == identifier]
-    native_results = [block for block in native if block[2] == 'user'
-                      and block[3].get('type') == 'tool_result' and block[3].get('tool_use_id') == identifier]
+    pair = _Native.from_records(originals, 'claude').pair(identifier)
+    if pair is None or pair[1][:2] != (record, index):
+        return False
     wire_calls = [block for block in wire_blocks if block[2] == 'assistant'
                   and block[3].get('type') == 'tool_use' and block[3].get('id') == identifier]
     wire_results = [block for block in wire_blocks if block[2] == 'user'
                     and block[3].get('type') == 'tool_result' and block[3].get('tool_use_id') == identifier]
-    return (len(native_calls) == len(native_results) == len(wire_calls) == len(wire_results) == 1
-            and native_results[0][:2] == (record, index)
-            and native_calls[0][:2] < native_results[0][:2]
+    return (len(wire_calls) == len(wire_results) == 1
             and wire_results[0][:2] == target[:2]
             and wire_calls[0][:2] < target[:2]
-            and _call_fingerprint(native_calls[0][3]) == _call_fingerprint(wire_calls[0][3]))
-
+            and _call_fingerprint(pair[0][3]) == _call_fingerprint(wire_calls[0][3]))
 
 def _validate_choice(choice):
     if not isinstance(choice, dict) or choice.get('kind') not in ('message', 'assistant', 'output'):
@@ -251,7 +250,7 @@ def _validate_choice(choice):
         raise NativeContextRejected('Explicit native coordinates, identities and replacement text are required')
 
 
-def request_apply(request, originals, selections, *, _inspect=None):
+def request_apply(request, originals, selections, *, _inspect=None, input_index=None):
     """Apply authenticated explicit choices to uniquely matched wire blocks.
 
     Stale source identities preserve the complete request. A missing, ambiguous,
@@ -268,14 +267,8 @@ def request_apply(request, originals, selections, *, _inspect=None):
         _validate_choice(choice)
     wire_blocks = list(_blocks(request['messages']))
     changes, positions = [], set()
-    latest_user_role_prompt_index = max((n for n, message in enumerate(request['messages'])
-                        if isinstance(message, dict) and message.get('role') == 'user'
-                        and not (isinstance(message.get('content'), list) and any(
-                            isinstance(block, dict) and block.get('type') == 'tool_result'
-                            for block in message['content']))
-                        and not any(block.get('type') == 'text' and isinstance(block.get('text'), str)
-                            and block['text'].lstrip().startswith('<task-notification>')
-                            for _, _, _, block, _ in _blocks([message]))), default=-1)
+    latest_user_role_prompt_index = (input_index if input_index is not None else
+        max((index for index, _ in input_messages(request['messages'])), default=-1))
     for choice in selections:
         record, index = choice['record'], choice['block_index']
         original = originals.get(record)

@@ -17,7 +17,8 @@ import completion_assessment as core_api
 from claude_context_adapter import (NativeContextRejected, SignedPrefixSelectionUnsupported, claude_home,
                                     require_rewriteable_prefix)
 import ledger_access
-from native_transcript import codex_home, codex_transcript_path, is_user_role_prompt
+from native_transcript import (codex_home, codex_transcript_path, codex_session_owner, codex_item as _clean,
+    codex_input_text, is_codex_user_message, is_prompt_row, matches_input_text, correlate_prompt_index)
 from source_reference import SourceReferenceError, json_digest, matches_input, reference_source, verify_source
 from text_lines import committed_records
 
@@ -31,12 +32,6 @@ def _require(condition, detail):
         raise ResponseUseRejected(detail)
 
 
-def _clean(value):
-    result = copy.deepcopy(value)
-    result.pop('internal_chat_message_metadata_passthrough', None)
-    return result
-
-
 @dataclass(frozen=True)
 class _Native:
     records: dict
@@ -46,30 +41,67 @@ class _Native:
     finals: tuple
     locator: str = ''
 
+    @classmethod
+    def from_records(cls, records, platform, *, user_role_prompts=(), finals=(), locator=''):
+        """Index already-normalized native records; ownership stays with the reader."""
+        calls, results = [], []
+        if platform == 'codex':
+            for record, item in records.items():
+                if item.get('type') in ('custom_tool_call', 'function_call'):
+                    calls.append((record, 0, item.get('call_id'), item))
+                if item.get('type') in ('custom_tool_call_output', 'function_call_output'):
+                    results.append((record, 0, item.get('call_id'), item))
+        else:
+            from claude_context_adapter import _native_blocks
+            for record, index, role, block in _native_blocks(records):
+                if block.get('type') == 'tool_use' and role == 'assistant':
+                    calls.append((record, index, block.get('id'), block))
+                if block.get('type') == 'tool_result' and role == 'user':
+                    results.append((record, index, block.get('tool_use_id'), block))
+        return cls(records, user_role_prompts, tuple(calls), tuple(results), finals, locator)
+
+    def pair(self, identifier):
+        """Return one ordered native call/result pair, retaining both coordinates."""
+        calls = [call for call in self.calls if call[2] == identifier]
+        results = [result for result in self.results if result[2] == identifier]
+        if len(calls) != 1 or len(results) != 1:
+            return None
+        call, result = calls[0], results[0]
+        if call[:2] >= result[:2]:
+            return None
+        expected = {'custom_tool_call': 'custom_tool_call_output',
+                    'function_call': 'function_call_output'}.get(call[3].get('type'))
+        if expected is not None and result[3].get('type') != expected:
+            return None
+        return call, result
+
+    def pending_call(self, input_record, call_id=None):
+        """Return one current unreturned call whose identity has never been replayed."""
+        pending = [call for call in self.calls if call[0] > input_record
+                   and isinstance(call[2], str) and call[2]
+                   and (call_id is None or call[2] == call_id)
+                   and not any(result[2] == call[2] for result in self.results)]
+        if len(pending) != 1 or sum(call[2] == pending[0][2] for call in self.calls) != 1:
+            return None
+        return pending[0]
 
 def _native(path, platform, session):
     rows = committed_records(Path(path).read_bytes())
     _require(all(isinstance(row, dict) for row in rows.values()), 'Native JSONL objects are required')
-    calls, results, user_role_prompts, finals = [], [], [], []
+    user_role_prompts, finals = [], []
     if platform == 'codex':
-        owners = [r.get('payload', {}).get('id') for r in rows.values() if r.get('type') == 'session_meta']
-        _require(owners and all(owner == session for owner in owners), 'Native transcript owner differs')
+        try:
+            owner = codex_session_owner(rows.values())
+        except ValueError as error:
+            raise ResponseUseRejected(str(error)) from error
+        _require(owner == session, 'Native transcript owner differs')
         payloads = {n: r.get('payload') for n, r in rows.items() if r.get('type') == 'response_item'}
         _require(all(isinstance(item, dict) for item in payloads.values()), 'Native response items are required')
         records = {n: _clean(item) for n, item in payloads.items()}
         for n, item in records.items():
-            _require(isinstance(item, dict), 'Native response items are required')
             typ = item.get('type')
-            raw = rows[n]['payload']
-            if typ == 'message' and item.get('role') == 'user':
-                metadata = raw.get('internal_chat_message_metadata_passthrough')
-                kinds = metadata.get('content_item_kinds') if isinstance(metadata, dict) else None
-                if kinds is None or (isinstance(kinds, list) and 'user.text' in kinds):
-                    user_role_prompts.append(n)
-            if typ in ('custom_tool_call', 'function_call'):
-                calls.append((n, 0, item.get('call_id'), item))
-            if typ in ('custom_tool_call_output', 'function_call_output'):
-                results.append((n, 0, item.get('call_id'), item))
+            if is_codex_user_message(rows[n]['payload']):
+                user_role_prompts.append(n)
             if (typ == 'message' and item.get('role') == 'assistant'
                 and (item.get('phase') == 'final_answer' or
                      (item.get('phase') is None and item.get('channel') == 'final'))
@@ -77,22 +109,16 @@ def _native(path, platform, session):
                 finals.append(n)
     else:
         import claude_context_adapter as adapter
-        owned = {n: row for n, row in rows.items() if row.get('type') in ('user', 'assistant')}
+        # Ownership and normalized records must describe the same row snapshot.
+        records = adapter.native_records_from_rows(rows)
+        owned = {n: rows[n] for n in records}
         _require(all(row.get('sessionId') == session and not row.get('isSidechain')
                      for row in owned.values()), 'Native Claude transcript owner differs')
-        # Owner checks and normalized records must describe the same read.
-        # Native hosts append tool events while this operation is running.
-        records = adapter.native_records_from_rows(rows)
         for n, item in records.items():
             row = owned[n]
-            if is_user_role_prompt(row):
+            if is_prompt_row(row):
                 user_role_prompts.append(n)
-            for index, block in enumerate(item['content']):
-                if block.get('type') == 'tool_use' and item['role'] == 'assistant':
-                    calls.append((n, index, block.get('id'), block))
-                if block.get('type') == 'tool_result' and item['role'] == 'user':
-                    results.append((n, index, block.get('tool_use_id'), block))
-            reason = row['message'].get('stop_reason')
+            reason = row.get('message', {}).get('stop_reason')
             if (item['role'] == 'assistant' and reason in (None, 'end_turn')
                 and not any(b.get('type') == 'tool_use' for b in item['content'])
                 and _text_present(item['content'], 'text')):
@@ -109,8 +135,8 @@ def _native(path, platform, session):
                          (v['role'] == 'assistant' or k in user_role_prompts)]
                 if later and later[0] in user_role_prompts and n not in finals:
                     finals.append(n)
-    return _Native(records, tuple(user_role_prompts), tuple(calls), tuple(results), tuple(sorted(finals)), str(Path(path).resolve()))
-
+    return _Native.from_records(records, platform, user_role_prompts=tuple(user_role_prompts),
+                                finals=tuple(sorted(finals)), locator=str(Path(path).resolve()))
 
 def _text_present(content, block_type):
     return isinstance(content, list) and any(isinstance(block, dict)
@@ -127,8 +153,7 @@ def _path(home, platform, session):
 
 def _input_message_text(item, platform):
     if platform == 'codex':
-        from context_lifecycle import _input_text
-        return _input_text(item)
+        return codex_input_text(item)
     return ''.join(block['text'] for block in item['content']
                    if block.get('type') == 'text' and isinstance(block.get('text'), str))
 
@@ -139,6 +164,21 @@ def _binding(source, event=None, *, current=False, transaction=None):
 
 
 def _bound_input_row(native, binding, platform):
+    if platform == 'codex':
+        matches = []
+        for record, item in reversed(tuple(native.records.items())):
+            if item.get('type') != 'message' or item.get('role') != 'user':
+                continue
+            text = codex_input_text(item)
+            if text is not None and matches_input(text, binding):
+                matches.append((record, item))
+            # Context metadata can locate a boundary, but cannot disqualify a
+            # row whose text matches the input Core recorded. Never skip a
+            # newer ordinary prompt to bind an older recorded input.
+            if record in native.user_role_prompts:
+                break
+        _require(len(matches) == 1, 'The transcript row for the bound input is unavailable or ambiguous')
+        return matches[0]
     _require(bool(native.user_role_prompts), 'The transcript row for the bound input is unavailable')
     record = native.user_role_prompts[-1]
     item = native.records[record]
@@ -146,13 +186,21 @@ def _bound_input_row(native, binding, platform):
         _require(platform == 'claude' and native.locator == binding.get('native_transcript_path')
             and record == binding.get('native_input_record') and json_digest(item) == binding.get('native_input_digest'),
             'Current SDK context must use its exact original native row and full message')
-    if platform == 'claude':
-        import claude_context_adapter as adapter
-        _require(adapter.bound_input_message(native.records, binding) == item, 'The bound input message identity differs')
-    else:
-        text = _input_message_text(item, platform)
-        _require(matches_input(text, binding), 'The transcript row differs from the current input that Core code recorded')
+    _require(matches_input_text(item['content'], binding), 'The bound input message identity differs')
     return record, item
+
+
+def _bound_record_matches(native, payload, platform):
+    """Authenticate a historical input without adding a sender requirement."""
+    record = payload['native_input_record']
+    item = native.records.get(record)
+    if not isinstance(item, dict) or json_digest(item) != payload['native_input_digest']:
+        return False
+    if platform == 'codex':
+        text = codex_input_text(item)
+        return (item.get('type') == 'message' and item.get('role') == 'user'
+                and text is not None and matches_input(text, payload['input_binding']))
+    return record in native.user_role_prompts and matches_input_text(item['content'], payload['input_binding'])
 
 
 def _schema(connection):
@@ -187,16 +235,12 @@ def record_use(source, expected_input_event_id, observation, *, purpose, call_id
         binding = _binding(source, expected_input_event_id, current=True, transaction=connection)
         native = _native(path, platform, session)
         input_record, input_message = _bound_input_row(native, binding, platform)
-        pending = [call for call in native.calls if call[0] > input_record
-                   and isinstance(call[2], str) and bool(call[2])
-                   and not any(result[2] == call[2] for result in native.results)]
         if call_id is not None:
             _require(isinstance(call_id, str) and bool(call_id), 'An explicit native call ID is required')
-            pending = [call for call in pending if call[2] == call_id]
-        _require(len(pending) == 1, 'One unique pending native lookup call is required; ambiguous calls are rejected')
-        call_record, call_index, identifier, call = pending[0]
-        _require(sum(c[2] == identifier for c in native.calls) == 1,
-                 'The native pending call identity is replayed or ambiguous')
+        pending = native.pending_call(input_record, call_id)
+        _require(pending is not None,
+                 'One unique pending native lookup call is required; replayed or ambiguous calls are rejected')
+        call_record, call_index, identifier, call = pending
         payload = dict(schema_version='response-context-use.v1',
             input_binding=binding, native_input_record=input_record, native_input_digest=json_digest(input_message),
             original=reference_source(path, appendable=True), call_record=call_record,
@@ -270,8 +314,7 @@ def record_use_judgments(source, expected_input_event_id, judgments, *, transact
             _require(payload['input_binding'] == original_binding and payload['original']['locator'] == path,
                      'The read-use input or original native owner differs')
             verify_source(payload['original'])
-            _require(payload['native_input_record'] in native.user_role_prompts
-                and json_digest(native.records[payload['native_input_record']]) == payload['native_input_digest'],
+            _require(_bound_record_matches(native, payload, platform),
                 'The original input that Core code bound to the read use differs')
             pair = _native_pair(native, payload, platform)
             _require(pair is not None, 'A post-use judgment requires one actual paired native result')
@@ -360,24 +403,22 @@ def _output(value, platform, reference, digest, replacement, *, marker='use_refe
     return (result if count else value), count, occurrences
 
 
-def _wire_input_index(request, platform, binding, original):
+def _wire_input_index(request, platform, binding, original, native):
+    input_record, bound = _bound_input_row(native, binding, platform)
+    _require(json_digest(original) == json_digest(bound), 'The native input message differs')
     if platform == 'codex':
-        from context_lifecycle import _last_user_role_message
-        item = _last_user_role_message(request['input'])
-        _require(isinstance(item, dict), 'The wire message for the bound input is unavailable')
-        text = _input_message_text(item, platform)
-        _require(matches_input(text, binding) and json_digest(_clean(item)) == json_digest(original),
-            'The wire message differs from the current input that Core code recorded')
-        return max(n for n, value in enumerate(request['input']) if value is item)
-    else:
-        import claude_context_adapter as adapter
-        item = adapter.bound_input_message(request['messages'], binding)
-        _require(adapter.semantic_fingerprint(item) == adapter.semantic_fingerprint(original),
-                 'The Claude wire message differs from the bound input')
-        return max(n for n, value in enumerate(request['messages']) if isinstance(value, dict)
-            and value.get('role') == 'user' and adapter.semantic_fingerprint(
-                adapter._normalize_message('user', value.get('content'))) == adapter.semantic_fingerprint(item))
-
+        _require(matches_input(_input_message_text(original, platform), binding),
+                 'The native message differs from the recorded input')
+        def prompts(items):
+            return [(index, json_digest(_clean(item))) for index, item in items
+                    if isinstance(item, dict) and item.get('type') == 'message' and item.get('role') == 'user']
+        try:
+            return correlate_prompt_index(prompts(native.records.items()),
+                prompts(enumerate(request['input'])), input_record)
+        except ValueError as error:
+            raise ResponseUseRejected(str(error)) from error
+    import claude_context_adapter as adapter
+    return adapter.bound_input_index(request['messages'], native.records, input_record, binding)
 
 def _answer_record(native, payload):
     """Locate a supported original answer without gating the model's judgment."""
@@ -389,20 +430,14 @@ def _answer_record(native, payload):
 
 
 def _native_pair(native, payload, platform):
-    calls = [call for call in native.calls if call[2] == payload['call_id']]
-    results = [result for result in native.results if result[2] == payload['call_id']]
-    if len(calls) != 1 or len(results) != 1:
+    pair = native.pair(payload['call_id'])
+    if pair is None:
         return None
-    call, result = calls[0], results[0]
+    call, result = pair
     if (call[:2] != (payload['call_record'], payload['call_block_index'])
-        or json_digest(call[3]) != payload['call_digest'] or call[:2] >= result[:2]):
+        or json_digest(call[3]) != payload['call_digest']):
         return None
-    if platform == 'codex':
-        expected = 'custom_tool_call_output' if call[3]['type'] == 'custom_tool_call' else 'function_call_output'
-        if result[3].get('type') != expected:
-            return None
     return call, result
-
 
 def _wire_pair(request, pair, platform):
     call, result = pair
@@ -494,7 +529,7 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
             native = _native(path, platform, session)
             if _retained_boundary is None:
                 input_record, input_item = _bound_input_row(native, binding, platform)
-                input_index = _wire_input_index(request, platform, binding, input_item)
+                input_index = _wire_input_index(request, platform, binding, input_item, native)
             else:
                 input_record, input_index = _retained_boundary
             eligible = []
@@ -513,8 +548,7 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
                     verify_source(payload['original'])
                 except SourceReferenceError:
                     continue
-                if (payload['native_input_record'] not in native.user_role_prompts
-                    or json_digest(native.records[payload['native_input_record']]) != payload['native_input_digest']):
+                if not _bound_record_matches(native, payload, platform):
                     continue
                 judgment_reference, judgment_raw = current_judgments[reference]
                 judgment = json.loads(judgment_raw)
@@ -531,8 +565,7 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
                     verify_source(judgment['original'])
                 except SourceReferenceError:
                     continue
-                if (judgment['native_input_record'] not in native.user_role_prompts
-                    or json_digest(native.records[judgment['native_input_record']]) != judgment['native_input_digest']):
+                if not _bound_record_matches(native, judgment, platform):
                     continue
                 pair = _native_pair(native, payload, platform)
                 if pair is None:

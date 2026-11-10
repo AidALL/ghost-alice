@@ -24,10 +24,44 @@ def _load_global_rule_blocks():
 
 
 class GlobalRuleBlockTest(unittest.TestCase):
-    def test_project_loader_does_not_reinject_common_contract(self):
-        body = (REPO_ROOT / 'AGENTS.md').read_text()
-        self.assertFalse('## First-Entry Contract' in body, 'project loader duplicates the common procedure')
-        self.assertIn('installed common contract', body)
+    def test_proposal_creation_preserves_existing_user_files_and_links(self):
+        blocks = _load_global_rule_blocks()
+        for apply, marker in ((blocks.apply_claude_bootstrap, blocks.CLAUDE_BOOTSTRAP_MARKER),
+                              (blocks.apply_codex_bootstrap, blocks.CODEX_BOOTSTRAP_MARKER)):
+            for existing_rules in (b"user rules\n", b"\xffuser rules\n"):
+                for proposal_kind in ("file", "link", "dangling-link"):
+                    with self.subTest(apply=apply.__name__, rules=existing_rules, proposal_kind=proposal_kind):
+                        with tempfile.TemporaryDirectory() as tmp:
+                            root = Path(tmp)
+                            source, dest = root / "source.md", root / "rules.md"
+                            proposed = dest.with_name(dest.name + ".ghost-alice-proposed")
+                            target = root / "personal.md"
+                            source.write_text(marker + "\n\nmanaged rules\n", encoding="utf-8")
+                            dest.write_bytes(existing_rules)
+                            if proposal_kind == "file":
+                                proposed.write_bytes(b"personal proposal\n")
+                            else:
+                                if proposal_kind == "link":
+                                    target.write_bytes(b"personal target\n")
+                                proposed.symlink_to(target)
+                            before = proposed.lstat()
+                            result = apply(source, dest)
+                            self.assertEqual(result.status, "proposed")
+                            self.assertNotEqual(result.path, proposed)
+                            self.assertIn("managed rules", result.path.read_text())
+                            again = apply(source, dest)
+                            self.assertEqual(again.status, "proposed")
+                            self.assertEqual(dest.read_bytes(), existing_rules)
+                            after = proposed.lstat()
+                            self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
+                            if proposal_kind == "file":
+                                self.assertEqual(proposed.read_bytes(), b"personal proposal\n")
+                            else:
+                                self.assertEqual(proposed.readlink(), target)
+                                if proposal_kind == "link":
+                                    self.assertEqual(target.read_bytes(), b"personal target\n")
+                                else:
+                                    self.assertFalse(target.exists())
 
     def test_platform_install_composes_one_common_source_and_preserves_rules_outside_managed_block(self):
         blocks = _load_global_rule_blocks()

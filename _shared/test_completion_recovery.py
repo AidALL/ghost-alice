@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 import completion_check_validator as validator
-from test_completion_skill_evidence import assert_stop_observation, stop_issue
+from stop_hook_testing import assert_stop_observation, stop_issue
 
 
 HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
@@ -33,12 +33,12 @@ class CompletionRecoveryTests(unittest.TestCase):
         return validator.validate_completion_text(text, require_completion_check=True)
 
     def hook(self, text, *, retry=False, platform="codex", record_review=True, review_verdict="supported"):
-        from test_completion_skill_evidence import StopHookSkillEvidenceTests
+        from stop_hook_testing import review_format_fixture
         env = {key: value for key, value in os.environ.items()
                if not key.startswith('GHOST_ALICE_')
                and key not in {'CODEX_THREAD_ID', 'CLAUDE_CODE_ENTRYPOINT'}}
         with tempfile.TemporaryDirectory() as temporary:
-            StopHookSkillEvidenceTests._review_format_fixture(
+            review_format_fixture(
                 Path(temporary), platform, text, env, review_verdict, record_review=record_review)
             result = subprocess.run(
                 [sys.executable, "-B", str(HOOK), "--platform", platform],

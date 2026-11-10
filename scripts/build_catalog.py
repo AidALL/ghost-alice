@@ -12,7 +12,7 @@ Usage:
     python3 scripts/build_catalog.py --output X   # set output file
 
 Dependencies:
-    Python 3.11+ standard library only (no PyYAML; includes a simple parser)
+    Python 3.11+ standard library and _shared/skill_metadata.py (no PyYAML)
 
 Exit codes:
     0: success
@@ -30,9 +30,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "_shared"))
+from skill_metadata import parse_frontmatter  # noqa: E402
+
 # Skill family directories. Scan only inside this list.
 FAMILY_DIRS = {
     "coding-convention": "coding-convention",
+}
+EXCLUDED_ROOTS = set(FAMILY_DIRS.values()) | {
+    ".github", "skill-catalog", "scripts", "official-docs", "_shared",
+    "company-info-files", "platforms", "psyco-neu-main", "psyco-neu-vision-main",
 }
 # System skills at the repo root. These form pre-work Ghost-ALICE gates such as routing and contracts.
 SYSTEM_FAMILY = "system"
@@ -46,65 +53,6 @@ VALID_CALL_TYPES = {"hard", "soft", "union", "meta"}
 UNION_TYPES = {"union"}
 
 CATALOG_VERSION = "2.0.0"
-
-
-def parse_frontmatter(text: str) -> dict[str, Any]:
-    """
-    Parse frontmatter from the SKILL.md body.
-    Uses a simple parser to avoid a PyYAML dependency.
-    Supports scalars (name: value), quoted scalars (name: "value"), and lists (- item).
-    """
-    if not text.startswith("---"):
-        raise ValueError("missing frontmatter start delimiter (---)")
-
-    lines = text.split("\n")
-    end_idx = None
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            end_idx = i
-            break
-    if end_idx is None:
-        raise ValueError("missing frontmatter end delimiter (---)")
-
-    fm: dict[str, Any] = {}
-    current_key: str | None = None
-    current_list: list[str] | None = None
-
-    for raw in lines[1:end_idx]:
-        if not raw.strip():
-            continue
-        # List item.
-        if raw.lstrip().startswith("- "):
-            if current_list is None:
-                raise ValueError(f"list item appeared without list context: {raw}")
-            item = raw.lstrip()[2:].strip()
-            current_list.append(_strip_quotes(item))
-            continue
-        # key: value
-        m = re.match(r"^([A-Za-z][\w-]*)\s*:\s*(.*)$", raw)
-        if not m:
-            # Continuation of a multiline value, such as an unquoted wrapped description.
-            if current_key and isinstance(fm.get(current_key), str):
-                fm[current_key] += " " + raw.strip()
-                continue
-            raise ValueError(f"frontmatter parse failed: {raw}")
-        key, value = m.group(1), m.group(2).strip()
-        current_key = key
-        current_list = None
-        if value == "":
-            # A list may start on the next line.
-            current_list = []
-            fm[key] = current_list
-        else:
-            fm[key] = _strip_quotes(value)
-    return fm
-
-
-def _strip_quotes(s: str) -> str:
-    s = s.strip()
-    if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
-        return s[1:-1]
-    return s
 
 
 def discover_skills(repo_root: Path) -> list[Path]:
@@ -122,14 +70,10 @@ def discover_skills(repo_root: Path) -> list[Path]:
             if skill_md.is_file():
                 found.append(skill_md)
     # Domain skills at the repo root.
-    excluded_roots = set(FAMILY_DIRS.values()) | {
-        ".github", "skill-catalog", "scripts", "official-docs", "_shared",
-        "company-info-files", "platforms", "psyco-neu-main", "psyco-neu-vision-main",
-    }
     for entry in sorted(repo_root.iterdir()):
         if not entry.is_dir():
             continue
-        if entry.name.startswith(".") or entry.name in excluded_roots:
+        if entry.name.startswith(".") or entry.name in EXCLUDED_ROOTS:
             continue
         skill_md = entry / "SKILL.md"
         if skill_md.is_file():
@@ -144,14 +88,10 @@ def discover_install_roots(repo_root: Path) -> list[str]:
         if (repo_root / family_dir).is_dir():
             roots.add(family_dir)
 
-    excluded_roots = set(FAMILY_DIRS.values()) | {
-        ".github", "skill-catalog", "scripts", "official-docs", "_shared",
-        "company-info-files", "platforms", "psyco-neu-main", "psyco-neu-vision-main",
-    }
     for entry in sorted(repo_root.iterdir()):
         if not entry.is_dir():
             continue
-        if entry.name.startswith(".") or entry.name in excluded_roots:
+        if entry.name.startswith(".") or entry.name in EXCLUDED_ROOTS:
             continue
         if (entry / "SKILL.md").is_file():
             roots.add(entry.name)
@@ -160,10 +100,15 @@ def discover_install_roots(repo_root: Path) -> list[str]:
 
 def build_skill_entry(skill_md: Path, repo_root: Path) -> dict[str, Any]:
     text = skill_md.read_text(encoding="utf-8")
-    fm = parse_frontmatter(text)
+    fm, _ = parse_frontmatter(text)
     name = fm.get("name", "")
+    if not isinstance(name, str):
+        raise ValueError(f"{skill_md}: name must be a string")
     if not name:
         raise ValueError(f"{skill_md}: missing name field")
+    description = fm.get("description", "")
+    if not isinstance(description, str):
+        raise ValueError(f"{skill_md}: description must be a string")
 
     rel_path = skill_md.relative_to(repo_root).as_posix()
     parent_dir = skill_md.parent.relative_to(repo_root).parts
@@ -175,7 +120,7 @@ def build_skill_entry(skill_md: Path, repo_root: Path) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "name": name,
         "path": rel_path,
-        "description": fm.get("description", ""),
+        "description": description,
         "family": family,
     }
     if fm.get("compatibility"):

@@ -21,10 +21,11 @@ from installer_assets import (
     OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED,
     classify_skill_root,
 )
-from global_rule_blocks import remove_claude_bootstrap, remove_codex_rule_file
-from install_hooks import uninstall_hook
+from global_rule_blocks import GlobalRuleBlockError, remove_claude_bootstrap, remove_codex_rule_file
+from install_hooks import _edit_toml_key, _find_toml_header_bounds, uninstall_hook
 from installer import locations
 import state_retention
+from text_lines import split_lines
 
 REMOVABLE_TARGET_OWNERSHIPS = {
     OWNERSHIP_GHOST_ALICE_MANAGED,
@@ -295,26 +296,6 @@ def _source_repo_hook_items(
     return items
 
 
-def _find_toml_section_bounds(lines: list[str], section_name: str) -> tuple[int | None, int]:
-    start: int | None = None
-    end = len(lines)
-    section_header = f"[{section_name}]"
-    for idx, raw_line in enumerate(lines):
-        stripped = raw_line.strip()
-        if not (stripped.startswith("[") and stripped.endswith("]")):
-            continue
-        if stripped.startswith("[["):
-            continue
-        if stripped == section_header:
-            if start is None:
-                start = idx
-            continue
-        if start is not None and idx > start:
-            end = idx
-            break
-    return start, end
-
-
 def _render_text_with_trailing_newline(lines: list[str]) -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
@@ -323,56 +304,10 @@ def _toml_basic_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _find_toml_header_bounds(lines: list[str], header: str) -> tuple[int | None, int]:
-    start: int | None = None
-    end = len(lines)
-    for idx, raw_line in enumerate(lines):
-        stripped = raw_line.strip()
-        if stripped == header:
-            start = idx
-            continue
-        if start is not None and stripped.startswith("[") and stripped.endswith("]"):
-            end = idx
-            break
-    return start, end
-
-
 def _restore_codex_hooks_feature_content(content: str, before_state: str) -> tuple[str, bool]:
-    lines = content.splitlines()
-    start, end = _find_toml_section_bounds(lines, "features")
-    if start is None:
-        if before_state == "missing":
-            return content if content.endswith("\n") else content + "\n", False
-        new_content = content.rstrip("\n")
-        if new_content:
-            new_content += "\n\n"
-        new_content += f"[features]\nhooks = {before_state}\n"
-        return new_content, True
-
-    hooks_idx: int | None = None
-    for idx in range(start + 1, end):
-        stripped = lines[idx].strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, _value = stripped.split("=", 1)
-        if key.strip() == "hooks":
-            hooks_idx = idx
-            break
-
-    if before_state == "missing":
-        if hooks_idx is None:
-            return _render_text_with_trailing_newline(lines), False
-        del lines[hooks_idx]
-        return _render_text_with_trailing_newline(lines), True
-
-    replacement = f"hooks = {before_state}"
-    if hooks_idx is None:
-        lines.insert(end, replacement)
-        return _render_text_with_trailing_newline(lines), True
-    if lines[hooks_idx].strip() == replacement:
-        return _render_text_with_trailing_newline(lines), False
-    lines[hooks_idx] = replacement
-    return _render_text_with_trailing_newline(lines), True
+    lines = split_lines(content)
+    changed = _edit_toml_key(lines, "[features]", "hooks", None if before_state == "missing" else before_state == "true")
+    return _render_text_with_trailing_newline(lines), changed
 
 
 def _codex_project_trust_header(project_path: str) -> str:
@@ -385,33 +320,10 @@ def _restore_codex_project_trust_content(
     project_path: str,
     before_state: str,
 ) -> tuple[str, bool]:
-    lines = content.splitlines()
+    lines = split_lines(content)
     header = _codex_project_trust_header(project_path)
-    start, end = _find_toml_header_bounds(lines, header)
-
-    if start is None:
-        if before_state == "missing":
-            return content if content.endswith("\n") else content + "\n", False
-        new_content = content.rstrip("\n")
-        if new_content:
-            new_content += "\n\n"
-        new_content += f"{header}\ntrust_level = \"{before_state}\"\n"
-        return new_content, True
-
-    trust_idx: int | None = None
-    for idx in range(start + 1, end):
-        stripped = lines[idx].strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, _value = stripped.split("=", 1)
-        if key.strip() == "trust_level":
-            trust_idx = idx
-            break
-
-    if before_state == "missing":
-        if trust_idx is None:
-            return _render_text_with_trailing_newline(lines), False
-        del lines[trust_idx]
+    changed = _edit_toml_key(lines, header, "trust_level", None if before_state == "missing" else before_state)
+    if before_state == "missing" and changed:
         start, end = _find_toml_header_bounds(lines, header)
         if start is not None:
             meaningful = [
@@ -421,16 +333,7 @@ def _restore_codex_project_trust_content(
             ]
             if not meaningful:
                 del lines[start:end]
-        return _render_text_with_trailing_newline(lines), True
-
-    replacement = f'trust_level = "{before_state}"'
-    if trust_idx is None:
-        lines.insert(end, replacement)
-        return _render_text_with_trailing_newline(lines), True
-    if lines[trust_idx].strip() == replacement:
-        return _render_text_with_trailing_newline(lines), False
-    lines[trust_idx] = replacement
-    return _render_text_with_trailing_newline(lines), True
+    return _render_text_with_trailing_newline(lines), changed
 
 
 def _is_allowed_codex_config_path(path: Path) -> bool:
@@ -487,7 +390,11 @@ def _codex_hook_feature_item_from_change(change: dict[str, Any], *, apply_change
         item.update(action="manual-review", reason="codex-config-read-failed", error=str(exc))
         return item
 
-    restored, changed = _restore_codex_hooks_feature_content(current, before_state)
+    try:
+        restored, changed = _restore_codex_hooks_feature_content(current, before_state)
+    except ValueError as exc:
+        item.update(action="manual-review", reason="codex-config-edit-failed", error=str(exc))
+        return item
     if not changed:
         item.update(action="unchanged", reason="codex-hooks-feature-already-restored")
         return item
@@ -560,11 +467,15 @@ def _codex_project_trust_item_from_change(change: dict[str, Any], *, apply_chang
         item.update(action="manual-review", reason="codex-config-read-failed", error=str(exc))
         return item
 
-    restored, changed = _restore_codex_project_trust_content(
-        current,
-        project_path=raw_project_path,
-        before_state=before_state,
-    )
+    try:
+        restored, changed = _restore_codex_project_trust_content(
+            current,
+            project_path=raw_project_path,
+            before_state=before_state,
+        )
+    except ValueError as exc:
+        item.update(action="manual-review", reason="codex-config-edit-failed", error=str(exc))
+        return item
     if not changed:
         item.update(action="unchanged", reason="codex-project-trust-already-restored")
         return item
@@ -630,14 +541,16 @@ def _quarantine_then_remove(
     uninstall cleanup does not own the human user's pending-merge quarantine decisions.
     """
     target_backup = _uninstall_backup_root(platform) / path.name
+    suffix = 1
+    while target_backup.exists() or target_backup.is_symlink():
+        target_backup = _uninstall_backup_root(platform) / f"{path.name}-{suffix}"
+        suffix += 1
     if apply_changes:
         target_backup.parent.mkdir(parents=True, exist_ok=True)
-        if target_backup.exists() or target_backup.is_symlink():
-            _remove_path(target_backup)
         if path.is_symlink():
             os.symlink(os.readlink(path), target_backup)
         elif path.is_dir():
-            shutil.copytree(path, target_backup)
+            shutil.copytree(path, target_backup, symlinks=True)
         else:
             shutil.copy2(path, target_backup)
         _remove_path(path)
@@ -950,31 +863,25 @@ def _global_rule_item(platform: str, *, apply_changes: bool, companion: bool = F
     if not path.is_file():
         return {"kind": "global-rule", "path": path.as_posix(), "action": "manual-review", "reason": "rule-path-not-file"}
 
-    if apply_changes:
-        result = remover(path)
-        action = "removed-global-rule" if result.status in {"removed", "updated"} else "unchanged"
-        return {
-            "kind": "global-rule",
-            "path": path.as_posix(),
-            "action": action,
-            "reason": result.status,
-        }
-
     try:
-        body = path.read_text(encoding="utf-8-sig")
-    except UnicodeDecodeError:
+        result = remover(path, apply_changes=apply_changes)
+    except GlobalRuleBlockError as exc:
+        if apply_changes or not isinstance(exc.__cause__, UnicodeDecodeError):
+            raise
         return {
             "kind": "global-rule",
             "path": path.as_posix(),
             "action": "manual-review",
             "reason": "encoding-invalid",
         }
-    has_ghost_alice_block = "Ghost-ALICE managed block begin" in body or body.startswith("# Ghost-ALICE")
+    action = "unchanged"
+    if result.status in {"removed", "updated"}:
+        action = "removed-global-rule" if apply_changes else "would-remove-global-rule"
     return {
         "kind": "global-rule",
         "path": path.as_posix(),
-        "action": "would-remove-global-rule" if has_ghost_alice_block else "unchanged",
-        "reason": "ghost-alice-block-present" if has_ghost_alice_block else "ghost-alice-block-absent",
+        "action": action,
+        "reason": result.status,
     }
 
 

@@ -13,6 +13,7 @@ from typing import Any
 
 
 import ledger_access
+from hook_input import parse_json_object, read_stdin_utf8
 from session_identity import bound_session, is_exact
 
 try:
@@ -99,20 +100,10 @@ def _clear_degrade_marker(root: Path, platform: str, payload: dict[str, Any]) ->
 
 
 def read_payload() -> dict[str, Any]:
-    # Hook runners send JSON as UTF-8. Read raw bytes so the Windows console code page cannot turn non-ASCII input into lone surrogate characters.
-    buffer = getattr(sys.stdin, "buffer", None)
     try:
-        data = buffer.read() if buffer is not None else sys.stdin.read()
-    except OSError:
+        return parse_json_object(read_stdin_utf8())
+    except (OSError, json.JSONDecodeError):
         return {}
-    raw = data.decode("utf-8", errors="replace") if isinstance(data, bytes) else str(data)
-    if not raw.strip():
-        return {}
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
-    return value if isinstance(value, dict) else {}
 
 
 def first_text(*values: Any) -> str:
@@ -176,15 +167,10 @@ def native_context_capability(session_id: str, platform: str = 'codex') -> dict[
         from native_transcript import codex_home, codex_transcript_path
         from hook_definitions import PROVIDER
         home = codex_home(os.environ)
-        path = codex_transcript_path(home, session_id)
+        path = codex_transcript_path(home, session_id, model_provider=PROVIDER)
         if path is None:
             return None
-        with Path(path).open() as stream:
-            metadata = json.loads(stream.readline())
-        payload = metadata.get('payload', {})
-        if (metadata.get('type') == 'session_meta' and payload.get('id') == session_id
-                and payload.get('model_provider') == PROVIDER and procedure.is_file()):
-            return {'native_provider': PROVIDER, 'procedure': str(procedure), 'native_dir': str(home)}
+        return {'native_provider': PROVIDER, 'procedure': str(procedure), 'native_dir': str(home)}
     except (ImportError, OSError, ValueError, TypeError, AttributeError):
         pass
     return None

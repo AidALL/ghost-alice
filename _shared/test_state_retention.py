@@ -406,6 +406,7 @@ class AppendTests(RetentionTestCase):
         [failure] = self.failures()
         self.assertEqual(failure["policy"], "gateway-usage")
 
+    @unittest.skipIf(file_lock.fcntl is None, "optional log locking requires flock")
     def test_appends_and_rotations_of_one_log_never_overlap(self):
         path = self.root / "usage.jsonl"
         policy = state_retention.POLICIES["gateway-usage"]._replace(limit=64)

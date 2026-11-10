@@ -15,11 +15,11 @@ from typing import Any, Callable, Mapping, Sequence, TextIO
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from project_runtime import project_runtime
+from hook_definitions import SUPPORTED_PLATFORMS
 from text_lines import split_lines
 
 
 CODE_OWNER_ROOT = Path(__file__).resolve().parents[1]
-PLATFORMS = {"claude", "codex"}
 FORBIDDEN_SESSION_FLAGS = {"--resume", "--continue", "--session-id"}
 CLAUDE_SESSION_SHORT_FLAGS = {"-r", "-c"}
 ORDINARY_AUTH_ENV_KEYS = frozenset({
@@ -226,7 +226,7 @@ def run_fresh_agent_session(
 ) -> str:
     """Run a one-shot nonpersistent CLI process for one stdin prompt."""
 
-    if platform not in PLATFORMS:
+    if platform not in SUPPORTED_PLATFORMS:
         raise ValueError("platform must be claude or codex")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("stdin prompt must be non-empty text")
@@ -282,7 +282,7 @@ def run_fresh_agent_session(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", required=True, choices=sorted(PLATFORMS))
+    parser.add_argument("--platform", required=True, choices=SUPPORTED_PLATFORMS)
     parser.add_argument("--claude-bin", default="claude")
     parser.add_argument("--codex-bin", default="codex")
     parser.add_argument("--timeout-seconds", type=float, default=600)
@@ -320,8 +320,8 @@ def main(
     error_stream = stderr or sys.stderr
     prompt = input_stream.read()
     binary = args.claude_bin if args.platform == "claude" else args.codex_bin
-    command = resolve_cli_command(binary)
     try:
+        command = resolve_cli_command(binary)
         response = run_fresh_agent_session(
             platform=args.platform,
             prompt=prompt,

@@ -40,8 +40,8 @@ def hold_lock(testcase, root: Path) -> Path:
     """Take `<root>/.ghost-alice/install.lock` for this process until the test ends."""
     lock = root / ".ghost-alice" / "install.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
-    install_lock.acquire_lock(lock, owner="installer:test:claude:test")
-    testcase.addCleanup(install_lock.release_lock, lock)
+    generation = install_lock.acquire_lock(lock, owner="installer:test:claude:test")
+    testcase.addCleanup(install_lock.release_lock, lock, generation)
     return lock
 
 

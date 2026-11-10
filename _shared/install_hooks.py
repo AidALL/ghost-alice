@@ -45,29 +45,14 @@ import re
 import shutil
 import sys
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple
 
 MIN_PYTHON_VERSION = (3, 11)
 HOOK_PYTHON_SENTINEL = "__GHOST_ALICE_HOOK_PYTHON__"
-PYTHON_VERSION_CHECK_CODE = (
-    "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
-)
-POSIX_HOOK_PYTHON_LAUNCHER = (
-    'for py in "${GHOST_ALICE_PYTHON:-}" python3 python '
-    "/opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3 /bin/python3 "
-    "/opt/homebrew/bin/python3.[0-9]* /usr/local/bin/python3.[0-9]* "
-    "/usr/bin/python3.[0-9]* /bin/python3.[0-9]* __GHOST_ALICE_INSTALL_PYTHON__; do "
-    '[ -n "$py" ] || continue; '
-    'if command -v "$py" >/dev/null 2>&1 || [ -x "$py" ]; then '
-    f'"$py" -c "{PYTHON_VERSION_CHECK_CODE}" >/dev/null 2>&1 && exec "$py" "$@"; '
-    "fi; "
-    "done; "
-    'echo "Ghost-ALICE hook requires Python 3.11+" >&2; exit 127'
-)
 
 if sys.version_info < MIN_PYTHON_VERSION:
     detected = ".".join(str(part) for part in sys.version_info[:3])
@@ -76,13 +61,14 @@ if sys.version_info < MIN_PYTHON_VERSION:
 
 from merge_companion_messages import render_pending_merge_message
 import hook_definitions
-from hook_definitions import normalize_hook_id, resolve_hook_event
+from hook_definitions import POSIX_HOOK_PYTHON_LAUNCHER, normalize_hook_id, resolve_hook_event
 import runtime_config
 import install_destination
 import state_retention
 import addon_installer
 from addon_installer import AddonManifestError, load_addon_targets
 import retired_assets
+from text_lines import split_lines
 
 # Prevent Windows cp949 stdout encoding issues.
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
@@ -129,6 +115,8 @@ def _localized_bridge(
 
 
 def _quote_static_arg(value: str | Path) -> str:
+    if os.name != "nt" and not sys.platform.startswith("win"):
+        return _quote_posix_arg(str(value))
     text = str(value).replace("\\", "/")
     if os.name == "nt" and re.fullmatch(r"[A-Za-z]:/[^\s\"<>|]+", text):
         return text
@@ -197,7 +185,7 @@ def _resolve_shared_hook_script(name: str) -> str:
     active = install_destination.current()
     source = Path(active.core_source_root)/"_shared"/name if active else script
     if script.exists() or (active and source.is_file()):
-        return str(script).replace("\\", "/")
+        return script.as_posix()
     return ""
 
 
@@ -251,13 +239,12 @@ def _retained_installed_ledger(platform_key):
                 command=hook.get("command","")
                 if not any((globals().get("_hook_runner_id_match") or (lambda *_: False))(command,identity) for identity in ("session-intent","tool-checkpoint","session-start","session-receipt")):
                     continue
-                outer=shlex.split(command,comments=True)
-                if "--binding-b64" in outer:
-                    binding=install_destination.decode_binding(outer[outer.index("--binding-b64")+1])
+                runner = hook_definitions.parse_hook_runner_command(command)
+                if runner["binding"] is not None:
+                    binding=install_destination.decode_binding(runner["binding"])
                     roots.add(binding["destination"]["ledger_root"])
                 else:
-                    args=outer[outer.index("run")+1:]
-                    inner=shlex.split(base64.urlsafe_b64decode(args[-1]).decode(),comments=True)
+                    inner=shlex.split(runner["command"],comments=True)
                     for flag in ("--root","--session-intent-root"):
                         if flag in inner:
                             root=inner[inner.index(flag)+1]
@@ -579,19 +566,12 @@ def _hook_runner_command(
                 "dynamic Node hook command requires hook_profile_gate.py"
             )
         return command
-    payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
     normalized = normalize_hook_id(hook_id)
-    runner_args = ["run", normalized]
-    if platform_key is not None:
-        platform = platform_key.strip().lower()
-        if platform not in {"claude", "codex"}:
-            raise ValueError(f"unsupported hook runner platform: {platform_key}")
-        runner_args.append(platform)
-    runner_args.append(payload)
     binding_platform = platform_key or os.environ.get("GHOST_ALICE_PLATFORM") or "codex"
     destination = install_destination.current() or _default_destination(binding_platform)
     binding = destination.binding()
-    runner_args.extend(["--binding-b64", install_destination.encode_binding(binding)])
+    runner_args = hook_definitions.encode_hook_runner_args(
+        hook_id, command, platform_key, install_destination.encode_binding(binding))
     visible_hint = " ghost-alice-hook.mjs" if "ghost-alice-hook.mjs" in command else ""
     return (
         f"{_hook_python_invocation(script, *runner_args)} "
@@ -834,7 +814,7 @@ def _platform_tool_checkpoint_entry(
     event: str,
     node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
 ) -> dict[str, Any]:
-    if platform_key in {"claude", "codex"}:
+    if platform_key in hook_definitions.SUPPORTED_PLATFORMS:
         command = _dispatcher_hook_command(platform_key, event, node_runtime)
         return _hook_runner_command_entry(
             "tool-checkpoint",
@@ -970,7 +950,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
 
 
 def _ensure_node_runtime_for_hook_install(platform_key: str) -> str | None:
-    if platform_key not in {"claude", "codex"}:
+    if platform_key not in hook_definitions.SUPPORTED_PLATFORMS:
         return None
     platform = PLATFORMS[platform_key]
     if not platform["detect"]():
@@ -1094,27 +1074,212 @@ def _write_text_file(path: Path, content: str, dry_run: bool = False) -> None:
     _log(f"Saved: {path}")
 
 
-def _find_toml_section_bounds(lines: list[str], section_name: str) -> Tuple[Optional[int], int]:
-    """Find the start/end line indices for a TOML section."""
-    start: Optional[int] = None
-    end = len(lines)
-    section_header = f"[{section_name}]"
-
+def _toml_table_headers(lines: list[str]) -> Iterator[tuple[int, dict[str, Any], str]]:
+    """Yield each header's line, decoded table and trailing comment/newline for text edits."""
+    section_start = 0
     for idx, raw_line in enumerate(lines):
-        stripped = raw_line.strip()
-        if not (stripped.startswith("[") and stripped.endswith("]")):
+        if not raw_line.lstrip().startswith("["):
             continue
-        if stripped.startswith("[["):
+        try:
+            table = tomllib.loads(raw_line)
+            # A header-looking line inside a multiline string or array is not
+            # a table. The preceding section must contain complete values.
+            tomllib.loads("\n".join(line.rstrip("\r\n") for line in lines[section_start:idx]))
+        except tomllib.TOMLDecodeError:
             continue
-        if stripped == section_header:
-            if start is None:
-                start = idx
-            continue
-        if start is not None and idx > start:
-            end = idx
-            break
+        for end, character in enumerate(raw_line):
+            if character != "]":
+                continue
+            try:
+                if tomllib.loads(raw_line[:end + 1]) == table:
+                    section_start = idx
+                    yield idx, table, raw_line[end + 1:]
+                    break
+            except tomllib.TOMLDecodeError:
+                continue  # a bracket inside a quoted key, or the first of ]]
 
-    return start, end
+
+def _find_toml_header_bounds(lines: list[str], header: str) -> tuple[Optional[int], int]:
+    expected = tomllib.loads(header)
+    start: Optional[int] = None
+    for idx, table, _suffix in _toml_table_headers(lines):
+        if start is not None:
+            return start, idx
+        if table == expected:
+            start = idx
+    return start, len(lines)
+
+
+def _toml_table_assignments(
+    lines: list[str], start: int, end: int,
+) -> Iterator[tuple[int, int, dict[str, Any], str]]:
+    """Yield complete assignments and their source spans, leaving multiline values intact."""
+    first = start + 1
+    while first < end:
+        if not lines[first].strip() or lines[first].lstrip().startswith("#"):
+            first += 1
+            continue
+        for last in range(first, end):
+            statement = "\n".join(lines[first:last + 1])
+            try:
+                values = tomllib.loads(statement)
+            except tomllib.TOMLDecodeError:
+                continue
+            suffix = ""
+            last_line_start = statement.rfind("\n") + 1
+            for offset, character in enumerate(lines[last]):
+                if character != "#":
+                    continue
+                prefix = statement[:last_line_start + offset]
+                try:
+                    tomllib.loads(prefix)
+                except tomllib.TOMLDecodeError:
+                    continue  # this # belongs to the value, not a trailing comment
+                suffix = statement[len(prefix.rstrip(" \t")):]
+                break
+            yield first, last + 1, values, suffix
+            first = last + 1
+            break
+        else:
+            return
+
+
+def _toml_table_values(content: str, header: str) -> dict[str, Any] | None:
+    """Read a table by its decoded path, independently of its source notation."""
+    try:
+        values = tomllib.loads(content)
+    except tomllib.TOMLDecodeError:
+        return None
+    path = tomllib.loads(header)
+    while path:
+        name, path = next(iter(path.items()))
+        if not isinstance(values, dict) or name not in values:
+            return None
+        values = values[name]
+    return values if isinstance(values, dict) else None
+
+
+def _toml_header_path(table: dict[str, Any]) -> tuple[str, ...] | None:
+    path = []
+    while table:
+        if len(table) != 1:
+            return None
+        name, table = next(iter(table.items()))
+        if not isinstance(table, dict):
+            return None  # array tables are not managed setting owners
+        path.append(name)
+    return tuple(path)
+
+
+def _toml_value(value: Any) -> str:
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return "{ " + ", ".join(f"{json.dumps(key)} = {_toml_value(item)}" for key, item in value.items()) + " }"
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    if isinstance(value, float):
+        return repr(value)
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _toml_dotted_assignments(values: dict[str, Any], prefix: tuple[str, ...] = ()) -> list[str]:
+    rendered = []
+    for name, item in values.items():
+        path = (*prefix, name)
+        if isinstance(item, dict) and item:
+            rendered.extend(_toml_dotted_assignments(item, path))
+        else:
+            rendered.append(".".join(json.dumps(part, ensure_ascii=False) for part in path) + " = " + _toml_value(item))
+    return rendered
+
+
+def _edit_toml_without_header(lines: list[str], header: str, key: str, value: bool | str | None) -> bool:
+    """Edit the containing dotted/inline assignment, preserving unrelated assignments."""
+    target = (*_toml_header_path(tomllib.loads(header)), key)
+    target_exists = key in (_toml_table_values("\n".join(lines), header) or {})
+    headers = [(idx, _toml_header_path(table)) for idx, table, _ in _toml_table_headers(lines)]
+    sections = [(-1, ())] + headers
+    for index, (start, context) in enumerate(sections):
+        end = sections[index + 1][0] if index + 1 < len(sections) else len(lines)
+        if context is None or target[:len(context)] != context:
+            continue
+        relative = target[len(context):]
+        for first, last, values, suffix in _toml_table_assignments(lines, start, end):
+            owner = values
+            ancestors = []
+            for part in relative[:-1]:
+                if not isinstance(owner.get(part), dict):
+                    break
+                ancestors.append((owner, part))
+                owner = owner[part]
+            else:
+                if target_exists and relative[-1] not in owner:
+                    continue
+                if value is None:
+                    if relative[-1] not in owner:
+                        continue
+                    del owner[relative[-1]]
+                    for parent, part in reversed(ancestors):
+                        if parent[part]:
+                            break
+                        del parent[part]
+                else:
+                    owner[relative[-1]] = value
+                replacement = _toml_dotted_assignments(values)
+                if suffix:
+                    if replacement:
+                        replacement[-1] += suffix
+                    else:
+                        replacement = [suffix.lstrip()]
+                candidate = lines[:first] + replacement + lines[last:]
+                tomllib.loads("\n".join(candidate))
+                lines[:] = candidate
+                return True
+    if value is None:
+        return False
+    # A root dotted assignment can extend tables declared by other dotted keys.
+    end = headers[0][0] if headers else len(lines)
+    replacement = ".".join(json.dumps(part, ensure_ascii=False) for part in target) + " = " + _toml_value(value)
+    candidate = lines[:end] + [replacement] + lines[end:]
+    tomllib.loads("\n".join(candidate))
+    lines[:] = candidate
+    return True
+
+
+def _edit_toml_key(lines: list[str], header: str, key: str, value: bool | str | None) -> bool:
+    """Set or remove one managed assignment; None removes it while retaining its comment."""
+    tomllib.loads("\n".join(lines))
+    start, end = _find_toml_header_bounds(lines, header)
+    replacement = f"{key} = {json.dumps(value, ensure_ascii=False)}" if value is not None else None
+    if start is None:
+        values = _toml_table_values("\n".join(lines), header) or {}
+        if key in values and type(values[key]) is type(value) and values[key] == value:
+            return False
+        if replacement is None:
+            return _edit_toml_without_header(lines, header, key, value)
+        candidate = [*lines, *([""] if lines and lines[-1].strip() else []), header, replacement]
+        try:
+            tomllib.loads("\n".join(candidate))
+        except tomllib.TOMLDecodeError:
+            return _edit_toml_without_header(lines, header, key, value)
+        lines[:] = candidate
+        return True
+
+    for first, last, values, suffix in _toml_table_assignments(lines, start, end):
+        if key not in values:
+            continue
+        if type(values[key]) is type(value) and values[key] == value:
+            return False
+        if replacement is None:
+            lines[first:last] = [suffix.lstrip()] if suffix else []
+        else:
+            lines[first:last] = [replacement + suffix]
+        return True
+    if replacement is None:
+        return False
+    lines.insert(end, replacement)
+    return True
 
 
 def _render_text_with_trailing_newline(lines: list[str]) -> str:
@@ -1126,73 +1291,18 @@ def _codex_hook_feature_enabled_in_content(content: str) -> bool:
 
 
 def _codex_hook_feature_state_in_content(content: str) -> str:
-    lines = content.splitlines()
-    start, end = _find_toml_section_bounds(lines, "features")
-    if start is None:
-        return "missing"
-
-    for raw_line in lines[start + 1:end]:
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, value = stripped.split("=", 1)
-        if key.strip() != "hooks":
-            continue
-        return "true" if value.split("#", 1)[0].strip().lower() == "true" else "false"
-
+    values = _toml_table_values(content, "[features]")
+    if values is not None and "hooks" in values:
+        return "true" if values["hooks"] is True else "false"
     return "missing"
 
 
 def _merge_codex_hook_feature_flag(content: str) -> tuple[str, bool]:
     """Ensure [features] hooks = true in config.toml content."""
-    lines = content.splitlines()
-    start, end = _find_toml_section_bounds(lines, "features")
-
-    if start is None:
-        new_content = content.rstrip("\n")
-        if new_content:
-            new_content += "\n\n"
-        new_content += "[features]\nhooks = true\n"
-        return new_content, True
-
-    hooks_idx: Optional[int] = None
-    deprecated_indices: list[int] = []
-
-    for idx in range(start + 1, end):
-        stripped = lines[idx].strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, _value = stripped.split("=", 1)
-        key = key.strip()
-        if key == "hooks":
-            hooks_idx = idx
-        elif key == "codex_hooks":
-            deprecated_indices.append(idx)
-
-    changed = bool(deprecated_indices)
-    for idx in reversed(deprecated_indices):
-        del lines[idx]
-
-    if deprecated_indices:
-        start, end = _find_toml_section_bounds(lines, "features")
-        hooks_idx = None
-        for idx in range(start + 1, end):
-            stripped = lines[idx].strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
-                continue
-            key, _value = stripped.split("=", 1)
-            if key.strip() == "hooks":
-                hooks_idx = idx
-                break
-
-    if hooks_idx is not None:
-        if _codex_hook_feature_enabled_in_content(_render_text_with_trailing_newline(lines)):
-            return _render_text_with_trailing_newline(lines), changed
-        lines[hooks_idx] = "hooks = true"
-        return _render_text_with_trailing_newline(lines), True
-
-    lines.insert(end, "hooks = true")
-    return _render_text_with_trailing_newline(lines), True
+    lines = split_lines(content)
+    changed = _edit_toml_key(lines, "[features]", "codex_hooks", None)
+    changed = _edit_toml_key(lines, "[features]", "hooks", True) or changed
+    return _render_text_with_trailing_newline(lines), changed
 
 
 def _ensure_codex_hook_feature_enabled(dry_run: bool = False) -> bool:
@@ -1380,20 +1490,6 @@ def _toml_basic_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _find_toml_header_bounds(lines: list[str], header: str) -> tuple[Optional[int], int]:
-    start: Optional[int] = None
-    end = len(lines)
-    for idx, raw_line in enumerate(lines):
-        stripped = raw_line.strip()
-        if stripped == header:
-            start = idx
-            continue
-        if start is not None and stripped.startswith("[") and stripped.endswith("]"):
-            end = idx
-            break
-    return start, end
-
-
 def _codex_hook_state_key_parts(key: str) -> Optional[tuple[str, str, str, str]]:
     parts = key.rsplit(":", 3)
     if len(parts) != 4:
@@ -1412,17 +1508,14 @@ def _codex_hook_state_key_parts(key: str) -> Optional[tuple[str, str, str, str]]
     return settings_path.replace("\\", "/"), event_name, group_index, handler_index
 
 
-def _codex_hook_state_header_key(line: str) -> Optional[str]:
-    prefix = "[hooks.state."
-    stripped = line.strip()
-    if not stripped.startswith(prefix) or not stripped.endswith("]"):
-        return None
-    encoded_key = stripped[len(prefix):-1].strip()
-    try:
-        decoded = json.loads(encoded_key)
-    except json.JSONDecodeError:
-        return None
-    return decoded if isinstance(decoded, str) else None
+def _codex_hook_state_table_key(table: dict[str, Any]) -> Optional[str]:
+    hooks = table.get("hooks")
+    state = hooks.get("state") if isinstance(hooks, dict) else None
+    if isinstance(state, dict) and len(state) == 1:
+        key = next(iter(state))
+        if state[key] == {}:
+            return key
+    return None
 
 
 def _prune_codex_hook_state_path_variants(lines: list[str], keep_key: str) -> bool:
@@ -1431,22 +1524,14 @@ def _prune_codex_hook_state_path_variants(lines: list[str], keep_key: str) -> bo
         return False
 
     changed = False
-    index = 0
-    while index < len(lines):
-        existing_key = _codex_hook_state_header_key(lines[index])
+    headers = list(_toml_table_headers(lines))
+    ends = [index for index, _table, _suffix in headers[1:]] + [len(lines)]
+    for (index, table, _suffix), end in reversed(list(zip(headers, ends))):
+        existing_key = _codex_hook_state_table_key(table)
         if existing_key is None or existing_key == keep_key:
-            index += 1
             continue
         if _codex_hook_state_key_parts(existing_key) != keep_parts:
-            index += 1
             continue
-
-        end = index + 1
-        while end < len(lines):
-            stripped = lines[end].strip()
-            if stripped.startswith("[") and stripped.endswith("]"):
-                break
-            end += 1
         del lines[index:end]
         changed = True
 
@@ -1461,61 +1546,20 @@ def _codex_project_trust_header(project_path: str) -> str:
     return f"[projects.{_toml_basic_string(project_path)}]"
 
 
-def _toml_trust_level_value(raw_value: str) -> str:
-    value = raw_value.split("#", 1)[0].strip()
-    if value in {'"trusted"', "'trusted'"}:
-        return "trusted"
-    if value in {'"untrusted"', "'untrusted'"}:
-        return "untrusted"
-    return "other"
-
-
 def _codex_project_trust_state_in_content(content: str, project_path: str) -> str:
-    lines = content.splitlines()
-    start, end = _find_toml_header_bounds(lines, _codex_project_trust_header(project_path))
-    if start is None:
-        return "missing"
-    for raw_line in lines[start + 1:end]:
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, value = stripped.split("=", 1)
-        if key.strip() == "trust_level":
-            return _toml_trust_level_value(value)
+    values = _toml_table_values(content, _codex_project_trust_header(project_path))
+    if values is not None and "trust_level" in values:
+        value = values["trust_level"]
+        return value if value in ("trusted", "untrusted") else "other"
     return "missing"
 
 
 def _merge_codex_project_trust(content: str, project_path: str) -> tuple[str, bool, str]:
-    lines = content.splitlines()
+    lines = split_lines(content)
     header = _codex_project_trust_header(project_path)
-    start, end = _find_toml_header_bounds(lines, header)
     before_state = _codex_project_trust_state_in_content(content, project_path)
-
-    if before_state == "trusted":
-        return _render_text_with_trailing_newline(lines), False, before_state
-
-    trusted_line = 'trust_level = "trusted"'
-    if start is None:
-        if lines and lines[-1].strip():
-            lines.append("")
-        lines.extend([header, trusted_line])
-        return _render_text_with_trailing_newline(lines), True, before_state
-
-    trust_idx: Optional[int] = None
-    for idx in range(start + 1, end):
-        stripped = lines[idx].strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, _value = stripped.split("=", 1)
-        if key.strip() == "trust_level":
-            trust_idx = idx
-            break
-
-    if trust_idx is None:
-        lines.insert(end, trusted_line)
-    else:
-        lines[trust_idx] = trusted_line
-    return _render_text_with_trailing_newline(lines), True, before_state
+    changed = _edit_toml_key(lines, header, "trust_level", "trusted")
+    return _render_text_with_trailing_newline(lines), changed, before_state
 
 
 def _write_codex_project_trust_change(
@@ -1569,38 +1613,13 @@ def _ensure_codex_project_trusted(dry_run: bool = False) -> bool:
 
 
 def _merge_codex_hook_trust_state(content: str, state_entries: dict[str, str]) -> tuple[str, bool]:
-    lines = content.splitlines()
+    lines = split_lines(content)
     changed = False
 
     for key, trusted_hash in state_entries.items():
         changed = _prune_codex_hook_state_path_variants(lines, key) or changed
         header = f"[hooks.state.{_toml_basic_string(key)}]"
-        start, end = _find_toml_header_bounds(lines, header)
-        trusted_line = f'trusted_hash = "{trusted_hash}"'
-
-        if start is None:
-            if lines and lines[-1].strip():
-                lines.append("")
-            lines.extend([header, trusted_line])
-            changed = True
-            continue
-
-        trusted_idx: Optional[int] = None
-        for idx in range(start + 1, end):
-            stripped = lines[idx].strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
-                continue
-            candidate_key, _candidate_value = stripped.split("=", 1)
-            if candidate_key.strip() == "trusted_hash":
-                trusted_idx = idx
-                break
-
-        if trusted_idx is None:
-            lines.insert(end, trusted_line)
-            changed = True
-        elif lines[trusted_idx].strip() != trusted_line:
-            lines[trusted_idx] = trusted_line
-            changed = True
+        changed = _edit_toml_key(lines, header, "trusted_hash", trusted_hash) or changed
 
     return _render_text_with_trailing_newline(lines), changed
 
@@ -1643,16 +1662,10 @@ def _hook_already_exists(
     expected_command: Optional[str] = None,
 ) -> bool:
     """Return whether the hook list already contains the same marker."""
-    for entry in hooks_list:
-        for hook in entry.get("hooks", []):
-            cmd = hook.get("command", "")
-            if (
-                marker in cmd
-                and (not require_dispatcher or _is_dispatcher_command(cmd))
-                and (expected_command is None or cmd == expected_command)
-            ):
-                return True
-    return False
+    return _hook_marker_match_status(
+        hooks_list, marker, require_dispatcher=require_dispatcher,
+        expected_command=expected_command,
+    )[1]
 
 
 def _entry_command(entry: dict[str, Any]) -> str:
@@ -1701,33 +1714,12 @@ def _hook_runner_id_match(command: str, hook_id: str | None, *, decode_binding: 
     """
     if not hook_id:
         return False
-    import shlex
+    runner = hook_definitions.parse_hook_runner_command(command)
+    if runner is None or runner["hook_id"] != normalize_hook_id(hook_id):
+        return False
     try:
-        argv = shlex.split(command,comments=True)
-        if argv[:2] == ["/bin/sh","-c"]:
-            if len(argv)<7 or argv[3]!="ghost-alice-python":
-                return False
-            prefix,suffix=POSIX_HOOK_PYTHON_LAUNCHER.split("__GHOST_ALICE_INSTALL_PYTHON__")
-            if not argv[2].startswith(prefix) or not argv[2].endswith(suffix):
-                return False
-            middle=shlex.split(argv[2][len(prefix):-len(suffix)])
-            if len(middle)!=1 or not Path(middle[0]).is_absolute():
-                return False
-            script_index=4
-        else:
-            if len(argv)<4 or not re.fullmatch(r"python(?:3(?:\.[0-9]+)?)?(?:\.exe)?",Path(argv[0]).name):
-                return False
-            script_index=1
-        if not Path(argv[script_index]).is_absolute() or Path(argv[script_index]).name!="hook_profile_gate.py":
-            return False
-        args=argv[script_index+1:]
-        if len(args) in {5,6} and args[-2]=="--binding-b64":
-            if decode_binding:
-                install_destination.decode_binding(args[-1])
-            args=args[:-2]
-        if len(args) not in {3,4} or args[:2] != ["run",normalize_hook_id(hook_id)]:
-            return False
-        base64.urlsafe_b64decode(args[-1]).decode('utf-8')
+        if decode_binding and runner["binding"] is not None:
+            install_destination.decode_binding(runner["binding"])
         return True
     except (ValueError,UnicodeError,IndexError):
         return False
@@ -1736,22 +1728,19 @@ def _hook_runner_id_match(command: str, hook_id: str | None, *, decode_binding: 
 def _managed_session_intent_options(command: str):
     """Return the options of the current managed session-intent registration, or None for any other form."""
     import shlex
-    if not _hook_runner_id_match(command, "session-intent"):
+    runner = hook_definitions.parse_hook_runner_command(command)
+    if runner is None or runner["hook_id"] != "session-intent":
         return None
     try:
-        outer = shlex.split(command, comments=True)
-        script_index = 4 if outer[:2] == ["/bin/sh", "-c"] else 1
-        args = outer[script_index + 1:]
-        if len(args) != 6 or args[:2] != ["run", "session-intent"] or args[2] not in {"codex", "claude"} or args[4] != "--binding-b64":
+        if runner["platform"] not in hook_definitions.SUPPORTED_PLATFORMS or runner["binding"] is None:
             return None
-        binding = install_destination.decode_binding(args[5])
+        binding = install_destination.decode_binding(runner["binding"])
         if set(binding) != {"schema_version", "destination"}:
             return None
         destination = install_destination.InstallDestination.parse(binding["destination"])
-        if Path(outer[script_index]) != Path(destination.runtime_shared_dir) / "hook_profile_gate.py":
+        if Path(runner["script"]) != Path(destination.runtime_shared_dir) / "hook_profile_gate.py":
             return None
-        inner = base64.urlsafe_b64decode(args[3]).decode("utf-8")
-        argv = shlex.split(inner, comments=True)
+        argv = shlex.split(runner["command"], comments=True)
         if (len(argv) < 4 or argv[0] != HOOK_PYTHON_SENTINEL
                 or Path(argv[1]) != Path(destination.runtime_shared_dir) / "session_intent_analyzer_hook.py"
                 or len(argv[2:]) % 2):
@@ -1759,7 +1748,7 @@ def _managed_session_intent_options(command: str):
         options = dict(zip(argv[2::2], argv[3::2]))
         if (set(options) != {"--platform", "--format", "--root", "--context"}
                 or len(options) != len(argv[2:]) // 2
-                or options["--platform"] != args[2]
+                or options["--platform"] != runner["platform"]
                 or options["--format"] not in {"json", "text"}
                 or options["--root"] != destination.ledger_root
                 or options["--context"] != "prompt_submit"):
@@ -1957,7 +1946,7 @@ def install_hook(
 
     require_dispatcher = False
 
-    if platform_key in {"claude", "codex"}:
+    if platform_key in hook_definitions.SUPPORTED_PLATFORMS:
         if _ensure_hook_dispatcher_installed(dry_run=dry_run):
             changed = True
 
@@ -2145,7 +2134,7 @@ def install_hook(
                 changed = True
             else:
                 _log(f"  {post_tool_key} io-trace hook already exists. Skipping")
-        elif platform_key in {"claude", "codex"}:
+        elif platform_key in hook_definitions.SUPPORTED_PLATFORMS:
             _log("  io_trace_hook.py not found. Skipping io-trace hook")
 
     # Trust only exact event/command pairs produced by verified addon sources in
@@ -2350,14 +2339,15 @@ def _reconcile_codex_hook_trust(content: str, settings_file: Path, settings: dic
     if not isinstance(state, dict):
         return unchanged("hooks.state is not a table")
 
-    lines = content.splitlines(keepends=True)
-    starts = [index for index, line in enumerate(lines)
-              if line.strip().startswith("[") and line.strip().endswith("]")]
-    result = lines[:starts[0]] if starts else list(lines)
+    lines = content.split("\n")
+    lines = [line + "\n" for line in lines[:-1]] + ([lines[-1]] if lines[-1] else [])
+    headers = list(_toml_table_headers(lines))
+    ends = [index for index, _table, _suffix in headers[1:]] + [len(lines)]
+    result = lines[:headers[0][0]] if headers else list(lines)
     written = set()
-    for start, end in zip(starts, [*starts[1:], len(lines)]):
+    for (start, table, suffix), end in zip(headers, ends):
         block = lines[start:end]
-        key = _codex_hook_state_header_key(block[0])
+        key = _codex_hook_state_table_key(table)
         if key is not None:
             new_key = target(key)
             if new_key is None:
@@ -2366,8 +2356,7 @@ def _reconcile_codex_hook_trust(content: str, settings_file: Path, settings: dic
                 return unchanged(f"two tables would share {new_key}")
             written.add(new_key)
             if new_key != key:
-                ending = block[0][len(block[0].rstrip("\r\n")):]
-                block = [f"[hooks.state.{_toml_basic_string(new_key)}]{ending}", *block[1:]]
+                block = [f"[hooks.state.{_toml_basic_string(new_key)}]{suffix}", *block[1:]]
         result += block
     reconciled = "".join(result)
 

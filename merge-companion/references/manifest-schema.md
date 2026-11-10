@@ -9,7 +9,7 @@ The installer Python code and the response model reviewing a merge use the impor
   "version": 1,
   "entries": [
     {
-      "id": "<ISO timestamp>-<skill>-<safe_filename>",
+      "id": "pending-<UUID hex>",
       "platform": "claude" | "codex",
       "skill": "<skill name or 'bootstrap' 'hooks'>",
       "source_path": "<absolute path>",
@@ -50,14 +50,14 @@ print('manifest decision recorded')
 PY
 ```
 
-`mark_decided(path: Path, entry_id: str, decision: str)` returns `None` on success and atomically updates the matching entry. `deferred` leaves `decided=false`; the other two decisions set it true. `ManifestError` means an unknown decision or missing entry; filesystem errors also remain failures. The response model reads the process exit status and returned error, rather than treating a proposed choice as a recorded one. If the live change succeeded but this recording failed, preserve the evidence of that change and repair only the manifest record; do not apply the same change again. `read_manifest(Path(...))` returns the manifest object and `list_pending(Path(...))` returns pending entries; neither function approves a merge.
+`mark_decided(path: Path, entry_id: str, decision: str)` returns `None` on success and atomically updates the matching entry. `deferred` leaves `decided=false`; the other two decisions set it true. `ManifestError` means an unknown decision, missing entry or ambiguous duplicate ID. A historical repeated ID selects its unique pending occurrence; multiple pending occurrences remain unchanged and require an exact review; filesystem errors also remain failures. The response model reads the process exit status and returned error, rather than treating a proposed choice as a recorded one. If the live change succeeded but this recording failed, preserve the evidence of that change and repair only the manifest record; do not apply the same change again. `read_manifest(Path(...))` returns the manifest object and `list_pending(Path(...))` returns pending entries; neither function approves a merge.
 
 ## Persistence behavior
 
-The helper writes through a temporary file and a rename. `append_entry`, `append_entry_if_absent` and `mark_decided` hold the lock on the sibling `.lock` file and wait for it at most `MANIFEST_LOCK_WAIT_S` in `manifest_io.py`; a lock held longer raises `file_lock.LockTimeout` to the caller, and a lock the file system refuses raises its `OSError`. Windows takes no lock. When a manifest holds corrupt JSON, `read_manifest` prints a warning, backs the file up with the `.corrupt-bak` suffix and returns an empty entry list.
+The helper writes through a temporary file and a rename. `_shared/pending_manifest.py` owns the sibling `.lock` transaction shared by initialization, append, decision, cleanup and addon pruning. Each caller supplies its own read-error policy and holds the lock through its read and write. `MANIFEST_LOCK_WAIT_S` is 30 seconds; a lock held longer raises `file_lock.LockTimeout` to the caller, and a lock the file system refuses raises its `OSError`. Mandatory locks use `fcntl` on POSIX and `msvcrt` on Windows. When a manifest holds corrupt JSON, `read_manifest` prints a warning, backs the file up with the `.corrupt-bak` suffix and returns an empty entry list.
 
 ## Safety boundary
 
-Before applying the change that the human user approved, the response model verifies resolved path containment: `backup_path` belongs to the actual pending-merge directory of the current host, and `source_path` belongs to the installed skills root of the installation identified under the common contract's Prohibitions or a host configuration root the human user authorized. Example host configuration roots are `~/.codex/` and `~/.claude/`. The entry ID uses timestamp-skill-safe_filename; safe_filename removes slash, backslash and double-dot traversal components.
+Before applying the change that the human user approved, the response model verifies resolved path containment: `backup_path` belongs to the actual pending-merge directory of the current host, and `source_path` belongs to the installed skills root of the installation identified under the common contract's Prohibitions or a host configuration root the human user authorized. Example host configuration roots are `~/.codex/` and `~/.claude/`. Each new occurrence has a UUID entry ID. File backups reserve a unique filename before copying; an earlier backup is never reused. A symlink change records its literal `current_link_target` without reading the referent. These identities select artifacts and do not grant path authority.
 
 The snapshot_hash and current_hash fields identify artifacts. They do not determine which behavior is correct or authorize applying a result.

@@ -72,10 +72,11 @@ class TestAgentVisibilityPolicy(unittest.TestCase):
         self.assertEqual(decision, {"visible_decision": "force_show", "reason": "forced-verification"})
 
     def test_completion_assessment_issue_is_forced(self):
-        decision = self._decide("minimal", hook_id="completion", event="Stop", stdout=(
-            '{"continue": true, "stop_notice": {"issues": [{"detail": "requires a [completion-check]"}]}}'))
-
-        self.assertEqual(decision, {"visible_decision": "force_show", "reason": "forced-verification"})
+        for hook_id in ("completion", "namespace: Completion "):
+            with self.subTest(hook_id=hook_id):
+                decision = self._decide("minimal", hook_id=hook_id, event="Stop", stdout=(
+                    '{"continue": true, "stop_notice": {"issues": [{"detail": "requires a [completion-check]"}]}}'))
+                self.assertEqual(decision, {"visible_decision": "force_show", "reason": "forced-verification"})
 
     def test_visible_decision_values_are_canonical(self):
         for profile in ("strict", "dynamic", "minimal", "quiet"):

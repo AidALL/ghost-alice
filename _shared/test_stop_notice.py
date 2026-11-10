@@ -14,8 +14,8 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import test_completion_skill_evidence as evidence
-from test_completion_skill_evidence import assert_stop_observation
+import stop_hook_testing as evidence
+from stop_hook_testing import assert_stop_observation
 
 HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
 NOTICE_FILE = "GHOST_ALICE_STOP_NOTICE_FILE"
@@ -70,7 +70,7 @@ class StopNoticeCase(unittest.TestCase):
         env = {key: value for key, value in os.environ.items()
                if not key.startswith("GHOST_ALICE_") and key not in {"CODEX_THREAD_ID", "CLAUDE_CODE_ENTRYPOINT"}}
         if ledger:
-            evidence.StopHookSkillEvidenceTests._review_format_fixture(root, "codex", text, env, **fixture)
+            evidence.review_format_fixture(root, "codex", text, env, **fixture)
         if new_input is not None:
             # Another input is recorded through the intake hook path after the route was registered, so that route is stale.
             import test_response_route as fixtures

@@ -31,7 +31,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '_shared'))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from global_rule_blocks import platform_contract_text, GlobalRuleBlockError
+from skill_metadata import load_skill_catalog
+from markdown_structure import atx_heading, iter_unfenced_lines
+from validate_skills import _github_anchor
 
 
 ENTRYPOINT_SKILLS = {
@@ -109,7 +113,7 @@ def check_owner_references(repo: Path, rel: str, text: str, area: str, findings:
             continue
         if anchor:
             headings = re.findall(r"(?m)^#{1,6}\s+(.+?)\s*#*\s*$", owner.read_text(encoding="utf-8"))
-            anchors = {re.sub(r"[^\w\s-]", "", heading.lower()).replace(" ", "-") for heading in headings}
+            anchors = {_github_anchor(heading) for heading in headings}
             if anchor not in anchors:
                 findings.append(
                     Finding("ERROR", area, "owner-anchor", f"{rel} owner reference '{reference}' targets a missing heading.")
@@ -150,8 +154,36 @@ def check_ssot_imports(repo: Path, findings: list[Finding]) -> None:
                 Finding("WARNING", "ssot-import", "exist", f"{rel} is missing. Platform loader is absent.")
             )
             continue
-        text = path.read_text(encoding="utf-8").strip()
-        if "@AGENTS.md" not in text and "AGENTS.md" not in text:
+        parts, previous_end = [], 0
+        for offset, line in iter_unfenced_lines(path.read_text(encoding="utf-8")):
+            heading = atx_heading(offset, line)
+            if offset > previous_end or heading:
+                parts.append('\n\n')
+            parts.append(line)
+            if heading:
+                parts.append('\n\n')
+            previous_end = offset + len(line)
+        visible = []
+        for paragraph in re.split(r'\n[ \t]*\n', ''.join(parts)):
+            cursor = 0
+            while cursor < len(paragraph):
+                if paragraph[cursor] == '\\' and paragraph[cursor:cursor + 2] in ('\\\\', '\\`'):
+                    visible.append(paragraph[cursor:cursor + 2])
+                    cursor += 2
+                elif paragraph[cursor] == '`':
+                    end = cursor + 1
+                    while end < len(paragraph) and paragraph[end] == '`':
+                        end += 1
+                    closing = next((run for run in re.finditer(r'`+', paragraph[end:])
+                                    if len(run[0]) == end - cursor), None)
+                    visible.append(' ' if closing else paragraph[cursor:end])
+                    cursor = end + closing.end() if closing else end
+                else:
+                    visible.append(paragraph[cursor])
+                    cursor += 1
+            visible.append('\n\n')
+        text = ''.join(visible)
+        if not re.search(r'(?<![\w@/])@(?:\./)?AGENTS\.md(?![\w./-])', text):
             findings.append(
                 Finding(
                     "ERROR",
@@ -254,13 +286,23 @@ def check_catalog_contains_entrypoints(repo: Path, findings: list[Finding]) -> N
         )
         return
     try:
-        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        catalog = load_skill_catalog(catalog_path)
     except json.JSONDecodeError as e:
         findings.append(
             Finding("ERROR", "catalog", "parse", f"skill-catalog/skills.json parse failed: {e}")
         )
         return
-    names = {s["name"] for s in catalog.get("skills", [])}
+    except (OSError, UnicodeError) as error:
+        findings.append(
+            Finding("ERROR", "catalog", "read", f"skill-catalog/skills.json read failed: {error}")
+        )
+        return
+    except ValueError as error:
+        findings.append(
+            Finding("ERROR", "catalog", "shape", f"skill-catalog/skills.json shape error: {error}")
+        )
+        return
+    names = {skill["name"] for skill in catalog["skills"]}
     for required in ENTRYPOINT_SKILLS:
         if required not in names:
             findings.append(

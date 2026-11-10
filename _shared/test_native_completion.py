@@ -1,6 +1,6 @@
 """Core owns native assessment inputs; the Stop script reads only its decisions."""
 import hashlib
-import importlib
+import completion_assessment
 import json
 import os
 from pathlib import Path
@@ -9,8 +9,10 @@ import sys
 import unittest
 from unittest.mock import patch
 
+import ledger_access
+import native_completion
 import test_response_route as fixtures
-from test_completion_skill_evidence import assert_stop_observation
+from stop_hook_testing import assert_stop_observation
 
 
 # The actual status response rejected by the native Stop hook. This is a
@@ -51,7 +53,7 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         self.source = dict(GHOST_ALICE_CORE_ROOT=str(fixtures.ROOT),
             GHOST_ALICE_SESSION_INTENT_ROOT=str(self.fixture.root),
             GHOST_ALICE_PLATFORM='codex', GHOST_ALICE_SESSION_ID='current', CODEX_THREAD_ID='current')
-        self.api = importlib.import_module('completion_assessment')
+        self.api = completion_assessment
         self.time = '2026-10-10T20:47:11+00:00'
         self.observation = Path(self.fixture.tmp.name) / 'original-observation.json'
         self.observation.write_text(json.dumps(dict(core_cases=8, record_cases=17,
@@ -92,11 +94,11 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         return candidate
 
     def assess(self, body=REJECTED_STATUS_REPORT):
-        return importlib.import_module('native_completion').assess_native_completion(
+        return native_completion.assess_native_completion(
             self.source, text=body)
 
     def run_stop(self, body):
-        hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
+        hook = Path(__file__).parent / 'claude_stop_verification_hook.py'
         env = dict(os.environ, **self.source, PYTHONDONTWRITEBYTECODE='1')
         result = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
             input=json.dumps(dict(session_id='current', last_assistant_message=body)),
@@ -181,10 +183,9 @@ class UnroutedNativeWorkTests(unittest.TestCase):
         source = dict(GHOST_ALICE_CORE_ROOT=str(fixtures.ROOT),
             GHOST_ALICE_SESSION_INTENT_ROOT=str(fixture.root),
             GHOST_ALICE_PLATFORM='claude', GHOST_ALICE_SESSION_ID='current')
-        native = importlib.import_module('native_completion')
-        with patch.object(importlib.import_module('ledger_access').load_ledger(), 'read_response_route',
+        with patch.object(ledger_access.load_ledger(), 'read_response_route',
                 side_effect=ValueError('selected execution work needs a selectable owned criterion')):
-            rejected_route = native.assess_native_completion(source)
+            rejected_route = native_completion.assess_native_completion(source)
         self.assertEqual(rejected_route['input_event_id'], fixture.event)
         self.assertIsNone(rejected_route['response_route'])
         self.assertEqual(rejected_route['completion_route']['route_binding'], 'missing')
@@ -194,7 +195,7 @@ class UnroutedNativeWorkTests(unittest.TestCase):
                 dict(type='tool_use', name='Write', input=dict(file_path='/isolated/memo.md', content='memo'))]))]
         transcript.write_text(''.join(json.dumps(row) + '\n' for row in entries))
         body = '주간업무메모-20261011.md를 다운로드 폴더에 만들었습니다. 파일 하나를 만드는 작업이라 라우팅 절차를 생략했습니다.'
-        hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
+        hook = Path(__file__).parent / 'claude_stop_verification_hook.py'
         def stop():
             result = subprocess.run([sys.executable, '-B', str(hook)],
                 input=json.dumps(dict(session_id='current', transcript_path=str(transcript),
@@ -244,7 +245,7 @@ class NativeActivityTests(unittest.TestCase):
         self.transcript.write_text('\n'.join(json.dumps(row) for row in (self.rows if rows is None else rows)) + '\n')
 
     def assess(self, payload=None):
-        return importlib.import_module('native_completion').assess_native_completion(
+        return native_completion.assess_native_completion(
             self.source, text=self.payload['last_assistant_message'],
             hook_payload=self.payload if payload is None else payload)
 
@@ -320,7 +321,7 @@ class NativeActivityTests(unittest.TestCase):
         self.assertEqual(assessed['native_activity']['status'], 'absent')
         self.assertIsNone(assessed['body_issue'])
 
-        hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
+        hook = Path(__file__).parent / 'claude_stop_verification_hook.py'
         stopped = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
             input=json.dumps(self.payload), text=True, capture_output=True, check=True,
             env=dict(os.environ, **self.source, CODEX_THREAD_ID='current', PYTHONDONTWRITEBYTECODE='1'))
@@ -388,11 +389,6 @@ class NativeCompletionTests(unittest.TestCase):
             GHOST_ALICE_SESSION_INTENT_ROOT=str(self.fixture.root),
             GHOST_ALICE_PLATFORM='codex', GHOST_ALICE_SESSION_ID='current')
 
-    def service(self):
-        path = Path(__file__).with_name('native_completion.py')
-        self.assertTrue(path.is_file(), 'Core native assessment service is missing')
-        return importlib.import_module('native_completion').assess_native_completion
-
     def test_rejected_progress_report_does_not_infer_a_new_completion(self):
         # Core code's Stop script did not pass this follow-up report as a completion submission after the previous repair.
         # Its words do not constitute a new structured completion submission.
@@ -408,9 +404,9 @@ class NativeCompletionTests(unittest.TestCase):
 가장 명확한 미완성은 방금 제 답변입니다. 긴 `[completion-check]`가 사용자 화면에 그대로 나왔습니다. 기존 보고의 반복 차단은 고쳤지만, 내부 기록 절차를 업무 답변에서 완전히 분리하지는 못했습니다.
 
 따라서 지금은 “검증·접수·정정 기능과 특정 보고 오류를 고친 상태”입니다. 원하신 “Core와 AP가 내부에서 협력하고, 사용자는 업무 지시와 결과에 집중하는 상태”까지 완성됐다고 말할 수는 없습니다.'''
-        result = self.service()(self.source, text=body)
+        result = native_completion.assess_native_completion(self.source, text=body)
         self.assertIsNone(result['body_issue'])
-        hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
+        hook = Path(__file__).parent / 'claude_stop_verification_hook.py'
         executed = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
             input=json.dumps(dict(session_id='current', last_assistant_message=body)),
             text=True, capture_output=True, check=True,
@@ -420,31 +416,31 @@ class NativeCompletionTests(unittest.TestCase):
     def test_prose_without_a_control_block_is_not_a_completion_submission(self):
         self.fixture.record(self.fixture.candidate())
         text = 'Everything requested is represented here.'
-        result = self.service()(self.source, text=text)
+        result = native_completion.assess_native_completion(self.source, text=text)
         self.assertIsNone(result['body_issue'])
         self.assertEqual(result['input_event_id'], self.fixture.event)
         self.assertEqual(result['body_digest'], 'sha256:' + hashlib.sha256(text.encode()).hexdigest())
 
     def test_plain_progress_text_keeps_selected_work_without_a_completion_check(self):
-        result = self.service()(self.source, text='Saved report matches input')
+        result = native_completion.assess_native_completion(self.source, text='Saved report matches input')
         self.assertIsNone(result['body_issue'])
 
     def test_stale_route_cannot_be_replaced_by_caller_policy_fields(self):
         self.fixture.intake('New current input')
-        result = self.service()(self.source)
+        result = native_completion.assess_native_completion(self.source)
         self.assertEqual(result['completion_route']['route_binding'], 'stale')
         self.assertIsNone(result['body_issue'])
         with self.assertRaises(TypeError):
-            self.service()(self.source, claim_report={'valid': True})
+            native_completion.assess_native_completion(self.source, claim_report={'valid': True})
 
     def test_missing_ledger_coordinates_do_not_disable_body_validation_or_create_state(self):
-        result = self.service()({}, text='[completion-check]')
+        result = native_completion.assess_native_completion({}, text='[completion-check]')
         self.assertIsNotNone(result['body_issue'])
         self.assertEqual(result['context_status'], 'unavailable')
 
     def test_missing_route_precedes_successive_control_field_repairs(self):
         self.fixture.intake('Is the release ready?')
-        result = self.service()(self.source, text='[partial-check]\n- scope: partial')
+        result = native_completion.assess_native_completion(self.source, text='[partial-check]\n- scope: partial')
         self.assertTrue(result['body_issue'].startswith('route-unavailable:'))
         self.assertIn('task-router', result['body_issue'])
 
@@ -452,7 +448,7 @@ class NativeCompletionTests(unittest.TestCase):
         coords = dict(self.fixture.coords, session_id='unrouted')
         fixtures.ledger.record_turn(**coords, raw_input='Explain existing results', recording_path='hook')
         event = fixtures.ledger.read_session_state(**coords)['latest_input_event_id']
-        assess = self.service()
+        assess = native_completion.assess_native_completion
         source = dict(self.source, GHOST_ALICE_SESSION_ID='unrouted')
         result = assess(source, text='Original accepted result')
         self.assertEqual(result['input_event_id'], event)
@@ -466,7 +462,7 @@ class NativeProofBindingTests(unittest.TestCase):
         body = proof + '\n\nThe footer observation is retained. Native application remains unverified.'
         response_file = Path(self.owner.fixture.tmp.name) / 'answer.txt'
         response_file.write_text(body)
-        shared = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent))
+        shared = Path(__file__).parent
         env = dict(os.environ, **self.owner.source, PYTHONDONTWRITEBYTECODE='1')
         def cli(*args):
             return subprocess.run([sys.executable, '-B', str(shared / 'completion_assessment.py'), *args],
@@ -512,11 +508,11 @@ class NativeProofBindingTests(unittest.TestCase):
         self.owner = CompletionAssessmentTests()
         self.owner.setUp()
         self.addCleanup(self.owner.doCleanups)
-        self.api = self.owner.api()
+        self.api = completion_assessment
         self.proof = self.owner.proof()
 
     def assess(self, proof):
-        return importlib.import_module('native_completion').assess_native_completion(
+        return native_completion.assess_native_completion(
             self.owner.source, text=proof)
 
     def review(self, verdict='supported'):
@@ -692,7 +688,7 @@ class NativeProofBindingTests(unittest.TestCase):
         body = self.proof + '\n\nThe footer correction is verified.'
         self.review_response(body)
         original = self.owner.observation.read_bytes()
-        shared = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent))
+        shared = Path(__file__).parent
         env = dict(os.environ, **self.owner.source, PYTHONDONTWRITEBYTECODE='1')
         for status in ('source-changed', 'source-unavailable'):
             with self.subTest(status=status):

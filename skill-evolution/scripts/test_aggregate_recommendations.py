@@ -29,6 +29,26 @@ def load_module():
 
 
 class AggregateRecommendationsTests(unittest.TestCase):
+    def test_occurrence_counts_normalize_invalid_values_and_legacy_sources(self) -> None:
+        counts = [None, 0, "invalid", "3", 4]
+        self._write("codex", "counts", [
+            {"id": "same", "source": "user-explicit", "occurrence_count": count}
+            for count in counts
+        ])
+        result = self.mod.aggregate(self.root, now="2026-06-05T00:00:00Z")
+        self.assertEqual(result["recommendations"][0]["occurrence_count"], 10)
+        self.assertEqual(result["recommendations"][0]["sources"], ["user-said"])
+
+    def test_empty_root_returns_no_recommendations(self) -> None:
+        with mock.patch.object(self.mod, "load_ledger", side_effect=ImportError("ledger unavailable")) as loader:
+            result = self.mod.aggregate(self.root, now="2026-06-05T00:00:00Z")
+            self._write("codex", "empty", [None, {}, {"id": " "}])
+            invalid_only = self.mod.aggregate(self.root, now="2026-06-05T00:00:00Z")
+        self.assertEqual(result["recommendation_count"], 0)
+        self.assertEqual(result["recommendations"], [])
+        self.assertEqual(invalid_only["recommendation_count"], 0)
+        self.assertEqual(invalid_only["session_files"], 1)
+
     # The fixtures assign source labels as the response model would; user-said is a claim about origin.
     def setUp(self) -> None:
         self.root = pathlib.Path(tempfile.mkdtemp(prefix="agg-rec-test-"))

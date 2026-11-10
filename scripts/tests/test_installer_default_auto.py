@@ -378,7 +378,10 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             # Codex has no /visibility command; only the Claude tail names it.
             self.assertNotIn("/visibility", result.stdout)
             self.assertIn("Details", result.stdout)
-            self.assertRegex(result.stdout, r"log: .+\.ghost-alice/install/\d{4}-\d{2}-\d{2}-\d{6}\.log")
+            logs = list((temp_home / ".ghost-alice" / "install").glob("*.log"))
+            self.assertEqual(len(logs), 1)
+            self.assertTrue(logs[0].is_file())
+            self.assertIn(f"  log: {logs[0]}", result.stdout)
             self.assertIn("rerun with --verbose to show per-skill actions", result.stdout)
             self.assertNotIn("\r[2/5] Skill sync [", result.stdout)
             self.assertNotIn("[install_hooks]", result.stdout)

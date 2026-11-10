@@ -4,13 +4,11 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import importlib.util
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -26,6 +24,7 @@ from project_runtime import project_runtime
 import runtime_config
 from encoding_guard import validate_repo
 from global_rule_blocks import codex_requires_governance_companion
+from hook_definitions import SUPPORTED_PLATFORMS
 from installer_assets import (
     OWNERSHIP_ABSENT,
     OWNERSHIP_GHOST_ALICE_MANAGED,
@@ -40,6 +39,7 @@ from installer_assets import (
 
 import install_destination
 import state_retention
+from text_lines import committed_byte_lines, committed_lines
 
 
 STATUS_OK = "ok"
@@ -51,7 +51,6 @@ STATUS_RANK = {
     STATUS_ERROR: 2,
 }
 CODE_OWNER_ROOT = Path(__file__).resolve().parents[1]
-SUPPORTED_PLATFORMS = ("claude", "codex")
 NODE_JS_DOWNLOAD_URL = "https://nodejs.org/en/download"
 RUNTIME_SHARED_FILES = (
     "hook_profile_gate.py",
@@ -68,7 +67,6 @@ RUNTIME_SHARED_FILES = (
     "text_lines.py",
     "hook_definitions.py",
 )
-BASE64_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{32,}={0,2}")
 
 
 def _max_status(statuses: Sequence[str]) -> str:
@@ -110,7 +108,7 @@ def _addon_registry_audit(ghost_alice_root: Path, platform: str) -> tuple[str, l
                 findings.append({**base, "status": STATUS_WARNING, "reason": "no-recorded-content_hash"})
                 continue
             try:
-                live = hash_utils.hash_target(target, mode)
+                live = hash_utils.hash_target(target, mode, recorded_hash=recorded)
             except Exception as exc:  # never let a hashing error crash the read-only doctor
                 findings.append({**base, "status": STATUS_ERROR, "reason": f"hash-error:{exc.__class__.__name__}"})
                 continue
@@ -184,6 +182,8 @@ def _pending_manifest_status(manifest: Path) -> tuple[str, str, int]:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return STATUS_ERROR, f"invalid-manifest ({exc.__class__.__name__})", 0
 
+    if not isinstance(data, dict):
+        return STATUS_ERROR, "invalid-manifest (not-object)", 0
     entries = data.get("entries", [])
     if not isinstance(entries, list):
         return STATUS_ERROR, "invalid-manifest (entries-not-list)", 0
@@ -198,13 +198,13 @@ def _retention_failure_line(record: Path) -> str:
     failure, else the count and the last failure's time, entry and error type. A retention failure is Ghost-ALICE's
     own and stops no work, so the line never changes doctor's overall status."""
     try:
-        lines = [line for line in record.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+        lines = committed_lines(record.read_bytes().decode("utf-8", errors="replace"))
     except FileNotFoundError:
         return "ok"
     except OSError:
         return "record unreadable"
     rows = []
-    for line in lines:
+    for line in lines.values():
         try:
             rows.append(json.loads(line))
         except ValueError:
@@ -251,22 +251,19 @@ def _hook_rejection_rows(log: Path) -> list[dict]:
     run's row with its output, so parsing them all would cost seconds per doctor run."""
     rows: list[dict] = []
 
-    def take(lines: list[bytes]) -> None:
-        for line in lines:
-            if HOOK_REJECTION_MARK not in line:
-                continue
-            row = json.loads(line.decode("utf-8", errors="replace"))
-            item = row.get("surface_item") if isinstance(row, dict) else None
-            if isinstance(item, dict) and item.get("value_key") == "hook-command-rejection":
-                rows.append(row)
-
     with log.open("rb") as handle:
         rest = b""
         while chunk := handle.read(1 << 20):
-            lines = (rest + chunk).split(b"\n")
-            rest = lines.pop()
-            take(lines)
-        take([rest])
+            content = rest + chunk
+            end = 0
+            for _start, end, line in committed_byte_lines(content):
+                if HOOK_REJECTION_MARK not in line:
+                    continue
+                row = json.loads(line.decode("utf-8", errors="replace"))
+                item = row.get("surface_item") if isinstance(row, dict) else None
+                if isinstance(item, dict) and item.get("value_key") == "hook-command-rejection":
+                    rows.append(row)
+            rest = content[end:]
     return rows
 
 
@@ -745,31 +742,11 @@ def _hook_config_commands(hook_config: Path | None) -> tuple[str, list[str]]:
     return STATUS_OK, _walk_hook_commands(data.get("hooks", data))
 
 
-def _decode_base64_tokens(text: str) -> list[str]:
-    decoded: list[str] = []
-    for token in BASE64_TOKEN_RE.findall(text):
-        padded = token + ("=" * ((4 - len(token) % 4) % 4))
-        try:
-            raw = base64.urlsafe_b64decode(padded.encode("ascii"))
-            candidate = raw.decode("utf-8")
-        except Exception:
-            continue
-        if candidate and candidate not in decoded:
-            decoded.append(candidate)
-    return decoded
-
-
 def _expanded_hook_command_text(command: str) -> str:
-    seen = {command}
-    pending = [command]
-    while pending:
-        current = pending.pop()
-        for decoded in _decode_base64_tokens(current):
-            if decoded in seen:
-                continue
-            seen.add(decoded)
-            pending.append(decoded)
-    return "\n".join(seen)
+    from hook_definitions import parse_hook_runner_command
+
+    runner = parse_hook_runner_command(command)
+    return command if runner is None else command + "\n" + runner["command"]
 
 
 def _norm_for_compare(text: str) -> str:
@@ -872,18 +849,17 @@ def _runtime_session_intent_golden_status(
     destination = None
     if hook_commands is not None:
         import install_destination
+        from hook_definitions import parse_hook_runner_command
         from install_hooks import _managed_session_intent_options
 
         destinations = {}
         for command in hook_commands:
             if _managed_session_intent_options(command) is None:
                 continue
-            outer = shlex.split(command, comments=True)
-            script_index = 4 if outer[:2] == ["/bin/sh", "-c"] else 1
-            args = outer[script_index + 1:]
-            binding = install_destination.decode_binding(args[-1])
+            runner = parse_hook_runner_command(command)
+            binding = install_destination.decode_binding(runner["binding"])
             candidate = install_destination.InstallDestination.parse(binding["destination"])
-            if (args[2] != platform
+            if (runner["platform"] != platform
                     or Path(candidate.runtime_shared_dir).resolve() != runtime_shared.resolve()
                     or Path(candidate.core_source_root).resolve() != owning_root):
                 return STATUS_ERROR, "session-intent-binding-mismatch"
@@ -1253,7 +1229,7 @@ def run(args: argparse.Namespace) -> int:
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run read-only Ghost-ALICE installer diagnostics.")
-    parser.add_argument("--platform", required=True, choices=["claude", "codex"])
+    parser.add_argument("--platform", required=True, choices=SUPPORTED_PLATFORMS)
     parser.add_argument("--repo-root", required=True, type=Path)
     parser.add_argument("--encoding-root", action="append", type=Path, default=None)
     parser.add_argument("--ghost-alice-root", type=Path, default=Path.home() / ".ghost-alice")

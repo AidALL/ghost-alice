@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from install_state_writer import read_state
 from installer import addons, locations, report, runner
 from installer.runner import InstallerExit
 
@@ -47,6 +48,8 @@ class Target:
 
 @dataclass
 class Collected:
+    """The selected identities for one installation; later stages keep these targets when the source changes."""
+
     skill_targets: list[Target]
     addon_targets: list[Target]
     skill_target_total: int
@@ -96,16 +99,36 @@ def _present(path: Path) -> bool:
     return path.is_symlink() or path.is_dir()
 
 
-def has_managed_installs(skills_root: Path) -> bool:
-    """True when any core skill (or family sub-skill) exists as a link or dir under `skills_root`."""
+def has_managed_installs(skills_root: Path, platform: str, *, excluding: tuple[Path, ...] = ()) -> bool:
+    """Whether a Core slot remains after excluding the caller's confirmed removal paths."""
+    skills_root = Path(skills_root).absolute()
+    excluded = {Path(path).absolute() for path in excluding}
+    state_path = locations.install_state_path(platform)
+    try:
+        state = read_state(state_path)
+        if state is not None and state.get("platform", platform) != platform:
+            raise ValueError(f"install-state platform mismatch: {state_path}")
+    except (OSError, ValueError) as exc:
+        report.warn(f"Keeping shared support because the install inventory could not be read: {exc}")
+        return True
+    if state is not None:
+        for target in state["targets"]:
+            path = Path(target["dest_path"]).absolute()
+            if (target["target_name"] != "_shared" and not target.get("addon_id")
+                    and target.get("owner") != "addon" and path.parent == skills_root
+                    and path not in excluded and _present(path)):
+                return True
+    # Inventory and source-name presence are independent evidence of remaining Core slots.
     for skill in ALL_SKILLS:
         targets = expand_skill_targets(skill)
         if not targets:
-            if _present(Path(skills_root) / skill):
+            path = Path(skills_root) / skill
+            if path.absolute() not in excluded and _present(path):
                 return True
             continue
         for target in targets:
-            if _present(Path(skills_root) / target.name):
+            path = Path(skills_root) / target.name
+            if path.absolute() not in excluded and _present(path):
                 return True
     return False
 
@@ -149,7 +172,6 @@ def collect_targets(ctx: "Context", skills: list[str]) -> Collected:
     `<checkout>/_shared` exists."""
     validate_requested_skills(skills)
     addon_targets = list(addons.collect_addon_targets(ctx))
-    ctx.addon_targets = addon_targets
     skill_targets = iter_install_targets(skills)
     all_targets = [*skill_targets, *addon_targets]
     support_total = 1 if (runner.REPO_ROOT / "_shared").is_dir() else 0

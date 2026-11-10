@@ -166,16 +166,13 @@ def operation_lock(home):
         return
     before = path.parent.exists()
     try:
-        acquire_lock(path, owner='context-gateway')
+        generation = acquire_lock(path, owner='context-gateway')
     except InstallLockError as exc:
         raise GatewayBlocked('Another installer holds the operation lock') from exc
-    owned = snapshot(path)
     try:
         yield
     finally:
-        current = snapshot(path)
-        if current.identity == owned.identity and current.raw == owned.raw:
-            release_lock(path)
+        release_lock(path, generation)
         if not before:
             try:
                 path.parent.rmdir()

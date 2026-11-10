@@ -21,6 +21,7 @@ _SHARED_DIR = Path(__file__).resolve().parents[1] / "_shared"
 if str(_SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(_SHARED_DIR))
 from text_lines import byte_lines
+from native_transcript import codex_session_owner
 
 TOKEN_FIELDS = ("server_input_tokens", "ordinary_input_tokens", "cache_read_tokens",
                 "cache_write_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens",
@@ -35,22 +36,30 @@ def number(value):
 
 
 def gap(gaps, locator, reason):
-    gaps.append({"locator": locator, "reason": reason})
+    finding = {"locator": locator, "reason": reason}
+    if finding not in gaps:
+        gaps.append(finding)
 
 
 def _codex_session_binding(rows, path):
-    owners = [(row.get('payload', {}).get('id'), f'{path}:{line}')
-              for line, row in rows if row.get('type') == 'session_meta'
-              and isinstance(row.get('payload'), dict)]
-    return (owners[0] if owners and
-        all(isinstance(identity, str) and identity and identity == owners[0][0]
-            for identity, _ in owners) else (None, None))
+    try:
+        owner = codex_session_owner(row for _, row in rows)
+    except ValueError:
+        return None, None
+    if owner is None:
+        return None, None
+    return owner, next(f'{path}:{line}' for line, row in rows if row.get('type') == 'session_meta')
 
 
 def codex_intervals(rows, path, gaps):
     previous = dict.fromkeys(CODEX_FIELDS, 0)
     previous_timestamp = None
     session_id, session_locator = _codex_session_binding(rows, path)
+    if any(row.get('type') == 'session_meta' and isinstance(row.get('payload'), dict)
+           and row['payload'].get('forked_from_id') is not None for _, row in rows):
+        # The file's owner does not identify which cumulative intervals it inherited.
+        # Preserve each observation; cross-export overlap cannot be certified additive.
+        session_id, session_locator = None, None
     model = None
     observations = []
     for line, row in rows:
@@ -193,17 +202,39 @@ def _reconcile_codex_observations(observations, gaps):
     """Response identities deduplicate across exports; mixed coverage stays explicit."""
     retained, positions = [], {}
     bindings = defaultdict(list)
+    snapshots = defaultdict(list)
     for observation in observations:
+        observation = deepcopy(observation)
         if observation['unit'] != 'server_response':
             retained.append(observation)
             continue
         key = observation['response_id']
         bindings[key].append(observation['session_provenance'])
+        snapshots[key].extend(observation.get('usage_snapshots', [{
+            'locator': observation['locator'], 'timestamp': observation.get('timestamp'),
+            'source_path': observation['session_provenance']['source_path'],
+            'raw_usage': observation['raw_usage']}]))
         if key not in positions:
             positions[key] = len(retained)
             retained.append(observation)
-        elif (observation.get('timestamp') or '') >= (retained[positions[key]].get('timestamp') or ''):
+        elif (observation.get('timestamp') or '') > (retained[positions[key]].get('timestamp') or ''):
             retained[positions[key]] = observation
+    for key, originals in snapshots.items():
+        response = retained[positions[key]]
+        latest = [snapshot for snapshot in originals
+                  if (snapshot.get('timestamp') or '') == (response.get('timestamp') or '')]
+        counters = {json.dumps({field: snapshot['raw_usage'].get(field) for field in CODEX_FIELDS},
+                               sort_keys=True) for snapshot in latest}
+        if len(counters) > 1:
+            # Preserve contradictory originals as one response, including when
+            # this per-source result is reconciled again across exports.
+            response = dict(response, raw_usage={}, tokens=dict.fromkeys(TOKEN_FIELDS),
+                            usage_basis='conflicting-response-snapshots',
+                            usage_snapshots=latest,
+                            usage_snapshot_locators=[snapshot['locator'] for snapshot in latest])
+            retained[positions[key]] = response
+            gap(gaps, response['locator'],
+                'Conflicting response usage counters at the same timestamp; additive usage unknown')
     for key, originals in bindings.items():
         if len({binding['session_id'] for binding in originals}) > 1:
             response = retained[positions[key]]
@@ -230,7 +261,8 @@ def _reconcile_codex_observations(observations, gaps):
     return retained
 
 
-def codex_observations(rows, path, gaps):
+def _codex_response_records(rows, path, gaps):
+    """Extract responses and their coverage endpoint without discarding sparse records."""
     records, model, endpoint, server_endpoint = [], None, None, None
     session_id, session_locator = _codex_session_binding(rows, path)
     has_session_metadata = any(row.get('type') == 'session_meta' for _, row in rows)
@@ -276,24 +308,44 @@ def codex_observations(rows, path, gaps):
                            session_provenance=dict(session_id=owner, session_locator=owner_locator,
                                                    source_path=str(path)))
         records.append(observation)
-    if not records:
-        return codex_intervals(rows, path, gaps)
-    records = _reconcile_codex_observations(records, gaps)
     # Host display counters can omit compaction calls. Server counters own
     # coverage when response records supply them.
     if server_endpoint is not None:
         endpoint = server_endpoint
-    # Never sum both response rows and their overlapping cumulative snapshots.
-    fields = {"server_input_tokens": "input_tokens", "output_tokens": "output_tokens"}
-    covered = endpoint is not None and all(
-        all(o["tokens"][field] is not None for o in records)
-        and sum(o["tokens"][field] for o in records) == number(endpoint.get(raw))
-        for field, raw in fields.items())
-    if covered:
-        return records
-    gap(gaps, str(path), "Response IDs do not cover cumulative endpoint; retain intervals without double counting")
-    intervals = codex_intervals(rows, path, gaps)
-    return intervals if intervals else records
+    return records, endpoint
+
+
+
+def codex_observations(source_rows, gaps):
+    """Reconcile response identities across sources before choosing cumulative coverage."""
+    parsed = [(rows, path, *_codex_response_records(rows, path, gaps))
+              for rows, path in source_rows]
+    responses = _reconcile_codex_observations(
+        [record for _, _, records, _ in parsed for record in records], gaps)
+    conflicts = {response['response_id'] for response in responses
+                 if response.get('usage_basis') == 'conflicting-response-snapshots'}
+    observations = []
+    for rows, path, records, endpoint in parsed:
+        if not records:
+            observations.extend(codex_intervals(rows, path, gaps))
+            continue
+        records = _reconcile_codex_observations(records, gaps)
+        # Never sum both response rows and their overlapping cumulative snapshots.
+        fields = {"server_input_tokens": "input_tokens", "output_tokens": "output_tokens"}
+        covered = endpoint is not None and all(
+            all(o["tokens"][field] is not None for o in records)
+            and sum(o["tokens"][field] for o in records) == number(endpoint.get(raw))
+            for field, raw in fields.items())
+        # A sparse export cannot hide a contradiction with another export by
+        # replacing its response originals with cumulative coverage first.
+        if covered or any(o['response_id'] in conflicts
+                          or o.get('usage_basis') == 'conflicting-response-snapshots' for o in records):
+            observations.extend(records)
+            continue
+        gap(gaps, str(path), "Response IDs do not cover cumulative endpoint; retain intervals without double counting")
+        intervals = codex_intervals(rows, path, gaps)
+        observations.extend(intervals if intervals else records)
+    return _reconcile_codex_observations(observations, gaps)
 
 
 def _snapshot_instant(value):
@@ -624,7 +676,7 @@ def _call_coverage(observations, receipts, identified_count):
 def observe(provider, paths, *, through_line=None, receipt_paths=()):
     if through_line is not None and (type(through_line) is not int or through_line < 1 or len(paths) != 1):
         raise ValueError("A cutoff requires one original source and a positive line number")
-    observations, gaps, sources, native_bindings = [], [], [], []
+    observations, gaps, sources, native_bindings, codex_sources = [], [], [], [], []
     seen_paths = set()
     for source in paths:
         path = Path(source).resolve()
@@ -656,13 +708,13 @@ def observe(provider, paths, *, through_line=None, receipt_paths=()):
                 native_bindings.append(binding)
             observations.extend(_anthropic_usage_snapshots(rows, path, gaps))
         else:
-            observations.extend(codex_observations(rows, path, gaps))
+            codex_sources.append((rows, path))
     if provider == "anthropic":
         # Merge across exports before normalization so sparse snapshots do not
         # discard known fields or create false missing-counter gaps.
         observations = _reconcile_anthropic_snapshots(observations, gaps)
     elif provider == 'codex':
-        observations = _reconcile_codex_observations(observations, gaps)
+        observations = codex_observations(codex_sources, gaps)
     totals, subtotals = {}, {}
     for field in TOKEN_FIELDS:
         values = [o["tokens"][field] for o in observations]

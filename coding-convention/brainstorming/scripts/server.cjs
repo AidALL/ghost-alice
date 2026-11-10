@@ -76,6 +76,7 @@ function decodeFrame(buffer) {
 const PORT = process.env.BRAINSTORM_PORT || (49152 + Math.floor(Math.random() * 16383));
 const HOST = process.env.BRAINSTORM_HOST || '127.0.0.1';
 const URL_HOST = process.env.BRAINSTORM_URL_HOST || (HOST === '127.0.0.1' ? 'localhost' : HOST);
+const URL_AUTHORITY = URL_HOST.includes(':') && !URL_HOST.startsWith('[') ? '[' + URL_HOST + ']' : URL_HOST;
 const SESSION_DIR = process.env.BRAINSTORM_DIR || '/tmp/brainstorm';
 const CONTENT_DIR = path.join(SESSION_DIR, 'content');
 const STATE_DIR = path.join(SESSION_DIR, 'state');
@@ -212,7 +213,7 @@ function handleMessage(text) {
     return;
   }
   touchActivity();
-  console.log(JSON.stringify({ source: 'websocket-message', ...event }));
+  console.log(JSON.stringify({ ...event, source: 'websocket-message' }));
   if (event.choice) {
     const eventsFile = path.join(STATE_DIR, 'events');
     fs.appendFileSync(eventsFile, JSON.stringify(event) + '\n');
@@ -244,6 +245,11 @@ const debounceTimers = new Map();
 function startServer() {
   if (!fs.existsSync(CONTENT_DIR)) fs.mkdirSync(CONTENT_DIR, { recursive: true });
   if (!fs.existsSync(STATE_DIR)) fs.mkdirSync(STATE_DIR, { recursive: true });
+  const sessionDir = fs.realpathSync(SESSION_DIR);
+  const sessionHeader = Buffer.from(sessionDir).toString('base64url');
+  const controlToken = crypto.randomBytes(32).toString('hex');
+  const controlFile = path.join(STATE_DIR, 'server-control');
+  let shutdownReason = null;
 
   // Track known files to distinguish new screens from updates.
   // macOS fs.watch reports 'rename' for both new files and overwrites,
@@ -252,11 +258,35 @@ function startServer() {
     fs.readdirSync(CONTENT_DIR).filter(f => f.endsWith('.html'))
   );
 
-  const server = http.createServer(handleRequest);
-  server.on('upgrade', handleUpgrade);
+  const server = http.createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/_brainstorm/stop') {
+      const token = Buffer.from(req.headers['x-brainstorm-token'] || '');
+      if (req.headers.origin !== undefined ||
+          req.headers['x-brainstorm-session'] !== sessionHeader ||
+          token.length !== controlToken.length ||
+          !crypto.timingSafeEqual(token, Buffer.from(controlToken))) {
+        res.writeHead(403);
+        res.end('Invalid session identity');
+        return;
+      }
+      res.writeHead(202, { 'Content-Type': 'application/json', 'Connection': 'close' });
+      res.end(JSON.stringify({ status: 'stopping', pid: process.pid }), () => shutdown('stop requested'));
+      return;
+    }
+    handleRequest(req, res);
+  });
+  const connections = new Set();
+  server.on('connection', socket => {
+    connections.add(socket);
+    socket.on('close', () => connections.delete(socket));
+  });
+  server.on('upgrade', (req, socket) => {
+    if (shutdownReason) socket.destroy();
+    else handleUpgrade(req, socket);
+  });
 
   const watcher = fs.watch(CONTENT_DIR, (eventType, filename) => {
-    if (!filename || !filename.endsWith('.html')) return;
+    if (shutdownReason || !filename || !filename.endsWith('.html')) return;
 
     if (debounceTimers.has(filename)) clearTimeout(debounceTimers.get(filename));
     debounceTimers.set(filename, setTimeout(() => {
@@ -281,17 +311,34 @@ function startServer() {
   watcher.on('error', (err) => console.error('fs.watch error:', err.message));
 
   function shutdown(reason) {
-    console.log(JSON.stringify({ type: 'server-stopped', reason }));
+    if (shutdownReason) return;
+    shutdownReason = reason;
+    console.log(JSON.stringify({ type: 'server-stopping', reason }));
     const infoFile = path.join(STATE_DIR, 'server-info');
     if (fs.existsSync(infoFile)) fs.unlinkSync(infoFile);
-    fs.writeFileSync(
-      path.join(STATE_DIR, 'server-stopped'),
-      JSON.stringify({ reason, timestamp: Date.now() }) + '\n'
-    );
     watcher.close();
     clearInterval(lifecycleCheck);
-    server.close(() => process.exit(0));
+    for (const timer of debounceTimers.values()) clearTimeout(timer);
+    debounceTimers.clear();
+    server.close();
+    for (const socket of connections) {
+      if (clients.has(socket)) {
+        socket.end(encodeFrame(OPCODES.CLOSE, Buffer.alloc(0)));
+      }
+      // A peer that stops reading must not hold the server's shutdown open.
+      socket.destroy();
+    }
   }
+
+  // The marker records reaching process exit, not merely requesting shutdown.
+  // stop-server.sh independently observes process disappearance before cleanup.
+  process.once('exit', () => {
+    if (!shutdownReason) return;
+    fs.writeFileSync(path.join(STATE_DIR, 'server-stopped'),
+      JSON.stringify({ reason: shutdownReason, timestamp: Date.now() }) + '\n');
+  });
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 
   function ownerAlive() {
     if (!ownerPid) return true;
@@ -317,9 +364,15 @@ function startServer() {
   }
 
   server.listen(PORT, HOST, () => {
+    const port = server.address().port;
+    fs.writeFileSync(path.join(STATE_DIR, 'server.pid'), String(process.pid) + '\n');
+    fs.writeFileSync(controlFile, JSON.stringify({
+      pid: process.pid, session_dir: sessionDir, host: server.address().address,
+      port, token: controlToken
+    }) + '\n', { mode: 0o600, flag: 'wx' });
     const info = JSON.stringify({
-      type: 'server-started', port: Number(PORT), host: HOST,
-      url_host: URL_HOST, url: 'http://' + URL_HOST + ':' + PORT,
+      type: 'server-started', port, host: HOST,
+      url_host: URL_HOST, url: 'http://' + URL_AUTHORITY + ':' + port,
       screen_dir: CONTENT_DIR, state_dir: STATE_DIR
     });
     console.log(info);

@@ -1543,28 +1543,24 @@ def _context_input_binding(connection, root, state, event_id):
         and resolved.get('event')=='native-input-resolved' and resolved.get('actor')=='sdk'
         and resolved.get('context_input_event_id')==event_id and resolved.get('native_row')==locator
         and all(resolved.get(key)==observation.get(key) for key in ('platform','session_id','transport_observation_id')))
-    require(isinstance(original,dict) and set(original)=={'storage','locator','digest','byte_length','appendable','source_id'}
-        and original.get('storage')=='source-reference.v1' and original.get('appendable') is True
+    source_api = _shared_module('source_reference')
+    source_api.validate_source_reference(original, exact=True)
+    require(original['appendable'] is True
         and isinstance(locator,dict) and set(locator)=={'cursor_key','start_offset','end_offset'}
         and type(locator['start_offset']) is int and type(locator['end_offset']) is int
         and 0 <= locator['start_offset'] < locator['end_offset']==original['byte_length']
         and isinstance(identity,dict) and set(identity)=={'device','inode'})
-    source_api = _shared_module('source_reference')
-    source_api._validate(original)
-    with Path(original['locator']).open('rb') as stream:
-        actual = os.fstat(stream.fileno()); raw = stream.read(original['byte_length'])
-    require((actual.st_dev,actual.st_ino)==(identity['device'],identity['inode'])
-        and len(raw)==original['byte_length'] and text_digest(raw)==original['digest']
-        and locator['cursor_key']==hashlib.sha256(json.dumps([original['locator'],actual.st_dev,actual.st_ino]).encode()).hexdigest())
+    raw = source_api.source_bytes(original, identity=identity)
+    native = _shared_module('native_transcript')
+    snapshot = native.TranscriptSnapshot((identity['device'], identity['inode']), raw)
+    require(locator['cursor_key'] == snapshot.cursor_key(original['locator']))
     boundary = observation.get('transcript_boundary')
     require(isinstance(boundary,dict) and boundary.get('path')==original['locator']
         and type(boundary.get('offset')) is int and 0 <= boundary['offset'] <= locator['start_offset']
-        and hashlib.sha256(raw[:boundary['offset']]).hexdigest()==boundary.get('prefix_digest')
-        and (boundary.get('inode') is None or (boundary.get('device'),boundary['inode'])==(actual.st_dev,actual.st_ino)))
+        and snapshot.matches_boundary(boundary))
     native_line = raw[locator['start_offset']:locator['end_offset']]
     require([line for _, _, line in _shared_module('text_lines').committed_byte_lines(native_line)]==[native_line])
     entry = json.loads(native_line)
-    native = _shared_module('native_transcript')
     require(isinstance(entry,dict) and entry.get('sessionId')==owner[1] and native.native_input_actor(entry)=='sdk'
         and entry.get('promptId') in (None,observation.get('native_prompt_id'))
         and native.matches_input_text(entry['message'].get('content'),observation))
@@ -1574,7 +1570,6 @@ def _context_input_binding(connection, root, state, event_id):
         input_digest=observation['input_digest'],input_char_count=observation['input_char_count'],context_only=True,
         native_transcript_path=original['locator'],native_input_record=_shared_module('text_lines').line_number(raw,locator['start_offset']),
         native_input_digest=json_digest(message))
-
 
 def _imported_event_count(connection: sqlite3.Connection, root: Path, state: dict[str, Any]) -> int | None:
     """Recover only an attested import prefix, never current compatibility state."""

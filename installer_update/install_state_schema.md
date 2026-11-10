@@ -49,7 +49,7 @@ The installer writes one manifest for the selected platform at the corresponding
 | `source_path` | string | The source path that created the target. |
 | `dest_path` | string | The installed destination path. |
 | `install_mode` | string | One of `copy`, `copy-fallback`, `symlink`, `junction`, `wrapper`, `missing`. |
-| `target_tree_hash` | string | The destination content baseline hash. A missing target is `missing`. |
+| `target_tree_hash` | string | The destination content baseline hash. Directory records use `tree-v2:<sha256>`; readers compare historical unprefixed hashes with the original algorithm. A missing target is `missing`. |
 | `managed_markers` | array | The list of markers that serve as a secondary way to identify target ownership. |
 | `installed_at` | string | The UTC ISO-8601 timestamp of when that target record was recorded. |
 
@@ -63,6 +63,8 @@ The installer writes one manifest for the selected platform at the corresponding
 | `junction` | A state installed as a Windows directory junction or reparse point. |
 | `wrapper` | A platform wrapper artifact that is not part of the skill tree. |
 | `missing` | A state where the destination could not be found at the time the manifest was recorded. Under the criteria for a normal completed install, it should not occur. |
+
+New directory hashes frame each relative path and fixed-length file digest, so embedded separators in file contents cannot collide with file boundaries. Historical unprefixed hashes retain their original comparison semantics and limitations; a reader never replaces an old baseline by hashing the current disk.
 
 ## managed_markers
 
@@ -79,6 +81,8 @@ The installer writes one manifest for the selected platform at the corresponding
 - When the manifest exists, installer doctor uses the `targets` array as the SSOT for that platform's managed targets. It does not fail merely because a catalog-wide skill that is absent from a partial-install manifest is missing.
 - If a recorded target is missing from its destination or fails marker/hash verification, installer doctor reports that target as requiring action.
 
+The writer retains unselected Core target rows during a partial reinstall. A historical failure-only object without `targets` migrates to an empty inventory; it provides no baseline. If the existing inventory cannot be read, installation preserves it under a unique sibling `.bak` name, reports the warning and writes the selected inventory. Partial-failure observations retain valid existing targets and rollback entries. Selected and addon removal prune only their completed destinations through `install_state_writer.remove_targets`.
+
 ## system_env_changes
 
 The installer writes `system_env_changes` entries for changes it applies to the user system environment. Uninstall reads each entry and applies the rollback conditions documented for that kind before restoring the prior state.
@@ -92,3 +96,5 @@ Each entry is distinguished by the `kind` field. The installer records the follo
 | `codex_project_trust` | A trace-backed record that the installer changed `~/.codex/config.toml` `[projects."<repo>"] trust_level` to `trusted` for the Ghost-ALICE project. Records `path`, `project_path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores or removes that trust entry only from this record. |
 
 Each entry has an `applied_at` UTC ISO-8601 timestamp and the kind-specific fields above. Adding a kind requires both install-recording and uninstall-rollback implementation and tests.
+
+The writer carries previous rollback records forward when the current run supplies none. A new record replaces only the same implemented owner: source repository, Codex feature configuration path, or Codex project path within its configuration file. Other recorded kinds are carried unchanged and do not acquire a rollback handler.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import subprocess
@@ -108,6 +109,22 @@ class InstallerAssetInventoryTest(unittest.TestCase):
 
         self.assertEqual(result.ownership, "externally-modified-managed")
         self.assertEqual(result.reason, "content-hash-mismatch")
+
+    def test_malformed_marker_baseline_never_certifies_clean_ownership(self) -> None:
+        managed = self._skill(self.skills, "task-router", "user bytes\n")
+        marker = write_ownership_marker(managed, platform="codex", asset_id="task-router",
+            source_repo=str(self.repo), source_commit="abc123", install_mode="copy")
+        original = json.loads(marker.read_text(encoding="utf-8"))
+        for baseline in (None, [], "invalid", {"SKILL.md": None}, {"SKILL.md": "not-a-digest"}):
+            with self.subTest(baseline=baseline):
+                marker.write_text(json.dumps({**original, "content_hashes": baseline}), encoding="utf-8")
+                result = classify_skill_root(managed, expected_asset_id="task-router")
+                self.assertEqual(result.ownership, "ownership-conflict")
+        original.pop("content_hashes")
+        marker.write_text(json.dumps(original), encoding="utf-8")
+        self.assertEqual(classify_skill_root(managed, expected_asset_id="task-router").ownership,
+                         "ownership-conflict")
+        self.assertEqual((managed / "SKILL.md").read_text(encoding="utf-8"), "user bytes\n")
 
     def test_symlink_to_repo_is_managed_and_broken_symlink_is_conflict(self) -> None:
         source = self._skill(self.repo, "task-router")

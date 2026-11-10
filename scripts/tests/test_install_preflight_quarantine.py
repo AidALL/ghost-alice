@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "merge-companion" / "scripts"))
 from installer_assets import write_ownership_marker
 from file_walker import walk_installed_copy_files
-from installer_testing import checkout_copy
+from installer_testing import checkout_copy, installer_env
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -109,8 +109,7 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
     def _assert_install_sh_backs_up_external_change(self, executable: str, remove_marker: bool) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_home = Path(temp_dir)
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home.as_posix())
             env["GHOST_ALICE_LANG"] = "en"
 
             source = checkout_copy(self)
@@ -158,8 +157,7 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_home = Path(temp_dir)
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home.as_posix())
             env["GHOST_ALICE_LANG"] = "en"
 
             source = checkout_copy(self)
@@ -206,8 +204,7 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
             legacy_skill.mkdir(parents=True)
             (legacy_skill / "SKILL.md").write_text("legacy bash skill edit\n", encoding="utf-8")
 
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home.as_posix())
             env["GHOST_ALICE_LANG"] = "en"
             source = checkout_copy(self)
             cmd = [bash_exe, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", "task-router"]
@@ -249,8 +246,7 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
                 install_mode="copy",
             )
 
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home.as_posix())
             env["GHOST_ALICE_LANG"] = "en"
             source = checkout_copy(self)
             cmd = [bash_exe, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", "task-router"]
@@ -283,8 +279,7 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
             custom_skill.mkdir(parents=True)
             (custom_skill / "SKILL.md").write_bytes(b"\xff")
 
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home.as_posix())
             env["GHOST_ALICE_LANG"] = "en"
             source = checkout_copy(self)
             cmd = [bash_exe, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", "task-router"]
@@ -316,8 +311,7 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
             custom_body = "---\nname: my-local-skill\ndescription: Local skill.\n---\n\n# Keep Me\n"
             (custom_skill / "SKILL.md").write_text(custom_body, encoding="utf-8")
 
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home.as_posix())
             env["GHOST_ALICE_LANG"] = "en"
             source = checkout_copy(self)
             cmd = [bash_exe, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", "task-router"]

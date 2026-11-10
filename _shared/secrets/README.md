@@ -17,6 +17,7 @@ Ghost-ALICE scripts and skills use this helper as the single entry point for cre
 - Permissions: `600` (owner read and write only). The helper sets this value.
 - Directory permissions: `700`
 - Format: `KEY=value` (.env style, quotes optional)
+- Bash `secrets_set` and `secrets_unset` return a nonzero status when storage fails and preserve an existing file if replacement fails. If saving a prompted value fails, `secrets_get_or_prompt` warns on stderr and still returns the entered value for the current call; it reports success for that lookup without claiming the value was saved.
 
 Example file:
 

@@ -1,18 +1,22 @@
 """Verify installed copy targets before recording postflight baselines.
 
-Dependencies: Python 3.11+ standard library only.
+Dependencies: Python 3.11+ standard library, local file_walker and sibling _shared/install_state_writer.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from file_walker import EXCLUDED_DIR_NAMES, EXCLUDED_FILE_NAMES, EXCLUDED_FILE_SUFFIXES
+
+_SHARED = Path(__file__).resolve().parents[2] / "_shared"
+if str(_SHARED) not in sys.path:
+    sys.path.insert(0, str(_SHARED))
+
+from install_state_writer import record_partial_failure
 
 COPY_MODES = {"copy", "copy-fallback"}
 LINK_MODES = {"symlink", "junction"}
@@ -118,11 +122,18 @@ def validate_copy_targets(targets: list[InstallTarget]) -> list[dict]:
             continue
 
         if target.install_mode not in COPY_MODES:
+            failures.append({
+                "target_name": target.name,
+                "source_path": _as_posix(target.source_path),
+                "dest_path": _as_posix(target.dest_path),
+                "install_mode": target.install_mode,
+                "reason": "missing-target" if target.install_mode == "missing" else "unsupported-install-mode",
+            })
             continue
 
         source_hash = tree_hash(target.source_path)
         dest_hash = tree_hash(target.dest_path)
-        if source_hash == dest_hash:
+        if source_hash == dest_hash and source_hash != "missing":
             continue
 
         if source_hash == "missing":
@@ -147,19 +158,8 @@ def validate_copy_targets(targets: list[InstallTarget]) -> list[dict]:
 
 
 def write_partial_state(state_root: Path, platform: str, failures: list[dict]) -> Path:
-    state_root.mkdir(parents=True, exist_ok=True)
     state_path = state_root / f"{platform}.json"
-    installed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    state = {
-        "schema_version": 1,
-        "platform": platform,
-        "installed_at": installed_at,
-        "status": "partial_failure",
-        "partial_failure": True,
-        "remote_freshness_state": "unverified",
-        "failures": failures,
-    }
-    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    record_partial_failure(state_path, platform, failures)
     return state_path
 
 
@@ -181,8 +181,12 @@ def main() -> int:
     if not failures:
         return 0
 
-    state_path = write_partial_state(Path(args.state_root), args.platform, failures)
-    print(f"install verification failed; partial state written to {state_path}", file=sys.stderr)
+    try:
+        state_path = write_partial_state(Path(args.state_root), args.platform, failures)
+    except (OSError, ValueError) as exc:
+        print(f"install verification failed; partial state could not be recorded: {exc}", file=sys.stderr)
+    else:
+        print(f"install verification failed; partial state written to {state_path}", file=sys.stderr)
     for failure in failures:
         print(
             f"- {failure['target_name']}: {failure['reason']} "

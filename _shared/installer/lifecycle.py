@@ -84,29 +84,63 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
     selection.validate_requested_skills(skills)
     report.info("Removing selected skills...")
     skills_dir = Path(ctx.skills_dir)
-    removal: list[tuple[str, Path]] = []
-    for skill in skills:
+    candidates = {target.name: target for skill in skills for target in selection.expand_skill_targets(skill)}
+    removal: list[tuple[str, Path, Path]] = []
+    absent: list[tuple[str, Path, Path]] = []
+    dependency_status: dict[str, int] = {}
+    for label, target in candidates.items():
         if not request.force:
-            dependents = addons.dependents_rc(ctx, skill)
+            names = {label} | {skill for skill in skills
+                               if any(leaf.name == label for leaf in selection.expand_skill_targets(skill))}
+            for name in sorted(names):
+                if name not in dependency_status:
+                    dependency_status[name] = addons.dependents_rc(ctx, name)
+            statuses = [dependency_status[name] for name in sorted(names)]
+            dependents = 2 if 2 in statuses else next((status for status in statuses if status != 0), 0)
             if dependents == 2:
-                report.warn(f"Skipping {skill}: an installed addon depends on it (use --force to override)")
+                report.warn(f"Skipping {label}: an installed addon depends on it (use --force to override)")
+                failed += 1
                 continue
             if dependents != 0:
-                report.warn(f"Dependency check failed for {skill}; proceeding with removal")
-        targets = selection.expand_skill_targets(skill)
-        for target in targets:
-            removal.append((target.name, skills_dir / target.name))
-    guard = transaction.guard_gateway_removal(ctx, [path for _, path in removal])
+                report.warn(f"Dependency check failed for {label}; preserving its installed target")
+                failed += 1
+                continue
+        path = skills_dir / label
+        proposed = transaction.remove_installed_target(ctx, label, path, source_path=target.path, apply_changes=False)
+        if proposed["action"] in {"would-remove", "would-quarantine-remove"}:
+            removal.append((label, path, target.path))
+        elif proposed["action"] == "missing":
+            absent.append((label, path, target.path))
+        else:
+            failed += 1
+            report.warn(f"Preserving {label}: {proposed['reason']}")
+    if not selection.has_managed_installs(skills_dir, ctx.platform, excluding=tuple(path for _, path, _ in removal)):
+        shared = skills_dir / "_shared"
+        proposed = transaction.remove_installed_target(ctx, "_shared", shared,
+            source_path=runner.REPO_ROOT / "_shared", apply_changes=False)
+        if proposed["action"] in {"would-remove", "would-quarantine-remove"}:
+            removal.append(("_shared", shared, runner.REPO_ROOT / "_shared"))
+        elif proposed["action"] == "missing":
+            absent.append(("_shared", shared, runner.REPO_ROOT / "_shared"))
+        else:
+            failed += 1
+            report.warn(f"Preserving _shared: {proposed['reason']}")
+    guard = transaction.guard_gateway_removal(ctx, [path for _, path, _ in removal])
     if guard != 0:
         return guard
-    for label, path in removal:
-        if transaction.remove_installed_target(label, path):
+    absent_paths = {path for _, path, _ in absent}
+    for label, path, source_path in [*removal, *absent]:
+        if label == "_shared" and selection.has_managed_installs(skills_dir, ctx.platform):
+            failed += 1
+            report.warn("Preserving _shared: a Core target remains after removal")
+            continue
+        result = transaction.remove_installed_target(ctx, label, path, source_path=source_path,
+                                                     only_if_absent=path in absent_paths)
+        if result["action"] in {"removed", "quarantined-removed"}:
             removed += 1
-    shared_rc = transaction.cleanup_shared_if_unused(ctx, skills_dir)
-    if shared_rc == 0:
-        removed += 1
-    elif shared_rc != 1:
-        return shared_rc
+        elif result["action"] != "missing":
+            failed += 1
+            report.warn(f"Preserving {label}: {result['reason']}")
     if ctx.platform == "claude":
         if hosts.remove_claude_bootstrap_if_unused(ctx, skills_dir):
             removed += 1
@@ -117,7 +151,7 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
         report.info("No skills to remove.")
     else:
         report.ok(f"{removed} item(s) removed.")
-    if selection.has_managed_installs(skills_dir):
+    if selection.has_managed_installs(skills_dir, ctx.platform):
         report.info("Managed skills remain; keeping hooks installed.")
     elif not hosts.install_hooks(ctx, "uninstall", ctx.platform):
         report.error("Hook removal failed. Aborting skill removal")

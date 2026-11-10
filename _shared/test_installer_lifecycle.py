@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import plistlib
 import sys
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -63,8 +65,8 @@ class LifecycleCase(unittest.TestCase):
         self.stub("installer.addons.uninstall_addon", 0)
         self.stub("installer.addons.dependents_rc", 0)
         self.stub("installer.transaction.guard_gateway_removal", 0)
-        self.stub("installer.transaction.remove_installed_target", True)
-        self.stub("installer.transaction.cleanup_shared_if_unused", 0)
+        self.stub("installer.transaction.remove_installed_target", side_effect=lambda ctx, label, path, **kwargs:
+                  {"action": "removed" if kwargs.get("apply_changes", True) else "would-remove"})
         self.stub("installer.hosts.remove_claude_bootstrap_if_unused", True)
         self.stub("installer.hosts.remove_codex_bootstrap_if_unused", True)
         self.stub("installer.hosts.install_hooks", True)
@@ -131,26 +133,30 @@ class UninstallTests(LifecycleCase):
     def test_selected_skill_removal_flow(self):
         # uninstall.sh:360-438
         self.stub_removal_flow()
-        self.patches.enter_context(mock.patch("installer.addons.dependents_rc", side_effect=lambda ctx, s: {"alpha": 2, "fam": 3}.get(s, 0)))
+        self.patches.enter_context(mock.patch("installer.addons.dependents_rc", side_effect=lambda ctx, s: {"alpha": 2, "one": 3}.get(s, 0)))
         removed_paths = []
+        def remove(ctx, label, path, **kwargs):
+            if kwargs.get("apply_changes", True):
+                removed_paths.append((label, Path(path)))
+                return {"action": "removed"}
+            return {"action": "would-remove"}
         self.patches.enter_context(mock.patch("installer.transaction.remove_installed_target",
-                                              side_effect=lambda label, path: removed_paths.append((label, Path(path))) or True))
+                                              side_effect=remove))
         self.patches.enter_context(mock.patch("installer.selection.has_managed_installs", return_value=False))
         rc, out = self.captured(lifecycle.uninstall, self.ctx, ["alpha", "fam"])
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 1)
         self.assertIn("[INFO] Removing selected skills...", out)
         self.assertIn("[WARN] Skipping alpha: an installed addon depends on it (use --force to override)", out)
-        self.assertIn("[WARN] Dependency check failed for fam; proceeding with removal", out)
-        self.assertEqual(removed_paths, [("one", self.ctx.skills_dir / "one"), ("two", self.ctx.skills_dir / "two")])
-        self.assertIn("[OK] 4 item(s) removed.", out)
-        self.assertEqual([c for c in self.calls if c in ("guard_gateway_removal", "cleanup_shared_if_unused",
+        self.assertIn("[WARN] Dependency check failed for one; preserving its installed target", out)
+        self.assertEqual(removed_paths, [("two", self.ctx.skills_dir / "two"), ("_shared", self.ctx.skills_dir / "_shared")])
+        self.assertIn("[OK] 3 item(s) removed.", out)
+        self.assertEqual([c for c in self.calls if c in ("guard_gateway_removal",
                                                          "remove_claude_bootstrap_if_unused", "install_hooks")],
-                         ["guard_gateway_removal", "cleanup_shared_if_unused", "remove_claude_bootstrap_if_unused", "install_hooks"])
+                         ["guard_gateway_removal", "remove_claude_bootstrap_if_unused", "install_hooks"])
 
     def test_force_skips_dependency_checks_and_hooks_stay_when_skills_remain(self):
         self.stub_removal_flow()
         self.patches.enter_context(mock.patch("installer.selection.has_managed_installs", return_value=True))
-        self.patches.enter_context(mock.patch("installer.transaction.cleanup_shared_if_unused", return_value=1))
         self.patches.enter_context(mock.patch("installer.hosts.remove_claude_bootstrap_if_unused", return_value=False))
         rc, out = self.captured(lifecycle.uninstall, self.ctx, ["--force", "alpha"])
         self.assertEqual(rc, 0)
@@ -163,14 +169,12 @@ class UninstallTests(LifecycleCase):
         self.stub_removal_flow()
         self.patches.enter_context(mock.patch("installer.transaction.guard_gateway_removal", return_value=2))
         self.assertEqual(lifecycle.uninstall(self.ctx, ["alpha"]), 2)
-        self.assertNotIn("remove_installed_target", self.calls)
+        self.assertNotIn("install_hooks", self.calls)
         self.patches.enter_context(mock.patch("installer.transaction.guard_gateway_removal", return_value=0))
         self.patches.enter_context(mock.patch("installer.selection.has_managed_installs", return_value=False))
         self.patches.enter_context(mock.patch("installer.hosts.install_hooks", return_value=False))
         _, out = self.captured(lambda: self.assertRaises(InstallerExit, lifecycle.uninstall, self.ctx, ["alpha"]))
         self.assertIn("[ERROR] Hook removal failed. Aborting skill removal", out)
-        self.patches.enter_context(mock.patch("installer.transaction.cleanup_shared_if_unused", return_value=3))
-        self.assertEqual(lifecycle.uninstall(self.ctx, ["alpha"]), 3)
 
     def test_unknown_skill_is_rejected(self):
         self.stub_removal_flow()
@@ -179,8 +183,7 @@ class UninstallTests(LifecycleCase):
 
     def test_nothing_removed_message(self):
         self.stub_removal_flow()
-        self.patches.enter_context(mock.patch("installer.transaction.remove_installed_target", return_value=False))
-        self.patches.enter_context(mock.patch("installer.transaction.cleanup_shared_if_unused", return_value=1))
+        self.patches.enter_context(mock.patch("installer.transaction.remove_installed_target", return_value={"action": "missing"}))
         self.patches.enter_context(mock.patch("installer.hosts.remove_claude_bootstrap_if_unused", return_value=False))
         self.patches.enter_context(mock.patch("installer.selection.has_managed_installs", return_value=True))
         rc, out = self.captured(lifecycle.uninstall, self.ctx, ["alpha"])
@@ -212,6 +215,235 @@ class FullUninstallTests(LifecycleCase):
         self.assertEqual(runner.tool_calls("uninstall_cleanup.py")[0],
                          ["--platform", "claude", "--install-state-manifest", str(self.ghost / "install-state" / "claude.json"),
                           "--apply"])
+
+
+class SelectedRemovalOwnershipTests(LifecycleCase):
+    def setUp(self):
+        super().setUp()
+        self.stub("installer.transaction.migrate_record")
+        self.stub("installer.addons.resume_pending_uninstalls")
+        self.stub("installer.hosts.install_hooks", True)
+        self.stub("installer.hosts.remove_claude_bootstrap_if_unused", False)
+        self.patches.enter_context(mock.patch("installer.selection.ALL_SKILLS", ("alpha", "fam")))
+        self.dependents = self.patches.enter_context(mock.patch("installer.addons.dependents_rc", return_value=0))
+        self.guard = self.patches.enter_context(mock.patch("installer.transaction.guard_gateway_removal", return_value=0))
+        self.state = self.ghost / "install-state" / "claude.json"
+
+    def installed(self, name, *, linked=False, modified=False):
+        from installer_assets import write_ownership_marker
+        source = self.source / name if name in {"alpha", "_shared"} else self.source / "fam" / name
+        path = self.ctx.skills_dir / name
+        if linked:
+            path.symlink_to(source)
+        else:
+            shutil.copytree(source, path)
+            write_ownership_marker(path, platform="claude", asset_id=name,
+                source_repo=str(self.source), source_commit="fixture", install_mode="copy")
+            if modified:
+                (path / "SKILL.md").write_text("current user change\n", encoding="utf-8")
+        return path
+
+    def inventory(self, *names):
+        self.state.parent.mkdir(parents=True, exist_ok=True)
+        value = dict(schema_version=1, platform="claude", source_root=str(self.source),
+            targets=[dict(target_name=name, dest_path=str(self.ctx.skills_dir/name),
+                          source_path=str(self.source/name if name in {"alpha", "_shared"} else self.source/'fam'/name),
+                          install_mode="copy") for name in names])
+        self.state.write_text(json.dumps(value), encoding="utf-8")
+
+    def test_personal_slots_and_private_shared_survive_even_with_force(self):
+        for name in ("alpha", "_shared"):
+            path = self.ctx.skills_dir/name
+            path.mkdir()
+            (path/'personal.txt').write_text(name, encoding="utf-8")
+        rc, _ = self.captured(lifecycle.uninstall, self.ctx, ["--force", "alpha"])
+        self.assertEqual(rc, 1)
+        for name in ("alpha", "_shared"):
+            self.assertEqual((self.ctx.skills_dir/name/'personal.txt').read_text(), name)
+        self.assertFalse(any(call.args[1] for call in self.guard.call_args_list))
+
+    def test_family_checks_exact_leaves_and_preserves_dependency_or_unknown(self):
+        one, two = self.installed("one"), self.installed("two")
+        self.dependents.side_effect = lambda ctx, name: {"one": 2, "two": 3}.get(name, 0)
+        rc, _ = self.captured(lifecycle.uninstall, self.ctx, ["fam"])
+        self.assertEqual(rc, 1)
+        self.assertEqual([call.args[1] for call in self.dependents.call_args_list], ["fam", "one", "two"])
+        self.assertTrue(one.exists())
+        self.assertTrue(two.exists())
+
+    def test_family_dependency_preserves_all_leaves(self):
+        one, two = self.installed("one"), self.installed("two")
+        self.dependents.side_effect = lambda ctx, name: 2 if name == "fam" else 0
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ["fam"])[0], 1)
+        self.assertEqual([call.args[1] for call in self.dependents.call_args_list].count("fam"), 1)
+        self.assertTrue(one.exists())
+        self.assertTrue(two.exists())
+
+    def test_all_actual_deletions_reach_gateway_before_any_leaf_changes(self):
+        alpha, shared = self.installed("alpha", linked=True), self.installed("_shared", linked=True)
+        def refuse(ctx, targets):
+            self.assertTrue(alpha.is_symlink())
+            self.assertTrue(shared.is_symlink())
+            self.assertEqual(set(targets), {alpha, shared})
+            return 3
+        self.guard.side_effect = refuse
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ["alpha"])[0], 3)
+        self.assertTrue(alpha.is_symlink())
+        self.assertTrue(shared.is_symlink())
+
+    def test_managed_link_and_modified_copy_remove_without_losing_earlier_backup(self):
+        alpha = self.installed("alpha", linked=True)
+        one = self.installed("one", modified=True)
+        self.installed("two")
+        backup = self.ghost/'uninstall-backup'/'claude'/'one'
+        backup.mkdir(parents=True)
+        (backup/'SKILL.md').write_text("earlier user change\n", encoding="utf-8")
+        rc, _ = self.captured(lifecycle.uninstall, self.ctx, ["alpha", "fam"])
+        self.assertEqual(rc, 0)
+        self.assertFalse(alpha.is_symlink())
+        self.assertFalse(one.exists())
+        self.assertTrue((self.source/'alpha'/'SKILL.md').exists())
+        self.assertEqual((backup/'SKILL.md').read_text(), "earlier user change\n")
+        copies = [path.read_text() for path in backup.parent.glob('one*/SKILL.md')]
+        self.assertIn("current user change\n", copies)
+
+    def test_successful_selected_removal_prunes_only_removed_current_targets(self):
+        alpha, one = self.installed("alpha"), self.installed("one")
+        self.inventory("alpha", "one")
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ["alpha"])[0], 0)
+        self.assertFalse(alpha.exists())
+        self.assertTrue(one.exists())
+        self.assertEqual([row['target_name'] for row in json.loads(self.state.read_text())['targets']], ['one'])
+
+    def test_other_host_reference_preserves_target_and_current_inventory(self):
+        alpha = self.installed("alpha")
+        self.inventory("alpha")
+        other = self.state.with_name('codex.json')
+        other.write_text(json.dumps(dict(platform='codex', targets=[dict(dest_path=str(alpha))])))
+        original = self.state.read_bytes()
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ["alpha"])[0], 1)
+        self.assertTrue(alpha.exists())
+        self.assertEqual(self.state.read_bytes(), original)
+
+    def test_target_appearing_after_absent_preview_is_not_deleted(self):
+        self.inventory("alpha")
+        def appeared(ctx, targets):
+            self.assertEqual(targets, [])
+            self.installed("alpha")
+            return 0
+        self.guard.side_effect = appeared
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ["alpha"])[0], 1)
+        self.assertTrue((self.ctx.skills_dir/'alpha/SKILL.md').exists())
+        self.assertEqual(json.loads(self.state.read_text())['targets'][0]['target_name'], 'alpha')
+
+    def test_shared_remains_when_a_leaf_changes_after_preview(self):
+        alpha, shared = self.installed("alpha"), self.installed("_shared", linked=True)
+        def changed(ctx, targets):
+            (alpha/'.ghost-alice-install.json').unlink()
+            return 0
+        self.guard.side_effect = changed
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ["alpha"])[0], 1)
+        self.assertTrue(alpha.exists())
+        self.assertTrue(shared.is_symlink())
+
+    def test_private_shared_survives_removal_of_the_last_managed_leaf(self):
+        self.installed("alpha")
+        shared = self.ctx.skills_dir/'_shared'
+        shared.mkdir()
+        (shared/'personal.txt').write_text('private support', encoding='utf-8')
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ["alpha"])[0], 1)
+        self.assertEqual((shared/'personal.txt').read_text(), 'private support')
+        self.assertNotIn(shared, self.guard.call_args.args[1])
+
+    def test_invalid_copy_marker_preserves_bytes_and_inventory(self):
+        alpha = self.installed("alpha")
+        self.inventory("alpha")
+        marker = alpha/'.ghost-alice-install.json'
+        data = json.loads(marker.read_text())
+        data.pop('content_hashes')
+        marker.write_text(json.dumps(data))
+        before = (alpha/'SKILL.md').read_bytes()
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ["alpha"])[0], 1)
+        self.assertEqual((alpha/'SKILL.md').read_bytes(), before)
+        self.assertEqual(len(json.loads(self.state.read_text())['targets']), 1)
+
+    def test_force_removes_managed_family_leaves_without_dependency_query(self):
+        self.installed('one')
+        self.installed('two')
+        self.dependents.return_value = 2
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ['--force', 'fam'])[0], 0)
+        self.dependents.assert_not_called()
+        self.assertFalse((self.ctx.skills_dir/'one').exists())
+        self.assertFalse((self.ctx.skills_dir/'two').exists())
+
+    def test_intentionally_absent_target_leaves_current_inventory(self):
+        self.inventory('alpha')
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ['alpha'])[0], 0)
+        self.assertEqual(json.loads(self.state.read_text())['targets'], [])
+
+    def test_last_managed_leaf_removes_owned_shared_and_prunes_both(self):
+        alpha = self.installed('alpha', linked=True)
+        shared = self.installed('_shared', linked=True)
+        self.inventory('alpha', '_shared')
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ['alpha'])[0], 0)
+        self.assertEqual(set(self.guard.call_args.args[1]), {alpha, shared})
+        self.assertFalse(alpha.is_symlink())
+        self.assertFalse(shared.is_symlink())
+        self.assertTrue((self.source/'_shared').is_dir())
+        self.assertEqual(json.loads(self.state.read_text())['targets'], [])
+
+
+class RecordedInventoryRetentionTests(LifecycleCase):
+    def remove_selected(self, *, old_child_present):
+        import install_hooks
+        from installer_assets import write_ownership_marker
+        from installer import hosts
+
+        self.stub("installer.transaction.migrate_record")
+        self.stub("installer.addons.resume_pending_uninstalls")
+        self.stub("installer.addons.dependents_rc", 0)
+        self.stub("installer.transaction.guard_gateway_removal", 0)
+        self.patches.enter_context(mock.patch("installer.selection.ALL_SKILLS", ("alpha", "fam")))
+        # Keep real configuration effects while using the fixture's selected source tree.
+        self.patches.enter_context(mock.patch.object(hosts, "install_hooks",
+            side_effect=lambda ctx, action, platform: install_hooks.uninstall_hook(platform) in {"removed", "not_found"}))
+        checkout = Path(__file__).resolve().parents[1]
+        shutil.copy2(checkout / "_shared" / "global_rule_blocks.py", self.source / "_shared" / "global_rule_blocks.py")
+        targets = []
+        for name, source in (("alpha", self.source / "alpha"), ("_shared", self.source / "_shared"),
+                             ("one", self.source / "fam" / "one")):
+            path = self.ctx.skills_dir / name
+            if name != "one" or old_child_present:
+                shutil.copytree(source, path)
+                write_ownership_marker(path, platform="claude", asset_id=name, source_repo=str(self.source),
+                                       source_commit="fixture", install_mode="copy")
+            targets.append(dict(target_name=name, source_path=str(source), dest_path=str(path), install_mode="copy"))
+        shutil.rmtree(self.source / "fam" / "one")
+        state = self.ghost / "install-state" / "claude.json"
+        state.parent.mkdir(parents=True)
+        state.write_text(json.dumps(dict(schema_version=1, platform="claude", source_root=str(self.source), targets=targets)))
+        bootstrap = self.home / ".claude" / "CLAUDE.md"
+        bootstrap.write_text("# Ghost-ALICE Claude Bootstrap\nmanaged rules\n", encoding="utf-8")
+        settings = self.home / ".claude" / "settings.json"
+        settings.write_text(json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command",
+            "command": "echo [session-intent-analyzer]"}]}]}}))
+        result, _ = self.captured(lifecycle.uninstall, self.ctx, ["alpha"])
+        self.assertEqual(result, 0)
+        self.assertFalse((self.ctx.skills_dir / "alpha").exists())
+        actual = dict(old_child=(self.ctx.skills_dir / "one").exists(),
+                      shared=(self.ctx.skills_dir / "_shared").exists(), bootstrap=bootstrap.exists(),
+                      hooks=any(json.loads(settings.read_text()).get("hooks", {}).values()))
+        self.assertEqual(actual, dict.fromkeys(actual, old_child_present))
+        self.assertTrue((self.source / "alpha" / "SKILL.md").is_file())
+        return json.loads(state.read_text())
+
+    def test_source_removed_installed_child_keeps_shared_hooks_and_bootstrap(self):
+        state = self.remove_selected(old_child_present=True)
+        self.assertEqual({row["target_name"] for row in state["targets"]}, {"one", "_shared"})
+
+    def test_missing_recorded_child_does_not_keep_shared_hooks_or_bootstrap(self):
+        state = self.remove_selected(old_child_present=False)
+        self.assertEqual({row["target_name"] for row in state["targets"]}, {"one"})
 
 
 class RepairTests(LifecycleCase):

@@ -24,6 +24,14 @@ BIND_HOST="127.0.0.1"
 URL_HOST=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --project-dir|--host|--url-host)
+      if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+        printf '{"error": "%s requires a value"}\n' "$1"
+        exit 1
+      fi
+      ;;
+  esac
+  case "$1" in
     --project-dir)
       PROJECT_DIR="$2"
       shift 2
@@ -78,13 +86,15 @@ fi
 SESSION_ID="$$-$(date +%s)"
 
 if [[ -n "$PROJECT_DIR" ]]; then
+  # Resolve the caller's project before changing to the installed script directory.
+  mkdir -p -- "$PROJECT_DIR" || exit 1
+  PROJECT_DIR="$(CDPATH= cd -- "$PROJECT_DIR" >/dev/null && pwd -P)" || exit 1
   SESSION_DIR="${PROJECT_DIR}/.coding-convention/brainstorm/${SESSION_ID}"
 else
   SESSION_DIR="/tmp/brainstorm-${SESSION_ID}"
 fi
 
 STATE_DIR="${SESSION_DIR}/state"
-PID_FILE="${STATE_DIR}/server.pid"
 LOG_FILE="${STATE_DIR}/server.log"
 
 # Create fresh session directory with content and state peers
@@ -101,9 +111,7 @@ if [[ -z "$OWNER_PID" || "$OWNER_PID" == "1" ]]; then
 fi
 
 if [[ "$FOREGROUND" == "true" ]]; then
-  echo "$$" > "$PID_FILE"
-  env BRAINSTORM_DIR="$SESSION_DIR" BRAINSTORM_HOST="$BIND_HOST" BRAINSTORM_URL_HOST="$URL_HOST" BRAINSTORM_OWNER_PID="$OWNER_PID" node server.cjs
-  exit $?
+  exec env BRAINSTORM_DIR="$SESSION_DIR" BRAINSTORM_HOST="$BIND_HOST" BRAINSTORM_URL_HOST="$URL_HOST" BRAINSTORM_OWNER_PID="$OWNER_PID" node server.cjs
 fi
 
 # Start server, capturing output to log file
@@ -111,7 +119,6 @@ fi
 nohup env BRAINSTORM_DIR="$SESSION_DIR" BRAINSTORM_HOST="$BIND_HOST" BRAINSTORM_URL_HOST="$URL_HOST" BRAINSTORM_OWNER_PID="$OWNER_PID" node server.cjs > "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 disown "$SERVER_PID" 2>/dev/null
-echo "$SERVER_PID" > "$PID_FILE"
 
 # Wait for server-started message (check log file)
 for i in {1..50}; do

@@ -158,6 +158,30 @@ class VerboseAutoTests(AutoCase):
 
 
 class CompactAutoTests(AutoCase):
+    def test_independent_parents_in_one_second_keep_separate_child_streams(self):
+        ctx = self.context(args=["task-router"])
+        self.child_results = {platform: (0, [json.dumps({"type": "target-result", "platform": platform,
+                                                        "target_id": "_shared", "target_kind": "support"})])
+                              for platform in ("claude", "codex")}
+        with mock.patch("installer.report.datetime") as clock:
+            clock.now.return_value.strftime.return_value = "2026-11-09-010203"
+            self.assertEqual(self.run_children(ctx, ["claude", "codex"])[0], 0)
+            first_children = list(self.children)
+            first_log = report.state().log_file
+            first_events = Path(first_children[0][1]["GHOST_ALICE_INSTALL_EVENT_FILE"])
+            first_bytes = first_events.read_bytes()
+            quiet(self.home)
+            self.children.clear()
+            self.assertEqual(self.run_children(ctx, ["claude", "codex"])[0], 0)
+        second_log = report.state().log_file
+        second_events = Path(self.children[0][1]["GHOST_ALICE_INSTALL_EVENT_FILE"])
+        self.assertNotEqual(first_log, second_log)
+        self.assertNotEqual(first_events, second_events)
+        self.assertEqual(first_events.read_bytes(), first_bytes)
+        for children, event_file in ((first_children, first_events), (self.children, second_events)):
+            self.assertEqual({child[1]["GHOST_ALICE_INSTALL_EVENT_FILE"] for child in children}, {str(event_file)})
+            self.assertEqual(report.read_all_common_target_progress(event_file, 2), 1)
+
     def test_children_log_and_report(self):
         # install.sh:361-445; test_installer_default_auto.py:404-433
         ctx = self.context(args=["task-router"])

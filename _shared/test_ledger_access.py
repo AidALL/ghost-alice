@@ -38,11 +38,13 @@ class LoadLedgerTests(unittest.TestCase):
 class CoordinatesTests(unittest.TestCase):
     def test_valid_coordinates_return_the_ledger_the_resolved_root_and_the_owner(self):
         with tempfile.TemporaryDirectory() as folder:
-            core, root, owner = ledger_access.coordinates(ledger_access.source_environment(
-                'claude', 'session-1', root=folder))
-        self.assertIs(core, ledger_access.load_ledger())
-        self.assertEqual(root, Path(folder).resolve())
-        self.assertEqual(owner, dict(platform='claude', session_id='session-1'))
+            for platform in ('claude', 'codex'):
+                with self.subTest(platform=platform):
+                    core, root, owner = ledger_access.coordinates(ledger_access.source_environment(
+                        platform, 'session-1', root=folder))
+                    self.assertIs(core, ledger_access.load_ledger())
+                    self.assertEqual(root, Path(folder).resolve())
+                    self.assertEqual(owner, dict(platform=platform, session_id='session-1'))
 
     def test_each_rejection_carries_its_reason(self):
         cases = {

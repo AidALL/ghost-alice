@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -28,6 +29,11 @@ class InstallPs1EncodingTest(unittest.TestCase):
         if not powershell:
             self.skipTest("powershell.exe is not available on this machine")
 
+        temp = tempfile.TemporaryDirectory(prefix="install's parser ")
+        self.addCleanup(temp.cleanup)
+        script = Path(temp.name) / "install.ps1"
+        shutil.copy2(INSTALL_PS1, script)
+        quoted_script = str(script).replace("'", "''")
         result = subprocess.run(
             [
                 powershell,
@@ -37,7 +43,7 @@ class InstallPs1EncodingTest(unittest.TestCase):
                     "$parseErrors = $null; "
                     "$tokens = $null; "
                     "[void][System.Management.Automation.Language.Parser]::ParseFile("
-                    f"'{INSTALL_PS1}', [ref]$tokens, [ref]$parseErrors"
+                    f"'{quoted_script}', [ref]$tokens, [ref]$parseErrors"
                     "); "
                     "if ($parseErrors.Count -gt 0) { "
                     "$parseErrors | ForEach-Object { $_.Message }; "

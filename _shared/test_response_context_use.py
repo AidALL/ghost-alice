@@ -424,6 +424,25 @@ class ResponseContextUseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.record(call_id='absent')
 
+    def test_pending_lookup_requires_a_current_unreplayed_call(self):
+        self.rows[1], self.rows[2] = self.rows[2], self.rows[1]
+        self.write_rows()
+        with self.assertRaises(ValueError):
+            self.record(call_id='lookup')
+        self.append(copy.deepcopy(self.call))
+        with self.assertRaises(ValueError):
+            self.record(call_id='lookup')
+
+
+    def test_codex_result_species_must_match_the_executed_call(self):
+        receipt = self.record()
+        output = self.output(receipt)
+        output['type'] = 'function_call_output'
+        self.write_rows()
+        with self.assertRaisesRegex(ValueError, 'paired native result'):
+            self.judge(receipt)
+
+
     def test_original_call_replay_and_changed_prefix_are_preserved(self):
         receipt = self.record(); self.output(receipt); self.judge(receipt); self.final(); self.next_user_role_prompt()
         request = self.request()
@@ -519,12 +538,25 @@ class ResponseContextUseTests(unittest.TestCase):
         self.assertTrue(result.request['input'][2]['output'].endswith('\nindependent stdout'))
         self.assertEqual(result.request['input'][1], self.call)
 
-    def test_host_environment_context_cannot_replace_exact_current_input(self):
+    def test_recorded_codex_input_kind_does_not_add_a_sender_requirement(self):
+        self.first_prompt['internal_chat_message_metadata_passthrough'] = dict(content_item_kinds=['environment.context'])
+        self.write_rows()
+        receipt = self.record()
+        self.output(receipt); self.judge(receipt); self.final(); self.next_user_role_prompt()
+        self.assertEqual(self.select().state, 'selected')
+
+    def test_host_environment_context_preserves_the_exact_current_input_and_remains_unchanged(self):
         receipt = self.record(); self.output(receipt); self.judge(receipt); self.final()
         context = self.user_role_item('environment context')
         context['internal_chat_message_metadata_passthrough'] = {'content_item_kinds': ['environments.environment_context']}
         self.append(context)
-        self.assertEqual(self.select().state, 'preserved')
+        request = self.request()
+        result = self.select(request)
+        self.assertEqual(result.state, 'selected')
+        self.assertEqual(result.request['input'][0], request['input'][0])
+        self.assertEqual(result.request['input'][-1], request['input'][-1])
+        del request['input'][0]
+        self.assertEqual(self.select(request).state, 'preserved')
 
     def test_existing_sibling_disposition_and_explicit_response_use_compose(self):
         import context_lifecycle as lifecycle

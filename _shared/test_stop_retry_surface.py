@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from test_completion_skill_evidence import assert_stop_observation
+from stop_hook_testing import assert_stop_observation, reply, skill_call, user_role_row
 
 
 HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
@@ -29,19 +29,10 @@ INTERACTIVE = ("claude-desktop", "claude-vscode", "remote_desktop", "remote_mobi
 
 
 def prompt(text, entrypoint=None):
-    entry = {"type": "user", "message": {"role": "user", "content": text}}
+    entry = user_role_row(text)
     if entrypoint:
         entry["entrypoint"] = entrypoint
     return entry
-
-
-def skill_call():
-    return {"type": "assistant", "message": {"role": "assistant", "content": [
-        {"type": "tool_use", "name": "Skill", "input": {"skill": "verification-before-completion"}}]}}
-
-
-def reply(text):
-    return {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
 
 
 def stop_feedback(reason):
@@ -104,11 +95,11 @@ class StopRetrySurfaceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
-            from test_completion_skill_evidence import StopHookSkillEvidenceTests
+            from stop_hook_testing import review_format_fixture
             text = next(part['text'] for entry in reversed(entries)
                         for part in entry.get('message', {}).get('content', [])
                         if isinstance(part, dict) and part.get('type') == 'text')
-            StopHookSkillEvidenceTests._review_format_fixture(
+            review_format_fixture(
                 Path(temp_dir), platform, text, env, review_verdict, record_review=record_review)
             hook_input = {"session_id": "fixture-stop", "transcript_path": str(transcript),
                           "stop_hook_active": stop_hook_active, "last_assistant_message": text}

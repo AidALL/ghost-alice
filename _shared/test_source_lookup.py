@@ -41,6 +41,39 @@ class SourceLookupTests(unittest.TestCase):
             with self.assertRaises((ValueError, KeyError)):
                 source_lookup.lookup(p,pointer='/missing')
 
+    def test_search_returns_original_offsets_after_casefold_expansion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'source.txt'
+            for text, query, offset, excerpt in [
+                ('ß TARGET', 'target', 2, 'TARGET'),
+                ('İ ß TARGET', 'target', 4, 'TARGET'),
+                ('a Straße', 'STRASSE', 2, 'Straße'),
+                ('a ß z', 's', 2, 'ß'),
+                ('ordinary TARGET', 'target', 9, 'TARGET'),
+            ]:
+                with self.subTest(text=text, query=query):
+                    path.write_text('unrelated\n' + text + '\n', encoding='utf-8')
+                    result = source_lookup.lookup(path, query=query)
+                    self.assertEqual(result['matches'], [dict(line=2, offset=offset)])
+                    match = result['matches'][0]
+                    self.assertEqual(source_lookup.lookup(path, **match, length=len(excerpt))['text'], excerpt)
+
+
+    def test_json_pointer_array_indices_follow_pointer_syntax_without_restricting_object_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'source.json'
+            malformed = ['-1', '01', '+1', ' 1', '1 ', '١', '-']
+            value = dict(array=list(range(11)), object={key: key for key in malformed})
+            path.write_text(json.dumps(value), encoding='utf-8')
+            for token in malformed:
+                with self.subTest(token=token):
+                    with self.assertRaises(ValueError):
+                        source_lookup.lookup(path, pointer='/array/' + token)
+                    self.assertEqual(source_lookup.lookup(path, pointer='/object/' + token)['value'], token)
+            self.assertEqual(source_lookup.lookup(path, pointer='/array/0')['value'], 0)
+            self.assertEqual(source_lookup.lookup(path, pointer='/array/10')['value'], 10)
+
+
     def test_explicit_full_read_preserves_long_original_without_copying(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d)/'original.txt'

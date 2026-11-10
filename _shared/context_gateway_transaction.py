@@ -103,11 +103,12 @@ class _Journal:
             self.io.rmdir(path)
 
 
-def _state(io, domain, plan=None):
+def owned_service_state(io, domain, agent):
+    """Match the native observation to the caller's recorded agent before permitting service effects."""
     value = io.state(domain)
     if isinstance(value, ServiceObservation):
         if value.presence == 'present':
-            if plan is not None and value.agent != plan.agent:
+            if value.agent != agent:
                 raise RuntimeError('Loaded gateway service does not match the owned service definition')
             value = 'running'
         else:
@@ -160,7 +161,7 @@ def execute(plan, io, *, apply_changes=True):
     for guard in plan.guards:
         assert_current(io, guard)
     try:
-        was_running = _state(io, plan.domain, plan) == 'running'
+        was_running = owned_service_state(io, plan.domain, plan.agent) == 'running'
     except Exception as exc:
         raise GatewayServiceError('Service state is unavailable; no installed artifacts changed') from exc
     if was_running and plan.prior_state is None:
@@ -179,7 +180,7 @@ def execute(plan, io, *, apply_changes=True):
             io.stop(plan.domain)
             stopped = True
         phase = 'verify-absence'
-        if _state(io, plan.domain, plan) != 'absent':
+        if owned_service_state(io, plan.domain, plan.agent) != 'absent':
             raise RuntimeError('Gateway service absence is unconfirmed')
         phase = 'stage'
         for guard in plan.guards:
@@ -208,9 +209,9 @@ def execute(plan, io, *, apply_changes=True):
                                       phase=phase) from failure
         try:
             if attempted_start:
-                if _state(io, plan.domain, plan) == 'running':
+                if owned_service_state(io, plan.domain, plan.agent) == 'running':
                     io.stop(plan.domain)
-                if _state(io, plan.domain, plan) != 'absent':
+                if owned_service_state(io, plan.domain, plan.agent) != 'absent':
                     raise RuntimeError('Candidate stop is unconfirmed')
             if recorded:
                 io.record(plan.record_before)

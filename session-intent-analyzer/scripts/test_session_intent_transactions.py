@@ -3,6 +3,7 @@
 Dependencies: Python 3.11+ standard library only.
 """
 import importlib.util
+from contextlib import closing
 import json
 import os
 import sqlite3
@@ -87,7 +88,7 @@ class TransactionTests(unittest.TestCase):
             connection.close()
 
     def database_payload(self):
-        with sqlite3.connect(self.ledger.storage_database_path(self.root)) as connection:
+        with closing(sqlite3.connect(self.ledger.storage_database_path(self.root))) as connection:
             return connection.execute("SELECT revision,input_event_id,state_json FROM sessions WHERE platform=? AND session_id=?",
                                       ("codex", "session-a")).fetchone()
 
@@ -584,7 +585,7 @@ sys.exit(7)
                 with self.assertRaises(ValueError):
                     self.ledger.migrate_session(**self.identity)
                 self.assertEqual(self.paths["state"].read_bytes(), before)
-                with sqlite3.connect(self.ledger.storage_database_path(self.root)) as connection:
+                with closing(sqlite3.connect(self.ledger.storage_database_path(self.root))) as connection:
                     self.assertEqual(connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0)
 
     def test_legacy_anchor_number_schema_rejects_unsafe_values(self):
@@ -597,7 +598,7 @@ sys.exit(7)
                     with self.assertRaises(ValueError):
                         self.ledger.migrate_session(**self.identity)
                     self.assertEqual(self.paths["state"].read_bytes(), before)
-                    with sqlite3.connect(self.ledger.storage_database_path(self.root)) as connection:
+                    with closing(sqlite3.connect(self.ledger.storage_database_path(self.root))) as connection:
                         self.assertEqual(connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0)
 
     def test_revision_cannot_increment_outside_shared_json_integer_range(self):

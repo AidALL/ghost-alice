@@ -43,10 +43,10 @@ class PublishCase(unittest.TestCase):
         self.codex.mkdir(parents=True)
         self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)})
         self.env.start()
-        install_lock.acquire_lock(self.ghost / "install.lock", owner="installer:install:claude:test")
+        self.lock_generation = install_lock.acquire_lock(self.ghost / "install.lock", owner="installer:install:claude:test")
 
     def tearDown(self):
-        install_lock.release_lock(self.ghost / "install.lock")
+        install_lock.release_lock(self.ghost / "install.lock", self.lock_generation)
         self.env.stop()
         self.temp.cleanup()
 
@@ -400,10 +400,42 @@ class FailureTests(PublishCase):
         return self.only_txid(exclude=(first,))
 
     def assert_recover_refused(self, txid):
-        with self.assertRaises(install_transaction.InstallTransactionError):
+        folder = self.ghost / "rollbacks" / txid
+        paths = [*self.dests, *(Path(target["rollback"]) for target in self.journal(txid)["targets"]
+                               if target.get("rollback"))]
+        before = {path: content_digest.state(path) for path in paths}
+
+        def file_bytes():
+            return {file: file.read_bytes() for root in (*self.dests, folder)
+                    for file in (root, *root.rglob("*")) if file.is_file() and not file.is_symlink()}
+
+        saved_bytes = file_bytes()
+        record = installed_payload.path(self.ghost).read_bytes()
+        with self.assertRaises(install_transaction.InstallTransactionError) as refused:
             install_transaction.recover(self.ghost, txid)
+        self.assertIn(f"review {folder}", str(refused.exception))
+        self.assertEqual({path: content_digest.state(path) for path in paths}, before)
+        self.assertEqual(file_bytes(), saved_bytes)
+        self.assertEqual(installed_payload.path(self.ghost).read_bytes(), record)
         self.assertEqual(self.journal(txid)["phase"], "prepare")
         self.assertEqual(install_transaction.unfinished(self.ghost), [txid])
+
+    def test_recover_refuses_a_changed_kept_original_before_modifying_any_target(self):
+        txid = self.crash_after_publish()
+        # alpha is checked last in reverse recovery order; the other targets must stay untouched too.
+        target = next(t for t in self.journal(txid)["targets"] if t["name"] == "alpha")
+        kept = Path(target["rollback"])
+        self.assertEqual(content_digest.state(kept), target["before"])
+        (kept / "SKILL.md").write_text("modified kept original\n", encoding="utf-8")
+        self.assert_recover_refused(txid)
+
+    def test_recover_refuses_a_changed_kept_original_when_the_published_target_is_missing(self):
+        txid = self.crash_after_publish()
+        target = next(t for t in self.journal(txid)["targets"] if t["name"] == "alpha")
+        kept = Path(target["rollback"])
+        (kept / "SKILL.md").write_text("modified kept original\n", encoding="utf-8")
+        shutil.rmtree(self.codex / "alpha")
+        self.assert_recover_refused(txid)
 
     def test_recover_refuses_an_empty_folder_added_after_the_publish(self):
         # Nothing the user adds after the stop may disappear with the published copy.

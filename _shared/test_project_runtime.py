@@ -256,8 +256,11 @@ class ProjectRuntimeTest(unittest.TestCase):
                         result = action(run)
                         if name == "nonzero":
                             self.assertEqual(result.returncode, 7)
-                except (OSError, subprocess.TimeoutExpired):
-                    pass
+                except (OSError, subprocess.TimeoutExpired) as error:
+                    self.assertNotEqual(name, 'nonzero', 'a completed process must return its exit code')
+                    self.assertIsInstance(error, subprocess.TimeoutExpired if name == 'timeout' else OSError)
+                else:
+                    self.assertEqual(name, 'nonzero', 'the failure fixture must raise its declared exception')
 
                 self.assertIsNotNone(root)
                 self.assertTrue(root.is_dir())

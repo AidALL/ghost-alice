@@ -333,6 +333,27 @@ class NativeUsageTests(unittest.TestCase):
         self.assertEqual(report['totals']['output_tokens'], 60)
         self.assertEqual(len(report['observations']), 4)
 
+    def test_codex_fork_owner_does_not_certify_inherited_interval_ownership(self):
+        parent = [dict(type='session_meta', payload=dict(id='parent')),
+                  snapshot(counter(100, 40, 10))]
+        child = [dict(type='session_meta', payload=dict(id='child', forked_from_id='parent')),
+                 *parent, snapshot(counter(200, 80, 20), counter(100, 40, 10))]
+        sibling = [dict(type='session_meta', payload=dict(id='sibling', forked_from_id='parent')),
+                   *parent, snapshot(counter(300, 120, 30), counter(200, 80, 20))]
+        grandchild = [dict(type='session_meta', payload=dict(id='grandchild', forked_from_id='child')),
+                      *child]
+        for sources in ([parent, child], [child, parent], [child, sibling], [parent, grandchild]):
+            with self.subTest(sources=sources):
+                report = self.observe_sources(sources, provider='codex')
+                self.assertIsNone(report['totals']['server_input_tokens'])
+                self.assertIsNone(report['totals']['output_tokens'])
+                self.assertTrue(any('interval overlap' in item['reason'] for item in report['gaps']))
+        # One export still supplies its observed cumulative total, not child-only usage.
+        report = self.observe_sources([child], provider='codex')
+        self.assertEqual(report['totals']['server_input_tokens'], 200)
+        self.assertTrue(all(row['interval_provenance']['session_id'] is None
+                            for row in report['observations']))
+
     def test_codex_ambiguous_partial_legacy_overlap_is_unknown_not_summed(self):
         other = [dict(type='session_meta', payload=dict(id='session-a')),
                  snapshot(counter(200, 80, 20)),
@@ -367,6 +388,136 @@ class NativeUsageTests(unittest.TestCase):
         self.assertEqual(report['totals']['server_input_tokens'], 100)
         self.assertEqual(len(report['observations']), 1)
         self.assertEqual(report['observations'][0]['unit'], 'server_response')
+
+    def test_codex_equal_time_response_conflicts_remain_unknown_in_any_source_order(self):
+        usages = [counter(100, 40, 10), counter(200, 80, 20)]
+        records = [dict(type='token_usage_record', timestamp='2026-10-12T20:00:00Z',
+                        payload=dict(response_id='resp-conflict', thread_id='session-a',
+                                     usage=usage, thread_token_usage=usage)) for usage in usages]
+        for ordered in (records, list(reversed(records))):
+            # A duplicate after the conflict must not make one alternative definitive.
+            for sources in ([[*ordered, ordered[0], snapshot(usages[0])]],
+                            [[ordered[0]], [ordered[1]], [ordered[0]]]):
+                with self.subTest(sources=sources):
+                    report = self.observe_sources(sources, provider='codex')
+                    self.assertIsNone(report['totals']['server_input_tokens'])
+                    self.assertIsNone(report['totals']['output_tokens'])
+                    self.assertIsNone(report['observed_subtotals']['server_input_tokens'])
+                    self.assertEqual(report['call_coverage']['observed_server_response_count'], 1)
+                    self.assertEqual(len(report['observations']), 1)
+                    observation = report['observations'][0]
+                    self.assertEqual(observation['raw_usage'], {})
+                    self.assertEqual({row['raw_usage']['input_tokens']
+                                      for row in observation['usage_snapshots']}, {100, 200})
+                    self.assertTrue(all(row['locator'] for row in observation['usage_snapshots']))
+                    self.assertTrue(any('Conflicting response usage counters' in item['reason']
+                                        for item in report['gaps']))
+
+
+    def test_codex_identical_timestamped_response_copies_count_once(self):
+        usage = counter(100, 40, 10)
+        record = dict(type='token_usage_record', timestamp='2026-10-12T20:00:00Z',
+                      payload=dict(response_id='resp-copy', thread_id='session-a',
+                                   usage=usage, thread_token_usage=usage))
+        report = self.observe_sources([[record, record], [record]], provider='codex')
+        self.assertEqual(report['totals']['server_input_tokens'], 100)
+        self.assertEqual(report['totals']['output_tokens'], 10)
+        self.assertEqual(len(report['observations']), 1)
+        self.assertFalse(any('Conflicting response usage counters' in item['reason']
+                             for item in report['gaps']))
+
+
+    def test_codex_sparse_exports_reconcile_response_conflicts_before_cumulative_fallback(self):
+        cumulative = counter(300, 60, 30)
+        exports = [[dict(type='session_meta', payload=dict(id='session-a')),
+                    dict(type='token_usage_record', timestamp='2026-10-12T20:00:00Z',
+                         payload=dict(response_id='resp-conflict', thread_id='session-a',
+                                      usage=usage, thread_token_usage=cumulative)),
+                    snapshot(cumulative)]
+                   for usage in (counter(100, 20, 10), counter(200, 40, 20))]
+        for sources in (exports, list(reversed(exports))):
+            with self.subTest(sources=sources):
+                report = self.observe_sources(sources, provider='codex')
+                self.assertIsNone(report['totals']['server_input_tokens'])
+                self.assertIsNone(report['totals']['output_tokens'])
+                self.assertIsNone(report['observed_subtotals']['server_input_tokens'])
+                self.assertEqual(report['call_coverage']['observed_server_response_count'], 1)
+                self.assertEqual(len(report['observations']), 1)
+                observation = report['observations'][0]
+                self.assertEqual(observation['unit'], 'server_response')
+                self.assertEqual({row['raw_usage']['input_tokens']
+                                  for row in observation['usage_snapshots']}, {100, 200})
+                self.assertTrue(any('Conflicting response usage counters' in item['reason']
+                                    for item in report['gaps']))
+
+
+    def test_codex_sparse_identical_or_later_response_exports_keep_cumulative_coverage(self):
+        cumulative = counter(300, 60, 30)
+        earlier = [dict(type='session_meta', payload=dict(id='session-a')),
+                   dict(type='token_usage_record', timestamp='2026-10-12T20:00:00Z',
+                        payload=dict(response_id='resp-sparse', thread_id='session-a',
+                                     usage=counter(100, 20, 10), thread_token_usage=cumulative)),
+                   snapshot(cumulative)]
+        later = [dict(type='session_meta', payload=dict(id='session-a')),
+                 dict(type='token_usage_record', timestamp='2026-10-12T20:00:01Z',
+                      payload=dict(response_id='resp-sparse', thread_id='session-a',
+                                   usage=counter(200, 40, 20), thread_token_usage=cumulative)),
+                 snapshot(cumulative)]
+        for sources in ([earlier, earlier], [earlier, later], [later, earlier]):
+            with self.subTest(sources=sources):
+                report = self.observe_sources(sources, provider='codex')
+                self.assertEqual(report['totals']['server_input_tokens'], 300)
+                self.assertEqual(report['totals']['output_tokens'], 30)
+                self.assertEqual(len(report['observations']), 1)
+                self.assertEqual(report['observations'][0]['unit'], 'cumulative_interval')
+                self.assertFalse(any('Conflicting response usage counters' in item['reason']
+                                     for item in report['gaps']))
+
+
+    def test_codex_newer_response_counters_win_in_both_export_orders(self):
+        records = [dict(type='token_usage_record', timestamp=timestamp,
+                        payload=dict(response_id='resp-newer', thread_id='session-a',
+                                     usage=usage, thread_token_usage=usage))
+                   for timestamp, usage in [('2026-10-12T20:00:00Z', counter(200, 80, 20)),
+                                            ('2026-10-12T20:00:01Z', counter(100, 40, 10))]]
+        for ordered in (records, list(reversed(records))):
+            with self.subTest(ordered=ordered):
+                report = self.observe_sources([[record] for record in ordered], provider='codex')
+                self.assertEqual(report['totals']['server_input_tokens'], 100)
+                self.assertEqual(report['totals']['output_tokens'], 10)
+                self.assertEqual(len(report['observations']), 1)
+                self.assertEqual(report['observations'][0]['timestamp'], '2026-10-12T20:00:01Z')
+                self.assertFalse(any('Conflicting response usage counters' in item['reason']
+                                     for item in report['gaps']))
+
+
+    def test_codex_newer_response_resolves_an_earlier_source_conflict(self):
+        early = [dict(type='token_usage_record', timestamp='2026-10-12T20:00:00Z',
+                      payload=dict(response_id='resp-newer', thread_id='session-a',
+                                   usage=usage, thread_token_usage=usage))
+                 for usage in (counter(100, 20, 10), counter(200, 40, 20))]
+        later = dict(type='token_usage_record', timestamp='2026-10-12T20:00:01Z',
+                     payload=dict(response_id='resp-newer', thread_id='session-a',
+                                  usage=counter(150, 30, 15), thread_token_usage=counter(150, 30, 15)))
+        earlier_source = [*early, snapshot(counter(200, 40, 20))]
+        for sources in ([earlier_source, [later]], [[later], earlier_source]):
+            with self.subTest(sources=sources):
+                report = self.observe_sources(sources, provider='codex')
+                self.assertEqual(report['totals']['server_input_tokens'], 150)
+                self.assertEqual(report['totals']['output_tokens'], 15)
+                self.assertEqual(len(report['observations']), 1)
+                self.assertEqual(report['observations'][0]['timestamp'], '2026-10-12T20:00:01Z')
+
+
+    def test_codex_malformed_owner_never_falls_back_to_a_matching_thread_id(self):
+        for payload in (None, [], {}):
+            with self.subTest(payload=payload):
+                rows = self.modern_codex_rows() + [dict(type='session_meta', payload=payload)]
+                report = self.observe_sources([rows], provider='codex')
+                self.assertEqual(len(report['observations']), 1)
+                self.assertIsNone(report['observations'][0]['session_provenance']['session_id'])
+                self.assertTrue(any('session identity' in item['reason'] for item in report['gaps']))
+
 
     def modern_codex_rows(self, session='session-a'):
         usage = counter(100, 40, 10)
@@ -417,6 +568,17 @@ class NativeUsageTests(unittest.TestCase):
         self.assertEqual(report['totals']['output_tokens'], 20)
         self.assertEqual(len(report['observations']), 2)
         self.assertEqual(report['call_coverage']['observed_server_response_count'], 1)
+
+    def test_codex_conflicting_session_copies_report_one_gap_per_original_location(self):
+        left = self.modern_codex_rows('left')
+        right = self.modern_codex_rows('right')
+        for sources in ([left, right], [right, left]):
+            with self.subTest(sources=sources):
+                report = self.observe_sources(sources, provider='codex')
+                findings = [gap for gap in report['gaps']
+                            if 'Conflicting response-copy session identities' in gap['reason']]
+                self.assertEqual(len(findings), 1)
+                self.assertIsNone(report['observations'][0]['session_provenance']['session_id'])
 
     def test_codex_duplicate_response_cannot_hide_conflicting_native_session_ownership(self):
         first, second = self.modern_codex_rows('session-a'), self.modern_codex_rows('session-b')

@@ -822,7 +822,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         shutil.copy2(SCRIPT, self.hook)
         shutil.copy2(SCRIPT.with_name("install_destination.py"),shared/"install_destination.py")
         for dependency in ('reminder_texts.py', 'reminder_texts.json', 'atomic_write.py', 'source_reference.py', 'timestamps.py',
-                           'ledger_access.py', 'session_identity.py'):
+                           'ledger_access.py', 'session_identity.py', 'hook_input.py'):
             shutil.copy2(SCRIPT.with_name(dependency), shared / dependency)
         self.home = self.base / "home"
         self.home.mkdir()

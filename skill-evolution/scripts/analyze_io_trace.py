@@ -19,6 +19,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_shared"))
 import install_destination  # noqa: E402
 from ledger_access import load_ledger  # noqa: E402
+from text_lines import committed_lines  # noqa: E402
 
 
 def default_trace() -> Path:
@@ -78,17 +79,13 @@ def first_text(*values: Any) -> str:
 
 def load_jsonl(path: Path, window: int) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    with path.expanduser().open(encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                value = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(value, dict):
-                rows.append(value)
+    for line in committed_lines(path.expanduser().read_bytes()).values():
+        try:
+            value = json.loads(line.strip())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            rows.append(value)
     if window <= 0:
         return rows
     return rows[-window:]
@@ -301,12 +298,13 @@ def load_intent_context(path: Path | None) -> dict[str, Any] | None:
         return None
     path = path.expanduser()
     if path.name == "intent-state.json" and any((path.parents[2] / name).exists() for name in ("ghost-state.sqlite3", ".sqlite-authority.json")):
-        value = load_ledger().read_session_state(root=path.parents[2], platform=path.parent.parent.name, session_id=path.parent.name)
-    else:
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
+        snapshot = load_ledger().consumer_snapshot(path)
+        return {key: snapshot[key] for key in EMPTY_INTENT_CONTEXT}
+    # Portable reports retain their schema without loading the ledger or validating unexported fields.
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
     if not isinstance(value, dict):
         return None
     decisions = [item for item in value.get("decisions", []) if isinstance(item, dict)]

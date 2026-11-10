@@ -17,6 +17,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+if __package__:
+    from .markdown_structure import atx_headings
+else:
+    from markdown_structure import atx_headings
+
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -194,13 +199,13 @@ def check_layer(c: LayerCheck) -> tuple[bool, str]:
         if not c.owner.is_file():
             return False, f"{c.layer}: contract owner missing. {c.owner}"
         owner_text = c.owner.read_text(encoding="utf-8")
-        heading = re.search(r"^(#{1,6}) " + re.escape(c.owner_section) + r"$", owner_text, re.MULTILINE)
+        headings = list(atx_headings(owner_text))
+        heading = next((item for item in headings if item.title == c.owner_section), None)
         if heading is None:
             return False, f"{c.layer}: contract owner section missing. {c.owner_section}"
-        body = owner_text[heading.end():]
-        following = re.search(r"^#{1," + str(len(heading.group(1))) + r"} ", body, re.MULTILINE)
-        if following:
-            body = body[:following.start()]
+        end = next((item.start for item in headings
+                    if item.start > heading.start and item.level <= heading.level), len(owner_text))
+        body = owner_text[heading.end:end]
         if not re.search(c.owner_pattern, body, re.MULTILINE):
             return False, f"{c.layer}: contract owner requirements missing. {c.owner_section}"
     return True, f"{c.layer}: OK. {c.description}"

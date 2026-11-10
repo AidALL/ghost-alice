@@ -86,6 +86,8 @@ Read both exit status and returned JSON. `status: unsupported` records the unfav
 
 The explanation review records the response model's judgments; it does not satisfy an acceptance criterion of the work.
 
+When either judgment identifies previously undeclared work that the human user's instructions authorize and a required acceptance criterion depends on, the response model declares that work through the existing response route registration before delivering the answer. Follow the selected installed session-intent-analyzer's `references/ledger-schema.md`, section The response model's declared remaining work, for `declared_remaining_work`, its prerequisites and source references. An unmet criterion alone does not establish necessary work. Updating only this declaration preserves the recorded review when the current input, route boundary, selected criteria, original sources and answer remain unchanged; the response model does not repeat the judgments or execute the work again merely to update the declaration.
+
 ## Proof bytes and time
 
 The main verification skill defines the schemas of the completion and partial completion blocks. Keep exactly one nonempty top-level `- evidence:` section in new proof. Core code reads the exact source-reference text from it; nested claim evidence cannot substitute. Missing, empty, duplicate, ambiguous or placeholder evidence remains rejected.

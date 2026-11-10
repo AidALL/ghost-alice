@@ -6,12 +6,14 @@ Dependencies: Python 3.11+ standard library only.
 from __future__ import annotations
 
 import errno
+import os
 from pathlib import Path
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -29,18 +31,32 @@ class FileLockTests(unittest.TestCase):
         path = self.root / "io-trace.jsonl"
         path.write_text("old\n", encoding="utf-8")
         locked = []
+        opened = []
+        old_inode_opened = threading.Event()
+        open_file = os.open
+
+        def observe_open(*args, **kwargs):
+            descriptor = open_file(*args, **kwargs)
+            if threading.current_thread() is thread:
+                opened.append(os.fstat(descriptor).st_ino)
+                old_inode_opened.set()
+            return descriptor
 
         def writer():
             with file_lock.exclusive(path) as held:
                 locked.append(held.st_ino)
 
-        with file_lock.exclusive(path):
+        with file_lock.exclusive(path) as old:
             thread = threading.Thread(target=writer)
-            thread.start()
-            time.sleep(0.1)  # the writer now waits for the lock on the old file
-            path.rename(path.with_name("io-trace.jsonl.1"))
-            path.write_text("new\n", encoding="utf-8")
+            self.addCleanup(thread.join, 10)
+            with mock.patch.object(file_lock.os, "open", side_effect=observe_open):
+                thread.start()
+                self.assertTrue(old_inode_opened.wait(5), "the waiter did not open the held log")
+                self.assertEqual(opened, [old.st_ino])
+                path.rename(path.with_name("io-trace.jsonl.1"))
+                path.write_text("new\n", encoding="utf-8")
         thread.join(10)
+        self.assertFalse(thread.is_alive(), "the waiter did not finish after rotation")
         self.assertEqual(locked, [path.stat().st_ino])
 
     @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
@@ -52,7 +68,9 @@ class FileLockTests(unittest.TestCase):
             with self.assertRaises(file_lock.LockTimeout):
                 with file_lock.exclusive(path):
                     pass
-            self.assertLess(time.monotonic() - started, 5)
+            elapsed = time.monotonic() - started
+            self.assertGreaterEqual(elapsed, 0.15)
+            self.assertLess(elapsed, 5)
 
     @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
     def test_a_caller_limit_replaces_the_default_limit(self):
@@ -62,7 +80,9 @@ class FileLockTests(unittest.TestCase):
             with self.assertRaises(file_lock.LockTimeout):
                 with file_lock.exclusive(path, wait=0.2):
                     pass
-            self.assertLess(time.monotonic() - started, 5)
+            elapsed = time.monotonic() - started
+            self.assertGreaterEqual(elapsed, 0.15)
+            self.assertLess(elapsed, 5)
 
     @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
     def test_a_lock_the_file_system_refuses_goes_on_without_the_lock(self):
@@ -86,6 +106,49 @@ class FileLockTests(unittest.TestCase):
         with mock.patch.object(file_lock, "fcntl", None), file_lock.exclusive(path) as held:
             self.assertIsNone(held)
         self.assertFalse(path.exists())
+
+    def test_mandatory_lock_without_a_native_primitive_refuses_to_proceed(self):
+        path = self.root / 'install.lock.guard'
+        with mock.patch.object(file_lock, 'fcntl', None), mock.patch.object(file_lock, 'msvcrt', None, create=True):
+            with self.assertRaises(OSError):
+                with file_lock.exclusive(path, must_lock=True):
+                    self.fail('mandatory locking silently proceeded')
+        self.assertFalse(path.exists())
+
+    def test_windows_mandatory_lock_locks_and_unlocks_the_first_byte(self):
+        path = self.root / 'install.lock.guard'
+        calls = []
+
+        def locking(fd, mode, count):
+            calls.append((fd, mode, count, os.lseek(fd, 0, os.SEEK_CUR), os.fstat(fd).st_size))
+
+        windows = SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=locking)
+        with mock.patch.object(file_lock, 'fcntl', None), mock.patch.object(file_lock, 'msvcrt', windows, create=True):
+            with self.assertRaisesRegex(RuntimeError, 'body failed'):
+                with file_lock.exclusive(path, must_lock=True) as held:
+                    self.assertIsNotNone(held)
+                    raise RuntimeError('body failed')
+        self.assertEqual([call[1:] for call in calls], [(2, 1, 0, 1), (0, 1, 0, 1)])
+        with self.assertRaises(OSError):
+            os.fstat(calls[0][0])
+        self.assertEqual(path.read_bytes(), b'\0')
+
+    def test_windows_contention_times_out_and_other_errors_propagate(self):
+        path = self.root / 'install.lock.guard'
+        windows = SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0,
+                                  locking=mock.Mock(side_effect=OSError(errno.EACCES, 'held')))
+        with mock.patch.object(file_lock, 'fcntl', None), mock.patch.object(file_lock, 'msvcrt', windows, create=True):
+            with self.assertRaises(file_lock.LockTimeout):
+                with file_lock.exclusive(path, wait=0, must_lock=True):
+                    self.fail('contended lock was granted')
+            fd = windows.locking.call_args.args[0]
+            with self.assertRaises(OSError):
+                os.fstat(fd)
+            windows.locking.side_effect = OSError(errno.ENOLCK, 'unsupported')
+            with self.assertRaises(OSError) as caught:
+                with file_lock.exclusive(path, must_lock=True):
+                    self.fail('unsupported mandatory lock was granted')
+            self.assertEqual(caught.exception.errno, errno.ENOLCK)
 
 
 if __name__ == "__main__":

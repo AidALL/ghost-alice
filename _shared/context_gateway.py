@@ -171,6 +171,25 @@ def _recorded_usage(usage):
     return recorded
 
 
+def _recorded_selections(observations):
+    """Project selector work objects into the gateway's body-free audit metadata."""
+    fields = (
+        'reference', 'judgment_reference', 'record', 'block_index', 'kind', 'disposition',
+        'source_locator', 'original', 'original_pointer', 'source', 'native_answer',
+        'message_index', 'wire_block_index', 'forwarded_message_index', 'forwarded_wire_block_index',
+        'item_digest', 'block_digest', 'call_record', 'call_block_index', 'call_digest',
+        'clear_tool_inputs', 'tool_use_id', 'original_item_digest', 'original_block_digest',
+        'original_semantic_block_digest', 'original_call_digest', 'removed_call_digest',
+        'before_item_digest', 'forwarded_item_digest', 'forwarded_block_digest',
+        'forwarded_semantic_block_digest', 'observation_digest', 'original_call',
+        'current_input_event_id', 'disposition_input_event_id', 'provider_application',
+        'application', 'server_edit', 'replacement_carrier',
+    )
+    return [{key: observation[key] for key in fields if key in observation}
+            for observation in observations]
+
+
+
 def forward_stream(upstream, sink, provider, on_usage):
     """Copy original response bytes while observing native usage separately.
 
@@ -395,7 +414,7 @@ def make_server(scope, output, origins=None, port=0, selectors=None, server_sele
                         if result.state == 'selected':
                             forwarded = encode_body(json.dumps(result.request, ensure_ascii=False,
                                                                separators=(',', ':')).encode(), encoding)
-                            observed['selected_blocks'] = result.observations
+                            observed['selected_blocks'] = _recorded_selections(result.observations)
                         observed.update(state=result.state, reason=result.reason)
                         body = forwarded
                     except Exception as error:

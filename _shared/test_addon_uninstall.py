@@ -17,6 +17,7 @@ import shlex
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -31,6 +32,8 @@ import install_transaction  # noqa: E402
 import addon_uninstall as un  # noqa: E402
 import hash_utils  # noqa: E402
 import install_destination  # noqa: E402
+import file_lock  # noqa: E402
+import pending_manifest  # noqa: E402
 from snapshot import capture_snapshot, load_snapshot  # noqa: E402
 
 
@@ -286,6 +289,132 @@ class CoreUninstallTest(UninstallTestBase):
         self.assertTrue(entries["pending-copy-addon-skill"]["decided"])
         self.assertEqual(entries["pending-copy-addon-skill"]["decision"], "addon-uninstalled")
         self.assertFalse(entries["pending-user-skill"]["decided"])
+
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_pending_deletion_decision_preserves_a_concurrent_append(self):
+        path = self.root / ".ghost-alice/pending-merges/claude/manifest.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"entries": [{
+            "id": "removed", "change_kind": "deleted", "decided": False,
+            "source_path": str(self.skills / "pilot/SKILL.md")}]}))
+        provided = [{"kind": "skill", "name": "pilot", "install_mode": "copy",
+                     "target": str(self.skills / "pilot")}]
+        observed, release = threading.Event(), threading.Event()
+        errors = []
+        read_text = Path.read_text
+
+        def pause_after_read(candidate, *args, **kwargs):
+            body = read_text(candidate, *args, **kwargs)
+            if candidate == path and threading.current_thread().name == "addon-decision":
+                observed.set()
+                if not release.wait(5):
+                    raise TimeoutError("addon decision reader was not released")
+            return body
+
+        def decide():
+            try:
+                un._mark_pending_manifest_deleted_entries(
+                    "pilot", addons_dir=self.addons, platform="claude", provided=provided)
+            except Exception as error:
+                errors.append(error)
+
+        def append(data):
+            data["entries"].append({"id": "concurrent", "decided": False})
+            return True
+
+        blocked = False
+        worker = threading.Thread(target=decide, name="addon-decision")
+        with mock.patch.object(Path, "read_text", pause_after_read):
+            worker.start()
+            try:
+                self.assertTrue(observed.wait(5))
+                try:
+                    pending_manifest.update_manifest(path, pending_manifest.read_json, append, wait=0.05)
+                except file_lock.LockTimeout:
+                    blocked = True
+            finally:
+                release.set()
+                worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        if blocked:
+            pending_manifest.update_manifest(path, pending_manifest.read_json, append, wait=5)
+        entries = pending_manifest.read_json(path)["entries"]
+        self.assertEqual([entry["id"] for entry in entries], ["removed", "concurrent"])
+        self.assertEqual(entries[0]["decision"], "addon-uninstalled")
+        self.assertTrue(entries[0]["decided"])
+        self.assertFalse(entries[1]["decided"])
+
+    def test_failed_inventory_cleanup_keeps_addon_record_until_retry_finishes(self):
+        self._install("alpha", ["one"])
+        state = self.root / ".ghost-alice/install-state/claude.json"
+        state.parent.mkdir(parents=True)
+        valid = {"platform": "claude", "targets": [{
+            "target_name": "one", "addon_id": "alpha", "dest_path": str(self.skills / "one")} ]}
+        state.write_text("{malformed")
+        with self.assertRaises(ValueError):
+            self._uninstall("alpha")
+        self.assertTrue((self.addons / "alpha.json").is_file())
+        self.assertTrue((self.addons / "alpha.json.removing").is_file())
+        self.assertFalse(os.path.lexists(self.skills / "one"))
+        state.write_text(json.dumps(valid))
+        resumed = un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills], platform="claude")
+        self.assertEqual([row["status"] for row in resumed], ["removed"])
+        self.assertEqual(json.loads(state.read_text())["targets"], [])
+        self.assertFalse((self.addons / "alpha.json").exists())
+        self.assertFalse((self.addons / "alpha.json.removing").exists())
+
+    def test_pending_read_and_shape_failures_keep_mapping_for_removal_retry(self):
+        for filename in ("snapshot.json", "manifest.json"):
+            for failure in ("read", "json", "shape"):
+                with self.subTest(filename=filename, failure=failure):
+                    addon_id = filename.split(".")[0] + "-" + failure
+                    name = "skill-" + addon_id
+                    self._install(addon_id, [name])
+                    path = self.root / ".ghost-alice/pending-merges/claude" / filename
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    for other in ("snapshot.json", "manifest.json"):
+                        (path.parent / other).unlink(missing_ok=True)
+                    skill_file = self.skills / name / "SKILL.md"
+                    if filename == "snapshot.json":
+                        capture_snapshot(path, [skill_file], "claude", skills_dir=self.skills)
+                        valid = path.read_bytes()
+                    else:
+                        valid = json.dumps({"entries": [{"id": name, "source_path": str(skill_file),
+                            "change_kind": "deleted", "decided": False}]}).encode()
+                        path.write_bytes(valid)
+                    if failure == "json":
+                        path.write_bytes(b"{malformed")
+                    elif failure == "shape":
+                        path.write_bytes(b'[]')
+                    retained = path.read_bytes()
+                    sidecar = self.addons / (addon_id + ".json")
+                    sidecar_before = sidecar.read_bytes()
+                    read_text = Path.read_text
+
+                    def read(candidate, *args, **kwargs):
+                        if failure == "read" and candidate == path:
+                            raise PermissionError("temporary pending read failure")
+                        return read_text(candidate, *args, **kwargs)
+
+                    with mock.patch.object(Path, "read_text", read):
+                        with self.assertRaises((OSError, ValueError)):
+                            self._uninstall(addon_id)
+                    self.assertEqual(sidecar.read_bytes(), sidecar_before)
+                    self.assertTrue(self._marker(addon_id).exists())
+                    self.assertEqual(path.read_bytes(), retained)
+                    path.write_bytes(valid)
+                    resumed = self._uninstall(addon_id)
+                    self.assertEqual(resumed["status"], "removed")
+                    current = json.loads(path.read_bytes())
+                    if filename == "snapshot.json":
+                        self.assertEqual(current["files"], {})
+                        self.assertEqual(current["file_records"], {})
+                    else:
+                        self.assertEqual(current["entries"][0]["decision"], "addon-uninstalled")
+                        self.assertTrue(current["entries"][0]["decided"])
+                    self.assertFalse(sidecar.exists())
+                    self.assertFalse(self._marker(addon_id).exists())
 
     def test_non_skill_target_relative_name_does_not_decide_skill_pending_entry(self):
         self.skills.mkdir(parents=True, exist_ok=True)
@@ -677,15 +806,16 @@ class UninstallScenarioGapTest(UninstallTestBase):
 
     # B2: mixed clean + drifted -> partial; clean removed, drifted preserved, sidecar kept.
     def test_b2_mixed_drift_is_partial(self):
-        self._install("alpha", ["clean", "drift"])
-        self._repoint("drift")
+        self._install("alpha", ["a-drift", "z-clean"])
+        drift = self._repoint("a-drift")
         result = self._uninstall("alpha")
         self.assertEqual(result["status"], "partial")
         actions = {i["name"]: i["action"] for i in result["items"]}
-        self.assertEqual(actions["clean"], "removed")
-        self.assertEqual(actions["drift"], "manual-review")
-        self.assertFalse(os.path.lexists(self.skills / "clean"))
-        self.assertTrue(os.path.lexists(self.skills / "drift"))
+        self.assertEqual(actions["z-clean"], "removed")
+        self.assertEqual(actions["a-drift"], "manual-review")
+        self.assertFalse(os.path.lexists(self.skills / "z-clean"))
+        self.assertTrue(os.path.lexists(drift))
+        self.assertEqual((drift / "SKILL.md").read_text(encoding="utf-8"), "user")
         self.assertTrue((self.addons / "alpha.json").exists())
 
     # C4: resume after a partial (target still blocked) stays partial, idempotent.

@@ -513,39 +513,43 @@ class InstallStatusContractTest(unittest.TestCase):
             repo.mkdir()
             installed_skill = installed / "custom-local-skill"
             installed_skill.mkdir(parents=True)
-            (repo / "bad.md").write_bytes(b"\xff")
             (installed_skill / "SKILL.md").write_text(
                 "---\nname: custom-local-skill\ndescription: Local skill.\n---\n\n# Local\n",
                 encoding="utf-8",
             )
 
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(INSTALL_DOCTOR),
-                    "--platform",
-                    "codex",
-                    "--repo-root",
-                    str(repo),
-                    "--encoding-root",
-                    str(repo),
-                    "--encoding-root",
-                    str(installed),
-                    "--ghost-alice-root",
-                    str(root / ".ghost-alice"),
-                    "--strict",
-                ],
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("encoding: error", result.stdout)
-            self.assertIn("bad.md", result.stdout)
-            self.assertIn("invalid-utf8", result.stdout)
+            command = [
+                sys.executable,
+                str(INSTALL_DOCTOR),
+                "--platform",
+                "codex",
+                "--repo-root",
+                str(repo),
+                "--encoding-root",
+                str(repo),
+                "--encoding-root",
+                str(installed),
+                "--ghost-alice-root",
+                str(root / ".ghost-alice"),
+                "--strict",
+            ]
+            for damaged_file in (None, repo / "bad-source.md", installed / "bad-installed.md"):
+                with self.subTest(damaged_file=damaged_file):
+                    if damaged_file is not None:
+                        damaged_file.write_bytes(b"\xff")
+                    result = subprocess.run(
+                        command, cwd=REPO_ROOT, capture_output=True, text=True,
+                        encoding="utf-8", errors="replace",
+                    )
+                    if damaged_file is None:
+                        self.assertIn("encoding: ok", result.stdout)
+                        self.assertNotIn("invalid-utf8", result.stdout)
+                    else:
+                        damaged_file.unlink()
+                        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                        self.assertIn("encoding: error", result.stdout)
+                        self.assertIn(damaged_file.name, result.stdout)
+                        self.assertIn("invalid-utf8", result.stdout)
 
     def test_doctor_reports_missing_global_rule_block(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

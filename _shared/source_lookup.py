@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 
 import ledger_access
 from text_lines import line_at, stream_lines
@@ -19,9 +20,13 @@ def _pointer(value, pointer):
         raise ValueError('A JSON pointer starts with /')
     for part in pointer.split('/')[1:] if pointer else ():
         key = part.replace('~1', '/').replace('~0', '~')
-        value = value[int(key)] if isinstance(value, list) else value[key]
+        if isinstance(value, list):
+            if re.fullmatch(r'0|[1-9][0-9]*', key) is None:
+                raise ValueError('A JSON pointer array index is zero or a positive decimal without leading zeros')
+            value = value[int(key)]
+        else:
+            value = value[key]
     return value
-
 
 def _line(path, number):
     with path.open('rb') as stream:
@@ -59,12 +64,18 @@ def lookup(path, *, pointer=None, record=None, line=None, query=None, offset=Non
         if not query:
             raise ValueError('Literal search must not be empty')
         matches = []
+        folded_query = query.casefold()
         with path.open('rb') as stream:
             for i, text in stream_lines(stream):
-                pos = text.casefold().find(query.casefold())
+                pos = text.casefold().find(folded_query)
                 if pos < 0:
                     continue
-                matches.append(dict(line=i, offset=pos))
+                folded_end = 0
+                for source_offset, character in enumerate(text):
+                    folded_end += len(character.casefold())
+                    if folded_end > pos:
+                        matches.append(dict(line=i, offset=source_offset))
+                        break
         result.update(matches=matches, total_matches=len(matches),
                       selection='Matching source coordinates; select the needed line or JSON field')
     elif pointer is not None:
@@ -90,7 +101,6 @@ def lookup(path, *, pointer=None, record=None, line=None, query=None, offset=Non
     if (stat.st_size, stat.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
         raise ValueError('Source changed during this lookup; select the current source again')
     return result
-
 
 def _record_use(*args, **kwargs):
     from response_context_use import record_use

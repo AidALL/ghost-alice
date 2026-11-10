@@ -20,7 +20,7 @@ ENTRIES = {
     "completion": (install_hooks._platform_stop_hook_entry, "Stop"),
     "session-start": (install_hooks._platform_session_start_entry, "SessionStart"),
 }
-RUNNER_ARGS = re.compile(r'hook_profile_gate\.py"?\s+"run"\s+"([^"]+)"\s+"([^"]+)"')
+RUNNER_ARGS = re.compile(r'''hook_profile_gate\.py["']?\s+["']run["']\s+["']([^"']+)["']\s+["']([^"']+)["']''')
 
 
 class HookRunnerPlatformTests(unittest.TestCase):

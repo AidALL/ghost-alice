@@ -130,7 +130,7 @@ def remove_claude_bootstrap(ctx: "Context", require_change: bool = False) -> boo
 def remove_claude_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool:
     from installer import selection
 
-    if selection.has_managed_installs(skills_root):
+    if selection.has_managed_installs(skills_root, ctx.platform):
         return False
     return remove_claude_bootstrap(ctx, True)
 
@@ -138,7 +138,7 @@ def remove_claude_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool
 def remove_codex_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool:
     from installer import selection
 
-    if selection.has_managed_installs(skills_root):
+    if selection.has_managed_installs(skills_root, ctx.platform):
         return False
     codex_home = locations.codex_home()
     agents = codex_home / "AGENTS.md"

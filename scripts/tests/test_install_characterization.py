@@ -34,7 +34,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env  # noqa: E402
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "_fixtures" / "characterization"
 SETTINGS_SHAPE_FIXTURE = FIXTURE_DIR / "install_settings_shape.json"
@@ -74,9 +74,9 @@ def _find_test_bash() -> str | None:
 def _run_install(source: Path, home: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run the install.sh of ``source`` (a checkout copy) with a deterministic, offline, non-interactive environment.
 
-    ``HOME`` is pinned to ``home`` and progress animation is disabled so output
-    is stable. ``--skip-source-health`` (passed by callers) disables all
-    git/network access, which is required for determinism.
+    Host and session overrides are isolated under ``home``, Git selects the
+    copied source, and progress animation is disabled. Callers pass
+    ``--skip-source-health`` to omit the source freshness check.
     """
 
     bash_exe = _find_test_bash()
@@ -85,9 +85,7 @@ def _run_install(source: Path, home: Path, *args: str) -> subprocess.CompletedPr
             "No non-WSL bash executable available for install.sh characterization test"
         )
 
-    env = os.environ.copy()
-    env["HOME"] = home.as_posix()
-    env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
+    env = installer_env(home)
 
     return subprocess.run(
         [bash_exe, str(source / "install.sh"), *args],
@@ -172,11 +170,11 @@ class InstallCharacterizationTest(unittest.TestCase):
                 return
             self.assertEqual(snapshot, expected)
 
-    def test_uninstall_preserves_unmanaged_file_and_removes_markers(self) -> None:
+    def test_uninstall_preserves_unmanaged_file_and_source_and_removes_managed_skill(self) -> None:
         """Assert install/uninstall cleanup behavior.
 
-        Non-managed files survive full uninstall and managed ownership
-        markers are removed from the selected skill root.
+        Non-managed files and source bytes survive full uninstall; the
+        installed skill itself is removed, including when it has no copy marker.
         """
 
         source = checkout_copy(self)
@@ -195,6 +193,13 @@ class InstallCharacterizationTest(unittest.TestCase):
                 0,
                 msg=install_result.stderr + install_result.stdout,
             )
+            installed_skill = skills_dir / "task-router"
+            source_skill = source / "task-router" / "SKILL.md"
+            source_bytes = source_skill.read_bytes()
+            self.assertTrue((installed_skill / "SKILL.md").is_file())
+            if os.name != "nt":
+                self.assertTrue(installed_skill.is_symlink(), "Claude install must create the managed link")
+                self.assertEqual(installed_skill.resolve(), source_skill.parent)
 
             uninstall_result = _run_uninstall(source, home, "--platform", "claude")
             self.assertEqual(
@@ -202,6 +207,8 @@ class InstallCharacterizationTest(unittest.TestCase):
                 0,
                 msg=uninstall_result.stderr + uninstall_result.stdout,
             )
+            self.assertFalse(os.path.lexists(installed_skill), "managed skill survived full uninstall")
+            self.assertEqual(source_skill.read_bytes(), source_bytes)
 
             self.assertTrue(
                 unmanaged_file.exists(),

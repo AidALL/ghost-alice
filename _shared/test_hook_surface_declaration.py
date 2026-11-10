@@ -56,6 +56,22 @@ def declared(message, *, context=None):
 
 
 class RunnerHonorsDeclarationTests(unittest.TestCase):
+    def test_unreadable_pending_manifest_has_no_clean_receipt_or_new_notice(self):
+        for cached in (False, True):
+            with self.subTest(cached=cached), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory)
+                manifest = home / '.ghost-alice/pending-merges/codex/manifest.json'
+                manifest.parent.mkdir(parents=True)
+                manifest.write_text('{broken', encoding='utf-8')
+                command = [sys.executable, str(Path(__file__).with_name('pending_merge_precheck_hook.py')),
+                           '--platform', 'codex', '--format', 'json']
+                if cached:
+                    command.extend(['--root', str(home / 'ledger')])
+                result = subprocess.run(command, input='{}', text=True, capture_output=True,
+                                        env=dict(os.environ, HOME=directory, USERPROFILE=directory))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), {'continue': True})
+
     def test_dynamic_profile_hides_a_declared_routine_notice_and_keeps_model_context(self):
         host = gate("session-intent", declared(CONTEXT, context=CONTEXT))
         self.assertNotIn("systemMessage", host)
