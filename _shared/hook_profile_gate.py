@@ -36,6 +36,7 @@ if "--binding-b64" in sys.argv:
 
 import agent_visibility_policy
 import pending_manifest
+from fresh_agent_session import write_utf8
 from hook_definitions import CORE_HOOK_IDS, SUPPORTED_PLATFORMS, decode_hook_payload, normalize_hook_id
 from hook_input import parse_json_object, read_stdin_utf8
 import runtime_config
@@ -567,19 +568,10 @@ def _render_user_surface(item: dict[str, object], stdout: str, stderr: str) -> t
 
 
 def _emit_rendered_user_surface(user_stdout: str, user_stderr: str) -> None:
-    def _write(stream, text: str) -> None:
-        if not text:
-            return
-        try:
-            stream.write(text)
-        except UnicodeEncodeError:
-            encoding = getattr(stream, "encoding", None) or "utf-8"
-            stream.write(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
-
     if user_stdout:
-        _write(sys.stdout, user_stdout)
+        write_utf8(sys.stdout, user_stdout)
     if user_stderr:
-        _write(sys.stderr, user_stderr)
+        write_utf8(sys.stderr, user_stderr)
 
 
 def run(hook_id: str, payload: str, *, platform: str | None = None, binding=None) -> int:
