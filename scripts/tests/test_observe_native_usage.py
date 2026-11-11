@@ -177,13 +177,15 @@ class NativeUsageTests(unittest.TestCase):
         report = self.observe_sources([[early, late], [other]])
         self.assertIsNone(report['totals']['output_tokens'])
 
-    def observe_sources(self, sources, provider='anthropic'):
+    def observe_sources(self, sources, provider='anthropic', *, duplicate_source=False):
         with tempfile.TemporaryDirectory() as directory:
             args = [sys.executable, str(SCRIPT), '--provider', provider]
             for index, rows in enumerate(sources):
                 path = Path(directory) / f'native-{index}.jsonl'
                 path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
                 args += ['--source', str(path)]
+                if duplicate_source:
+                    args += ['--source', str(path)]
             result = subprocess.run(args, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             return json.loads(result.stdout)
@@ -192,9 +194,9 @@ class NativeUsageTests(unittest.TestCase):
         early = assistant('msg_a', dict(input_tokens=2, cache_creation_input_tokens=10,
             cache_read_input_tokens=20, output_tokens=5,
             cache_creation={'ephemeral_5m_input_tokens': 4, 'ephemeral_1h_input_tokens': 6},
-            output_tokens_details={'thinking_tokens': 3}))
+            output_tokens_details={'thinking_tokens': 3, 'text_tokens': 2}))
         late = assistant('msg_a', dict(output_tokens=8,
-            cache_creation={'ephemeral_5m_input_tokens': 4}))
+            cache_creation={'ephemeral_5m_input_tokens': 4}, output_tokens_details={'text_tokens': 5}))
         late['timestamp'] = '2026-10-12T20:00:01Z'
         report = self.observe_sources([[early], [late]])
         self.assertEqual(report['totals']['server_input_tokens'], 32)
@@ -203,6 +205,7 @@ class NativeUsageTests(unittest.TestCase):
         self.assertEqual(report['totals']['reasoning_output_tokens'], 3)
         self.assertEqual(len(report['observations']), 1)
         self.assertEqual(len(report['observations'][0]['usage_snapshot_locators']), 2)
+        self.assertEqual(report['observations'][0]['raw_usage']['output_tokens_details']['text_tokens'], 5)
         self.assertFalse(report['gaps'])
 
     def test_source_order_does_not_override_later_response_counters(self):
@@ -216,19 +219,6 @@ class NativeUsageTests(unittest.TestCase):
         self.assertEqual(len(report['observations']), 1)
         self.assertFalse(report['gaps'])
 
-    def test_nested_streaming_snapshot_keeps_prior_ttl_and_thinking_fields(self):
-        early = assistant('msg_a', dict(input_tokens=2, cache_creation_input_tokens=10,
-            cache_read_input_tokens=20, output_tokens=5,
-            cache_creation={'ephemeral_5m_input_tokens': 4, 'ephemeral_1h_input_tokens': 6},
-            output_tokens_details={'thinking_tokens': 3, 'text_tokens': 2}))
-        late = assistant('msg_a', dict(output_tokens=8,
-            cache_creation={'ephemeral_5m_input_tokens': 4},
-            output_tokens_details={'text_tokens': 5}))
-        late['timestamp'] = '2026-10-12T20:00:01Z'
-        report = self.observe('anthropic', [early, late])
-        self.assertEqual(report['totals']['cache_write_1h_tokens'], 6)
-        self.assertEqual(report['totals']['reasoning_output_tokens'], 3)
-        self.assertEqual(report['observations'][0]['raw_usage']['output_tokens_details']['text_tokens'], 5)
 
     def test_overlapping_exports_order_each_field_by_its_original_snapshot(self):
         early = assistant('msg_a', dict(input_tokens=2, cache_creation_input_tokens=0,
@@ -283,22 +273,11 @@ class NativeUsageTests(unittest.TestCase):
         self.assertIsNone(report['totals']['output_tokens'])
         self.assertEqual(report['observations'][0]['usage_basis'], 'provider-iterations')
 
-    def observe(self, provider, rows, duplicate_source=False):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "native.jsonl"
-            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
-            args = [sys.executable, str(SCRIPT), "--provider", provider,
-                    "--source", str(path)]
-            if duplicate_source:
-                args += ["--source", str(path)]
-            result = subprocess.run(args, capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            return json.loads(result.stdout)
 
     def test_codex_repeated_cumulative_snapshot_is_not_another_response(self):
         a, b = counter(100, 40, 10), counter(250, 160, 30)
-        result = self.observe("codex", [snapshot(a), snapshot(a),
-                                       snapshot(b, counter(150, 120, 20)), snapshot(b)])
+        result = self.observe_sources([[snapshot(a), snapshot(a),
+                                       snapshot(b, counter(150, 120, 20)), snapshot(b)]], provider="codex")
         self.assertEqual(result["totals"]["server_input_tokens"], 250)
         self.assertEqual(result["totals"]["output_tokens"], 30)
         self.assertEqual(len(result["observations"]), 2)
@@ -603,7 +582,7 @@ class NativeUsageTests(unittest.TestCase):
                                         for gap in report['gaps']))
 
     def test_native_write_zero_does_not_prove_server_zero(self):
-        result = self.observe("codex", [snapshot(counter(115278, 114432, 100))])
+        result = self.observe_sources([[snapshot(counter(115278, 114432, 100))]], provider="codex")
         self.assertEqual(result["totals"]["server_input_tokens"], 115278)
         self.assertEqual(result["totals"]["native_reported_cache_read_tokens"], 114432)
         self.assertIsNone(result["totals"]["cache_write_tokens"])
@@ -617,8 +596,8 @@ class NativeUsageTests(unittest.TestCase):
         final = dict(early, output_tokens=2149, cache_creation={
             "ephemeral_1h_input_tokens": 25056, "ephemeral_5m_input_tokens": 0},
             output_tokens_details={"thinking_tokens": 333})
-        result = self.observe("anthropic", [assistant("msg_a", early),
-                                            assistant("msg_a", final), assistant("msg_a", final)])
+        result = self.observe_sources([[assistant("msg_a", early),
+                                            assistant("msg_a", final), assistant("msg_a", final)]], provider="anthropic")
         self.assertEqual(result["totals"]["server_input_tokens"], 80740)
         self.assertEqual(result["totals"]["output_tokens"], 2149)
         self.assertEqual(result["totals"]["cache_write_1h_tokens"], 25056)
@@ -627,7 +606,7 @@ class NativeUsageTests(unittest.TestCase):
     def test_another_message_id_is_another_paid_call(self):
         usage = {"input_tokens": 2, "cache_creation_input_tokens": 4,
                  "cache_read_input_tokens": 10, "output_tokens": 3}
-        result = self.observe("anthropic", [assistant("msg_a", usage), assistant("msg_b", usage)])
+        result = self.observe_sources([[assistant("msg_a", usage), assistant("msg_b", usage)]], provider="anthropic")
         self.assertEqual(result["totals"]["server_input_tokens"], 32)
 
     def test_compaction_iterations_are_counted_once_instead_of_zero_reply_totals(self):
@@ -636,7 +615,7 @@ class NativeUsageTests(unittest.TestCase):
                          cache_creation_input_tokens=0, cache_read_input_tokens=0, output_tokens=12),
                          dict(type='message', input_tokens=3, cache_creation_input_tokens=0,
                               cache_read_input_tokens=10, output_tokens=4)])
-        result = self.observe('anthropic', [assistant('msg-summary', usage), assistant('msg-summary', usage)])
+        result = self.observe_sources([[assistant('msg-summary', usage), assistant('msg-summary', usage)]], provider='anthropic')
         self.assertEqual(len(result['observations']), 1)
         self.assertEqual(result['totals']['server_input_tokens'], 50)
         self.assertEqual(result['totals']['output_tokens'], 16)
@@ -645,7 +624,7 @@ class NativeUsageTests(unittest.TestCase):
     def test_missing_compaction_iteration_usage_stays_unknown_despite_top_level_zero(self):
         usage = dict(input_tokens=0, cache_creation_input_tokens=0, cache_read_input_tokens=0,
                      output_tokens=0, iterations=[dict(type='compaction', input_tokens=37)])
-        result = self.observe('anthropic', [assistant('msg-summary', usage)])
+        result = self.observe_sources([[assistant('msg-summary', usage)]], provider='anthropic')
         self.assertIsNone(result['totals']['server_input_tokens'])
         self.assertIsNone(result['totals']['cache_read_tokens'])
         self.assertIsNone(result['totals']['output_tokens'])
@@ -659,63 +638,63 @@ class NativeUsageTests(unittest.TestCase):
                            cache_read_input_tokens=10, output_tokens=4,
                            cache_creation={'ephemeral_5m_input_tokens': 3, 'ephemeral_1h_input_tokens': 2},
                            output_tokens_details={'thinking_tokens': 2})]
-        result = self.observe('anthropic', [assistant('msg-details', dict(input_tokens=0,
-            output_tokens=0, iterations=iterations))])
+        result = self.observe_sources([[assistant('msg-details', dict(input_tokens=0,
+            output_tokens=0, iterations=iterations))]], provider='anthropic')
         self.assertEqual(result['totals']['server_input_tokens'], 60)
         self.assertEqual(result['totals']['cache_write_5m_tokens'], 5)
         self.assertEqual(result['totals']['cache_write_1h_tokens'], 5)
         self.assertEqual(result['totals']['reasoning_output_tokens'], 5)
 
     def test_missing_cache_field_does_not_become_zero(self):
-        result = self.observe("anthropic", [assistant("msg_a", {"input_tokens": 2, "output_tokens": 3})])
+        result = self.observe_sources([[assistant("msg_a", {"input_tokens": 2, "output_tokens": 3})]], provider="anthropic")
         self.assertIsNone(result["totals"]["server_input_tokens"])
         self.assertIsNone(result["totals"]["cache_read_tokens"])
         self.assertTrue(result["gaps"])
 
     def test_ttl_details_are_parts_of_cache_write(self):
-        result = self.observe("anthropic", [assistant("msg_a", {
+        result = self.observe_sources([[assistant("msg_a", {
             "input_tokens": 2, "cache_creation_input_tokens": 10,
             "cache_read_input_tokens": 20, "output_tokens": 5,
-            "cache_creation": {"ephemeral_5m_input_tokens": 4, "ephemeral_1h_input_tokens": 6}})])
+            "cache_creation": {"ephemeral_5m_input_tokens": 4, "ephemeral_1h_input_tokens": 6}})]], provider="anthropic")
         self.assertEqual(result["totals"]["server_input_tokens"], 32)
         self.assertEqual(result["totals"]["cache_write_tokens"], 10)
 
     def test_invalid_ttl_subtotal_is_a_gap(self):
-        result = self.observe("anthropic", [assistant("msg_a", {
+        result = self.observe_sources([[assistant("msg_a", {
             "input_tokens": 2, "cache_creation_input_tokens": 10,
             "cache_read_input_tokens": 20, "output_tokens": 5,
-            "cache_creation": {"ephemeral_5m_input_tokens": 4, "ephemeral_1h_input_tokens": 7}})])
+            "cache_creation": {"ephemeral_5m_input_tokens": 4, "ephemeral_1h_input_tokens": 7}})]], provider="anthropic")
         self.assertTrue(any("TTL" in gap["reason"] for gap in result["gaps"]))
 
     def test_duplicate_source_path_does_not_duplicate_bill(self):
-        result = self.observe("anthropic", [assistant("msg_a", {
+        result = self.observe_sources([[assistant("msg_a", {
             "input_tokens": 2, "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 20, "output_tokens": 5})], duplicate_source=True)
+            "cache_read_input_tokens": 20, "output_tokens": 5})]], provider="anthropic", duplicate_source=True)
         self.assertEqual(result["totals"]["server_input_tokens"], 22)
 
     def test_synthetic_context_fill_is_not_server_usage(self):
-        result = self.observe("codex", [snapshot(counter(100, 40, 10)),
-                                       snapshot(counter(0, 0, 0, total=1000))])
+        result = self.observe_sources([[snapshot(counter(100, 40, 10)),
+                                       snapshot(counter(0, 0, 0, total=1000))]], provider="codex")
         self.assertEqual(result["observed_subtotals"]["server_input_tokens"], 100)
         self.assertTrue(result["gaps"])
 
     def test_aggregate_jump_is_not_named_one_request(self):
-        result = self.observe("codex", [snapshot(counter(100, 40, 10)),
-                                       snapshot(counter(400, 140, 40), counter(150, 50, 10))])
+        result = self.observe_sources([[snapshot(counter(100, 40, 10)),
+                                       snapshot(counter(400, 140, 40), counter(150, 50, 10))]], provider="codex")
         self.assertEqual(result["totals"]["server_input_tokens"], 400)
         self.assertFalse(result["observations"][-1]["matches_last_usage"])
         self.assertEqual(result["observations"][-1]["unit"], "cumulative_interval")
 
     def test_partial_record_does_not_erase_known_usage(self):
-        result = self.observe("codex", [snapshot(counter(100, 40, 10)),
-                                       {"type": "event_msg", "payload": {"type": "token_count", "info": None}}])
+        result = self.observe_sources([[snapshot(counter(100, 40, 10)),
+                                       {"type": "event_msg", "payload": {"type": "token_count", "info": None}}]], provider="codex")
         self.assertEqual(result["observed_subtotals"]["server_input_tokens"], 100)
 
     def test_response_ids_precede_overlapping_cumulative_snapshots(self):
         usage = counter(100, 40, 10)
         row = {"type": "token_usage_record", "payload": {
             "response_id": "resp_1", "usage": usage, "thread_token_usage": usage}}
-        result = self.observe("codex", [row, row, snapshot(usage)])
+        result = self.observe_sources([[row, row, snapshot(usage)]], provider="codex")
         self.assertEqual(result["totals"]["server_input_tokens"], 100)
         self.assertEqual(result["observations"][0]["unit"], "server_response")
         self.assertEqual(result["observations"][0]["response_id"], "resp_1")
@@ -723,8 +702,8 @@ class NativeUsageTests(unittest.TestCase):
 
     def test_record_without_token_count_is_still_observed(self):
         usage = counter(100, 40, 10)
-        result = self.observe("codex", [{"type": "token_usage_record", "payload": {
-            "response_id": "resp_1", "usage": usage, "thread_token_usage": usage}}])
+        result = self.observe_sources([[{"type": "token_usage_record", "payload": {
+            "response_id": "resp_1", "usage": usage, "thread_token_usage": usage}}]], provider="codex")
         self.assertEqual(result["totals"]["server_input_tokens"], 100)
 
     def test_host_counter_cannot_drop_server_compaction_responses(self):
@@ -734,7 +713,7 @@ class NativeUsageTests(unittest.TestCase):
             {"type": "token_usage_record", "payload": {
                 "response_id": "resp_compaction", "usage": usage,
                 "thread_token_usage": counter(200, 80, 20)}}, snapshot(usage)]
-        result = self.observe("codex", rows)
+        result = self.observe_sources([rows], provider="codex")
         self.assertEqual(result["totals"]["server_input_tokens"], 200)
         self.assertEqual(result["totals"]["output_tokens"], 20)
         self.assertEqual({o["response_id"] for o in result["observations"]},
@@ -763,9 +742,9 @@ class NativeUsageTests(unittest.TestCase):
 
     def test_sparse_response_records_keep_cumulative_coverage(self):
         usage = counter(100, 40, 10)
-        result = self.observe("codex", [snapshot(usage), {"type": "token_usage_record", "payload": {
+        result = self.observe_sources([[snapshot(usage), {"type": "token_usage_record", "payload": {
             "response_id": "resp_2", "usage": usage,
-            "thread_token_usage": counter(200, 80, 20)}}, snapshot(counter(200, 80, 20), usage)])
+            "thread_token_usage": counter(200, 80, 20)}}, snapshot(counter(200, 80, 20), usage)]], provider="codex")
         self.assertEqual(result["totals"]["server_input_tokens"], 200)
         self.assertTrue(any("Response IDs" in g["reason"] for g in result["gaps"]))
 
@@ -774,7 +753,7 @@ class NativeUsageTests(unittest.TestCase):
                  "cache_read_input_tokens": 20, "output_tokens": 5}
         a, b = assistant("msg_a", usage), assistant("msg_b", usage)
         b["message"]["model"] = "claude-opus-5-5"
-        result = self.observe("anthropic", [a, b])
+        result = self.observe_sources([[a, b]], provider="anthropic")
         self.assertEqual(result["by_model"]["claude-sonnet-5-5"]["server_input_tokens"], 22)
         self.assertEqual(result["by_model"]["claude-opus-5-5"]["server_input_tokens"], 22)
 
@@ -783,7 +762,7 @@ class NativeUsageTests(unittest.TestCase):
                                       "cache_read_input_tokens": 0, "output_tokens": 0})
         row["message"]["model"] = "<synthetic>"
         row["isApiErrorMessage"] = True
-        result = self.observe("anthropic", [row])
+        result = self.observe_sources([[row]], provider="anthropic")
         self.assertIsNone(result["totals"]["server_input_tokens"])
         self.assertEqual(result["observations"], [])
         self.assertTrue(result["gaps"])

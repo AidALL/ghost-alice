@@ -15,7 +15,7 @@ from pathlib import Path
 import install_destination
 from typing import Any
 
-from session_identity import is_exact
+from hook_definitions import read_platform
 from hook_input import parse_json_object, read_stdin_utf8 as _read_stdin_utf8
 from session_intent_analyzer_hook import bound_session_identity
 from strict_session_log import _safe_text
@@ -119,15 +119,10 @@ def _text(value: Any, fallback: str = "") -> str:
     return text if text else fallback
 
 
-def _platform(payload: dict[str, Any]) -> str:
-    # Installer-supplied host context wins over incidental payload metadata.
-    value = os.environ.get("GHOST_ALICE_PLATFORM") or payload.get("platform")
-    return value if is_exact(value) else "unknown"
-
-
 def _extract(payload: dict[str, Any]) -> dict[str, str]:
     tool = _text(payload.get("tool_name") or payload.get("tool"), "unknown")
-    platform = _platform(payload)
+    # Installer-supplied host context wins over incidental payload metadata.
+    platform = read_platform(os.environ.get("GHOST_ALICE_PLATFORM") or payload.get("platform"))
     session = bound_session_identity(platform, payload) or "unknown"
     tool_input = _as_dict(payload.get("tool_input"))
     path = "n/a"

@@ -17,6 +17,7 @@ import completion_assessment as core_api
 from claude_context_adapter import (NativeContextRejected, SignedPrefixSelectionUnsupported, claude_home,
                                     require_rewriteable_prefix)
 import ledger_access
+from hook_definitions import SUPPORTED_PLATFORMS
 from native_transcript import (codex_home, codex_transcript_path, codex_session_owner, codex_item as _clean,
     codex_input_text, is_codex_user_message, is_prompt_row, matches_input_text, correlate_prompt_index)
 from source_reference import SourceReferenceError, json_digest, matches_input, reference_source, verify_source
@@ -227,7 +228,7 @@ def record_use(source, expected_input_event_id, observation, *, purpose, call_id
     coordinates = _source_coordinates(observation)
     core, root, owner = core_api._coordinates(source)
     platform, session = owner['platform'], owner['session_id']
-    _require(platform in ('codex', 'claude'), 'The native lookup owner is unsupported')
+    _require(platform in SUPPORTED_PLATFORMS, 'The native lookup owner is unsupported')
     home = codex_home(source) if platform == 'codex' else claude_home(source)
     path = _path(home, platform, session)
     _require(path is not None, 'The owned original native transcript is unavailable')
@@ -297,7 +298,7 @@ def record_use_judgments(source, expected_input_event_id, judgments, *, transact
         seen.add(judgment['use_reference'])
     core, root, owner = core_api._coordinates(source)
     platform, session = owner['platform'], owner['session_id']
-    _require(platform in ('codex', 'claude'), 'The native responding owner is unsupported')
+    _require(platform in SUPPORTED_PLATFORMS, 'The native responding owner is unsupported')
     home = codex_home(source) if platform == 'codex' else claude_home(source)
     path = _path(home, platform, session)
     _require(path is not None, 'The owned original native transcript is unavailable')
@@ -496,7 +497,7 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
     if reason:
         return RequestSelection(request, 'preserved', reason)
     field = 'input' if platform == 'codex' else 'messages'
-    if platform not in ('codex', 'claude') or not isinstance(request, dict) or not isinstance(request.get(field), list):
+    if platform not in SUPPORTED_PLATFORMS or not isinstance(request, dict) or not isinstance(request.get(field), list):
         return RequestSelection(request, 'preserved', 'input-unclassified')
     session = session_id if session_id is not None else request.get('prompt_cache_key')
     if not isinstance(session, str) or not session:

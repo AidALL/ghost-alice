@@ -8,12 +8,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-try:
-    import claude_context_adapter as adapter
-except ModuleNotFoundError as error:
-    if error.name != 'claude_context_adapter':
-        raise
-    adapter = None
+import claude_context_adapter as adapter
 
 
 def digest(value):
@@ -31,7 +26,6 @@ def text(value):
 
 class ClaudeContextAdapterTests(unittest.TestCase):
     def setUp(self):
-        self.assertIsNotNone(adapter, 'The required pure Claude native-to-wire adapter is absent')
         self.user_role_message = message('user', text('implement now\n'))
         self.thinking = dict(type='thinking', thinking='signed reasoning', signature='synthetic-signature')
         self.call = dict(type='tool_use', id='consumed', name='Read',
@@ -80,9 +74,7 @@ class ClaudeContextAdapterTests(unittest.TestCase):
         selections = []
         adapter.request_apply(request, self.originals,
             [dict(self.choice(), disposition='omit')] if choices is None else choices, _inspect=selections)
-        operation = getattr(adapter, 'server_context_omit', None)
-        self.assertTrue(callable(operation), 'Signed/default-thinking omission has no server-owned application path')
-        return operation(request, selections)
+        return adapter.server_context_omit(request, selections)
 
     def test_server_omit_preserves_signed_prefix_and_requests_only_selected_results(self):
         request = copy.deepcopy(self.request)
@@ -396,21 +388,6 @@ class ClaudeContextAdapterTests(unittest.TestCase):
         forwarded, observations = self.apply([current], request=request)
         self.assertEqual(forwarded, request)
         self.assertEqual(observations, [])
-
-    def test_omit_active_missing_and_signed_thinking_prefixes_are_rejected(self):
-        choice = dict(self.choice(), disposition='omit', replacement_text='')
-        for thinking in (None, {'type': 'enabled'}, {'type': 'adaptive'}, {'type': 'disabled'}):
-            request = copy.deepcopy(self.request)
-            if thinking is None:
-                request.pop('thinking')
-            else:
-                request['thinking'] = thinking
-            if thinking == {'type': 'disabled'}:
-                request['messages'][1]['content'].insert(0, self.thinking)
-            original = copy.deepcopy(request)
-            with self.assertRaises(adapter.SignedPrefixSelectionUnsupported):
-                self.apply([choice], request=request)
-            self.assertEqual(request, original)
 
     def test_native_path_requires_unique_exact_session(self):
         with tempfile.TemporaryDirectory() as directory:

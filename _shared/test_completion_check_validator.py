@@ -32,9 +32,12 @@ class TestCompletionEvidenceMap(unittest.TestCase):
         self.assertIsNone(v.validate_completion_evidence_map(_block(acceptance=True)))
 
     def test_compact_form_without_acceptance_criteria_valid(self):
-        # No acceptance-criteria block; claim-evidence-map is self-contained.
-        block = _block(acceptance=False, criterion=None)
-        self.assertIsNone(v.validate_completion_evidence_map(block))
+        # Missing or placeholder criteria leave the claim-evidence-map self-contained.
+        for block in (_block(acceptance=False, criterion=None),
+                      _block().replace("  - c1: do the thing [source: user-said]",
+                                       "  - <criterion-id>: <placeholder>")):
+            with self.subTest(block=block):
+                self.assertIsNone(v.validate_completion_evidence_map(block))
 
     def test_compact_form_missing_evidence_invalid(self):
         for evidence in (None, ""):
@@ -42,6 +45,16 @@ class TestCompletionEvidenceMap(unittest.TestCase):
                 block = _block(acceptance=False, criterion=None, evidence=evidence)
                 result = v.validate_completion_evidence_map(block)
                 self.assertIn("evidence", result)
+
+    def test_claim_and_explicit_evidence_fields_are_never_inferred(self):
+        for block in (
+            _block().replace("claim: did the thing", "claim: "),
+            _block().replace("  - claim: did the thing\n    criterion: c1\n"
+                             "    evidence: ran test X\n    verdict: pass",
+                             "  - c1: Python output matched — verdict: pass"),
+        ):
+            with self.subTest(block=block):
+                self.assertIsNotNone(v.validate_completion_evidence_map(block))
 
     def test_compact_form_unverified_verdict_invalid(self):
         block = _block(acceptance=False, criterion=None, verdict="unverified")
@@ -60,12 +73,12 @@ class TestCompletionEvidenceMap(unittest.TestCase):
         block = _block(acceptance=True, criterion="c2")
         result = v.validate_completion_evidence_map(block)
         self.assertIsNotNone(result)
-        self.assertIn("criterion", result)
+        self.assertIn("acceptance-criteria criterion id", result)
 
     def test_compact_form_unverified_section_not_none_invalid(self):
         block = _block(acceptance=False, criterion=None, unverified="  - something remains")
         result = v.validate_completion_evidence_map(block)
-        self.assertIsNotNone(result)
+        self.assertIn("unverified section to be 'none'", result)
 
 
 def _final_text(*parts):
@@ -102,7 +115,10 @@ def _final_text(*parts):
 
 class TestExplicitCompletionRequirement(unittest.TestCase):
     def test_explicit_requirement_rejects_text_without_a_control_block(self):
-        self.assertIsNotNone(v.validate_completion_text("Status.", require_completion_check=True))
+        for text in ("Status.", "The requested change is complete and tests pass."):
+            with self.subTest(text=text):
+                self.assertIn("[completion-check]",
+                              v.validate_completion_text(text, require_completion_check=True))
 
     def test_explicit_requirement_rejects_empty_text(self):
         self.assertIsNotNone(v.validate_completion_text("", require_completion_check=True))
@@ -411,17 +427,12 @@ The change is complete and all tests pass.
 
 
 class LooksLikeCompletionClaimTest(unittest.TestCase):
-    def test_completion_check_marker_is_a_claim(self) -> None:
-        self.assertTrue(v.looks_like_completion_claim("[completion-check]\n- x"))
-
     def test_keyword_in_prose_without_marker_is_not_a_claim(self) -> None:
         # This marker helper detects explicit completion controls only. Native routing also checks executed-work assertions through requires_completion_check.
         self.assertFalse(v.looks_like_completion_claim("The build is done."))
         self.assertFalse(v.looks_like_completion_claim("work complete"))
         self.assertFalse(v.looks_like_completion_claim("I recommend option A."))
         self.assertFalse(v.looks_like_completion_claim("acceptance criteria: concrete success criteria"))
-
-    def test_plain_non_claim_text(self) -> None:
         self.assertFalse(v.looks_like_completion_claim("Here is some neutral text about cats."))
 
     def test_done_only_inside_control_blocks_is_not_a_claim(self) -> None:
@@ -511,24 +522,10 @@ class ValidateCompletionResponseTest(unittest.TestCase):
         self.assertIsNone(v.validate_completion_text(VALID_TEXT))
 
     def test_non_completion_claim_returns_none(self) -> None:
-        self.assertIsNone(v.validate_completion_text("Just a neutral sentence about the weather."))
-
-    def test_completion_claim_missing_completion_check_rejected_in_mandatory_final_block_mode(self) -> None:
-        reason = v.validate_completion_text(
-            "The requested change is complete and tests pass.",
-            require_completion_check=True,
-        )
-
-        self.assertIsNotNone(reason)
-        self.assertIn("[completion-check]", reason)
-
-    def test_explanatory_final_response_does_not_require_completion_check(self) -> None:
-        reason = v.validate_completion_text(
-            "Here is what happened: the hook treated a routine answer as closure.",
-            require_completion_check=False,
-        )
-
-        self.assertIsNone(reason)
+        for text in ("Just a neutral sentence about the weather.",
+                     "Here is what happened: the hook treated a routine answer as closure."):
+            with self.subTest(text=text):
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=False))
 
     def test_empty_text_returns_none(self) -> None:
         self.assertIsNone(v.validate_completion_text(""))
@@ -540,16 +537,6 @@ class ValidateCompletionResponseTest(unittest.TestCase):
         )
         self.assertIsNotNone(reason)
         self.assertIn("[completion-check]", reason)
-
-    def test_compact_form_without_acceptance_criteria_is_accepted(self) -> None:
-        # Compact form: no acceptance-criteria enumeration, but the claim-evidence-map still binds each claim to evidence and a verdict.
-        text = VALID_TEXT.replace(
-            "  - C1: validator enforces the completion contract [source: user-said]\n"
-            "  - C2: stdlib only [source: user-said]\n",
-            "  - <criterion-id>: <placeholder>\n",
-        )
-        reason = v.validate_completion_text(text)
-        self.assertIsNone(reason)
 
     def test_multi_criterion_entry_with_known_ids_is_accepted(self) -> None:
         for value in ("C1,C2", "C1 C2", "C1; C2"):

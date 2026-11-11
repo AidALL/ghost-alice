@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import completion_assessment as core_api
 from claude_context_adapter import NativeContextRejected, SignedPrefixSelectionUnsupported, ToolInputSelectionUnsupported, claude_home
 import ledger_access
+from hook_definitions import SUPPORTED_PLATFORMS
 from native_transcript import (codex_home, codex_transcript_path, codex_session_owner,
     codex_item as _item, codex_input_text, is_codex_user_message)
 from source_reference import json_digest, matches_input, SourceReferenceError, reference_source, source_text, validate_source_reference, verify_source
@@ -899,7 +900,7 @@ def _select_claude_request(request, root, native_home, session, *, _inspect=None
 
 def _cross_scope_blocks(request, root, native_home, platform, session_id):
     """Authenticate overlapping current declarations without ordering scopes."""
-    if platform not in ('codex', 'claude') or not isinstance(request, dict):
+    if platform not in SUPPORTED_PLATFORMS or not isinstance(request, dict):
         return set(), set(), False, None
     session = request.get('prompt_cache_key') if platform == 'codex' else session_id
     if not isinstance(session, str) or not session:
@@ -1289,7 +1290,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True)
     parser.add_argument('--codex-dir', '--native-dir', dest='native_dir', required=True)
-    parser.add_argument('--platform', choices=('codex','claude'), default='codex')
+    parser.add_argument('--platform', choices=SUPPORTED_PLATFORMS[::-1], default='codex')
     parser.add_argument('--session-id')
     parser.add_argument('--expected-input-event-id')
     operation = parser.add_mutually_exclusive_group(required=True)

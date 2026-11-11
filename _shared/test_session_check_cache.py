@@ -133,10 +133,8 @@ class SessionCheckReuseTest(unittest.TestCase):
                 result = load_instruction(root, "codex", "a", skill, body_retained=False)
             self.assertEqual(result["body"], "new body")
 
-    def test_continuously_changing_target_returns_no_result_or_clean_receipt(self):
+    def test_continuously_changing_target_raises_unstable_check(self):
         import session_check_cache as cache
-        import pending_merge_precheck_hook as hook
-        import io
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             target = root / "manifest.json"
@@ -146,19 +144,6 @@ class SessionCheckReuseTest(unittest.TestCase):
                 return {"undecided_count": 0}
             with self.assertRaises(cache.UnstableCheckTarget):
                 cache.observe_check(root, "codex", "a", "merge", target, check)
-            output = io.StringIO()
-            with mock.patch.object(hook, "observe_check", side_effect=cache.UnstableCheckTarget("keep changing")), \
-                 mock.patch.object(sys, "argv", ["hook", "--root", str(root), "--platform", "codex", "--format", "json"]), \
-                 mock.patch.object(hook, "_read_hook_input", return_value={}), \
-                 mock.patch.object(sys, "stdout", output):
-                self.assertEqual(hook.main(), 0)
-            # The check did not finish: the hook says so and leaves the host's flow alone.
-            body = json.loads(output.getvalue())
-            self.assertNotIn("decision", body)
-            self.assertIs(body.get("continue"), True)
-            self.assertIn("did not finish", body.get("systemMessage", ""))
-            self.assertNotIn("clean", body.get("systemMessage", ""))
-            self.assertNotIn("ghostAlicePendingMergeCheck", output.getvalue())
 
     def test_unstable_check_informs_the_user_on_both_hosts_and_formats(self):
         import session_check_cache as cache
@@ -242,6 +227,10 @@ class SessionCheckReuseTest(unittest.TestCase):
                             self.assertNotIn('"decision"', output)
                             if outcome == "reused":
                                 self.assertIn("session check reused", output)
+                        if outcome == "unstable":
+                            self.assertIn("did not finish", output)
+                            self.assertNotIn("clean", output)
+                            self.assertNotIn("ghostAlicePendingMergeCheck", output)
 
     def test_mutation_during_check_retries_and_never_returns_the_old_value(self):
         from session_check_cache import observe_check
@@ -315,6 +304,7 @@ class SessionCheckReuseTest(unittest.TestCase):
                 self.assertNotIn("LONG WORKFLOW", json.dumps(body))
             checked = first["ghostAlicePendingMergeCheck"]
             self.assertEqual((checked["platform"], checked["undecided_count"], checked["status"]), ("codex", 1, "checked"))
+            self.assertIn("1 undecided", first["systemMessage"])
             reused = second["ghostAlicePendingMergeCheck"]
             self.assertEqual((reused["status"], reused["checked_at"]), ("reused", checked["checked_at"]))
             self.assertNotIn("Surface merge-companion first", second["systemMessage"])
@@ -329,28 +319,6 @@ class SessionCheckReuseTest(unittest.TestCase):
             changed = run()
             self.assertEqual(changed["ghostAlicePendingMergeCheck"]["status"], "checked")
             self.assertEqual(changed["ghostAlicePendingMergeCheck"]["undecided_count"], 0)
-
-    def test_next_session_start_reports_a_manifest_change(self):
-        with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
-            manifest = home / ".ghost-alice/pending-merges/codex/manifest.json"
-            manifest.parent.mkdir(parents=True)
-            manifest.write_text(json.dumps({"entries": []}))
-            env = dict(os.environ)
-            env.update({"HOME": directory, "CODEX_THREAD_ID": "session-new", "GHOST_ALICE_SESSION_ID": "session-new"})
-            base = [sys.executable, str(Path(__file__).with_name("pending_merge_precheck_hook.py")), "--root", str(home / "ledger"), "--platform", "codex", "--format", "json"]
-            def run():
-                return json.loads(subprocess.run(base, input='{}', text=True, capture_output=True, env=env, check=True).stdout)
-            run()
-            # Another installer run backs up a modified skill during the session.
-            manifest.write_text(json.dumps({"entries": [{"decided": False}]}))
-            # merge-companion re-checks the manifest itself (merge-companion/SKILL.md); the next
-            # session start reports the change.
-            compacted = run()
-            self.assertNotIn("hookSpecificOutput", compacted)
-            checked = compacted["ghostAlicePendingMergeCheck"]
-            self.assertEqual((checked["undecided_count"], checked["status"]), (1, "checked"))
-            self.assertIn("1 undecided", compacted["systemMessage"])
 
     def test_removed_input_check_options_end_without_a_check(self):
         # A 0.5.1 input registration still passes the removed options; the installer removes that registration.

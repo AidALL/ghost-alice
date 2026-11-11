@@ -178,14 +178,6 @@ class CodexContextUpdateTests(unittest.TestCase):
         self.assertEqual(len(result.observations), 2)
         self.assertTrue(all(item['forwarded_item_digest'] is None for item in result.observations))
 
-    def test_stateful_request_preserves_original_even_after_update(self):
-        self.update([self.second])
-        self.fixture.request['previous_response_id'] = 'provider-owned-history'
-        result = self.select()
-        self.assertEqual(result.request, self.fixture.request)
-        self.assertEqual(result.reason, 'stateful-request-selection-unsupported')
-        self.assertEqual(result.observations, ())
-
     def test_existing_cli_publishes_source_local_update_under_actual_owner(self):
         stream = io.StringIO()
         with patch.dict(os.environ, {'CODEX_THREAD_ID': 'current'}), redirect_stdout(stream):

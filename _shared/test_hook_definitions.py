@@ -110,6 +110,17 @@ class LayerRuleTests(unittest.TestCase):
 
 
 class HookNameTests(unittest.TestCase):
+    def test_platform_reader_normalizes_supported_names_and_handles_invalid_values(self):
+        for supplied, expected in (("claude", "claude"), (" CoDeX ", "codex")):
+            with self.subTest(platform=supplied):
+                self.assertEqual(hook_definitions.read_platform(supplied), expected)
+                self.assertEqual(hook_definitions.read_platform(supplied, reject_unknown=True), expected)
+        for supplied in (None, "", " ", "future-host", "../claude", 1, {"name": "claude"}):
+            with self.subTest(platform=supplied):
+                self.assertEqual(hook_definitions.read_platform(supplied), "unknown")
+                with self.assertRaises(ValueError):
+                    hook_definitions.read_platform(supplied, reject_unknown=True)
+
     def test_normalize_hook_id_lowercases_and_keeps_the_last_namespace_part(self):
         self.assertEqual(hook_profile_gate_free_normalize("Session_Intent"), "session-intent")
         self.assertEqual(hook_profile_gate_free_normalize("addon:demo:Stop Hook"), "stop-hook")

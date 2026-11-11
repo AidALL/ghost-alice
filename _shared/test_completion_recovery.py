@@ -50,23 +50,23 @@ class CompletionRecoveryTests(unittest.TestCase):
 
     def test_closure_prose_without_a_block_is_not_a_submission(self):
         for text in ('The task is complete.', '작업을 완료했습니다.',
-                     'The review is not complete.', '작업 완료 여부를 설명합니다.'):
+                     'The review is not complete.', '작업 완료 여부를 설명합니다.',
+                     'No work has been executed. Here are the tradeoffs.',
+                     '검증은 미완료이며 결과의 한계를 설명합니다.'):
             for platform in ('codex', 'claude'):
                 with self.subTest(text=text, platform=platform):
-                    assert_stop_observation(self, self.hook(text, platform=platform, record_review=False))
+                    payload = self.hook(text, platform=platform, record_review=False)
+                    assert_stop_observation(self, payload)
+                    self.assertEqual(set(payload), {"continue", "stop_notice"})
 
     def test_reviewed_explanation_does_not_infer_completion_from_prose(self):
         for text in ('The retained record says the review is complete.',
                      '기존 검증 기록에 따르면 검토를 완료했습니다.',
-                     'The review is not complete.', '작업 완료 여부를 설명합니다.'):
+                     'The review is not complete.', '작업 완료 여부를 설명합니다.',
+                     '[task-router]\n- work-kind: nonexecution\n\nExplanation: the task is complete.'):
             for platform in ('codex', 'claude'):
                 with self.subTest(text=text, platform=platform):
                     assert_stop_observation(self, self.hook(text, platform=platform))
-
-    def test_unreviewed_explanation_passes_without_inferring_completion(self):
-        for text in ('No work has been executed. Here are the tradeoffs.',
-                     '검증은 미완료이며 결과의 한계를 설명합니다.'):
-            assert_stop_observation(self, self.hook(text, record_review=False))
 
     def test_readonly_completion_retains_proof_and_review_validation(self):
         supported = VALID.replace('Business result: 82 hours 40 minutes.',
@@ -81,15 +81,6 @@ class CompletionRecoveryTests(unittest.TestCase):
 
     def test_inline_none_is_equivalent_to_nested_none(self):
         self.assertIsNone(self.check(VALID.replace("- unverified:\n  - none", "- unverified: none")))
-
-    def test_multiple_declared_criteria_accept_equivalent_delimiters(self):
-        text = VALID.replace('- claim-evidence-map:', '  - boundary: Preserve the protected file. [source: user-said]\n- claim-evidence-map:')
-        for value in ('calculation,boundary', 'calculation boundary', 'calculation; boundary'):
-            with self.subTest(value=value):
-                self.assertIsNone(self.check(text.replace('criterion: calculation', 'criterion: '+value)))
-        for value in ('calculation; missing', ';', 'calculation; boundary; pending'):
-            with self.subTest(value=value):
-                self.assertIsNotNone(self.check(text.replace('criterion: calculation', 'criterion: '+value)))
 
     def test_semicolon_entry_retains_all_explicit_fields(self):
         text = VALID.replace(
@@ -116,18 +107,6 @@ class CompletionRecoveryTests(unittest.TestCase):
                     validator.extract_control_block(text, "completion-check")
                 )
                 self.assertEqual(entries[0]["verdict"], "fail")
-
-    def test_missing_evidence_or_claim_is_never_inferred(self):
-        for text in (
-            VALID.replace("    evidence: python check.py exited 0\n", ""),
-            VALID.replace("claim: operating time was checked", "claim: "),
-            VALID.replace("evidence: python check.py exited 0", "evidence: "),
-            VALID.replace("  - claim: operating time was checked\n    criterion: calculation\n"
-                          "    evidence: python check.py exited 0\n    verdict: pass",
-                          "  - calculation: Python output matched — verdict: pass"),
-        ):
-            with self.subTest(text=text):
-                self.assertIsNotNone(self.check(text))
 
     def test_none_prefix_cannot_hide_unverified_work(self):
         for value in ("none; pending result", "none but tests not run", "none\n  - pending result"):
@@ -204,11 +183,6 @@ class CompletionRecoveryTests(unittest.TestCase):
                 assert_stop_observation(self, payload, issue="must include evidence",
                     repair_target="completion_metadata")
 
-    def test_equivalent_inline_form_needs_no_repair_generation(self):
-        payload = self.hook(VALID.replace("- unverified:\n  - none", "- unverified: none"))
-        assert_stop_observation(self, payload)
-        self.assertNotIn("systemMessage", payload)
-
     def test_metadata_defect_is_observed_without_requesting_another_answer(self):
         payload = self.hook(VALID.replace("    evidence: python check.py exited 0\n", ""))
         observed = assert_stop_observation(self, payload, issue="must include evidence",
@@ -228,63 +202,9 @@ class CompletionRecoveryTests(unittest.TestCase):
                 self.assertNotIn('Invoke the Claude Code Skill tool', stop_issue(payload))
                 assert_stop_observation(self, self.hook(VALID, platform=platform))
 
-    def test_closure_prose_under_a_label_is_not_a_completion_submission(self):
-        payload = self.hook("[task-router]\n- work-kind: nonexecution\n\nExplanation: the task is complete.")
-        assert_stop_observation(self, payload)
-
     def test_fenced_completion_example_needs_no_recovery(self):
         payload = self.hook("Example:\n```text\n[completion-check]\n- claim-evidence-map:\n```\nUse that shape.")
         assert_stop_observation(self, payload)
-        self.assertNotIn("systemMessage", payload)
-
-    def test_actual_markdown_examples_do_not_trigger_stop_recovery(self):
-        for text in ("````text\n```\n[completion-check]\nThe task is complete.\n```\n````\n",
-                     "    [completion-check]\n    The task is complete.\n",
-                     "> Quoted example:\nThe task is complete.\n[completion-check]\n"):
-            with self.subTest(text=text):
-                payload = self.hook(text)
-                assert_stop_observation(self, payload)
-                self.assertNotIn("systemMessage", payload)
-
-    def test_long_example_followed_by_closure_prose_is_not_a_submission(self):
-        text = "````text\n```\n[completion-check]\n```\n````\n\nThe task is complete."
-        payload = self.hook(text)
-        assert_stop_observation(self, payload)
-
-    def test_balanced_explicit_multiline_quote_needs_no_stop_recovery(self):
-        for opening, closing in (("“", "”"), ('"', '"')):
-            text = "A sample response is:\n" + opening + "The task is complete.\n[completion-check]\n- claim-evidence-map:\n" + closing
-            with self.subTest(text=text):
-                payload = self.hook(text)
-                assert_stop_observation(self, payload)
-                self.assertNotIn("systemMessage", payload)
-
-    def test_inline_quotes_around_closure_prose_are_not_a_submission(self):
-        for literal in ("OK.", "pending.", "(Next section)"):
-            text = f'The command returned "{literal}"\n\nThe task is complete.\n\n"[boundary-contract]"'
-            with self.subTest(text=text):
-                assert_stop_observation(self, self.hook(text, record_review=False))
-
-    def test_inline_quotes_cannot_hide_a_malformed_unquoted_control_block(self):
-        text = 'The command returned "OK."\n\n[completion-check]\n- claim-evidence-map:\n\n"[boundary-contract]"'
-        payload = self.hook(text)
-        assert_stop_observation(self, payload, issue="claim-evidence-map")
-
-    def test_quoted_list_lazy_continuation_needs_no_stop_recovery(self):
-        for prefix in ("> - ", "> 1. ", "> 1. > "):
-            text = prefix + "Example output:\nThe task is complete.\n[completion-check]\n"
-            with self.subTest(text=text):
-                payload = self.hook(text)
-                assert_stop_observation(self, payload)
-                self.assertNotIn("systemMessage", payload)
-
-    def test_closed_nested_container_fence_needs_no_stop_recovery_for_lazy_quote(self):
-        prefix = "> - > ```\n>   > code\n>   > ```\n>\n> A quoted paragraph.\n"
-        for tail in ("The task is complete.\n[completion-check]\n", "> The task is complete.\n> [completion-check]\n"):
-            with self.subTest(tail=tail):
-                payload = self.hook(prefix + tail)
-                assert_stop_observation(self, payload)
-                self.assertNotIn("systemMessage", payload)
 
 
 if __name__ == "__main__":

@@ -352,22 +352,16 @@ class ContextLifecycleTests(unittest.TestCase):
             self.record([dict(kind='message', record=2, block_index=0,
                               summary='Current request', next_need='None')])
 
-    def test_semantic_publication_resolves_the_original_in_the_same_operation(self):
-        choice = {k: self.selection[k] for k in ('summary', 'next_need')}
-        choice.update(kind='output', locate_text='consumed navigation body')
+    def test_existing_material_uses_the_same_explicit_keep_or_replace_judgment(self):
+        choice = dict(kind='output', locate_text='consumed navigation body', disposition='replace',
+            summary='Navigation has served its purpose; source status is unresolved.',
+            next_need='Retrieve when the source decision changes')
         receipt = self.record([choice])
         self.assertEqual(receipt['selected_count'], 1)
         forwarded, changes = self.select()
         self.assertEqual(len(changes), 1)
         self.assertNotIn('consumed navigation body', json.dumps(forwarded))
         self.assertIn('required long source', json.dumps(forwarded))
-
-    def test_existing_material_uses_the_same_explicit_keep_or_replace_judgment(self):
-        choice = dict(kind='output', locate_text='consumed navigation body', disposition='replace',
-            summary='Navigation has served its purpose; source status is unresolved.',
-            next_need='Retrieve when the source decision changes')
-        self.record([choice])
-        self.assertNotIn('consumed navigation body', json.dumps(self.select()[0]))
         self.record([dict(choice, disposition='keep')])
         self.assertEqual(self.select()[0], self.request)
 
@@ -1123,16 +1117,6 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
         self.assertTrue(all(o['disposition'] == 'omit' for o in result.observations))
         self.assertNotIn(self.choice['summary'], json.dumps(result.request))
         self.assertEqual(self.log.read_bytes(), before)
-        for thinking in (None, {'type':'enabled'}):
-            request = self.request()
-            if thinking is None:
-                request.pop('thinking')
-            else:
-                request['thinking'] = thinking
-            result = self.select(request)
-            self.assertEqual(result.request, request)
-            self.assertEqual(result.reason, 'signed-prefix-selection-unsupported')
-            self.assertEqual(result.observations, ())
 
     def test_existing_output_coordinates_replace_only_selected_native_block(self):
         before = self.log.read_bytes()
@@ -1350,22 +1334,17 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
 
     def test_thinking_enabled_initial_request_preserves_manual_output_selection(self):
         self.record()
-        for kind in ('enabled', 'adaptive', 'between_tools'):
+        for kind in (None, 'enabled', 'adaptive', 'between_tools'):
             with self.subTest(kind=kind):
-                request = dict(self.request(), thinking={'type': kind})
+                request = self.request()
+                if kind is None:
+                    del request['thinking']
+                else:
+                    request['thinking'] = {'type': kind}
                 result = self.select(request)
                 self.assertEqual((result.state, result.reason), ('preserved', 'signed-prefix-selection-unsupported'))
                 self.assertEqual(result.request, request)
                 self.assertEqual(result.observations, ())
-
-    def test_missing_thinking_on_initial_request_preserves_manual_output_selection(self):
-        self.record()
-        request = self.request()
-        del request['thinking']
-        result = self.select(request)
-        self.assertEqual((result.state, result.reason), ('preserved', 'signed-prefix-selection-unsupported'))
-        self.assertEqual(result.request, request)
-        self.assertEqual(result.observations, ())
 
     def test_signed_prefix_with_keep_empty_or_missing_selection_retains_plain_preserved_reason(self):
         self.rows.insert(4, self.row('assistant', [copy.deepcopy(self.thinking)]))

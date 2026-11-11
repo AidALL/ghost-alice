@@ -17,6 +17,8 @@ import time
 import unittest
 from unittest.mock import patch
 
+from test_session_intent_ledger import authority_dump
+
 
 MODULE = Path(__file__).with_name("session_intent_ledger.py")
 
@@ -81,11 +83,7 @@ class TransactionTests(unittest.TestCase):
                                    (json.dumps(state), "codex", "session-a"))
 
     def database_dump(self):
-        connection = sqlite3.connect(self.ledger.storage_database_path(self.root).as_uri() + "?mode=ro", uri=True)
-        try:
-            return connection.execute("PRAGMA user_version").fetchone(), tuple(connection.iterdump())
-        finally:
-            connection.close()
+        return authority_dump(self.ledger, self.root)
 
     def database_payload(self):
         with closing(sqlite3.connect(self.ledger.storage_database_path(self.root))) as connection:

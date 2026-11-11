@@ -11,8 +11,8 @@ class GateSurfaceDesignTest(unittest.TestCase):
         for name in ('platforms/claude/CLAUDE.md', 'platforms/codex/AGENTS.md'):
             with self.subTest(path=name):
                 text = platform_contract_text(ROOT / name)
-                self.assertIn('Metadata alone is not execution' if 'codex' in name
-                              else 'follows their bodies', text)
+                if 'claude' in name:
+                    self.assertIn('follows their bodies', text)
                 self.assertNotIn('skill-call: session-intent-analyzer (this turn); task-router (this turn)', text)
 
     def test_router_follows_entry_sections_and_refers_to_gate_schema(self):

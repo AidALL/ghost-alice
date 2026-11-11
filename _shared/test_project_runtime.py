@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import os
 import shutil
@@ -15,27 +14,14 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import project_runtime
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = Path(__file__).with_name("project_runtime.py")
 TEMP_KEYS = ("TEMP", "TMP", "TMPDIR")
 
 
-def load_project_runtime():
-    if not MODULE_PATH.is_file():
-        return None
-    return importlib.import_module("project_runtime")
-
-
-class ProjectRuntimePresenceTest(unittest.TestCase):
-    def test_shared_project_runtime_module_exists(self):
-        self.assertIsNotNone(load_project_runtime())
-
-
 class ProjectRuntimeTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.runtime = load_project_runtime()
+    runtime = project_runtime
 
     def setUp(self):
         self.repo = REPO_ROOT / ".tmp" / "test-project-runtime" / uuid.uuid4().hex

@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import importlib
 import io
 import json
 import os
@@ -16,16 +15,10 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fresh_agent_session
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = Path(__file__).with_name("fresh_agent_session.py")
 FORBIDDEN_SESSION_FLAGS = {"--resume", "--continue", "--session-id"}
-
-
-def load_fresh_agent_session():
-    if not MODULE_PATH.is_file():
-        return None
-    return importlib.import_module("fresh_agent_session")
 
 
 def claude_stream(final_text: str) -> str:
@@ -54,12 +47,9 @@ def claude_stream(final_text: str) -> str:
     return "\n".join(json.dumps(event) for event in events) + "\n"
 
 
-class FreshAgentSessionPresenceTest(unittest.TestCase):
-    def test_fresh_agent_session_module_exists(self):
-        self.assertIsNotNone(load_fresh_agent_session())
-
-
 class FreshAgentSessionTest(unittest.TestCase):
+    session = fresh_agent_session
+
     def test_unknown_host_cannot_start_a_fresh_agent(self):
         with self.assertRaisesRegex(ValueError, 'platform must be claude or codex'):
             self.session.run_fresh_agent_session(platform='unknown-host', prompt='A valid prompt')
@@ -79,10 +69,6 @@ class FreshAgentSessionTest(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(stdout.getvalue(), '')
         self.assertEqual(stderr.getvalue(), '[fresh-agent-session] PowerShell runtime is unavailable\n')
-
-    @classmethod
-    def setUpClass(cls):
-        cls.session = load_fresh_agent_session()
 
     def setUp(self):
         self.fixture = (

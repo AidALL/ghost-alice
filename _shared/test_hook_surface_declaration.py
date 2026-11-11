@@ -25,6 +25,7 @@ import hook_profile_gate
 import install_hooks
 import pending_merge_precheck_hook
 import session_intent_analyzer_hook
+from test_session_intent_analyzer_hook import receipt_from
 
 KEY = "ghostAliceSurface"
 CONTEXT = "session-intent-analyzer: model context stays exactly as written. Never persist secrets."
@@ -166,8 +167,7 @@ class HooksDeclareOnlyRoutineStateTests(unittest.TestCase):
         self.assertNotIn("systemMessage", payload)
         self.assertNotIn(KEY, payload)
         context = payload["hookSpecificOutput"]["additionalContext"]
-        receipt = json.loads(context.split("[session-intent-receipt]\n", 1)[1]
-                             .split("\n[/session-intent-receipt]", 1)[0])
+        receipt = receipt_from(context)
         self.assertEqual(receipt["intake_status"], "observed")
         self.assertEqual(receipt["session_id"], "s-installed-surface")
         self.assertEqual(Path(receipt["ledger_root"]), Path(destination.ledger_root).resolve())
