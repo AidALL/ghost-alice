@@ -1,5 +1,6 @@
 import importlib.util
 import inspect
+import os
 import sys
 import tempfile
 import unittest
@@ -24,12 +25,122 @@ def _load_global_rule_blocks():
 
 
 class GlobalRuleBlockTest(unittest.TestCase):
+    def test_repeated_proposal_reuses_identical_file_without_rewriting_it(self):
+        blocks = _load_global_rule_blocks()
+        for apply, marker, render in (
+                (blocks.apply_claude_bootstrap, blocks.CLAUDE_BOOTSTRAP_MARKER, blocks.render_claude_bootstrap),
+                (blocks.apply_codex_bootstrap, blocks.CODEX_BOOTSTRAP_MARKER, blocks.render_codex_bootstrap)):
+            with self.subTest(apply=apply.__name__), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source, dest = root / "source.md", root / "rules.md"
+                source_body = marker + "\n\nmanaged rules\n"
+                source.write_text(source_body, encoding="utf-8")
+                dest.write_bytes(b"personal rules\n")
+
+                first = apply(source, dest)
+                before = first.path.stat()
+                paths = set(root.iterdir())
+                again = apply(source, dest)
+
+                self.assertEqual((again.status, again.path), ("proposed", first.path))
+                self.assertEqual(again.path.read_bytes(), render(source_body).replace("\n", os.linesep).encode("utf-8"))
+                after = again.path.stat()
+                self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
+                self.assertEqual(set(root.iterdir()), paths)
+                self.assertEqual(dest.read_bytes(), b"personal rules\n")
+
+    def test_existing_suffixed_proposal_is_reused_with_or_without_base_file(self):
+        blocks = _load_global_rule_blocks()
+        for apply, marker in ((blocks.apply_claude_bootstrap, blocks.CLAUDE_BOOTSTRAP_MARKER),
+                              (blocks.apply_codex_bootstrap, blocks.CODEX_BOOTSTRAP_MARKER)):
+            for base_exists in (False, True):
+                with self.subTest(apply=apply.__name__, base_exists=base_exists), tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    source, dest = root / "source.md", root / "rules.md"
+                    proposed = root / "custom[proposal]"
+                    source.write_text(marker + "\n\nmanaged rules\n", encoding="utf-8")
+                    dest.write_bytes(b"personal rules\n")
+                    first = apply(source, dest, proposed_path=proposed)
+                    saved = proposed.with_name(proposed.name + ".saved")
+                    first.path.rename(saved)
+                    if base_exists:
+                        proposed.write_bytes(b"older proposal\n")
+                    conflict = proposed.with_name(proposed.name + ".conflict")
+                    conflict.write_bytes(b"\xffpersonal proposal\n")
+                    link = proposed.with_name(proposed.name + ".link")
+                    link.symlink_to(saved)
+                    unrelated = proposed.with_name(proposed.name + "-unrelated")
+                    unrelated.write_bytes(saved.read_bytes())
+                    before = saved.stat()
+                    paths = set(root.iterdir())
+
+                    result = apply(source, dest, proposed_path=proposed)
+
+                    self.assertEqual((result.status, result.path), ("proposed", saved))
+                    after = saved.stat()
+                    self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
+                    self.assertEqual(set(root.iterdir()), paths)
+                    self.assertEqual(conflict.read_bytes(), b"\xffpersonal proposal\n")
+                    self.assertEqual(link.readlink(), saved)
+                    self.assertEqual(dest.read_bytes(), b"personal rules\n")
+                    if base_exists:
+                        self.assertEqual(proposed.read_bytes(), b"older proposal\n")
+
+    def test_changed_source_creates_new_proposal_and_reuses_each_version(self):
+        blocks = _load_global_rule_blocks()
+        for apply, marker in ((blocks.apply_claude_bootstrap, blocks.CLAUDE_BOOTSTRAP_MARKER),
+                              (blocks.apply_codex_bootstrap, blocks.CODEX_BOOTSTRAP_MARKER)):
+            with self.subTest(apply=apply.__name__), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source, dest = root / "source.md", root / "rules.md"
+                source.write_text(marker + "\n\nmanaged v1\n", encoding="utf-8")
+                dest.write_bytes(b"personal rules\n")
+                first = apply(source, dest)
+                original = first.path.read_bytes()
+
+                source.write_text(marker + "\n\nmanaged v2\n", encoding="utf-8")
+                second = apply(source, dest)
+                self.assertNotEqual(second.path, first.path)
+                self.assertIn(b"managed v2", second.path.read_bytes())
+                self.assertEqual(first.path.read_bytes(), original)
+                self.assertEqual(apply(source, dest).path, second.path)
+
+                source.write_text(marker + "\n\nmanaged v1\n", encoding="utf-8")
+                self.assertEqual(apply(source, dest).path, first.path)
+                self.assertEqual(dest.read_bytes(), b"personal rules\n")
+
+    def test_edited_proposals_are_preserved_and_not_reused(self):
+        blocks = _load_global_rule_blocks()
+        for apply, marker in ((blocks.apply_claude_bootstrap, blocks.CLAUDE_BOOTSTRAP_MARKER),
+                              (blocks.apply_codex_bootstrap, blocks.CODEX_BOOTSTRAP_MARKER)):
+            with self.subTest(apply=apply.__name__), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source, dest = root / "source.md", root / "rules.md"
+                source.write_text(marker + "\n\nmanaged rules\n", encoding="utf-8")
+                dest.write_bytes(b"personal rules\n")
+                first = apply(source, dest)
+                first.path.write_bytes(b"edited base proposal\n")
+                second = apply(source, dest)
+                second.path.write_bytes(b"edited suffixed proposal\n")
+
+                third = apply(source, dest)
+
+                self.assertNotIn(third.path, (first.path, second.path))
+                self.assertIn(b"managed rules", third.path.read_bytes())
+                self.assertEqual(first.path.read_bytes(), b"edited base proposal\n")
+                self.assertEqual(second.path.read_bytes(), b"edited suffixed proposal\n")
+                self.assertEqual(apply(source, dest).path, third.path)
+                self.assertEqual(dest.read_bytes(), b"personal rules\n")
+
     def test_proposal_creation_preserves_existing_user_files_and_links(self):
         blocks = _load_global_rule_blocks()
         for apply, marker in ((blocks.apply_claude_bootstrap, blocks.CLAUDE_BOOTSTRAP_MARKER),
                               (blocks.apply_codex_bootstrap, blocks.CODEX_BOOTSTRAP_MARKER)):
             for existing_rules in (b"user rules\n", b"\xffuser rules\n"):
-                for proposal_kind in ("file", "link", "dangling-link"):
+                kinds = ["file", "non-utf8", "directory", "link", "matching-link", "dangling-link"]
+                if hasattr(os, "mkfifo"):
+                    kinds.append("fifo")
+                for proposal_kind in kinds:
                     with self.subTest(apply=apply.__name__, rules=existing_rules, proposal_kind=proposal_kind):
                         with tempfile.TemporaryDirectory() as tmp:
                             root = Path(tmp)
@@ -40,9 +151,17 @@ class GlobalRuleBlockTest(unittest.TestCase):
                             dest.write_bytes(existing_rules)
                             if proposal_kind == "file":
                                 proposed.write_bytes(b"personal proposal\n")
+                            elif proposal_kind == "non-utf8":
+                                proposed.write_bytes(b"\xffpersonal proposal\n")
+                            elif proposal_kind == "directory":
+                                proposed.mkdir()
+                            elif proposal_kind == "fifo":
+                                os.mkfifo(proposed)
                             else:
                                 if proposal_kind == "link":
                                     target.write_bytes(b"personal target\n")
+                                elif proposal_kind == "matching-link":
+                                    apply(source, dest, proposed_path=target)
                                 proposed.symlink_to(target)
                             before = proposed.lstat()
                             result = apply(source, dest)
@@ -51,15 +170,20 @@ class GlobalRuleBlockTest(unittest.TestCase):
                             self.assertIn("managed rules", result.path.read_text())
                             again = apply(source, dest)
                             self.assertEqual(again.status, "proposed")
+                            self.assertEqual(again.path, result.path)
                             self.assertEqual(dest.read_bytes(), existing_rules)
                             after = proposed.lstat()
                             self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
                             if proposal_kind == "file":
                                 self.assertEqual(proposed.read_bytes(), b"personal proposal\n")
-                            else:
+                            elif proposal_kind == "non-utf8":
+                                self.assertEqual(proposed.read_bytes(), b"\xffpersonal proposal\n")
+                            elif "link" in proposal_kind:
                                 self.assertEqual(proposed.readlink(), target)
                                 if proposal_kind == "link":
                                     self.assertEqual(target.read_bytes(), b"personal target\n")
+                                elif proposal_kind == "matching-link":
+                                    self.assertEqual(target.read_bytes(), result.path.read_bytes())
                                 else:
                                     self.assertFalse(target.exists())
 

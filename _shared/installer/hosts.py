@@ -83,7 +83,7 @@ def ensure_claude_bootstrap(ctx: "Context") -> bool:
     return _merge_block(["claude-merge", "--source", str(claude_bootstrap_source()),
                          "--dest", str(rules), "--proposed", f"{rules}.ghost-alice-proposed"],
                         "Claude CLAUDE.md block merge failed; aborting install",
-                        "Claude CLAUDE.md has no Ghost-ALICE block; wrote proposed file instead",
+                        "Claude CLAUDE.md has no Ghost-ALICE block; proposed file available",
                         "Claude CLAUDE.md bootstrap block updated")
 
 
@@ -96,7 +96,7 @@ def ensure_codex_bootstrap(ctx: "Context") -> bool:
                          "--loader", str(codex_loader_source()),
                          "--dest", str(agents), "--proposed", f"{agents}.ghost-alice-proposed"],
                         "Codex AGENTS.md block merge failed; aborting install",
-                        "Codex AGENTS.md has no Ghost-ALICE block; wrote proposed file instead",
+                        "Codex AGENTS.md has no Ghost-ALICE block; proposed file available",
                         "Codex AGENTS.md bootstrap block updated")
 
 

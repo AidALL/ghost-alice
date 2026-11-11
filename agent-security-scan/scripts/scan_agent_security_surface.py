@@ -11,7 +11,7 @@ import json
 import re
 import shlex
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -26,12 +26,6 @@ SECRET_PATTERNS = [
 EXTERNAL_FETCH_RE = re.compile(r"(?i)\b(curl|wget|fetch|httpie)\b[^\n]*https?://")
 URL_RE = re.compile(r"(?i)https?://")
 REMOTE_INSTRUCTION_RE = re.compile(r"(?i)\b(read|fetch|open|load|visit|download|retrieve)\b[^\n]{0,200}https?://")
-# Preserve quoting until command-list boundaries have been identified. This
-# covers simple commands, not substitutions, redirections, or shell control flow.
-SHELL_TOKEN_RE = re.compile(
-    r'''\#[^\n]*|(?:[^\s'"\\;&|]+|\\[\s\S]|'[^']*'|"(?:\\[\s\S]|[^"\\])*")+|[;&|]+|\n'''
-)
-
 CREDENTIAL_ACCESS_RE = re.compile(
     r"(?is)\b(print|reveal|dump|exfiltrate|read|cat|show)\b.{0,140}"
     r"\b(~/?\.ghost-alice/secrets\.env|secrets\.env|api\s+keys?|tokens?|passwords?|credentials?)\b"
@@ -113,21 +107,196 @@ def iter_command_strings(value: Any) -> Iterable[str]:
             yield from iter_command_strings(item)
 
 
+@dataclass
+class _ShellContext:
+    """The lexical and command-position state of one open shell region."""
+
+    closing: str = ""
+    expansions_only: bool = False
+    literal_text: bool = False
+    words: list[str] = field(default_factory=list)
+    word: list[str] = field(default_factory=list)
+    quote: str = ""
+    case_states: list[str] = field(default_factory=list)
+    loop_header: bool = False
+    at_start: bool = True
+    redirect: str = ""
+    heredocs: list[tuple[str, bool, bool]] = field(default_factory=list)
+
+    def finish_word(self) -> None:
+        raw = "".join(self.word)
+        self.word.clear()
+        if not raw or self.expansions_only:
+            return
+        try:
+            decoded = shlex.split(raw)
+        except ValueError:
+            return  # Malformed quoting supplies no reliable argv boundary.
+        if not decoded:
+            return
+        if self.redirect:
+            if self.redirect in {"<<", "<<-"}:
+                self.heredocs.append((decoded[0], any(c in raw for c in "'\"\\"), self.redirect == "<<-"))
+            self.redirect = ""
+            return
+        if self.loop_header:
+            if self.at_start and raw == "do":
+                self.loop_header = False
+            else:
+                self.at_start = False
+            return
+        if self.case_states and self.case_states[-1] != "body":
+            if raw == "esac":
+                self.case_states.pop()
+            elif raw == "in" and self.case_states[-1] == "header":
+                self.case_states[-1] = "pattern"
+            return
+        if not self.words:
+            if raw in {"if", "then", "elif", "else", "while", "until", "do", "!", "{", "fi", "done", "}"}:
+                return
+            if raw in {"for", "select"}:
+                self.loop_header = True
+                self.at_start = False
+                return
+            if raw == "case":
+                self.case_states.append("header")
+                return
+            if raw == "esac" and self.case_states:
+                self.case_states.pop()
+                return
+            if re.match(r"[A-Za-z_]\w*=", raw):
+                return
+        self.words.extend(decoded)
+        self.at_start = False
+
+    def finish_command(self) -> list[str]:
+        self.finish_word()
+        words, self.words = self.words, []
+        self.at_start = True
+        self.redirect = ""
+        return words
+
+
 def hook_command_vectors(command: str) -> Iterable[list[str]]:
-    """Yield simple-command argv without treating quoted separators as syntax."""
-    tokens: list[str] = []
-    for match in SHELL_TOKEN_RE.finditer(command):
-        token = match.group()
-        if token in {";", "&&", "||", "|", "&", "\n"}:
-            if tokens:
-                yield command_words(" ".join(tokens))
-                tokens = []
-        elif not token.startswith("#"):
-            if not tokens and re.match(r"[A-Za-z_]\w*=", token):
+    """Read static command positions, never evaluate expansions or run commands.
+
+    Nested regions keep their own quotes and grammar state. An explicit stack
+    makes case-pattern parentheses distinct from region endings without using
+    Python recursion. Heredoc bodies contribute only permitted substitutions.
+    """
+    sources = [(command, False)]
+    while sources:
+        text, heredoc_body = sources.pop()
+        contexts = [_ShellContext(expansions_only=heredoc_body, literal_text=heredoc_body)]
+        index = 0
+        while index < len(text):
+            context = contexts[-1]
+            char = text[index]
+            if context.closing and not context.quote and text.startswith(context.closing, index):
+                context.finish_word()
+                in_pattern = bool(context.case_states and context.case_states[-1] == "pattern")
+                if not in_pattern:
+                    if words := context.finish_command():
+                        yield words
+                    index += len(context.closing)
+                    contexts.pop()
+                    continue
+            if context.quote == "'":
+                context.word.append(char)
+                index += 1
+                if char == "'":
+                    context.quote = ""
                 continue
-            tokens.append(token)
-    if tokens:
-        yield command_words(" ".join(tokens))
+            if char == "\\" and index + 1 < len(text):
+                if text[index + 1] != "\n":
+                    context.word.append(text[index:index + 2])
+                index += 2
+                continue
+            if text.startswith("$((", index):
+                context.word.append("$()")
+                contexts.append(_ShellContext(closing="))", expansions_only=True))
+                index += 3
+                continue
+            if (text.startswith("$(", index)
+                    or (not context.quote and not context.literal_text and text[index:index + 2] in {"<(", ">("})):
+                context.word.append("$()")
+                contexts.append(_ShellContext(closing=")"))
+                index += 2
+                continue
+            if char == "`":
+                context.word.append("$()")
+                contexts.append(_ShellContext(closing="`"))
+                index += 1
+                continue
+            if context.literal_text:
+                index += 1
+                continue
+            if char == '"' or (char == "'" and not context.quote):
+                context.quote = "" if context.quote == char else char
+                context.word.append(char)
+                index += 1
+                continue
+            if context.quote:
+                context.word.append(char)
+                index += 1
+                continue
+            if char == "#" and not context.word and not context.expansions_only:
+                newline = text.find("\n", index)
+                index = len(text) if newline < 0 else newline
+                continue
+            if char in " \t\r\n":
+                context.finish_word()
+                index += 1
+                if char == "\n":
+                    if words := context.finish_command():
+                        yield words
+                    for delimiter, literal, strip_tabs in context.heredocs:
+                        body: list[str] = []
+                        while index < len(text):
+                            end = text.find("\n", index)
+                            end = len(text) if end < 0 else end + 1
+                            line = text[index:end]
+                            index = end
+                            compared = line.lstrip("\t") if strip_tabs else line
+                            if compared.rstrip("\r\n") == delimiter:
+                                break
+                            body.append(line)
+                        if not literal:
+                            sources.append(("".join(body), True))
+                    context.heredocs.clear()
+                continue
+            if char in "<>&;|()":
+                if char in "<>" and "".join(context.word).isdigit():
+                    context.word.clear()  # Adjacent digits name the redirection's file descriptor.
+                context.finish_word()
+                in_pattern = bool(context.case_states and context.case_states[-1] == "pattern")
+                operator = next((op for op in (";;&", "<<-", "<<<", "&&", "||", ";;", ";&", "<<", ">>", "<&", ">&", "<>", ">|", "&>")
+                                 if text.startswith(op, index)), char)
+                if in_pattern:
+                    if operator == ")":
+                        context.case_states[-1] = "body"
+                    index += len(operator)
+                    continue
+                if operator in {"<", ">", "<<", "<<-", "<<<", ">>", "<&", ">&", "<>", ">|", "&>"}:
+                    context.redirect = operator
+                else:
+                    if words := context.finish_command():
+                        yield words
+                    if operator in {";;", ";&", ";;&"} and context.case_states:
+                        context.case_states[-1] = "pattern"
+                    if operator == "(":
+                        arithmetic = text.startswith("((", index)
+                        contexts.append(_ShellContext(closing="))" if arithmetic else ")",
+                                                      expansions_only=arithmetic or context.expansions_only))
+                        if arithmetic:
+                            index += 1
+                index += len(operator)
+                continue
+            context.word.append(char)
+            index += 1
+        for context in reversed(contexts):
+            if words := context.finish_command():
+                yield words
 
 
 def is_shell_command(command: str) -> bool:
@@ -341,11 +510,15 @@ def effective_argv(words: list[str]) -> tuple[str, list[str]]:
         'time': {'-f', '--format', '-o', '--output'},
         'stdbuf': {'-i', '--input', '-o', '--output', '-e', '--error'},
         'xargs': {'-a', '--arg-file', '-d', '--delimiter', '-E', '-I', '-L', '-n', '--max-args', '-P', '--max-procs', '-s', '--max-chars'},
+        'watch': {'-n', '--interval'},
     }
+    if command == 'busybox':
+        return effective_argv(normalized_args) if normalized_args and not normalized_args[0].startswith('-') else (command, normalized_args)
     if command in wrapper_values:
         if command == 'command' and any(arg in {'-v', '-V'} for arg in normalized_args):
             return command, normalized_args
         index = 0
+        watch_exec = False
         while index < len(normalized_args):
             arg = normalized_args[index]
             if arg == '--':
@@ -353,9 +526,29 @@ def effective_argv(words: list[str]) -> tuple[str, list[str]]:
                 break
             if not arg.startswith('-'):
                 break
+            if command == 'watch':
+                if arg in {'-h', '--help', '-v', '--version'}:
+                    return command, normalized_args
+                if arg == '--exec':
+                    watch_exec = True
+                if not arg.startswith('--'):
+                    consumes_next = False
+                    for offset, option in enumerate(arg[1:], start=1):
+                        if option in {'h', 'v'}:
+                            return command, normalized_args
+                        if option == 'x':
+                            watch_exec = True
+                        if option == 'n':
+                            consumes_next = offset == len(arg) - 1
+                            break
+                    index += 2 if consumes_next else 1
+                    continue
             index += 2 if arg in wrapper_values[command] else 1
         if command == 'timeout':
             index += 1  # timeout consumes a duration before the command.
+        if command == 'watch' and not watch_exec and index < len(normalized_args):
+            # watch's default mode reconstructs a shell command; -x executes argv.
+            return 'sh', ['-c', ' '.join(normalized_args[index:])]
         return effective_argv(normalized_args[index:]) if index < len(normalized_args) else (command, normalized_args)
     if command not in ENV_COMMANDS:
         return command, normalized_args

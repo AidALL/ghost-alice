@@ -185,6 +185,21 @@ def _apply_bootstrap(
         status, body = _merge_bootstrap_text(existing_text, source_text, spec)
     if status == "proposed":
         proposed.parent.mkdir(parents=True, exist_ok=True)
+        candidates = [proposed]
+        try:
+            candidates.extend(sorted(
+                path for path in proposed.parent.iterdir()
+                if path.name.startswith(proposed.name + ".")
+            ))
+        except OSError:
+            pass
+        proposal_bytes = body.replace("\n", os.linesep).encode("utf-8")
+        for candidate in candidates:
+            try:
+                if not candidate.is_symlink() and candidate.is_file() and candidate.read_bytes() == proposal_bytes:
+                    return ApplyResult(status, candidate)
+            except OSError:
+                continue
         try:
             with proposed.open("x", encoding="utf-8") as output:
                 output.write(body)
