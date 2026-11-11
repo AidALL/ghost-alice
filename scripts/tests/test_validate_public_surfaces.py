@@ -3,20 +3,17 @@ import re
 import subprocess
 import sys
 import tempfile
-import textwrap
 import unittest
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+from scripts.tests.test_check_prose_wrapping import write_text
+
 SCRIPT = REPO_ROOT / "scripts" / "validate_public_surfaces.py"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "skill-validation.yml"
 RUNNER = REPO_ROOT / "scripts" / "run_installer_compat_tests.py"
-
-
-def write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(textwrap.dedent(text).lstrip(), encoding="utf-8")
 
 
 class PublicSurfaceParityValidatorTest(unittest.TestCase):
@@ -196,9 +193,6 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
             self.assertTrue(set(label.split()) <= set(ids), label)
         self.assertIn('href="#main"', text)
         self.assertIn("main", ids)
-
-    def test_homepage_has_accessible_navigation_and_figure_references(self) -> None:
-        self.assert_accessible_homepage((REPO_ROOT / "index.html").read_text(encoding="utf-8"))
 
     def test_homepage_languages_share_navigation_and_accessible_structure(self) -> None:
         english = (REPO_ROOT / "index.html").read_text()

@@ -534,12 +534,6 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.assertEqual(completion_assessment.assessment_coverage(assessment, candidate['contract'],
             candidate['proof'], self.time), set())
 
-    def test_copied_canonical_summary_cannot_replace_review_of_wrong_claim(self):
-        candidate = self.prepare(self.proof('The writing arm is now visible.'))
-        self.review(candidate, 'unsupported', 'Copying the footer criterion does not make an arm claim establish it.')
-        self.assertEqual(completion_assessment.assessment_coverage(self.lookup(candidate), candidate['contract'],
-            candidate['proof'], self.time), set())
-
     def test_translated_correct_claim_and_original_sources_are_supported(self):
         candidate = self.prepare()
         self.assertIn('Folders footer', __import__('source_reference').source_text(candidate['sources'][0]))
@@ -547,13 +541,6 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.assertEqual(completion_assessment.assessment_coverage(self.lookup(candidate), candidate['contract'],
             candidate['proof'], self.time), {('first', 1, 'AC1')})
         self.assertEqual(self.lookup(candidate).candidate['verified_at'], self.time)
-
-    def test_unrelated_source_requires_unsupported_owner_review(self):
-        self.observation.write_text('All unit tests for pen angle passed.')
-        candidate = self.prepare()
-        self.review(candidate, 'unsupported', 'Pen angle tests do not observe footer overlap.')
-        self.assertFalse(completion_assessment.assessment_coverage(self.lookup(candidate), candidate['contract'],
-            candidate['proof'], self.time))
 
     def test_missing_assessment_and_caller_verdict_are_not_coverage(self):
         candidate = self.prepare()

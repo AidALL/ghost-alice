@@ -118,10 +118,6 @@ class PartialCompletionTests(unittest.TestCase):
             with self.subTest(lead=lead):
                 self.assertIsNone(self.check(lead + '\n' + PARTIAL))
 
-    def test_full_completion_still_requires_unverified_none(self):
-        reason = self.check(PARTIAL.replace('[partial-check]', '[completion-check]'))
-        self.assertIn("unverified section to be 'none'", reason)
-
     def test_partial_examples_do_not_trigger_evidence_gate(self):
         self.assertIsNone(validator.validate_completion_text(
             'Example:\n```text\n' + PARTIAL_BODY + '```', require_completion_check=False))

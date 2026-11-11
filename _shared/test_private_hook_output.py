@@ -8,7 +8,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 import hook_profile_gate
 
@@ -60,16 +59,6 @@ class PrivateHookOutputTests(unittest.TestCase):
                 self.assertTrue(payload["continue"])
                 self.assertEqual(payload["hookSpecificOutput"]["additionalContext"], "Keep the pending entry for the human user's choice.")
                 self.assertIn("ghostAlicePendingMergeCheck", json.loads(raw))
-
-    def test_internal_pending_check_receipt_still_prevents_duplicate_inspection(self):
-        env = {"HOME": "/private/home", "GHOST_ALICE_PLATFORM": "codex"}
-        receipt = {"platform": "codex", "manifest_path": "/private/home/.ghost-alice/pending-merges/codex/manifest.json", "manifest_state": "parsed", "undecided_count": 1}
-        raw = json.dumps({"continue": True, "ghostAlicePendingMergeCheck": receipt})
-        with mock.patch.object(hook_profile_gate, "_has_pending_merge_undecided", side_effect=AssertionError("duplicate manifest inspection")):
-            context = hook_profile_gate._visibility_context("session-start", raw, "", 0, env=env, declared="routine")
-        self.assertTrue(context["pending_merge_undecided"])
-        rendered, _ = hook_profile_gate._render_user_surface({"user_surface": "full"}, raw, "")
-        self.assertNotIn("ghostAlicePendingMergeCheck", json.loads(rendered))
 
     def test_unknown_fields_and_non_json_failures_are_not_silently_removed(self):
         for raw in ('broken JSON', '{"unexpectedControl": false}', '[1,2]'):

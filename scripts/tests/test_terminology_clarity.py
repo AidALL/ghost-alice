@@ -1,4 +1,3 @@
-import os
 import sys
 import tempfile
 import unittest
@@ -102,11 +101,3 @@ class TestTerminologyClarity(unittest.TestCase):
             "GHOST_ALICE_INSTALLED_SKILLS_DIR: ${{ runner.temp }}/ghost-alice-ci-home/.agents/skills",
             workflow,
         )
-
-    def test_installed_skill_text_uses_explicit_terms_when_available(self):
-        skills_dir = os.environ.get("GHOST_ALICE_INSTALLED_SKILLS_DIR")
-        if not skills_dir:
-            self.skipTest("set GHOST_ALICE_INSTALLED_SKILLS_DIR to scan installed skill copies")
-        root = Path(skills_dir)
-        findings = collect_findings(root, ["."])
-        self.assertEqual([], findings)

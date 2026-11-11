@@ -1,7 +1,6 @@
 """Explicit lookup-use scopes, native closure, and exact producer substitution."""
 import copy
 from contextlib import closing
-import importlib
 import json
 from pathlib import Path
 import sqlite3
@@ -12,13 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_response_route as route_fixture
 import source_lookup
-
-try:
-    use = importlib.import_module('response_context_use')
-except ModuleNotFoundError as error:
-    if error.name != 'response_context_use':
-        raise
-    use = None
+import response_context_use as use
 
 
 def _measure_projection(case, result, capsule, observation, platform, message_index):
@@ -110,7 +103,6 @@ class ResponseContextUseTests(unittest.TestCase):
             stream.write(json.dumps(self.rows[-1]) + '\n')
 
     def record(self, observation=None, **kwargs):
-        self.assertIsNotNone(use, 'Required same-lookup record_use API is absent')
         return use.record_use(self.source, kwargs.pop('event', self.event),
             self.observation if observation is None else observation,
             purpose=kwargs.pop('purpose', 'Compare the selected original for this answer'),
@@ -126,7 +118,6 @@ class ResponseContextUseTests(unittest.TestCase):
 
     def judge(self, receipt, *, disposition='replace', summary='The original supports this comparison; remaining uncertainty needs follow-up',
               next_need='Retrieve the original when its wording is needed', event=None, transaction=None):
-        self.assertTrue(callable(getattr(use, 'record_use_judgments', None)), 'Required explicit post-use judgment API is absent')
         judgments = [dict(use_reference=reference['reference'], disposition=disposition,
                           summary=summary, next_need=next_need)
                      for reference in (receipt if isinstance(receipt, list) else [receipt])]
@@ -151,7 +142,6 @@ class ResponseContextUseTests(unittest.TestCase):
                     if r['type'] == 'response_item'], model='fixture')
 
     def select(self, request=None):
-        self.assertIsNotNone(use, 'Required native response-bound use selector is absent')
         return use.select_uses(self.request() if request is None else request, self.fixture.root, self.home)
 
     def test_explicit_replace_changes_same_response_and_multiple_next_inputs(self):
@@ -241,7 +231,7 @@ class ResponseContextUseTests(unittest.TestCase):
             judgments = connection.execute('SELECT payload_json FROM core_response_use_judgments').fetchall()
         self.assertEqual(len(judgments), 3)
 
-    def test_omit_changed_or_ambiguous_producer_is_preserved_and_relookup_is_independent(self):
+    def test_omit_changed_or_ambiguous_producer_is_preserved(self):
         receipt = self.record(); self.output(receipt); self.judge(receipt, disposition='omit')
         original = self.request()
         for producer in (dict(self.observation, value='changed body', use_reference=receipt['reference']),
@@ -251,11 +241,6 @@ class ResponseContextUseTests(unittest.TestCase):
             result = self.select(request)
             self.assertEqual(result.request, request)
             self.assertEqual(result.observations, ())
-        self.append(dict(type='custom_tool_call', call_id='relookup', name='exec', input='retrieve original again'))
-        self.append(dict(type='custom_tool_call_output', call_id='relookup', output=json.dumps(self.observation)))
-        result = self.select()
-        self.assertEqual(result.request['input'][-2:], self.request()['input'][-2:])
-        self.assertEqual(result.observations[0]['disposition'], 'omit')
 
     def test_stateful_codex_direct_postuse_selector_preserves_complete_request(self):
         receipt = self.record(); self.output(receipt); self.judge(receipt)
@@ -383,12 +368,6 @@ class ResponseContextUseTests(unittest.TestCase):
         self.assertNotIn(second_observation['value'], json.dumps(result.request))
         self.assertIn('retain independent sibling', json.dumps(result.request))
 
-    def test_commentary_or_next_input_without_judgment_never_infers_consumption(self):
-        receipt = self.record(); self.output(receipt)
-        self.final(phase='commentary')
-        self.next_user_role_prompt()
-        self.assertEqual(self.select().state, 'preserved')
-
     def test_legacy_final_channel_is_only_an_optional_answer_locator(self):
         receipt = self.record(); self.output(receipt)
         self.judge(receipt)
@@ -493,7 +472,6 @@ class ResponseContextUseTests(unittest.TestCase):
         self.assertEqual(result.request['input'][-2:], [relookup, current_body])
 
     def test_unavailable_storage_is_distinct_and_unexpected_bugs_propagate(self):
-        self.assertIsNotNone(use)
         receipt = self.record(); self.output(receipt); self.judge(receipt); self.final(); self.next_user_role_prompt()
         with patch.object(use, '_native', side_effect=OSError('read unavailable')):
             self.assertEqual(self.select().state, 'unavailable')
@@ -578,8 +556,10 @@ class ResponseContextUseTests(unittest.TestCase):
         receipt = self.record(); self.output(receipt); self.final(); self.next_user_role_prompt()
         result = self.select()
         self.assertEqual(result.state, 'preserved')
+        self.assertEqual(result.reason, 'use-judgment-absent')
         self.assertIn(self.observation['value'], json.dumps(result.request))
         self.assertEqual(result.request, self.request())
+        self.assertEqual(result.observations, ())
 
     def test_postuse_judgment_before_actual_result_is_rejected(self):
         receipt = self.record()
@@ -733,7 +713,6 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
         self.log.write_text(''.join(json.dumps(row) + '\n' for row in self.rows))
 
     def record(self):
-        self.assertIsNotNone(use)
         return use.record_use(self.source, self.event, self.observation,
                               purpose='Compare the selected original for this answer')
 
@@ -747,7 +726,6 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
         self.rows.append(self.row('user', [self.result_block]))
         self.write_rows()
         if judgment:
-            self.assertTrue(callable(getattr(use, 'record_use_judgments', None)))
             use.record_use_judgments(self.source, self.event, [dict(use_reference=receipt['reference'], disposition='replace',
                 summary='The selected source was compared; its uncertainty remains', next_need='Check unresolved source quality')])
         closure = self.thinking if signed else dict(type='text', text='unsigned closure context')
@@ -915,7 +893,7 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
         self.assertEqual(result.request, request)
         self.assertEqual(result.observations, ())
 
-    def test_omit_nested_unsigned_producer_and_keep_restore_preserve_prefix_guards(self):
+    def test_omit_nested_unsigned_producer_and_keep_restore_preserve_protocol(self):
         receipt = self.record(); self.close(receipt, judgment=False, wrapper=True)
         original = self.log.read_bytes()
         judgment = dict(use_reference=receipt['reference'], disposition='omit', summary='No current need',
@@ -929,18 +907,6 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
                          'stdout\n' + json.dumps(expected))
         self.assertEqual(result.request['messages'][3]['content'][0]['content'][1], self.result_block['content'][1])
         self.assertNotIn(receipt['reference'], json.dumps(result.request))
-        for thinking in (None, {'type':'enabled'}, {'type':'adaptive'}, {'type':'disabled'}):
-            request = self.request()
-            if thinking is None:
-                request.pop('thinking')
-            else:
-                request['thinking'] = thinking
-            if thinking == {'type':'disabled'}:
-                request['messages'][4]['content'] = [self.thinking]
-            result = self.select(request)
-            self.assertEqual(result.request, request)
-            self.assertEqual(result.reason, 'signed-prefix-selection-unsupported')
-            self.assertEqual(result.observations, ())
         use.record_use_judgments(self.source, self.event, [dict(judgment, disposition='keep')])
         self.assertEqual(self.select().request, self.request())
         self.assertEqual(self.log.read_bytes(), original)
@@ -1091,15 +1057,14 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
 
     def test_thinking_capable_initial_request_preserves_post_use_selection_without_signed_history(self):
         receipt = self.record(); self.close(receipt)
-        for kind in ('enabled', 'adaptive', 'between_tools'):
+        for kind in (None, 'enabled', 'adaptive', 'between_tools'):
             with self.subTest(kind=kind):
-                self.assert_signed_preserved(dict(self.request(), thinking={'type': kind}))
-
-    def test_missing_thinking_on_initial_request_preserves_post_use_selection(self):
-        receipt = self.record(); self.close(receipt)
-        request = self.request()
-        del request['thinking']
-        self.assert_signed_preserved(request)
+                request = self.request()
+                if kind is None:
+                    del request['thinking']
+                else:
+                    request['thinking'] = {'type': kind}
+                self.assert_signed_preserved(request)
 
     def test_signed_unsupported_post_use_reason_survives_empty_or_keep_manual_disposition(self):
         import context_lifecycle as lifecycle

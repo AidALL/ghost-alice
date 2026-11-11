@@ -8,10 +8,10 @@ import hashlib
 import importlib.util
 from pathlib import Path
 import sys
+from hook_definitions import SUPPORTED_PLATFORMS
 
 LEDGER_PATH = Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
 MODULE_NAME = "session_intent_ledger"
-PLATFORMS = frozenset({"codex", "claude"})
 
 
 class LedgerUnavailable(ImportError):
@@ -66,7 +66,7 @@ def coordinates(source):
     owner = {key: source.get("GHOST_ALICE_" + key.upper()) for key in ("platform", "session_id")}
     if not (isinstance(root, str) and Path(root).is_absolute()):
         raise CoordinateError("ledger-root-unavailable", "Exact ledger root is required")
-    if owner["platform"] not in PLATFORMS or not isinstance(owner["session_id"], str) or not owner["session_id"]:
+    if owner["platform"] not in SUPPORTED_PLATFORMS or not isinstance(owner["session_id"], str) or not owner["session_id"]:
         raise CoordinateError("owner-mismatch", "Exact native owner is required")
     if owner["platform"] == "codex" and source.get("CODEX_THREAD_ID") not in (None, "", owner["session_id"]):
         raise CoordinateError("owner-mismatch", "Native owner conflicts with the host")

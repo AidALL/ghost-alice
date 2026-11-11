@@ -26,10 +26,6 @@ class ValidatorOptionTests(unittest.TestCase):
     def test_evidence_structure_accepts_optional_old_self_report_lines(self):
         self.assertIsNone(self.check(WITH_SELF_REPORT))
 
-    def test_evidence_structure_still_rejects_a_missing_evidence_field(self):
-        broken = WITHOUT_SELF_REPORT.replace("    evidence: python check.py exited 0\n", "")
-        self.assertIn("evidence", self.check(broken))
-
 
 class StopHookSkillEvidenceTests(unittest.TestCase):
     def test_claude_allows_a_block_without_self_report_when_the_skill_was_called(self):

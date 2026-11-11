@@ -561,23 +561,6 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertNotIn("not-a-real-secret", result.stdout)
         self.assertNotIn("Use state_path for downstream intent context", payload["systemMessage"])
 
-    def test_receipt_native_session_wins_pointer_and_env_and_uses_exact_paths(self) -> None:
-        self.run_hook({"session_id": "old-pointer", "prompt": "prior"})
-        session_id = "native-session-exact"
-        result = self.run_hook(
-            {"session_id": session_id, "prompt": "current"}, session_env="other-env"
-        )
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        message = json.loads(result.stdout)["systemMessage"]
-        self.assertIn(RECEIPT_START, message)
-        receipt = receipt_from(message)
-        self.assertEqual(receipt["session_id"], session_id)
-        state = pathlib.Path(receipt["state_path"])
-        self.assertEqual(self.state(session_id)["session_id"], session_id)
-        self.assertEqual(state.parent.name, receipt["session_id"])
-        self.assertEqual(state.parents[2], self.ledger_root.resolve())
-        self.assertEqual(self.state("other-env"), {})
-
     def test_receipt_stays_with_completed_observation_when_other_session_moves_pointer(self) -> None:
         hook = _load_fresh("session_intent_analyzer_hook")
         real_record_turn = hook.record_turn
@@ -754,11 +737,24 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(observed_events[-1]["event_id"], receipt["input_event_id"])
 
     def test_payload_identity_precedes_native_thread_for_hook_observation(self) -> None:
+        prior = self.run_hook({"session_id": "old-pointer", "prompt": "prior"})
+        self.assertEqual(prior.returncode, 0, prior.stderr)
+        old_state, old_events = self.state("old-pointer"), self.events("old-pointer")
         result = self.run_hook({"session_id": "payload", "prompt": "input"},
                                native_session_env="native", session_env="generic")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(receipt_from(json.loads(result.stdout)["systemMessage"])["session_id"], "payload")
-        self.assertEqual(self.state("native"), {})
+        receipt = receipt_from(json.loads(result.stdout)["systemMessage"])
+        self.assertEqual(receipt["session_id"], "payload")
+        state = pathlib.Path(receipt["state_path"])
+        self.assertEqual(self.state("payload")["session_id"], "payload")
+        self.assertEqual(state.parent.name, receipt["session_id"])
+        self.assertEqual(state.parents[2], self.ledger_root.resolve())
+        for session_id in ("native", "generic"):
+            with self.subTest(session_id=session_id):
+                self.assertEqual(self.state(session_id), {})
+                self.assertEqual(self.events(session_id), [])
+        self.assertEqual(self.state("old-pointer"), old_state)
+        self.assertEqual(self.events("old-pointer"), old_events)
 
     def test_receipt_delta_write_needs_no_host_environment(self):
         ledger = SCRIPT.parents[1] / "session-intent-analyzer/scripts/session_intent_ledger.py"
@@ -822,7 +818,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         shutil.copy2(SCRIPT, self.hook)
         shutil.copy2(SCRIPT.with_name("install_destination.py"),shared/"install_destination.py")
         for dependency in ('reminder_texts.py', 'reminder_texts.json', 'atomic_write.py', 'source_reference.py', 'timestamps.py',
-                           'ledger_access.py', 'session_identity.py', 'hook_input.py'):
+                           'ledger_access.py', 'hook_definitions.py', 'session_identity.py', 'hook_input.py'):
             shutil.copy2(SCRIPT.with_name(dependency), shared / dependency)
         self.home = self.base / "home"
         self.home.mkdir()

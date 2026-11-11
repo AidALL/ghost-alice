@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 
 import ledger_access
+from hook_definitions import SUPPORTED_PLATFORMS
 from text_lines import line_at, stream_lines
 
 
@@ -132,7 +133,7 @@ def main():
     parser.add_argument('--length', type=int, help='Optional length of the requested string or line selection')
     parser.add_argument('--purpose')
     parser.add_argument('--root')
-    parser.add_argument('--platform', choices=('codex', 'claude'))
+    parser.add_argument('--platform', choices=SUPPORTED_PLATFORMS[::-1])
     parser.add_argument('--session-id')
     parser.add_argument('--native-dir')
     parser.add_argument('--expected-input-event-id')

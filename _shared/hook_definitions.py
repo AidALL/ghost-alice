@@ -16,6 +16,17 @@ from typing import Any
 
 SUPPORTED_PLATFORMS = ("claude", "codex")
 
+
+def read_platform(value: object, *, reject_unknown: bool = False) -> str:
+    """Read a supported host name; callers retain command-form and authority checks."""
+    platform = value.strip().lower() if isinstance(value, str) else ""
+    if platform in SUPPORTED_PLATFORMS:
+        return platform
+    if reject_unknown:
+        raise ValueError(f"unsupported hook platform: {value!r}")
+    return "unknown"
+
+
 PYTHON_VERSION_CHECK_CODE = (
     "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
 )

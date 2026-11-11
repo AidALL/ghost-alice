@@ -25,14 +25,25 @@ class SkillGateContractTest(unittest.TestCase):
             boundary_issues = [issue for issue in issues if "boundary-contract/SKILL.md" in issue.path]
             self.assertEqual(boundary_issues, [])
 
-    def test_boundary_contract_rejects_missing_authority_and_objective_protection(self) -> None:
-        for obligation in ("a boundary the human user set", "self-declared", "objective"):
-            with self.subTest(obligation=obligation), tempfile.TemporaryDirectory() as tmpdir:
+    def test_missing_required_patterns_identify_the_file_and_pattern(self) -> None:
+        cases = (
+            ("boundary-contract/SKILL.md", "a boundary the human user set"),
+            ("boundary-contract/SKILL.md", "self-declared"),
+            ("boundary-contract/SKILL.md", "objective"),
+            ("AGENTS.md", "installed common contract"),
+            ("task-router/SKILL.md", "response-route"),
+            ("task-router/SKILL.md", "references/routing-details.md"),
+            ("coding-convention/using-coding-convention/SKILL.md", "Instruction Body Reuse"),
+            ("task-router/SKILL.md", "../session-intent-analyzer/references/ledger-schema.md#core-response-projection"),
+        )
+        for relative, pattern in cases:
+            with self.subTest(path=relative, pattern=pattern), tempfile.TemporaryDirectory() as tmpdir:
                 root = Path(tmpdir)
                 self._write_valid_fixture(root)
-                path = root / "boundary-contract/SKILL.md"
-                path.write_text(path.read_text().replace(obligation, "REMOVED"))
-                self.assertTrue(any(obligation in issue.message for issue in run_contract_checks(root)))
+                path = root / relative
+                path.write_text(path.read_text(encoding="utf-8").replace(pattern, "REMOVED"), encoding="utf-8")
+                issues = {(issue.path, issue.message) for issue in run_contract_checks(root)}
+                self.assertIn((relative, f"missing required pattern: {pattern}"), issues)
 
     def _extract_between(self, text: str, start_marker: str, end_marker: str) -> str:
         start = text.find(start_marker)
@@ -158,27 +169,6 @@ class SkillGateContractTest(unittest.TestCase):
                     self.assertTrue(any(issue.path == relative and "owner" in issue.message and field in issue.message
                                         for issue in run_contract_checks(root)))
 
-    def test_missing_task_router_reference_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            agents_path = root / "AGENTS.md"
-            agents_path.write_text("docs/policies/session-gate-matrix.md\n", encoding="utf-8")
-
-            issues = run_contract_checks(root)
-            self.assertTrue(any("AGENTS.md" in issue.path for issue in issues))
-
-    def test_task_router_links_the_ledger_schema_owner_by_its_path(self) -> None:
-        link = "../session-intent-analyzer/references/ledger-schema.md#core-response-projection"
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            router = root / "task-router/SKILL.md"
-            router.write_text(router.read_text(encoding="utf-8").replace(
-                link, "../session-intent-analyzer/ledger-schema.md#core-response-projection"), encoding="utf-8")
-            messages = [issue.message for issue in run_contract_checks(root)]
-            self.assertIn(f"missing required pattern: {link}", messages)
-
     def test_missing_boundary_contract_skill_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -219,28 +209,6 @@ class SkillGateContractTest(unittest.TestCase):
             self.assertIn("task-router over-scope wording is forbidden", messages)
             self.assertNotIn("missing required pattern", messages)
 
-    def test_missing_task_router_routing_surface_contract_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            task_router_path = root / "task-router" / "SKILL.md"
-            task_router_path.write_text(
-                task_router_path.read_text(encoding="utf-8").replace("response-route", "route-surface"),
-                encoding="utf-8",
-            )
-
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("response-route", messages)
-
-    def test_missing_routing_surface_owner_policy_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            path = root / "task-router/SKILL.md"
-            path.write_text(path.read_text().replace("references/routing-details.md", "REMOVED"))
-            self.assertTrue(any("references/routing-details.md" in issue.message for issue in run_contract_checks(root)))
-
     def test_legacy_tool_checkpoint_name_fails(self) -> None:
         legacy_name = "action" + "-gate"
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -255,14 +223,6 @@ class SkillGateContractTest(unittest.TestCase):
             issues = run_contract_checks(root)
             messages = "\n".join(issue.message for issue in issues)
             self.assertIn("legacy tool checkpoint name is forbidden", messages)
-
-    def test_quality_rationale_missing_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            path = root / "coding-convention/using-coding-convention/SKILL.md"
-            path.write_text(path.read_text().replace("Instruction Body Reuse", "REMOVED"))
-            self.assertTrue(any("Instruction Body Reuse" in issue.message for issue in run_contract_checks(root)))
 
     def test_coercive_skip_wording_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -508,7 +468,6 @@ class SkillGateContractTest(unittest.TestCase):
         schema = (REPO_ROOT / "session-intent-analyzer/references/ledger-schema.md").read_text()
         self.assertIn("the human user's objective", router)
         self.assertIn('Do not replace a repair that the human user requested with a report', router)
-        self.assertIn('ledger-schema.md#core-response-projection', router)
         for field in ('response_mode', 'boundary_contract', '"reason"'):
             self.assertIn(field, schema)
         for field in ('primary_request', 'causal_axis', 'response_order', 'change_depth', 'focus_layer',

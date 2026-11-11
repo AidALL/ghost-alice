@@ -2,7 +2,6 @@
 """Contract tests for purpose-hidden blind behavior evaluation."""
 
 import hashlib
-import importlib
 import json
 import os
 import stat
@@ -15,9 +14,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import blind_behavior
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = Path(__file__).with_name("blind_behavior.py")
 DIMENSIONS = {
     "claim-discipline": "Require purpose-hidden behavioral evidence.",
     "scope-control": "Keep the release blocked when evidence is missing.",
@@ -68,12 +67,6 @@ PASS_RESULT = {
 }
 
 
-def load_blind_behavior():
-    if not MODULE_PATH.is_file():
-        return None
-    return importlib.import_module("blind_behavior")
-
-
 def write_manifest(home: Path, manifest=MANIFEST, platform: str | None = None) -> Path:
     chosen_platform = platform or manifest["platform"]
     value = {**manifest, "platform": chosen_platform}
@@ -101,12 +94,9 @@ def home_environment(home: Path) -> dict[str, str]:
     return {"HOME": str(home), "USERPROFILE": str(home)}
 
 
-class BlindBehaviorModulePresenceTest(unittest.TestCase):
-    def test_dedicated_blind_behavior_module_exists(self):
-        self.assertIsNotNone(load_blind_behavior())
-
-
 class BlindBehaviorContractTest(unittest.TestCase):
+    blind = blind_behavior
+
     def test_copy_provenance_accepts_framed_tree_hash_and_rejects_malformed_versions(self):
         from hash_utils import hash_target
         with tempfile.TemporaryDirectory() as folder:
@@ -143,10 +133,6 @@ class BlindBehaviorContractTest(unittest.TestCase):
                 self.assertEqual(calls[0][1]['input'], case['prompt'])
         with self.assertRaises(ValueError):
             self._execute(case=case, subject_command=['codex', '--case=codex'])
-
-    @classmethod
-    def setUpClass(cls):
-        cls.blind = load_blind_behavior()
 
     def _execute(self, *, case=CASE, manifest=MANIFEST, evaluator=PASS_RESULT,
                   subject=None, subject_command=None, manifest_path=None,
@@ -240,10 +226,6 @@ class BlindBehaviorContractTest(unittest.TestCase):
             raw = json.dumps(SEALED_CASE, ensure_ascii=False, indent=2).encode("utf-8")
             case_path.write_bytes(raw)
 
-            self.assertTrue(
-                hasattr(self.blind, "load_sealed_case"),
-                "blind controller must own sealed case loading",
-            )
             case, suite_digest = self.blind.load_sealed_case(case_path)
 
         self.assertEqual(case["id"], SEALED_CASE["id"])
@@ -517,61 +499,31 @@ class BlindBehaviorContractTest(unittest.TestCase):
         self.assertEqual(artifacts.get("failure-stage.txt"), "evaluator-confirmed-fail\n")
 
     def test_nonzero_evaluator_preserves_captured_failure_diagnostics(self):
-        observed = {}
-
-        def observe_evaluator(_command, kwargs):
-            observed["runtime"] = Path(kwargs["env"]["TMPDIR"]).parent
-
-        def observe_runtime(_calls):
-            runtime = observed["runtime"]
-            observed["artifacts"] = {
-                path.name: path.read_text(encoding="utf-8")
-                for path in runtime.rglob("*")
-                if path.is_file()
-            }
-
-        outcome, _ = self._execute(
-            evaluator_process=subprocess.CompletedProcess(
+        outcome, _, artifacts = self._execute_evaluator_failure_with_artifacts(
+            subprocess.CompletedProcess(
                 ["evaluator-agent"], 9, "evaluator stdout", "evaluator stderr"
             ),
-            evaluator_observer=observe_evaluator,
-            runtime_observer=observe_runtime,
         )
 
         self.assertEqual(outcome["record"]["reason"], "evaluator-process-failure")
-        self.assertEqual(observed["artifacts"]["subject-response.txt"],
+        self.assertEqual(artifacts["subject-response.txt"],
                          "Keep the release blocked.")
-        self.assertEqual(observed["artifacts"]["evaluator-stdout.txt"], "evaluator stdout")
-        self.assertEqual(observed["artifacts"]["evaluator-stderr.txt"], "evaluator stderr")
-        self.assertEqual(observed["artifacts"]["failure-stage.txt"],
+        self.assertEqual(artifacts["evaluator-stdout.txt"], "evaluator stdout")
+        self.assertEqual(artifacts["evaluator-stderr.txt"], "evaluator stderr")
+        self.assertEqual(artifacts["failure-stage.txt"],
                          "evaluator-process-failure\n")
 
     def test_invalid_evaluator_output_preserves_captured_failure_diagnostics(self):
-        observed = {}
-
-        def observe_evaluator(_command, kwargs):
-            observed["runtime"] = Path(kwargs["env"]["TMPDIR"]).parent
-
-        def observe_runtime(_calls):
-            runtime = observed["runtime"]
-            observed["artifacts"] = {
-                path.name: path.read_text(encoding="utf-8")
-                for path in runtime.rglob("*")
-                if path.is_file()
-            }
-
-        outcome, _ = self._execute(
-            evaluator_process=subprocess.CompletedProcess(
+        outcome, _, artifacts = self._execute_evaluator_failure_with_artifacts(
+            subprocess.CompletedProcess(
                 ["evaluator-agent"], 0, "{invalid", "parse warning"
             ),
-            evaluator_observer=observe_evaluator,
-            runtime_observer=observe_runtime,
         )
 
         self.assertEqual(outcome["record"]["reason"], "invalid-evaluator-output")
-        self.assertEqual(observed["artifacts"]["evaluator-stdout.txt"], "{invalid")
-        self.assertEqual(observed["artifacts"]["evaluator-stderr.txt"], "parse warning")
-        self.assertEqual(observed["artifacts"]["failure-stage.txt"],
+        self.assertEqual(artifacts["evaluator-stdout.txt"], "{invalid")
+        self.assertEqual(artifacts["evaluator-stderr.txt"], "parse warning")
+        self.assertEqual(artifacts["failure-stage.txt"],
                          "invalid-evaluator-output\n")
 
     def test_processes_use_repo_local_temp_under_hostile_parent_env(self):
@@ -688,28 +640,7 @@ class BlindBehaviorContractTest(unittest.TestCase):
         subject = subprocess.CompletedProcess(["subject-agent"], 0, "response", "private")
         for failure in failures:
             with self.subTest(failure=failure):
-                replies = iter([subject, failure])
-                calls = []
-
-                def runner(command, **kwargs):
-                    calls.append((command, kwargs))
-                    reply = next(replies)
-                    if isinstance(reply, BaseException):
-                        raise reply
-                    return adapt_fake_codex_subject(command, reply)
-
-                with tempfile.TemporaryDirectory() as folder:
-                    home = Path(folder)
-                    manifest = write_manifest(home)
-                    case_path = write_case(home)
-                    with mock.patch.dict(os.environ, home_environment(home), clear=False):
-                        outcome = self.blind.run_blind_behavior_case(
-                            case_path=case_path, platform="codex",
-                            install_manifest_path=manifest,
-                            subject_command=["subject-agent"],
-                            evaluator_command=["evaluator-agent"],
-                            timeout_seconds=5, repo_root=home, run_process=runner,
-                        )
+                outcome, calls = self._execute(subject=subject, evaluator_process=failure)
                 self.assertEqual(outcome["record"]["verdict"], "fail")
                 self.assertIsNone(outcome["conduct_feedback"])
                 self.assertEqual(len(calls), 2)
@@ -896,7 +827,7 @@ class BlindBehaviorCliTest(unittest.TestCase):
             cwd=REPO_ROOT, text=True, capture_output=True, timeout=5,
         )
         self.assertNotEqual(result.returncode, 0)
-        parser = load_blind_behavior().build_parser()
+        parser = blind_behavior.build_parser()
         destinations = {action.dest for action in parser._actions}
         self.assertNotIn("transport", destinations)
         self.assertNotIn("ledger", destinations)

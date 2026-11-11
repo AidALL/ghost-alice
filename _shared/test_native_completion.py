@@ -414,16 +414,15 @@ class NativeCompletionTests(unittest.TestCase):
         assert_stop_observation(self, json.loads(executed.stdout))
 
     def test_prose_without_a_control_block_is_not_a_completion_submission(self):
-        self.fixture.record(self.fixture.candidate())
-        text = 'Everything requested is represented here.'
-        result = native_completion.assess_native_completion(self.source, text=text)
-        self.assertIsNone(result['body_issue'])
-        self.assertEqual(result['input_event_id'], self.fixture.event)
-        self.assertEqual(result['body_digest'], 'sha256:' + hashlib.sha256(text.encode()).hexdigest())
-
-    def test_plain_progress_text_keeps_selected_work_without_a_completion_check(self):
-        result = native_completion.assess_native_completion(self.source, text='Saved report matches input')
-        self.assertIsNone(result['body_issue'])
+        for text, reviewed in (('Saved report matches input', False),
+                               ('Everything requested is represented here.', True)):
+            with self.subTest(text=text, reviewed=reviewed):
+                if reviewed:
+                    self.fixture.record(self.fixture.candidate())
+                result = native_completion.assess_native_completion(self.source, text=text)
+                self.assertIsNone(result['body_issue'])
+                self.assertEqual(result['input_event_id'], self.fixture.event)
+                self.assertEqual(result['body_digest'], 'sha256:' + hashlib.sha256(text.encode()).hexdigest())
 
     def test_stale_route_cannot_be_replaced_by_caller_policy_fields(self):
         self.fixture.intake('New current input')

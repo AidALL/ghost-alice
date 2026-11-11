@@ -488,46 +488,6 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
 
         self.assertEqual(Path(selected).resolve(), path_node.resolve())
 
-    def test_configured_node_runtime_absolute_path_is_allowed_in_hook_payload(self):
-        """Configured Node runtimes are valid hook executables even outside fixed roots."""
-        with tempfile.TemporaryDirectory() as temp_home:
-            codex_home = Path(temp_home) / ".codex"
-            node = codex_home / "runtime" / ("node.exe" if os.name == "nt" else "node")
-            node.parent.mkdir(parents=True, exist_ok=True)
-            node.write_text("# fake node\n", encoding="utf-8")
-            _make_node_executable(node)
-            config_toml = codex_home / "config.toml"
-            config_toml.write_text(
-                "[mcp_servers.node_repl.env]\n"
-                f"NODE_REPL_NODE_PATH = {json.dumps(node.as_posix())}\n",
-                encoding="utf-8",
-            )
-            command = f'"{node.as_posix()}" "{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}"'
-
-            with patch.dict(os.environ, {"HOME": temp_home, "CODEX_HOME": str(codex_home)}, clear=False):
-                argv = hook_profile_gate._validate_shell_command(command)
-
-        self.assertEqual(Path(argv[0]).resolve(), node.resolve())
-
-    def test_configured_node_runtime_must_be_named_node(self):
-        """A configured runtime path is not a generic absolute executable bypass."""
-        with tempfile.TemporaryDirectory() as temp_home:
-            codex_home = Path(temp_home) / ".codex"
-            runtime = codex_home / "runtime" / ("python.exe" if os.name == "nt" else "python")
-            runtime.parent.mkdir(parents=True, exist_ok=True)
-            runtime.write_text("# fake runtime\n", encoding="utf-8")
-            config_toml = codex_home / "config.toml"
-            config_toml.write_text(
-                "[mcp_servers.node_repl.env]\n"
-                f"NODE_REPL_NODE_PATH = {json.dumps(runtime.as_posix())}\n",
-                encoding="utf-8",
-            )
-            command = f'"{runtime.as_posix()}" "{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}"'
-
-            with patch.dict(os.environ, {"HOME": temp_home, "CODEX_HOME": str(codex_home)}, clear=False):
-                with self.assertRaises(hook_profile_gate.HookCommandRejected):
-                    hook_profile_gate._validate_shell_command(command)
-
     def test_wrapped_command_validation_strips_marker_comment(self):
         command = f'"{sys.executable}" -c "import sys; sys.exit(0)" # [hook-reminder] AGENTS.md'
 

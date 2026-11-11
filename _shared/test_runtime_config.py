@@ -355,6 +355,34 @@ class TestNodeRuntimeUsability(unittest.TestCase):
 
 
 class TestNodeRuntimeCandidates(unittest.TestCase):
+    @unittest.skipUnless(os.name != "nt", "POSIX execute bits are not enforced on Windows")
+    def test_configured_node_sources_require_posix_execute_access(self):
+        for source in ("env", "codex-config", "registration"):
+            for mode in (0o600, 0o700):
+                with self.subTest(source=source, mode=oct(mode)), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    node = root / source / "node"
+                    node.parent.mkdir()
+                    node.write_text("# fake node runtime\n", encoding="utf-8")
+                    node.chmod(mode)
+                    platform = "codex" if source == "codex-config" else "claude"
+                    env = {"HOME": directory, "USERPROFILE": directory, "PATH": ""}
+                    if source == "env":
+                        env["GHOST_ALICE_NODE"] = str(node)
+                    elif source == "codex-config":
+                        codex_home = root / ".codex"
+                        env["CODEX_HOME"] = str(codex_home)
+                        codex_home.mkdir()
+                        (codex_home / "config.toml").write_text(
+                            "[mcp_servers.node_repl.env]\n"
+                            f"NODE_REPL_NODE_PATH = {json.dumps(node.as_posix())}\n", encoding="utf-8")
+                    with mock.patch.dict(os.environ, env, clear=True):
+                        if source == "registration":
+                            runtime_config.save_config(
+                                {"hook_runtime": {"node": {platform: str(node.resolve())}}}, home=root)
+                        self.assertEqual(runtime_config.node_runtime_candidates(env, platform),
+                                         [node.resolve()] if mode == 0o700 else [])
+
     def test_codex_config_location_preserves_explicit_precedence_without_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

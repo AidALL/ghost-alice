@@ -10,6 +10,7 @@ from unittest.mock import patch
 import install_hooks
 import hook_profile_gate
 import pytest
+from installer_testing import destination_fixture
 
 
 def test_explicit_ledger_is_independent_of_source_and_runtime():
@@ -43,12 +44,6 @@ def test_binding_with_an_adapter_key_is_rejected(tmp_path):
     encoded=install_destination.encode_binding(dict(schema_version='ghost-alice-hook-binding.v1',destination=value,adapter={'adapter_id':'x'}))
     with pytest.raises(ValueError):
         install_destination.decode_binding(encoded)
-
-
-def destination_fixture(root):
-    return dict(mode='isolated',owned_root=str(root),platform_dir=str(root/'platform'),
-        skills_dir=str(root/'skills'),ghost_root=str(root/'ghost'),ledger_root=str(root/'ledger'),
-        project_root=str(root/'project'),core_source_root=str(Path(install_hooks.__file__).resolve().parents[1]))
 
 
 def _bound_hook_environment(tmp_path, platform, *, mode='normal', extra_env=None, native_cwd=None):

@@ -37,7 +37,7 @@ if "--binding-b64" in sys.argv:
 import agent_visibility_policy
 import pending_manifest
 from fresh_agent_session import write_utf8
-from hook_definitions import CORE_HOOK_IDS, SUPPORTED_PLATFORMS, decode_hook_payload, normalize_hook_id
+from hook_definitions import CORE_HOOK_IDS, decode_hook_payload, normalize_hook_id, read_platform
 from hook_input import parse_json_object, read_stdin_utf8
 import runtime_config
 import work_impact_projection
@@ -118,8 +118,11 @@ def _active_platform_from_argv(argv: list[str]) -> str | None:
     if platform_index + 1 >= len(argv):
         raise HookCommandRejected("invalid hook platform argument rejected")
     platform = argv[platform_index + 1]
-    if platform not in SUPPORTED_PLATFORMS:
-        raise HookCommandRejected(f"invalid hook platform argument rejected: {platform}")
+    try:
+        if read_platform(platform, reject_unknown=True) != platform:
+            raise ValueError("hook platform argument must be canonical")
+    except ValueError:
+        raise HookCommandRejected(f"invalid hook platform argument rejected: {platform}") from None
     return platform
 
 
@@ -156,16 +159,19 @@ def _is_same_file_as_trusted_node_runtime(
 
 
 def _hook_platform(argv: list[str], env: dict[str, str]) -> str:
-    outer = env.get("GHOST_ALICE_PLATFORM", "").strip().lower()
-    if outer and outer not in SUPPORTED_PLATFORMS:
-        raise HookCommandRejected(f"invalid outer hook platform rejected: {outer}")
+    outer = env.get("GHOST_ALICE_PLATFORM", "").strip()
+    if outer:
+        try:
+            outer = read_platform(outer, reject_unknown=True)
+        except ValueError:
+            raise HookCommandRejected(f"invalid outer hook platform rejected: {outer.lower()}") from None
     inner = _active_platform_from_argv(argv)
     if outer and inner and outer != inner:
         raise HookCommandRejected(
             f"hook platform mismatch: outer={outer}, inner={inner}"
         )
     platform = outer or inner
-    if platform not in SUPPORTED_PLATFORMS:
+    if not platform:
         raise HookCommandRejected(
             "dynamic Node hook command requires claude or codex platform"
         )
@@ -308,10 +314,6 @@ def _event_name(payload: dict[str, object], env: dict[str, str]) -> str:
     )
 
 
-def _platform_name(env: dict[str, str]) -> str:
-    return str(env.get("GHOST_ALICE_PLATFORM") or "unknown")
-
-
 def _pending_merge_manifest_path(env: dict[str, str], platform: str) -> Path | None:
     if not is_exact(platform):
         return None
@@ -411,7 +413,7 @@ def _visibility_context(
     declared: str = "",
 ) -> dict[str, object]:
     source_env = env if env is not None else os.environ
-    platform = _platform_name(source_env)
+    platform = read_platform(source_env.get("GHOST_ALICE_PLATFORM"))
     text = f"{stdout}\n{stderr}".lower()
     context: dict[str, object] = {}
     if hook_id == "session-start":
@@ -583,7 +585,7 @@ def run(hook_id: str, payload: str, *, platform: str | None = None, binding=None
 
 
 def _native_intake_session(env, hook_payload):
-    if _platform_name(env) != 'claude' or _event_name(hook_payload, env) not in ('PreToolUse', 'Stop'):
+    if read_platform(env.get("GHOST_ALICE_PLATFORM")) != 'claude' or _event_name(hook_payload, env) not in ('PreToolUse', 'Stop'):
         return None
     return bound_session_identity('claude', hook_payload, env)
 
@@ -704,10 +706,10 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
         # the runner builds that message and records it there first unless the file already holds it.
         try:
             import stop_notice
-            notice = stop_notice.notice_path(env, hook_payload, _platform_name(env))
+            notice = stop_notice.notice_path(env, hook_payload, read_platform(env.get("GHOST_ALICE_PLATFORM")))
             if normalize_hook_id(hook_id) not in CORE_HOOK_IDS:
                 stop_notice_failure = stop_notice.ensure_stop_notice(
-                    _platform_name(env), hook_payload, env, notice).get("file_error")
+                    read_platform(env.get("GHOST_ALICE_PLATFORM")), hook_payload, env, notice).get("file_error")
             if stop_notice_failure is None:
                 child_env[stop_notice.ENV_FILE] = str(notice)
         except Exception as error:  # noqa: BLE001 - Ghost-ALICE's own step fails without stopping the hook
@@ -758,7 +760,7 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     )
     if launch_failure is not None:
         decision = {"visible_decision": "hide", "reason": "runner-launch-failure-recorded"}
-    platform = _platform_name(env)
+    platform = read_platform(env.get("GHOST_ALICE_PLATFORM"))
     session_id = strict_session_log.session_id_from_payload(hook_payload, env=env, platform=platform)
     log_ref = str(strict_session_log.log_path(install_destination.home_directory(env), platform, session_id))
     item = _surface_item_for_result(
@@ -817,14 +819,9 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     return runner_exit_code
 
 
-def _fallback_rejection_audit_platform(env: Mapping[str, str]) -> str:
-    platform = str(env.get("GHOST_ALICE_PLATFORM") or "").strip().lower()
-    return platform if platform in SUPPORTED_PLATFORMS else "unknown"
-
-
 def _rejection_audit_platform(payload: str, env: Mapping[str, str]) -> str:
     """Choose an audit namespace without contributing to authorization."""
-    fallback = _fallback_rejection_audit_platform(env)
+    fallback = read_platform(env.get("GHOST_ALICE_PLATFORM"))
     try:
         command = _strip_allowed_suffix(_decode_payload(payload))
     except HookCommandRejected:
@@ -909,8 +906,8 @@ def main(argv: list[str] | None = None) -> NoReturn:
     payload = normalized_args[2] if len(normalized_args) == 3 else normalized_args[3]
     positional_platform: str | None = None
     if len(normalized_args) == 4:
-        candidate = normalized_args[2].strip().lower()
-        if candidate in SUPPORTED_PLATFORMS:
+        candidate = read_platform(normalized_args[2])
+        if candidate != "unknown":
             positional_platform = candidate
     try:
         if len(normalized_args) == 3:

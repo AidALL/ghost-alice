@@ -76,27 +76,6 @@ class NativeEnvelopeTests(unittest.TestCase):
         self.assertIn("block", host["systemMessage"])
         self.assertIn(NOT_BLOCKING, host["systemMessage"])
 
-    def test_continue_false_becomes_true_and_keeps_the_stop_reason_as_a_warning(self):
-        body = self.body(**{"continue": False, "stopReason": "Owned stop reason"})
-        body.pop("decision")
-        body.pop("reason")
-        host = self.run_command(body)
-        self.assertIs(host["continue"], True)
-        self.assertNotIn("stopReason", host)
-        self.assertIn("Owned stop reason", host["systemMessage"])
-        self.assertIn(NOT_BLOCKING, host["systemMessage"])
-
-    def test_pretool_permission_denial_is_removed_and_reported(self):
-        body = self.body(hookSpecificOutput={"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                             "permissionDecisionReason": "The current gate is closed.",
-                                             "additionalContext": "kept"})
-        body.pop("decision")
-        body.pop("reason")
-        host = self.run_command(body, platform="claude", event="PreToolUse")
-        self.assertEqual(host["hookSpecificOutput"], {"hookEventName": "PreToolUse", "additionalContext": "kept"})
-        self.assertIn("The current gate is closed.", host["systemMessage"])
-        self.assertIn(NOT_BLOCKING, host["systemMessage"])
-
     def test_user_prompt_block_is_removed_on_both_hosts(self):
         for platform in ("codex", "claude"):
             with self.subTest(platform=platform):
@@ -104,31 +83,48 @@ class NativeEnvelopeTests(unittest.TestCase):
                 self.assertIs(host["continue"], True)
                 self.assertIn(ACTIONABLE, host["systemMessage"])
 
-    def test_pretool_controls_and_recording_metadata_stay_in_raw_audit_not_native_envelope(self):
+    def test_controls_and_recording_metadata_stay_in_raw_audit_not_native_envelope(self):
+        context = 'Preserve the original supported evidence.'
+        cases = (
+            ('allow', 'PreToolUse', 'minimal', 0,
+             {'continue': True, 'hookSpecificOutput': {
+                 'hookEventName': 'PreToolUse', 'permissionDecision': 'allow',
+                 'permissionDecisionReason': 'Current gate is open.', 'additionalContext': context}}, ()),
+            ('continue-only', 'Stop', 'dynamic', 0,
+             {'continue': False, 'stopReason': 'Owned stop reason', 'systemMessage': ACTIONABLE},
+             ('stop the turn (Owned stop reason)',)),
+            ('deny-only', 'PreToolUse', 'dynamic', 0,
+             {'continue': True, 'systemMessage': ACTIONABLE, 'hookSpecificOutput': {
+                 'hookEventName': 'PreToolUse', 'permissionDecision': 'deny',
+                 'permissionDecisionReason': 'The current gate is closed.', 'additionalContext': 'kept'}},
+             ('deny the tool call (The current gate is closed.)',)),
+            ('continue-and-deny', 'PreToolUse', 'minimal', 2,
+             {'continue': False, 'stopReason': 'Current gate is blocked.',
+              'systemMessage': 'Recording failed; the current gate remains blocked.',
+              'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny',
+                                    'permissionDecisionReason': 'Current gate is blocked.', 'additionalContext': context}},
+             ('stop the turn (Current gate is blocked.)', 'deny the tool call (Current gate is blocked.)')),
+        )
         for platform in ('codex', 'claude'):
-            for denied in (False, True):
-                with self.subTest(platform=platform, denied=denied):
-                    body = self.body(**{'continue': not denied, 'hookSpecificOutput': {
-                        'hookEventName': 'PreToolUse', 'permissionDecision': 'deny' if denied else 'allow',
-                        'permissionDecisionReason': 'Current gate is blocked.' if denied else 'Current gate is open.',
-                        'additionalContext': 'Preserve the original supported evidence.',
-                    }, 'completion_recording': {'status': 'recording-unavailable' if denied else 'prepared',
-                        'receipt_token': 'audit-only-original-receipt'}})
+            for case, event, profile, exit_code, controls, warnings in cases:
+                with self.subTest(platform=platform, case=case):
+                    body = self.body(completion_recording={
+                        'status': 'recording-unavailable' if exit_code == 2 else 'prepared',
+                        'receipt_token': 'audit-only-original-receipt'})
                     for field in ('decision', 'reason', 'systemMessage'):
                         body.pop(field)
-                    if denied:
-                        body.update(systemMessage='Recording failed; the current gate remains blocked.',
-                                    stopReason='Current gate is blocked.')
-                    host = self.run_command(body, platform=platform, event='PreToolUse',
-                                            profile='minimal', exit_code=2 if denied else 0)
+                    body.update(controls)
+                    host = self.run_command(body, platform=platform, event=event,
+                                            profile=profile, exit_code=exit_code)
                     self.assertIs(host['continue'], True)
-                    self.assertEqual(host['hookSpecificOutput'], {
-                        'hookEventName': 'PreToolUse',
-                        'additionalContext': 'Preserve the original supported evidence.'})
-                    if denied:
+                    if 'hookSpecificOutput' in controls:
+                        self.assertEqual(host['hookSpecificOutput'], {
+                            'hookEventName': 'PreToolUse',
+                            'additionalContext': controls['hookSpecificOutput']['additionalContext']})
+                    if warnings:
                         self.assertTrue(host['systemMessage'].startswith(body['systemMessage']))
-                        self.assertIn('stop the turn (Current gate is blocked.)', host['systemMessage'])
-                        self.assertIn('deny the tool call (Current gate is blocked.)', host['systemMessage'])
+                        for warning in warnings:
+                            self.assertIn(warning, host['systemMessage'])
                         self.assertIn(NOT_BLOCKING, host['systemMessage'])
                     else:
                         self.assertNotIn('systemMessage', host)

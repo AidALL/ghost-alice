@@ -63,6 +63,22 @@ class AggregateRecommendationsTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def test_different_ids_in_one_class_count_as_cross_session_recurrence(self) -> None:
+        timestamp = "2026-09-28T00:00:00Z"
+        for platform, session, entry_id in (("claude", "s1", "repeated-status"),
+                                            ("codex", "s2", "parroted-examples")):
+            self._write(platform, session, [{
+                "id": entry_id, "summary": f"{entry_id} summary",
+                "corrective_rule": f"{entry_id} rule", "pattern_class": "restatement-loop",
+                "source": "user-said", "status": "open", "occurrence_count": 1,
+                "updated_at": timestamp,
+            }])
+        report = self.mod.aggregate(self.root, now=timestamp)
+        self.assertEqual(report["recommendation_count"], 1)
+        record = report["recommendations"][0]
+        self.assertEqual((record["id"], record["session_count"], record["occurrence_count"]), ("restatement-loop", 2, 2))
+        self.assertEqual(record["member_ids"], ["parroted-examples", "repeated-status"])
+
     def test_recurrence_and_recency_ranked(self) -> None:
         self._write("claude", "s1", [
             {"id": "a", "corrective_rule": "widen scope", "source": "user-said",

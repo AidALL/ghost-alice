@@ -405,6 +405,9 @@ class ContextGatewayTests(unittest.TestCase):
             with self.request(body, path=path) as reply:
                 self.assertEqual(reply.read(), self.answer)
             self.assertEqual(self.seen[-1][0], body)
+            if path == '/codex/responses':
+                events = [json.loads(line) for line in self.wire.read_text().splitlines()]
+                self.assertTrue(any(e['event'] == 'request-selection' and e['state'] == 'preserved' for e in events))
 
     def test_health_check_makes_no_upstream_request(self):
         request = urllib.request.Request(f'http://127.0.0.1:{self.server.server_port}/health',
@@ -436,14 +439,6 @@ class ContextGatewayTests(unittest.TestCase):
         self.assertEqual([(e['reason'], e['error_type']) for e in failed],
                          [('selection-error', 'KeyError'), ('selection-error', 'ValueError')])
         self.assertNotIn('fixture bug', self.wire.read_text())
-
-    def test_preservation_is_observed_without_reencoding(self):
-        body = b'{ "input": [], "prompt_cache_key": "unknown" }'
-        with self.request(body) as reply:
-            self.assertEqual(reply.read(), self.answer)
-        self.assertEqual(self.seen[-1][0], body)
-        events = [json.loads(line) for line in self.wire.read_text().splitlines()]
-        self.assertTrue(any(e['event'] == 'request-selection' and e['state'] == 'preserved' for e in events))
 
 
 class ClaudeGatewayTransportTests(unittest.TestCase):
@@ -808,10 +803,6 @@ class ServerUsageParserTests(unittest.TestCase):
         self.assertEqual(observed['server_id'], 'msg-fixture')
 
     def setUp(self):
-        self.assertTrue(callable(getattr(context_gateway, 'UsageSnapshots', None)),
-                        'Request-local cumulative usage parsing is missing')
-        self.assertTrue(callable(getattr(context_gateway, 'forward_stream', None)),
-                        'The production response-forwarding path must be memory-testable')
         self.start_usage = dict(input_tokens=17, cache_read_input_tokens=4096,
                                 cache_creation_input_tokens=256, output_tokens=1,
                                 cache_creation={'ephemeral_5m_input_tokens': 64,
@@ -913,30 +904,6 @@ class ServerUsageParserTests(unittest.TestCase):
         self.assertEqual([row['server_id'] for row in rows], ['msg-fixture', 'msg-fixture'])
         self.assertEqual(rows[-1]['usage'], dict(self.start_usage, output_tokens=9))
 
-    def test_gzip_usage_and_applied_edits_are_observed_without_changing_wire(self):
-        policy = {'applied_edits': [{'type': 'clear_tool_uses_20250919',
-                                   'cleared_tool_uses': 1, 'cleared_input_tokens': 71}]}
-        delta = dict(self.delta, context_management=policy)
-        raw = gzip.compress(b''.join(b'data: ' + json.dumps(event).encode() + b'\n\n'
-                                    for event in (self.start, delta)))
-        forwarded, rows, details = self.stream(raw, {'Content-Encoding': 'gzip'})
-        self.assertEqual(forwarded, raw)
-        self.assertEqual(details['wire_sha256'], hashlib.sha256(raw).hexdigest())
-        self.assertTrue(details['usage_stream_observable'])
-        self.assertEqual(rows[-1]['context_management'], policy)
-        self.assertEqual(rows[-1]['usage'], dict(self.start_usage, output_tokens=9))
-
-    def test_zstd_usage_is_observed_without_changing_wire(self):
-        try:
-            from compression import zstd
-        except ImportError:
-            self.skipTest('The installed gateway requires Python 3.14 for zstd')
-        raw = zstd.compress(b'data: ' + json.dumps(self.start).encode() + b'\n\n')
-        forwarded, rows, details = self.stream(raw, {'Content-Encoding': 'zstd'})
-        self.assertEqual(forwarded, raw)
-        self.assertTrue(details['usage_stream_observable'])
-        self.assertEqual(rows[-1]['usage'], self.start_usage)
-
     def test_unknown_encoding_preserves_bytes_and_usage_stays_unknown(self):
         raw = gzip.compress(b'data: ' + json.dumps(self.start).encode() + b'\n\n')
         forwarded, rows, details = self.stream(raw, {'Content-Encoding': 'unknown'})
@@ -961,24 +928,37 @@ class ServerUsageParserTests(unittest.TestCase):
     def assert_compressed_frame_contract(self, encoding, compress):
         policy = {'applied_edits': [{'type': 'clear_tool_uses_20250919', 'cleared_tool_uses': 1}]}
         delta = dict(self.delta, context_management=policy)
-        raw = b''.join(compress(b'data: ' + json.dumps(event).encode() + b'\n\n')
-                       for event in (self.start, delta))
-        for size in (1, len(raw)):
-            class Upstream:
-                headers = {'Content-Encoding': encoding}
-                def __init__(self):
-                    self.body = io.BytesIO(raw)
-                def read1(self, maximum):
-                    return self.body.read(size)
-            with self.subTest(encoding=encoding, size=size):
-                sink, rows = io.BytesIO(), []
-                details = context_gateway.forward_stream(Upstream(), sink, 'anthropic', rows.append)
-                self.assertEqual(sink.getvalue(), raw)
-                self.assertTrue(details['usage_stream_observable'])
-                self.assertEqual(rows[-1]['usage']['output_tokens'], 9)
-                self.assertEqual(rows[-1]['context_management'], policy)
-        forwarded, _, details = self.stream(raw + b'invalid trailing frame', {'Content-Encoding': encoding})
-        self.assertEqual(forwarded, raw + b'invalid trailing frame')
+        start_bytes = b'data: ' + json.dumps(self.start).encode() + b'\n\n'
+        delta_bytes = b'data: ' + json.dumps(delta).encode() + b'\n\n'
+        full_policy = {'applied_edits': [dict(policy['applied_edits'][0], cleared_input_tokens=71)]}
+        full_delta_bytes = b'data: ' + json.dumps(dict(self.delta, context_management=full_policy)).encode() + b'\n\n'
+        concatenated = compress(start_bytes) + compress(delta_bytes)
+        cases = (
+            ('single-start', compress(start_bytes), self.start_usage, None),
+            ('single-start-and-delta', compress(start_bytes + full_delta_bytes),
+             dict(self.start_usage, output_tokens=9), full_policy),
+            ('concatenated-start-and-delta', concatenated,
+             dict(self.start_usage, output_tokens=9), policy),
+        )
+        for framing, raw, expected_usage, expected_policy in cases:
+            for size in (1, len(raw)):
+                class Upstream:
+                    headers = {'Content-Encoding': encoding}
+                    def __init__(self):
+                        self.body = io.BytesIO(raw)
+                    def read1(self, maximum):
+                        return self.body.read(size)
+                with self.subTest(encoding=encoding, framing=framing, size=size):
+                    sink, rows = io.BytesIO(), []
+                    details = context_gateway.forward_stream(Upstream(), sink, 'anthropic', rows.append)
+                    self.assertEqual(sink.getvalue(), raw)
+                    self.assertEqual(details['wire_sha256'], hashlib.sha256(raw).hexdigest())
+                    self.assertTrue(details['usage_stream_observable'])
+                    self.assertEqual(rows[-1]['usage'], expected_usage)
+                    if expected_policy is not None:
+                        self.assertEqual(rows[-1]['context_management'], expected_policy)
+        forwarded, _, details = self.stream(concatenated + b'invalid trailing frame', {'Content-Encoding': encoding})
+        self.assertEqual(forwarded, concatenated + b'invalid trailing frame')
         self.assertFalse(details['usage_stream_observable'])
 
     def test_unknown_nonobject_sse_events_cannot_interrupt_byte_forwarding(self):

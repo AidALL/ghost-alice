@@ -17,6 +17,18 @@ import io_trace_hook
 
 
 class TestIoTraceHook(unittest.TestCase):
+    def test_platform_reading_preserves_environment_precedence_and_supported_names(self):
+        for supplied, expected in ((" Claude ", "claude"), (" CoDeX ", "codex"),
+                                   ("future-host", "unknown"), ("../claude", "unknown"),
+                                   (" ", "unknown")):
+            with self.subTest(platform=supplied), mock.patch.dict(
+                    os.environ, {"GHOST_ALICE_PLATFORM": supplied}, clear=True):
+                row = io_trace_hook._extract({"platform": "codex", "session_id": "platform-reading"})
+                self.assertEqual(row["platform"], expected)
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(io_trace_hook._extract({"platform": " Claude "})["platform"], "claude")
+            self.assertEqual(io_trace_hook._extract({"platform": {"name": "claude"}})["platform"], "unknown")
+
     def test_shell_command_fields_preserve_the_existing_record_limit(self):
         command = 'echo ' + 'synthetic-command ' * 25
         for name, field in [('Bash', 'command'), ('exec_command', 'cmd'), ('shell', 'cmd')]:

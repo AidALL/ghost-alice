@@ -22,9 +22,7 @@ TIMESTAMP = "2026-09-28T00:00:00Z"
 
 
 sys.path.insert(0, str(LEDGER_PATH.parent))
-sys.path.insert(0, str(REPO_ROOT / "skill-evolution" / "scripts"))
 import session_intent_ledger as LEDGER
-import aggregate_recommendations as AGGREGATOR
 
 
 def _entry(entry_id: str, pattern_class: str | None = None) -> dict:
@@ -172,34 +170,6 @@ class CliRejectionTests(unittest.TestCase):
                 self.assertEqual(after, before)
                 self.assertEqual(goal_after, goal_before)
                 self.assertEqual(json.loads(run("--read-state", "--pointer", "/conduct_feedback").stdout)['value'], [])
-
-
-class AggregatorGroupingTests(unittest.TestCase):
-    def _root(self, sessions: dict[tuple[str, str], list[dict]]) -> Path:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        root = Path(temporary.name)
-        for (platform, session), entries in sessions.items():
-            directory = root / platform / session
-            directory.mkdir(parents=True)
-            (directory / "intent-state.json").write_text(json.dumps({
-                "platform": platform, "session_id": session, "conduct_feedback": entries}), encoding="utf-8")
-        return root
-
-    def test_different_ids_in_one_class_count_as_cross_session_recurrence(self) -> None:
-        root = self._root({("claude", "s1"): [_entry("repeated-status", "restatement-loop")],
-                           ("codex", "s2"): [_entry("parroted-examples", "restatement-loop")]})
-        report = AGGREGATOR.aggregate(root, now=TIMESTAMP)
-        self.assertEqual(report["recommendation_count"], 1)
-        record = report["recommendations"][0]
-        self.assertEqual((record["id"], record["session_count"], record["occurrence_count"]), ("restatement-loop", 2, 2))
-        self.assertEqual(record["member_ids"], ["parroted-examples", "repeated-status"])
-
-    def test_unclassified_entries_keep_id_grouping(self) -> None:
-        root = self._root({("claude", "s1"): [_entry("a")], ("codex", "s2"): [_entry("b")]})
-        report = AGGREGATOR.aggregate(root, now=TIMESTAMP)
-        self.assertEqual(sorted(r["id"] for r in report["recommendations"]), ["a", "b"])
-        self.assertTrue(all(r["session_count"] == 1 for r in report["recommendations"]))
 
 
 if __name__ == "__main__":

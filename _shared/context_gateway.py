@@ -24,6 +24,7 @@ import uuid
 import zlib
 
 import state_retention
+from hook_definitions import SUPPORTED_PLATFORMS
 
 HOP = {'host', 'connection', 'transfer-encoding', 'content-length', 'proxy-connection', 'keep-alive'}
 INTERNAL_HEADERS = {'x-ghost-context-scope', 'x-ghost-context-session'}
@@ -302,7 +303,7 @@ def make_server(scope, output, origins=None, port=0, selectors=None, server_sele
         raise ValueError('Only an explicit Claude native-capability selector is supported')
     server_dispatch = server_selectors or {}
     if selectors is not None and (not isinstance(selectors, dict) or any(
-        key not in ('codex', 'claude') or not callable(callback) for key, callback in selectors.items())):
+        key not in SUPPORTED_PLATFORMS or not callable(callback) for key, callback in selectors.items())):
         raise ValueError('Explicit supported platform selection callbacks are required')
     dispatch = dict(selectors or {})
 

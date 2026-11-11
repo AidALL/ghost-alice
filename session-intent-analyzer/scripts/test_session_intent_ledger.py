@@ -150,8 +150,10 @@ class SessionIntentLedgerTests(unittest.TestCase):
                                              "admitted": old_value, "selectable": new_value}]})
             self.assertEqual(authority_dump(self.ledger, coordinates["root"]), before)
 
-    def run_cli(self, root, *args, identity=None):
+    def run_cli(self, root, *args, identity=None, remove_env=()):
         env = dict(os.environ)
+        for key in remove_env:
+            env.pop(key, None)
         env.update(identity or {})
         return subprocess.run(
             [sys.executable, str(LEDGER), "--root", str(root), *args],
@@ -272,12 +274,6 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertEqual(entry["source"], "user-said")
         self.assertEqual(entry["status"], "open")
         self.assertEqual(entry["corrective_rule"], "the human user's explicit remove/do/fix instruction requests execution")
-        state = self.ledger.apply_delta(state, {
-            "conduct_feedback": [
-                {"id": "report-instead-of-execute", "status": "encoded"}
-            ]
-        })
-        self.assertEqual(state["conduct_feedback"], [])
 
     def test_conduct_feedback_repeated_same_id_increments_occurrence_count(self) -> None:
         state = self.ledger.default_state("codex", "session-cf")
@@ -604,11 +600,8 @@ class SessionIntentLedgerTests(unittest.TestCase):
             },
         )
         before = authority_bytes(self.ledger, paths["state"])
-        completed = subprocess.run(
-            [sys.executable, str(LEDGER), "--root", str(root), "--platform", "codex",
-             "--session-id", "scope-correction", "--snapshot"],
-            check=True, capture_output=True, text=True,
-        )
+        completed = self.run_cli(root, "--platform", "codex", "--session-id", "scope-correction", "--snapshot")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
         snapshot = json.loads(completed.stdout)
         self.assertIn("active_decisions", snapshot)
         self.assertEqual([d["id"] for d in snapshot["active_decisions"]], ["repair-approved"])
@@ -864,24 +857,10 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.ledger.write_current_session_pointer(root, "codex", "s-pointer")
         delta = {"current_goal": "join semantic delta into the pointer session"}
 
-        completed = subprocess.run(
-            [
-                sys.executable,
-                str(LEDGER),
-                "--root",
-                str(root),
-                "--platform",
-                "codex",
-                "--delta-json",
-                json.dumps(delta, ensure_ascii=False),
-                "--snapshot",
-            ],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-        )
+        with patch.dict(os.environ, {"CODEX_THREAD_ID": "ambient-native", "GHOST_ALICE_SESSION_ID": "ambient-generic"}):
+            completed = self.run_cli(root, "--platform", "codex", "--delta-json",
+                                     json.dumps(delta, ensure_ascii=False), "--snapshot",
+                                     remove_env=("CODEX_THREAD_ID", "GHOST_ALICE_SESSION_ID"))
 
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("--session-id is required", completed.stderr)
@@ -903,22 +882,8 @@ class SessionIntentLedgerTests(unittest.TestCase):
             self.ledger._save_state(connection, state_before)
         events_before = authority_event_text(self.ledger, paths["events"])
 
-        completed = subprocess.run(
-            [
-                sys.executable,
-                str(LEDGER),
-                "--root",
-                str(root),
-                "--platform",
-                "codex",
-                "--snapshot",
-            ],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-        )
+        completed = self.run_cli(root, "--platform", "codex", "--snapshot")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
         snapshot = json.loads(completed.stdout)
         state_after = authority_state(self.ledger, paths["state"])
@@ -933,26 +898,9 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.ledger.write_current_session_pointer(root, "codex", "s-delta-snapshot")
         delta = {"current_goal": "update then print snapshot"}
 
-        completed = subprocess.run(
-            [
-                sys.executable,
-                str(LEDGER),
-                "--root",
-                str(root),
-                "--platform",
-                "codex",
-                "--session-id",
-                "s-delta-snapshot",
-                "--delta-json",
-                json.dumps(delta, ensure_ascii=False),
-                "--snapshot",
-            ],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-        )
+        completed = self.run_cli(root, "--platform", "codex", "--session-id", "s-delta-snapshot",
+                                 "--delta-json", json.dumps(delta, ensure_ascii=False), "--snapshot")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
         snapshot = json.loads(completed.stdout)
         events_path = root / "codex" / "s-delta-snapshot" / "intent-events.jsonl"

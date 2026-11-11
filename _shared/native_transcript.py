@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 import install_destination
+from hook_definitions import SUPPORTED_PLATFORMS
 from source_reference import matches_input, reference_source_prefix, SourceReferenceError, text_digest
 from text_lines import committed_byte_lines, committed_length, committed_lines, committed_records
 
@@ -300,7 +301,7 @@ def native_tool_activity(platform, session_id, hook_payload, *, input_observatio
         return dict(status=status, reason=reason)
 
     data = hook_payload if isinstance(hook_payload, dict) else {}
-    if (platform not in {'claude', 'codex'} or not isinstance(session_id, str) or not session_id
+    if (platform not in SUPPORTED_PLATFORMS or not isinstance(session_id, str) or not session_id
             or (data.get('session_id') or data.get('sessionId')) != session_id):
         return result('unavailable', 'native-owner-mismatch')
     path = data.get('transcript_path') or data.get('transcriptPath')
