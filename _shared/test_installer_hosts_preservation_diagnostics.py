@@ -106,7 +106,7 @@ class HookRegistrationTests(HostCase):
         with proposed.patch():
             ok, out = self.captured(hosts.ensure_claude_bootstrap, ctx)
         self.assertTrue(ok)
-        self.assertIn(f"[WARN] Claude CLAUDE.md has no Ghost-ALICE block; wrote proposed file instead: {rules}.ghost-alice-proposed", out)
+        self.assertIn(f"[WARN] Claude CLAUDE.md has no Ghost-ALICE block; proposed file available: {rules}.ghost-alice-proposed", out)
         codex = FakeRunner()
         with codex.patch():
             ok, out = self.captured(hosts.ensure_codex_bootstrap, ctx)

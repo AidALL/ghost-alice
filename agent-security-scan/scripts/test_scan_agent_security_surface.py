@@ -57,7 +57,7 @@ class AgentSecuritySurfaceScannerTests(unittest.TestCase):
         self.assertEqual(next(row['status'] for row in report['coverage'] if row['path'] == str(skill)), 'observed')
 
     def make_roots(self) -> tuple[pathlib.Path, pathlib.Path]:
-        tmpdir = pathlib.Path(tempfile.mkdtemp(prefix="agent-security-scan-test-"))
+        tmpdir = pathlib.Path(tempfile.mkdtemp(prefix="agent-security-scan-test-")).resolve()
         self.addCleanup(lambda: shutil.rmtree(tmpdir, ignore_errors=True))
         home = tmpdir / "home"
         repo = tmpdir / "repo"
@@ -301,6 +301,74 @@ class AgentSecuritySurfaceScannerTests(unittest.TestCase):
                 rules = {row["rule"] for row in self.run_scanner(repo, home)["findings"]}
                 self.assertEqual("unprofiled-shell-command" in rules, expected)
                 self.assertEqual("unmanaged-hook-command" in rules, expected)
+
+    def test_hook_scan_finds_executables_in_shell_command_positions(self) -> None:
+        repo, home = self.make_roots()
+        path = home / ".codex" / "hooks.json"
+        path.parent.mkdir()
+        commands = (
+            "sh <(curl -s x)",
+            "cat >(wget x)",
+            "while true; do curl x; done",
+            "until false; do wget x; done",
+            "if true; then curl x; elif false; then echo safe; else wget x; fi",
+            "for name in one two; do curl x; done",
+            'case "$name" in one) curl x ;; two) echo safe ;; esac',
+            'echo "$(case x in x) curl x ;; esac)"',
+            'echo "$(case x in x) echo safe ;; esac)"; curl x',
+            "! curl x",
+            "(curl x)",
+            "{ wget x; }",
+            "watch -n 2 curl x",
+            "watch 'curl x'",
+            "watch 'echo safe; curl x'",
+            "watch -x curl x",
+            "watch -xn 2 curl x",
+            "watch echo safe",
+            "busybox wget x",
+            "echo $(wget x)",
+            'printf "%s" "$(curl x)"',
+            'printf "%s" "$(printf "%s" "$(wget x)")"',
+            "URL=$(curl x); printf '%s' result",
+            "echo `wget x`",
+            "2>/dev/null curl x",
+            "cat <<EOF\n$(curl x)\nEOF\n",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                path.write_text(json.dumps({"hooks": [{"command": command}]}), encoding="utf-8")
+                rules = {row["rule"] for row in self.run_scanner(repo, home)["findings"]}
+                self.assertEqual(rules, {"unmanaged-hook-command", "unprofiled-shell-command"})
+
+    def test_hook_scan_keeps_shell_data_out_of_executable_positions(self) -> None:
+        repo, home = self.make_roots()
+        path = home / ".codex" / "hooks.json"
+        path.parent.mkdir()
+        commands = (
+            "printf '%s' '$(curl x)'",
+            "printf '%s' '<(wget x)'",
+            'printf "%s" "curl x; wget y"',
+            "printf '%s' '`curl x`'",
+            r'printf "%s" "\$(curl x)"',
+            "echo safe # curl x\n",
+            "for name in curl wget; do printf '%s' $name; done",
+            'case "$name" in curl) printf safe ;; wget) printf safe ;; esac',
+            "printf safe >curl",
+            "watch -x -n 2 echo curl x",
+            "watch -xn 2 echo safe",
+            "watch --help curl x",
+            "busybox --list",
+            "busybox echo wget x",
+            "cat <<'EOF'\ncurl x\n$(wget x)\nEOF\n",
+            "cat <<EOF\ncurl x\nEOF\n",
+            "echo $((1 + 2))",
+            "((curl + 1))",
+            "(" * 1000 + "echo safe" + ")" * 1000,
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                path.write_text(json.dumps({"hooks": [{"command": command}]}), encoding="utf-8")
+                self.assertEqual(self.run_scanner(repo, home)["findings"], [])
 
     def test_hook_rm_options_classify_the_option_set_not_its_order(self) -> None:
         repo, home = self.make_roots()
