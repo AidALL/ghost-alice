@@ -64,10 +64,10 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             body = dest.read_text()
             self.assertTrue(body.endswith(project_rules))
-            self.assertIn("Common Ghost-ALICE governance comes from", body)
-            self.assertIn("Project instruction files supply project-specific rules", body)
-            self.assertIn("An instruction that the human user enters in the conversation takes precedence over this loading procedure", body)
-            self.assertIn("without reading the common governance file", body)
+            expected_loader = LOADER.read_text().split("\n", 1)[1].strip().replace(
+                "{{GOVERNANCE_PATH}}", dest.with_name("ghost-alice-governance.md").resolve().as_posix()
+            )
+            self.assertIn(expected_loader, body)
             self.assertNotIn("If trusted project instructions already supply the complete", body)
 
     def test_doctor_uses_managed_dependency_marker_independently_of_headings(self):

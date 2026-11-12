@@ -267,7 +267,8 @@ class PreservationTests(HostCase):
         self.assertEqual(self.runner.tool_calls("diff_collector_cli.py")[0],
                          ["--snapshot", str(pending / "snapshot.json"), "--pending", str(pending),
                           "--manifest", str(pending / "manifest.json"), "--platform", "codex",
-                          "--skills-dir", str(ctx.skills_dir), "--target", "_shared", "--target", "alpha", "--target", "noop"])
+                          "--skills-dir", str(ctx.skills_dir), "--install-record-root", str(self.ghost),
+                          "--target", "_shared", "--target", "alpha", "--target", "noop"])
         failing = FakeRunner()
         failing.respond_to("diff_collector_cli.py", ToolResult(1))
         with failing.patch():

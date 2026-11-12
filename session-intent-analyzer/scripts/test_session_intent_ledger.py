@@ -359,8 +359,30 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertEqual(state["current_goal"], "implement the new session intent guard")
         self.assertIn("do not store raw prompts", state["constraints"])
         self.assertIn("input_digest", json.loads(events_text.splitlines()[0]))
+        for event in map(json.loads, events_text.splitlines()):
+            self.assertNotIn("raw_input", event)
+            self.assertNotIn("raw_user_input", event)
         self.assertNotIn(raw_prompt, events_text)
         self.assertNotIn("abc123", events_text)
+
+    def test_renaming_legacy_selection_flag_does_not_report_a_semantic_change(self) -> None:
+        coords = dict(root=self.tmpdir / 'legacy-selection', platform='codex', session_id='legacy')
+        criterion = dict(id='criterion', summary='Required result', source='user-said', selectable=True)
+        self.ledger.record_turn(**coords, raw_input='Original request',
+                               intent_delta={'acceptance_criteria': [criterion]})
+        state = self.ledger.read_session_state(**coords)
+        state['schema_version'] = 'session-intent-ledger.v1'
+        state['acceptance_criteria'][0]['admitted'] = state['acceptance_criteria'][0].pop('selectable')
+        with self.ledger.storage_transaction(coords['root']) as connection:
+            connection.execute('UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?',
+                               (json.dumps(state), 'codex', 'legacy'))
+        before = self.ledger.read_session_events(**coords)
+        self.ledger.record_turn(**coords, expected_input_event_id=state['latest_input_event_id'],
+                               intent_delta={'acceptance_criteria': [criterion]})
+        events = self.ledger.read_session_events(**coords)
+        self.assertEqual(events[:-1], before)
+        self.assertEqual(events[-1]['semantic_changes'], {})
+        self.assertEqual(self.ledger.read_session_state(**coords)['acceptance_criteria'], [criterion])
 
     def test_intent_delta_updates_events_and_current_session_discovery(self) -> None:
         root = self.tmpdir / "ledger"
@@ -400,7 +422,6 @@ class SessionIntentLedgerTests(unittest.TestCase):
             ["acceptance_criteria", "conduct_feedback", "current_goal"],
         )
         self.assertIn("intent_delta_digest", rows[-1])
-        self.assertNotIn("raw_user_input", rows[-1])
         self.assertIn("semantic_changes", rows[-1])
         self.assertEqual(pointer, "session-jsonl")
         self.assertFalse(paths["state"].exists(), "authoritative writes must not create JSON exports")

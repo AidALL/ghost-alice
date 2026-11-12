@@ -44,7 +44,7 @@ import os
 import re
 import shutil
 import sys
-import tomllib
+from installer import codex_toml as tomllib
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
@@ -980,11 +980,10 @@ def _read_settings(path: Path, *, backup_corrupt: bool = True) -> dict:
     except json.JSONDecodeError as e:
         _log(f"WARNING: Failed to parse JSON at {path} ({e})")
         if backup_corrupt:
-            _log("  File may be corrupted. Backing up and starting with empty settings.")
             backup = path.with_suffix(".json.corrupt-bak")
             install_destination.assert_mutation_path(backup)
             shutil.copy2(path, backup)
-            _log(f"  Corrupted file backed up: {backup}")
+            print(f"[WARN] Unreadable hook settings at {path}; original saved at {backup}. Continuing with empty settings.")
         else:
             _log("  File may be corrupted. Continuing with empty settings without modifying it.")
         return {}
@@ -1078,7 +1077,7 @@ def _toml_table_headers(lines: list[str]) -> Iterator[tuple[int, dict[str, Any],
     """Yield each header's line, decoded table and trailing comment/newline for text edits."""
     section_start = 0
     for idx, raw_line in enumerate(lines):
-        if not raw_line.lstrip().startswith("["):
+        if not raw_line.removeprefix("\ufeff").lstrip().startswith("["):
             continue
         try:
             table = tomllib.loads(raw_line)
@@ -2187,12 +2186,13 @@ def install_hook(
     if not changed:
         if not dry_run and selected_node_runtime is not None:
             _persist_node_runtime(platform_key, selected_node_runtime)
-            if platform_key == "claude" and addon_sources:
+            if platform_key == "claude":
                 import addon_skill_permissions
                 addon_skill_permissions.record_install(
                     settings_file,
                     load_addon_targets(list(addon_sources), core_skill_names=_ghost_alice_installed_skill_names(), platform="claude"),
                     permission_before, settings.get("permissions", {}).get("allow", []),
+                    core_names=_ghost_alice_installed_skill_names(),
                 )
         return "already"
 
@@ -2205,12 +2205,13 @@ def install_hook(
     if not dry_run and selected_node_runtime is not None:
         try:
             _persist_node_runtime(platform_key, selected_node_runtime)
-            if platform_key == "claude" and addon_sources:
+            if platform_key == "claude":
                 import addon_skill_permissions
                 addon_skill_permissions.record_install(
                     settings_file,
                     load_addon_targets(list(addon_sources), core_skill_names=_ghost_alice_installed_skill_names(), platform="claude"),
                     permission_before, settings.get("permissions", {}).get("allow", []),
+                    core_names=_ghost_alice_installed_skill_names(),
                 )
         except Exception as persistence_error:
             rollback_errors: list[Exception] = []
@@ -2549,16 +2550,29 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
 
     _log(f"── {name} ──")
 
+    settings_existed = settings_file.exists()
+    if settings_existed:
+        _log(f"  Hook config file: {settings_file}")
+    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
+
+    permission_removed = False
+    if platform_key == "claude":
+        import addon_skill_permissions
+        permission_items = addon_skill_permissions.detach_core(
+            _ghost_alice_installed_skill_names(), settings_file, settings, _write_settings, dry_run=dry_run,
+        )
+        permission_removed = any(item["action"] in {"removed", "would-remove"} for item in permission_items)
+        unowned = [item["name"] for item in permission_items if item["action"] == "manual-review"]
+        if unowned:
+            print(f"[WARN] Preserved Core Skill permissions without addition records: {', '.join(unowned)}")
+
     if not platform["detect"]():
         _log(f"  {config_dir} not found. Skipping")
         return "skipped"
 
-    if not settings_file.exists():
+    if not settings_existed:
         _log("  No hook config file. There are no hooks to remove")
         return "not_found"
-
-    _log(f"  Hook config file: {settings_file}")
-    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
 
     hooks_obj = settings.get("hooks", {})
     hook_list = hooks_obj.get(hook_key, [])
@@ -2604,7 +2618,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
 
     if total_removed == 0:
         _log("  No hooks found. Nothing to remove")
-        return "not_found"
+        return "removed" if permission_removed else "not_found"
 
     _remove_empty_hook_groups(hooks_obj)
     if dry_run:

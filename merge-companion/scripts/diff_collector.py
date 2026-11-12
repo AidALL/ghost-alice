@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
+import re
 from file_walker import EXCLUDED_DIR_NAMES, EXCLUDED_FILE_NAMES, EXCLUDED_FILE_SUFFIXES
 from snapshot import file_hash, load_snapshot, snapshot_records
 from manifest_io import append_entry, append_entry_if_absent
@@ -242,9 +243,36 @@ def collect_external_changes(
     snapshot_path: Path,
     files: Iterable[Path],
     skills_dir: Optional[Path] = None,
+    *, published_targets: Optional[dict] = None,
 ) -> list[dict]:
     snap = load_snapshot(snapshot_path)
     records = snapshot_records(snap, skills_dir=skills_dir)
+    # A publish can finish before the later hook/bootstrap steps fail. Its record,
+    # unlike the prior full-install snapshot, already names the new file inventory.
+    # Use only that recorded baseline, never the current disk, for those newer copies.
+    captured_at = snap.get("captured_at")
+    published_paths = set()
+    for destination, entry in (published_targets or {}).items():
+        root = Path(destination)
+        if (skills_dir is None or root.parent != skills_dir or not isinstance(entry, dict)
+                or entry.get("name") != root.name
+                or entry.get("mode") != "copy" or entry.get("baseline") != "recorded"
+                or entry.get("kind") not in {"skill", "support"}
+                or not isinstance(captured_at, str) or not isinstance(entry.get("installed_at"), str)
+                or entry["installed_at"] <= captured_at):
+            continue
+        published_files = entry.get("files")
+        if not isinstance(published_files, dict) or any(
+            not isinstance(name, str) or Path(name).is_absolute() or ".." in Path(name).parts
+            or not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+            for name, digest in published_files.items()
+        ):
+            continue
+        records = {name: record for name, record in records.items() if not Path(name).is_relative_to(root)}
+        published_records = snapshot_records({"files": {str(root / name): digest[len("sha256:"):]
+                                                         for name, digest in published_files.items()}}, skills_dir=skills_dir)
+        records.update(published_records)
+        published_paths.update(published_records)
     current_paths = {str(f): f for f in files if not _is_excluded_generated_path(f, records.get(str(f)), skills_dir)}
     changes = []
     for path_str, f in current_paths.items():
@@ -254,7 +282,7 @@ def collect_external_changes(
         new = file_hash(f) if current_kind == "file" else None
         current_encoding = _encoding_label(f)
         current_marker_hash = _install_marker_hash(f, old_record, skills_dir)
-        benign_ghost_alice_refresh = _is_benign_ghost_alice_marker_refresh(
+        benign_ghost_alice_refresh = path_str not in published_paths and _is_benign_ghost_alice_marker_refresh(
             f,
             old_record,
             new,

@@ -22,6 +22,16 @@ def context():
 
 
 class CompletionRouteTests(unittest.TestCase):
+    def test_legacy_selected_route_remains_current_without_rewriting_original(self):
+        ctx = context()
+        route = ctx['response_route']
+        route['schema_version'] = 'response-route.v1'
+        for row in route['work_units'] + route['selected_criteria']:
+            row['admitted'] = row.pop('selectable')
+        before = deepcopy(ctx)
+        self.assertEqual(select_completion_route(ctx)['route_binding'], 'current')
+        self.assertEqual(ctx, before)
+
     def test_minimal_surface_binds_the_current_route(self):
         ctx = context()
         ctx["response_route"]["routing_surface"] = dict(response_mode="normal", boundary_contract="n/a")

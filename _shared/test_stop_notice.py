@@ -147,7 +147,7 @@ class StopNoticeMessageTests(StopNoticeCase):
             "  Prerequisite: not available yet",
         ])
 
-    def test_work_the_user_stopped_is_marked_stopped(self):
+    def test_model_reported_human_stop_is_attributed_to_the_response_model(self):
         payload = self.run_stop(COMPLETE, declared_remaining_work=declared("model-reported-human-stop"))
         self.assertEqual(payload["stop_notice"]["remaining_work"]["control"], "model-reported-human-stop")
         self.assertEqual(self.lines(payload)[1:], [

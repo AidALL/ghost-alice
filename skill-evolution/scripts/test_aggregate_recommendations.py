@@ -39,8 +39,8 @@ class AggregateRecommendationsTests(unittest.TestCase):
         self.assertEqual(result["recommendations"][0]["occurrence_count"], 10)
         self.assertEqual(result["recommendations"][0]["sources"], ["user-said"])
 
-    def test_empty_root_returns_no_recommendations(self) -> None:
-        with mock.patch.object(self.mod, "load_ledger", side_effect=ImportError("ledger unavailable")) as loader:
+    def test_unavailable_ledger_fallback_ignores_empty_and_invalid_feedback(self) -> None:
+        with mock.patch.object(self.mod, "load_ledger", side_effect=ImportError("ledger unavailable")):
             result = self.mod.aggregate(self.root, now="2026-06-05T00:00:00Z")
             self._write("codex", "empty", [None, {}, {"id": " "}])
             invalid_only = self.mod.aggregate(self.root, now="2026-06-05T00:00:00Z")

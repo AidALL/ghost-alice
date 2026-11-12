@@ -79,7 +79,7 @@ CHECKS: list[LayerCheck] = [
     ),
     LayerCheck(
         layer="pending-merge-prose-rule",
-        description="common governance applies merge-companion before an installed-skill change and for a requested review",
+        description="common governance applies merge-companion before an installed-skill change and when the human user asks to review backed-up changes",
         file=REPO / "platforms" / "common-governance.md",
         pattern=r"`merge-companion`: before the selected work modifies, replaces or installs an installed skill, and when the human user asks to review backed-up changes",
     ),

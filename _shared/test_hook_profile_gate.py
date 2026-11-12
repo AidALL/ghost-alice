@@ -101,6 +101,29 @@ def _b64(command):
     return base64.urlsafe_b64encode(command.encode()).decode()
 
 class TestHookRunnerExecutionGate(unittest.TestCase):
+    def test_malformed_permission_decisions_are_removed_and_raw_output_is_audited(self):
+        for permission in (['deny'], {'decision': 'ask'}, None, 42):
+            with self.subTest(permission=permission), tempfile.TemporaryDirectory() as home:
+                raw = json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
+                    'permissionDecision': permission, 'permissionDecisionReason': 'invalid control',
+                    'additionalContext': 'retained source context'}}) + '\n'
+                output, errors = io.StringIO(), io.StringIO()
+                command = _b64(shlex.join([sys.executable, '-c', 'print(1)']))
+                with (mock.patch.dict(os.environ, {'HOME': home, 'GHOST_ALICE_PLATFORM': 'codex'}, clear=True),
+                      mock.patch.object(hook_profile_gate, '_read_stdin',
+                                        return_value='{"session_id":"malformed-control","event":"PreToolUse"}'),
+                      mock.patch.object(hook_profile_gate.subprocess, 'run',
+                                        return_value=subprocess.CompletedProcess([], 0, raw, '')),
+                      mock.patch.object(sys, 'stdout', output), mock.patch.object(sys, 'stderr', errors)):
+                    self.assertEqual(hook_profile_gate.run('tool-checkpoint', command), 0)
+                self.assertEqual(errors.getvalue(), '')
+                protocol = json.loads(output.getvalue())
+                self.assertEqual(protocol['hookSpecificOutput'], {'hookEventName': 'PreToolUse',
+                                  'additionalContext': 'retained source context'})
+                rows = strict_session_log.log_path(home, 'codex', 'malformed-control').read_text().splitlines()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(json.loads(rows[0])['stdout'], raw)
+
     def test_runtime_and_rejection_logs_use_the_same_environment_platform(self):
         for supplied, expected in ((" Claude ", "claude"), (" CoDeX ", "codex"),
                                    ("future-host", "unknown"), ("../claude", "unknown"),

@@ -92,7 +92,7 @@ bash install.sh --status
 
 정상 목표는 `overall: ok`입니다.
 
-Doctor는 `overall`에 영향을 주지 않는 Core 정보 줄 `native-intake-waits`와 `native-intake-failures`도 출력합니다. [입력 경고와 doctor 목록](troubleshooting.md#입력-경고와-doctor-목록)을 참고해 주세요.
+Doctor는 Core 정보 줄 `native-intake-waits`, `native-intake-failures`, `hook-failures`, `intake-hook-degraded`도 출력합니다. 이 목록은 `overall`과 종료 코드를 바꾸지 않습니다. Doctor는 기록된 대기·실패·처리 오류 표지를 보고하며, 처리 오류 표지만으로 입력의 저장 여부를 판단하지 않습니다. [입력 경고와 doctor 목록](troubleshooting.md#입력-경고와-doctor-목록)을 참고해 주세요.
 
 ## 업데이트
 
@@ -180,7 +180,7 @@ Ghost-ALICE는 Claude Code 작업 공간 명령으로 `/visibility strict|dynami
 
 인스톨러는 `--help`와 `--list`를 포함한 모든 명령에 Python 3.11 이상을 요구합니다. `install.sh`는 Python을 찾거나 준비하고 인수를 `_shared/installer/cli.py`에 전달하는 일만 합니다. 해당 버전이 없으면 가능한 환경에서 자동 준비를 시도합니다.
 
-선택적인 macOS 네이티브 문맥 게이트웨이는 `compression.zstd`를 제공하는 Python 3.14 이상을 요구합니다. 등록 명령 `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`는 먼저 이 기능을 확인한 뒤 launch agent, `state.json`, Codex provider 블록을 작성하고 설치 기록에 서비스를 기록합니다. 등록 명령은 모듈을 복사하지 않습니다. 서비스는 인스톨러가 게시한 런타임 `_shared`를 실행하므로 Core를 먼저 설치해 주세요. Core 인스톨러와 훅의 최소 요구 버전은 Python 3.11로 유지됩니다. Codex `config.toml`, launch agent, 상태 파일이 심볼릭 링크이면 등록과 분리는 서비스를 변경하기 전에 종료하고 링크와 원본을 보존합니다. 갱신은 서비스 파일 세 개가 설치 기록과 같은 동안 리스너의 포트와 `scope` 값을 유지합니다. 인스톨러 밖에서 변경된 파일이 있으면 명령은 무엇이든 변경하기 전에 종료하고, 기록이 지정하지 않은 launch agent, 상태 디렉터리 항목, provider 블록은 보존합니다. 첫 등록이 실패하고 후보 서비스의 중지가 확인되면, 롤백이 그 시도가 새로 작성한 상태 자료와 기록 항목을 삭제해 다음 등록을 진행할 수 있게 합니다. 중지를 확인할 수 없거나 자료가 동시에 변경되면 검토용으로 복구 자료를 보존합니다. 등록 뒤에는 `bash install.sh`만으로 설치본을 갱신합니다. `bash install.sh gateway detach --apply`은 서비스 등록을 해제하고 상태 디렉터리를 남깁니다. 설치 기록에 없는 게이트웨이 서비스를 launchd가 실행 중이면, 설치와 `--repair`는 그 서비스를 변경하지 않고 등록 명령을 안내하는 경고 한 줄을 출력합니다. 등록 명령은 서비스를 기록에 작성하고 새 코드로 재시작합니다.
+선택적인 macOS 네이티브 문맥 게이트웨이는 `compression.zstd`를 제공하는 Python 3.14 이상을 요구합니다. 등록 명령 `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`는 먼저 이 기능을 확인한 뒤 launch agent, `state.json`, Codex provider 블록을 작성하고 설치 기록에 서비스를 기록합니다. 등록 명령은 모듈을 복사하지 않습니다. 서비스는 인스톨러가 게시한 런타임 `_shared`를 실행하므로 Core를 먼저 설치해 주세요. Core 인스톨러와 훅의 최소 요구 버전은 Python 3.11로 유지됩니다. Codex `config.toml`, launch agent, 상태 파일이 심볼릭 링크이면 등록과 분리는 서비스를 변경하기 전에 종료하고 링크와 원본을 보존합니다. 갱신은 서비스 파일 세 개가 설치 기록과 같은 동안 리스너의 포트와 `scope` 값을 유지합니다. 인스톨러 밖에서 변경된 파일이 있으면 명령은 무엇이든 변경하기 전에 종료하고, 기록이 지정하지 않은 launch agent, 상태 디렉터리 항목, provider 블록은 보존합니다. 첫 등록이 실패하고 후보 서비스의 중지가 확인되면, 롤백이 그 시도가 새로 작성한 상태 자료와 기록 항목을 삭제해 다음 등록을 진행할 수 있게 합니다. 중지를 확인할 수 없거나 자료가 동시에 변경되면 검토용으로 복구 자료를 보존합니다. 등록 뒤에는 `bash install.sh`만으로 설치본을 갱신합니다. `bash install.sh gateway detach --apply`는 서비스 등록을 해제하고 상태 디렉터리를 남깁니다. 설치 기록에 없는 게이트웨이 서비스를 launchd가 실행 중이면, 설치와 `--repair`는 그 서비스를 변경하지 않고 등록 명령을 안내하는 경고 한 줄을 출력합니다. 등록 명령은 서비스를 기록에 작성하고 새 코드로 재시작합니다.
 
 - macOS: Homebrew가 있으면 `brew install python3`
 - Linux / WSL: `apt-get`, `dnf`, `yum`, `pacman` 같은 패키지 관리자
@@ -243,7 +243,7 @@ Claude Code에서 인스톨러는 매니페스트가 선택한 애드온의 `Ski
 - `~/.ghost-alice/hooks/`의 Node 기반 훅 실행 파일
 - Claude Code 권한 허용 목록
 - Claude `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` 전역 부트스트랩
-- Codex `~/.codex/AGENTS.md` 로더와 관리되는 `~/.codex/ghost-alice-governance.md` 공통 계약
+- Codex `~/.codex/AGENTS.md` 로더와 관리되는 `~/.codex/ghost-alice-governance.md` 공용 계약
 - 설치 기록 `~/.ghost-alice/installed-payload.json`: 두 호스트가 함께 쓰는 파일 하나이며, 배치와 같은 단계에서 설치 위치마다 출처와 복사한 파일의 지문을 기록합니다
 - `~/.ghost-alice/rollbacks/<txid>/`: 배치 한 번이 교체한 원래 파일, 배치 전의 설치 기록, 배치의 저널을 보관합니다. 설치 잠금을 획득하는 다음 인스톨러 명령이 중간에 중지된 배치를 복원하며, 완료된 폴더를 남기는 개수는 [런타임 상태 보존](../reference/repository-structure.md#런타임-상태-보존)이 정합니다
 - 설치 상태, 병합 대기 자료와 제거 보고서의 지원 상태
@@ -254,20 +254,20 @@ Claude Code에서 인스톨러는 매니페스트가 선택한 애드온의 `Ski
 
 ### 공통 거버넌스와 프로젝트 지침
 
-Ghost-ALICE 공통 거버넌스는 프로젝트와 업무 분야에 관계없이 적용됩니다. Codex의 정상 작업 경로에서 응답 모델은 관리되는 `~/.codex/AGENTS.md` 로더가 지정한 공통 계약 파일을 조회합니다. 인스톨러는 같은 디렉터리의 `ghost-alice-governance.md`에 그 계약을 기록합니다. Claude Code에서는 인스톨러가 `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`의 관리 블록에 공통 계약을 직접 기록합니다. 프로젝트 지침 파일은 프로젝트 고유 제약을 추가하며, 공통 절차의 복사본을 별도로 제공하지 않습니다. 공용 계약의 [Operating Model](../../../platforms/common-governance.md#operating-model)은 인간 사용자가 대화 입력창에 입력한 지시의 우선순위와 지시 파일에 작성된 제약을 정합니다.
+Ghost-ALICE 공통 거버넌스는 프로젝트와 업무 분야에 관계없이 적용됩니다. Codex의 정상 작업 경로에서 응답 모델은 관리되는 `~/.codex/AGENTS.md` 로더가 지정한 공용 계약 파일을 조회합니다. 인스톨러는 같은 디렉터리의 `ghost-alice-governance.md`에 그 계약을 기록합니다. Claude Code에서는 인스톨러가 `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`의 관리 블록에 공용 계약을 직접 기록합니다. 프로젝트 지침 파일은 프로젝트 고유 제약을 추가하며, 공통 절차의 복사본을 별도로 제공하지 않습니다. 공용 계약의 [Operating Model](../../../platforms/common-governance.md#operating-model)은 인간 사용자가 대화 입력창에 입력한 지시의 우선순위와 지시 파일에 작성된 제약을 정합니다.
 
 ```mermaid
 flowchart LR
-    S["플랫폼 공통 계약 소스"] --> I["인스톨러가 소유한 블록 갱신"]
-    I --> C["Codex 로더 + 공통 계약 파일"]
-    I --> H["Claude 전역 공통 계약 블록"]
+    S["플랫폼 공용 계약 소스"] --> I["인스톨러가 소유한 블록 갱신"]
+    I --> C["Codex 로더 + 공용 계약 파일"]
+    I --> H["Claude 전역 공용 계약 블록"]
     C --> M["응답 모델이 공통 절차 적용"]
     H --> M
     P["프로젝트 고유 제약"] --> M
     U["인간 사용자가 대화 입력창에 입력한 목적과 지시"] --> M
 ```
 
-Codex에서 지정된 공통 파일을 조회할 수 없으면 모델은 Ghost-ALICE 계약이 없다는 것을 사용자에게 한 번 알리고, Ghost-ALICE 원장 기록 없이 사용자의 일을 계속합니다. Codex에서 답변에 도구가 요구되지 않으면 모델은 공통 파일을 조회하지 않고 바로 답하고, 도구가 요구되는지 분명하지 않으면 그 요청을 작업으로 취급하고 공통 파일부터 조회합니다. Status와 doctor는 로더와, 로더가 지정한 공통 파일을 모두 확인합니다. 인스톨러는 부트스트랩 밖의 글과 Ghost-ALICE 표지가 없는 규칙 파일을 보존하며, Codex 공통 계약의 심볼릭 링크를 통한 교체를 거부합니다. 제안 파일을 설치된 계약으로 취급하지 않습니다. 다른 프로젝트의 지침 예산이나 고유 규칙을 변경하지 않습니다.
+Codex에서 지정된 공통 파일을 조회할 수 없으면 모델은 Ghost-ALICE 계약이 없다는 것을 사용자에게 한 번 알리고, Ghost-ALICE 원장 기록 없이 사용자의 일을 계속합니다. Codex에서 답변에 도구가 요구되지 않으면 모델은 공통 파일을 조회하지 않고 바로 답하고, 도구가 요구되는지 분명하지 않으면 그 요청을 작업으로 취급하고 공통 파일부터 조회합니다. Status와 doctor는 로더와, 로더가 지정한 공통 파일을 모두 확인합니다. 인스톨러는 부트스트랩 밖의 글과 Ghost-ALICE 표지가 없는 규칙 파일을 보존하며, Codex 공용 계약의 심볼릭 링크를 통한 교체를 거부합니다. 제안 파일을 설치된 계약으로 취급하지 않습니다. 다른 프로젝트의 지침 예산이나 고유 규칙을 변경하지 않습니다.
 
 
 ### merge-companion

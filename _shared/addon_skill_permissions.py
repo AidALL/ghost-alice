@@ -1,4 +1,4 @@
-"""Own only addon Skill grants that this installer added to Claude settings.
+"""Own only Core and addon Skill grants that this installer added to Claude settings.
 
 The installer preserves preexisting allow rules and does not record who added them. Unknown legacy ownership is
 reported for the human user to review, never converted into removal authority. This module stores
@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import sys
 import tempfile
 
 import addon_registry
@@ -40,12 +41,13 @@ def _read(settings_file):
         raise ValueError('invalid addon permission ownership file')
     data = json.loads(path.read_text())
     fields = {'schema_version', 'settings_file', 'addons'}
-    if (not isinstance(data, dict) or set(data) not in (fields, fields | {'pending_detach'})
+    if (not isinstance(data, dict) or not fields <= set(data) <= fields | {'pending_detach', 'core'}
             or type(data['schema_version']) is not int or data['schema_version'] not in (1, 2)
             or data['settings_file'] != expected or not isinstance(data['addons'], dict)):
         raise ValueError('invalid addon permission ownership binding')
-    for addon_id, skills in data['addons'].items():
-        addon_registry.validate_addon_id(addon_id)
+    for addon_id, skills in [*data['addons'].items(), (None, data.get('core', {}))]:
+        if addon_id is not None:
+            addon_registry.validate_addon_id(addon_id)
         if not isinstance(skills, dict):
             raise ValueError('invalid addon permission skill ownership')
         for name, added in skills.items():
@@ -55,16 +57,19 @@ def _read(settings_file):
     if 'pending_detach' in data:
         pending = data['pending_detach']
         if (not isinstance(pending, dict)
-                or set(pending) != {'addon_id', 'names', 'before', 'after'}
-                or not isinstance(pending['addon_id'], str)
+                or set(pending) not in ({'addon_id', 'names', 'before', 'after'}, {'owner', 'names', 'before', 'after'})
+                or ('owner' in pending and pending['owner'] != 'core')
+                or ('addon_id' in pending and not isinstance(pending['addon_id'], str))
                 or not isinstance(pending['names'], list) or not pending['names']
                 or not all(isinstance(name, str) for name in pending['names'])
                 or len(set(pending['names'])) != len(pending['names'])):
             raise ValueError('invalid pending addon permission detach')
-        addon_registry.validate_addon_id(pending['addon_id'])
+        if 'addon_id' in pending:
+            addon_registry.validate_addon_id(pending['addon_id'])
+        ownership = data.get('core', {}) if pending.get('owner') == 'core' else data['addons'].get(pending['addon_id'], {})
         for name in pending['names']:
             addon_registry.validate_addon_id(name)
-            if data['addons'].get(pending['addon_id'], {}).get(name) is not True:
+            if ownership.get(name) is not True:
                 raise ValueError('pending addon permission detach lacks ownership')
         for key in ('before', 'after'):
             fingerprint = pending[key]
@@ -77,52 +82,82 @@ def _read(settings_file):
 
 
 def _save(data):
+    """Prepare migration before committing the active receipt, restoring legacy on a failed commit."""
     path = _state_path()
     legacy = path.with_name('claude.json')
     data = dict(data, schema_version=2)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
+    saved_legacy = None
     try:
-        with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False, encoding='utf-8') as out:
-            temporary = Path(out.name)
-            json.dump(data, out, sort_keys=True, indent=2)
-            out.write('\n')
-            out.flush()
-            os.fsync(out.fileno())
-        os.replace(temporary, path)
-        temporary = None
+        if data['addons'] or data.get('core') or 'pending_detach' in data:
+            with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False, encoding='utf-8') as out:
+                temporary = Path(out.name)
+                json.dump(data, out, sort_keys=True, indent=2)
+                out.write('\n')
+                out.flush()
+                os.fsync(out.fileno())
         if os.path.lexists(legacy):
             descriptor, saved = tempfile.mkstemp(prefix='claude-v1-', suffix='.bak', dir=path.parent)
             os.close(descriptor)
-            os.replace(legacy, saved)
-        if not data['addons'] and 'pending_detach' not in data:
-            path.unlink()
+            try:
+                os.replace(legacy, saved)
+            except Exception:
+                Path(saved).unlink(missing_ok=True)
+                raise
+            saved_legacy = Path(saved)
+        # This is the final fallible operation: callers can restore settings on
+        # failure without a newly published receipt retaining removal authority.
+        if temporary is not None:
+            os.replace(temporary, path)
+            temporary = None
+        else:
+            path.unlink(missing_ok=True)
+    except Exception as error:
+        if saved_legacy is not None:
+            try:
+                os.replace(saved_legacy, legacy)
+            except Exception as restoration_error:
+                raise ExceptionGroup(
+                    f'Permission receipt commit failed; legacy receipt retained at {saved_legacy}',
+                    [error, restoration_error],
+                ) from error
+        raise
     finally:
         if temporary is not None:
-            temporary.unlink(missing_ok=True)
+            primary_error = sys.exception()
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                if primary_error is None:
+                    raise
+                primary_error.add_note(f'Temporary permission receipt cleanup failed at {temporary}: {cleanup_error}')
 
 
-def record_install(settings_file, targets, before_allow, after_allow):
+def record_install(settings_file, targets, before_allow, after_allow, *, core_names=()):
     """After settings commit, retain earliest attribution across Core updates."""
     targets = list(targets)
-    if not targets:
+    core_names = list(core_names)
+    if not targets and not core_names:
         return
     data = _read(settings_file)
     if 'pending_detach' in data:
         raise ValueError('pending addon permission detach requires review or resume before install')
     before = set(x for x in before_allow if isinstance(x, str))
     after = set(x for x in after_allow if isinstance(x, str))
-    for target in targets:
-        addon_registry.validate_addon_id(target.addon_id)
-        addon_registry.validate_addon_id(target.name)
-        rule = f'Skill({target.name})'
+    grants = [(target.addon_id, target.name) for target in targets] + [(None, name) for name in core_names]
+    for addon_id, name in grants:
+        if addon_id is not None:
+            addon_registry.validate_addon_id(addon_id)
+        addon_registry.validate_addon_id(name)
+        rule = f'Skill({name})'
         if rule not in after:
             continue
-        skills = data['addons'].setdefault(target.addon_id, {})
+        skills = data.setdefault('core', {}) if addon_id is None else data['addons'].setdefault(addon_id, {})
         if rule not in before:
-            skills[target.name] = True
+            skills[name] = True
         else:
-            skills.setdefault(target.name, False)
+            skills.setdefault(name, False)
     _save(data)
 
 
@@ -135,11 +170,23 @@ def detach(record, settings_file, settings, core_names, write_settings, *, dry_r
     names = {e['name'] for e in record.get('provided', [])
              if isinstance(e, dict) and e.get('kind') == 'skill'
              and e.get('ownership') == 'addon' and isinstance(e.get('name'), str)}
+    addon_id = addon_registry.validate_addon_id(record['addon_id'])
+    return _detach(addon_id, names, settings_file, settings, core_names, write_settings, dry_run=dry_run)
+
+
+def detach_core(names, settings_file, settings, write_settings, *, dry_run=False):
+    """Remove recorded Core additions, including retired names; leave unknown legacy grants for review."""
+    names = set(names) | set(_read(settings_file).get('core', {}))
+    return _detach(None, names, settings_file, settings, set(), write_settings, dry_run=dry_run)
+
+
+def _detach(addon_id, names, settings_file, settings, core_names, write_settings, *, dry_run=False):
     if not names:
         return []
-    addon_id = addon_registry.validate_addon_id(record['addon_id'])
     data = _read(settings_file)
-    ownership = data['addons'].get(addon_id, {})
+    owners = data if addon_id is None else data['addons']
+    owner_key = 'core' if addon_id is None else addon_id
+    ownership = owners.get(owner_key, {})
     permissions = settings.get('permissions', {})
     if not isinstance(permissions, dict):
         raise ValueError('Claude permissions must be an object')
@@ -154,7 +201,7 @@ def detach(record, settings_file, settings, core_names, write_settings, *, dry_r
         path = Path(settings_file)
         current = json.loads(path.read_text()) if path.exists() else {}
         fingerprint = _settings_fingerprint(current)
-        if (pending['addon_id'] != addon_id or not set(pending['names']).issubset(names)
+        if (pending.get('addon_id') != addon_id or not set(pending['names']).issubset(names)
                 or fingerprint != _settings_fingerprint(settings)
                 or fingerprint not in (pending['before'], pending['after'])):
             raise ValueError('pending addon permission detach requires review of current settings and selection')
@@ -164,7 +211,7 @@ def detach(record, settings_file, settings, core_names, write_settings, *, dry_r
                 for name in completed:
                     ownership.pop(name)
                 if not ownership:
-                    data['addons'].pop(addon_id)
+                    owners.pop(owner_key)
                 data.pop('pending_detach')
                 _save(data)
         elif set(pending['names']) & core_names:
@@ -202,7 +249,7 @@ def detach(record, settings_file, settings, core_names, write_settings, *, dry_r
     if updated != allow:
         updated_settings = dict(settings, permissions=dict(permissions, allow=updated))
         data['pending_detach'] = {
-            'addon_id': addon_id, 'names': sorted(removed),
+            **({'owner': 'core'} if addon_id is None else {'addon_id': addon_id}), 'names': sorted(removed),
             'before': _settings_fingerprint(settings),
             'after': _settings_fingerprint(updated_settings),
         }
@@ -215,7 +262,7 @@ def detach(record, settings_file, settings, core_names, write_settings, *, dry_r
         for name in retired:
             ownership.pop(name, None)
         if not ownership:
-            data['addons'].pop(addon_id, None)
+            owners.pop(owner_key, None)
         data.pop('pending_detach', None)
         _save(data)
     return rows

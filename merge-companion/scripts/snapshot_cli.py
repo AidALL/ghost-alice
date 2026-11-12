@@ -1,4 +1,4 @@
-"""Install-time snapshot CLI wrapper. Called by install.sh.
+"""Install-time snapshot CLI wrapper.
 
 Dependencies: Python 3.11+ standard library + local merge-companion modules.
 """

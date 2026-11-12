@@ -50,6 +50,46 @@ class AddonSkillPermissionTest(unittest.TestCase):
         self.assertEqual(rows[0]['action'],'removed')
         self.assertFalse(permissions._state_path().exists())
 
+    def test_core_attribution_survives_reinstall_and_preserves_existing_grants(self):
+        before = ['Skill(task-router)', 'Bash(user-command)']
+        after = before + ['Skill(writing-plans)']
+        settings = {'permissions': {'allow': after}}
+        self.write(self.settings, settings)
+        permissions.record_install(self.settings, [], before, after, core_names=['task-router', 'writing-plans'])
+        permissions.record_install(self.settings, [], after, after, core_names=['task-router', 'writing-plans'])
+        permissions.detach_core(['task-router', 'writing-plans'], self.settings, settings, self.write)
+        self.assertEqual(settings['permissions']['allow'], before)
+        self.assertFalse(permissions._state_path().exists())
+
+    def test_core_grants_without_addition_evidence_stay_and_are_reported(self):
+        settings = {'permissions': {'allow': ['Skill(task-router)']}}
+        self.write(self.settings, settings)
+        rows = permissions.detach_core(['task-router'], self.settings, settings, self.write)
+        self.assertEqual(rows[0]['action'], 'manual-review')
+        self.assertEqual(settings['permissions']['allow'], ['Skill(task-router)'])
+
+    def test_core_failed_detach_does_not_remove_a_user_duplicate_on_retry(self):
+        settings = {'permissions': {'allow': ['Skill(task-router)', 'Skill(task-router)']}}
+        self.write(self.settings, settings)
+        permissions.record_install(self.settings, [], [], ['Skill(task-router)'], core_names=['task-router'])
+        def write_then_fail(path, updated, **kwargs):
+            self.write(path, updated)
+            raise OSError('post-write-failure')
+        with self.assertRaises(OSError):
+            permissions.detach_core(['task-router'], self.settings, settings, write_then_fail)
+        retried = json.loads(self.settings.read_text())
+        permissions.detach_core(['task-router'], self.settings, retried, self.write)
+        self.assertEqual(retried['permissions']['allow'], ['Skill(task-router)'])
+        self.assertFalse(permissions._state_path().exists())
+
+    def test_core_and_addon_attribution_are_independent(self):
+        settings = self.prepare([], ['Skill(pilot)', 'Skill(task-router)'])
+        permissions.record_install(self.settings, [], [], ['Skill(task-router)'], core_names=['task-router'])
+        self.detach(settings)
+        self.assertEqual(permissions._read(self.settings)['core'], {'task-router': True})
+        permissions.detach_core(['task-router'], self.settings, settings, self.write)
+        self.assertEqual(settings['permissions']['allow'], [])
+
     def test_preexisting_identical_rule_and_later_duplicate_rule_preserved(self):
         before=['Skill(task-router)','Skill(pilot)']
         settings=self.prepare(before,before[:])
@@ -79,6 +119,83 @@ class AddonSkillPermissionTest(unittest.TestCase):
         self.assertTrue(permissions._read(self.settings)['addons']['pilot']['pilot'])
         self.assertFalse(legacy.exists())
         self.assertEqual([path.read_text() for path in state.parent.glob('claude-v1-*.bak')], [original])
+
+    def test_receipt_removal_failure_preserves_both_previous_receipts(self):
+        self.prepare([], ['Skill(pilot)'])
+        state = permissions._state_path()
+        original = state.read_bytes()
+        legacy = state.with_name('claude.json')
+        legacy_bytes = original.replace(b'"schema_version": 2', b'"schema_version": 1')
+        legacy.write_bytes(legacy_bytes)
+        data = permissions._read(self.settings)
+        data['addons'] = {}
+        unlink = Path.unlink
+        def fail_receipt_removal(path, *args, **kwargs):
+            if path == state:
+                raise PermissionError('injected receipt removal failure')
+            return unlink(path, *args, **kwargs)
+        with mock.patch.object(Path, 'unlink', new=fail_receipt_removal):
+            with self.assertRaisesRegex(PermissionError, 'receipt removal failure'):
+                permissions._save(data)
+        self.assertEqual(state.read_bytes(), original)
+        self.assertEqual(legacy.read_bytes(), legacy_bytes)
+
+    def test_failed_commit_and_failed_legacy_restore_keep_original_backup_and_both_errors(self):
+        state = permissions._state_path()
+        state.parent.mkdir(parents=True)
+        legacy = state.with_name('claude.json')
+        original = json.dumps({'schema_version': 1, 'settings_file': str(self.settings.resolve()),
+                               'addons': {'pilot': {'pilot': True}}}).encode()
+        legacy.write_bytes(original)
+        replace = permissions.os.replace
+        def fail_commit_and_restore(source, target):
+            if Path(target) == state:
+                raise PermissionError('injected receipt commit failure')
+            if Path(target) == legacy:
+                raise PermissionError('injected legacy restore failure')
+            return replace(source, target)
+        with mock.patch.object(permissions.os, 'replace', side_effect=fail_commit_and_restore):
+            with self.assertRaises(ExceptionGroup) as caught:
+                permissions.record_install(self.settings, [], [], ['Skill(task-router)'], core_names=['task-router'])
+        self.assertEqual([str(exc) for exc in caught.exception.exceptions],
+                         ['injected receipt commit failure', 'injected legacy restore failure'])
+        backups = list(state.parent.glob('claude-v1-*.bak'))
+        self.assertEqual([path.read_bytes() for path in backups], [original])
+        self.assertIn(str(backups[0]), str(caught.exception))
+        self.assertFalse(state.exists())
+
+    def test_temporary_cleanup_failure_keeps_recovery_error_and_backup_path_primary(self):
+        state = permissions._state_path()
+        state.parent.mkdir(parents=True)
+        legacy = state.with_name('claude.json')
+        original = json.dumps({'schema_version': 1, 'settings_file': str(self.settings.resolve()),
+                               'addons': {'pilot': {'pilot': True}}}).encode()
+        legacy.write_bytes(original)
+        replace, unlink = permissions.os.replace, Path.unlink
+        candidate = None
+        def fail_commit_and_restore(source, target):
+            nonlocal candidate
+            if Path(target) == state:
+                candidate = Path(source)
+                raise PermissionError('injected receipt commit failure')
+            if Path(target) == legacy:
+                raise PermissionError('injected legacy restore failure')
+            return replace(source, target)
+        def fail_temporary_cleanup(path, *args, **kwargs):
+            if path == candidate:
+                raise PermissionError('injected temporary cleanup failure')
+            return unlink(path, *args, **kwargs)
+        with mock.patch.object(permissions.os, 'replace', side_effect=fail_commit_and_restore), \
+                mock.patch.object(Path, 'unlink', new=fail_temporary_cleanup):
+            with self.assertRaises(ExceptionGroup) as caught:
+                permissions.record_install(self.settings, [], [], ['Skill(task-router)'], core_names=['task-router'])
+        self.assertEqual([str(exc) for exc in caught.exception.exceptions],
+                         ['injected receipt commit failure', 'injected legacy restore failure'])
+        backups = list(state.parent.glob('claude-v1-*.bak'))
+        self.assertEqual([path.read_bytes() for path in backups], [original])
+        self.assertIn(str(backups[0]), str(caught.exception))
+        self.assertTrue(any('injected temporary cleanup failure' in note for note in caught.exception.__notes__))
+        self.assertFalse(state.exists())
 
     def test_deleted_preexisting_rule_readded_by_installer_becomes_owned(self):
         self.prepare(['Skill(pilot)'],['Skill(pilot)'])

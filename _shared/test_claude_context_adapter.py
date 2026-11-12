@@ -620,13 +620,17 @@ class ClaudeContextAdapterTests(unittest.TestCase):
         self.assertEqual(updated['messages'][2]['content'][-1], unknown)
         self.assertEqual(len(observations), 1)
 
-    def assert_prefix_selection_rejected(self, request, choices=None, originals=None):
+    def assert_prefix_selection_rejected(self, request, choices=None, originals=None, dispositions=('replace', 'omit')):
         originals = self.originals if originals is None else originals
         before_request, before_originals = copy.deepcopy(request), copy.deepcopy(originals)
-        with self.assertRaisesRegex(adapter.NativeContextRejected, 'signed-prefix-selection-unsupported'):
-            self.apply(choices=choices, request=request, originals=originals)
-        self.assertEqual(request, before_request)
-        self.assertEqual(originals, before_originals)
+        for disposition in dispositions:
+            with self.subTest(disposition=disposition):
+                selected = [dict(choice, disposition=disposition)
+                            for choice in ([self.choice()] if choices is None else choices)]
+                with self.assertRaisesRegex(adapter.NativeContextRejected, 'signed-prefix-selection-unsupported'):
+                    self.apply(choices=selected, request=request, originals=originals)
+                self.assertEqual(request, before_request)
+                self.assertEqual(originals, before_originals)
 
     def test_same_tool_needed_results_around_selected_middle_before_later_thinking_are_unsupported(self):
         originals = copy.deepcopy(self.originals)
@@ -648,7 +652,8 @@ class ClaudeContextAdapterTests(unittest.TestCase):
     def test_prior_unsigned_text_before_later_thinking_is_unsupported(self):
         request = copy.deepcopy(self.request)
         request['messages'].append(dict(role='assistant', content=[copy.deepcopy(self.thinking)]))
-        self.assert_prefix_selection_rejected(request, [self.choice(1, kind='message')])
+        self.assert_prefix_selection_rejected(request, [self.choice(1, kind='message')], dispositions=('replace',))
+        self.assert_prefix_selection_rejected(request, [self.choice(4, kind='assistant')])
 
     def test_thinking_capable_initial_request_is_unsupported_without_existing_signed_blocks(self):
         for kind in ('enabled', 'adaptive', 'between_tools'):

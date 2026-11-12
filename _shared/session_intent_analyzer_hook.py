@@ -65,7 +65,7 @@ def _degrade_marker_path(root: Path, platform: str, payload: dict[str, Any]) -> 
 
 
 def _write_degrade_marker(root: Path, platform: str, payload: dict[str, Any], reason: str) -> None:
-    # Durable, ledger-independent record that THIS turn's input was NOT observed; the doctor's runtime check reads it. Best-effort: the audit marker must never break the hook itself.
+    # The hook records an intake failure independently of the ledger; receipt creation can fail after input storage. Doctor reads this marker. A marker write failure must never break the hook.
     try:
         path = _degrade_marker_path(root, platform, payload)
         if path is None:

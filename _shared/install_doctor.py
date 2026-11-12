@@ -25,6 +25,9 @@ import runtime_config
 from encoding_guard import validate_repo
 from global_rule_blocks import codex_requires_governance_companion
 from hook_definitions import SUPPORTED_PLATFORMS
+from install_transaction import (
+    EXCLUDED_COPY_DIR_NAMES, EXCLUDED_COPY_FILE_NAMES, EXCLUDED_COPY_FILE_SUFFIXES,
+)
 from installer_assets import (
     OWNERSHIP_ABSENT,
     OWNERSHIP_GHOST_ALICE_MANAGED,
@@ -217,11 +220,11 @@ def _retention_failure_line(record: Path) -> str:
     return f"{len(rows)} failures; last {last.get('ts')} {last.get('policy')} {last.get('error_type')}"
 
 
-# The hook runner records a command it refused to run as one row of the session's strict log
-# (`hook_profile_gate._append_rejection_audit`); this is the mark that row alone carries, as `append_event` writes it.
-HOOK_REJECTION_MARK = b'"value_key": "hook-command-rejection"'
-HOOK_REJECTION_DAYS = state_retention.POLICIES["session-logs"].limit   # what the session-logs retention keeps
-HOOK_REJECTION_SESSIONS_SHOWN = 5
+# Candidate marks only; the decoded fields below determine what the runner actually recorded.
+HOOK_DIAGNOSTIC_MARKS = (b'"value_key": "hook-command-rejection"', b'"native_intake_failure"',
+                         b'"launch_failure"', b'"stop_notice_failure"', b'file_error')
+HOOK_DIAGNOSTIC_DAYS = state_retention.POLICIES["session-logs"].limit
+HOOK_DIAGNOSTIC_SESSIONS_SHOWN = 5
 
 
 def _recent_session_logs(session_logs: Path, cutoff: datetime) -> list[tuple[str, Path]]:
@@ -248,9 +251,8 @@ def _recent_session_logs(session_logs: Path, cutoff: datetime) -> list[tuple[str
     return found
 
 
-def _hook_rejection_rows(log: Path) -> list[dict]:
-    """The rejection rows of one strict log. Only the lines that carry the mark are parsed; a log holds every hook
-    run's row with its output, so parsing them all would cost seconds per doctor run."""
+def _hook_diagnostic_rows(log: Path) -> list[dict]:
+    """Read committed diagnostic candidates in one pass, without parsing every ordinary hook output."""
     rows: list[dict] = []
 
     with log.open("rb") as handle:
@@ -259,11 +261,11 @@ def _hook_rejection_rows(log: Path) -> list[dict]:
             content = rest + chunk
             end = 0
             for _start, end, line in committed_byte_lines(content):
-                if HOOK_REJECTION_MARK not in line:
+                if not any(mark in line for mark in HOOK_DIAGNOSTIC_MARKS):
                     continue
                 row = json.loads(line.decode("utf-8", errors="replace"))
                 item = row.get("surface_item") if isinstance(row, dict) else None
-                if isinstance(item, dict) and item.get("value_key") == "hook-command-rejection":
+                if isinstance(item, dict):
                     rows.append(row)
             rest = content[end:]
     return rows
@@ -278,49 +280,83 @@ def _rejection_reason(row: dict) -> str:
     return (text.split(". ")[0] or "unknown")[:100]
 
 
-def _hook_rejection_lines(session_logs: Path, *, now: datetime | None = None) -> list[str]:
-    """The hook runner's command rejections as informational doctor lines: the count of the retention window and,
-    for the sessions with a rejection, newest last rejection first and at most `HOOK_REJECTION_SESSIONS_SHOWN`, the
-    count and the last rejection's time, hook and reason. Doctor reads the logs the session-logs retention still
-    keeps, in every host folder because the runner's audit platform can be `unknown`, and imports none of the
-    runtime. A rejection is Ghost-ALICE's own refusal to run a hook command: the other doctor lines already name the
-    repair when one is needed, so these lines never change doctor's overall status."""
-    cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=HOOK_REJECTION_DAYS)
+def _hook_failure_reason(row: dict) -> str:
+    """Decode explicit own-failure fields; neither child exit codes nor Stop's work judgments are failures here."""
+    item = row["surface_item"]
+    reasons = []
+    intake = item.get("native_intake_failure")
+    if isinstance(intake, dict) and intake.get("recorded") == "hook-log":
+        reasons.append(f"intake fallback: {intake.get('error')}: {intake.get('detail')}")
+    launch = item.get("launch_failure")
+    if isinstance(launch, dict):
+        reasons.append(f"launch: {launch.get('error')}: {launch.get('detail')}")
+    notice_failure = item.get("stop_notice_failure")
+    if isinstance(notice_failure, str) and notice_failure.strip():
+        reasons.append(f"hook runner Stop notice: {notice_failure}")
+    if row.get("event") == "Stop" and isinstance(row.get("stdout"), str):
+        try:
+            output = json.loads(row["stdout"])
+        except ValueError:
+            output = None
+        notice = output.get("stop_notice") if isinstance(output, dict) else None
+        if isinstance(notice, dict) and notice.get("schema_version") == "stop-notice.v1":
+            error = notice.get("file_error")
+            if isinstance(error, str) and error.strip():
+                reasons.append(f"Stop notice file: {error}")
+    return "; ".join(" ".join(reason.split())[:200] for reason in reasons)
+
+
+def _hook_diagnostic_lines(session_logs: Path, *, now: datetime | None = None) -> list[str]:
+    """Status-neutral strict-log counts and latest details, separately for rejections and own failures.
+
+    A row with multiple failure fields counts once. All host folders are read because the runner can record
+    platform `unknown`; each section shows the newest five sessions within the existing retention window.
+    """
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=HOOK_DIAGNOSTIC_DAYS)
+    sessions: dict[str, list[tuple[datetime, str, int, dict, str]]] = {
+        "hook-rejections": [], "hook-failures": []}
     try:
         logs = _recent_session_logs(session_logs, cutoff)
     except OSError as error:
-        return [f"hook-rejections: unavailable ({type(error).__name__})"]
-    sessions: list[tuple[datetime, str, int, dict]] = []
+        return [f"{label}: unavailable ({type(error).__name__})" for label in sessions]
     unreadable: list[str] = []
     for name, log in logs:
         try:
-            rows = _hook_rejection_rows(log)
+            rows = _hook_diagnostic_rows(log)
         except (OSError, ValueError) as error:
             unreadable.append(f"{type(error).__name__} {name}")
             continue
-        recent: list[tuple[datetime, dict]] = []
+        recent: dict[str, list[tuple[datetime, dict, str]]] = {label: [] for label in sessions}
         for row in rows:
             stamp = _parse_timestamp(row.get("ts"))
             if stamp is not None and stamp >= cutoff:
-                recent.append((stamp, row))
-        if recent:
-            last_stamp, last_row = max(recent, key=lambda entry: entry[0])
-            sessions.append((last_stamp, name, len(recent), last_row))
+                if row["surface_item"].get("value_key") == "hook-command-rejection":
+                    recent["hook-rejections"].append((stamp, row, _rejection_reason(row)))
+                reason = _hook_failure_reason(row)
+                if reason:
+                    recent["hook-failures"].append((stamp, row, reason))
+        for label, entries in recent.items():
+            if entries:
+                last_stamp, last_row, reason = max(entries, key=lambda entry: entry[0])
+                sessions[label].append((last_stamp, name, len(entries), last_row, reason))
     if unreadable and len(unreadable) == len(logs):
-        return [f"hook-rejections: unavailable ({unreadable[0]})"]
-    notes = []
-    if sessions:
-        shown = f", newest {HOOK_REJECTION_SESSIONS_SHOWN} shown" if len(sessions) > HOOK_REJECTION_SESSIONS_SHOWN else ""
-        notes.append(f"{len(sessions)} sessions{shown}")
-    if unreadable:
-        notes.append(f"{len(unreadable)} logs unreadable: {unreadable[0]}")
-    header = f"hook-rejections: {sum(count for _, _, count, _ in sessions)} in {HOOK_REJECTION_DAYS} days"
-    if notes:
-        header += f" ({'; '.join(notes)})"
-    sessions.sort(key=lambda entry: (-entry[0].timestamp(), entry[1]))
-    return [header, *(
-        f"  {name}: {count}, last {stamp.strftime('%Y-%m-%dT%H:%M:%SZ')} {row.get('hook_id') or 'unknown'}: "
-        f"{_rejection_reason(row)}" for stamp, name, count, row in sessions[:HOOK_REJECTION_SESSIONS_SHOWN])]
+        return [f"{label}: unavailable ({unreadable[0]})" for label in sessions]
+    lines = []
+    for label, entries in sessions.items():
+        notes = []
+        if entries:
+            shown = f", newest {HOOK_DIAGNOSTIC_SESSIONS_SHOWN} shown" if len(entries) > HOOK_DIAGNOSTIC_SESSIONS_SHOWN else ""
+            notes.append(f"{len(entries)} sessions{shown}")
+        if unreadable:
+            notes.append(f"{len(unreadable)} logs unreadable: {unreadable[0]}")
+        header = f"{label}: {sum(count for _, _, count, _, _ in entries)} in {HOOK_DIAGNOSTIC_DAYS} days"
+        if notes:
+            header += f" ({'; '.join(notes)})"
+        entries.sort(key=lambda entry: (-entry[0].timestamp(), entry[1]))
+        lines.extend([header, *(
+            f"  {name}: {count}, last {stamp.strftime('%Y-%m-%dT%H:%M:%SZ')} {row.get('hook_id') or 'unknown'}: "
+            f"{reason}" for stamp, name, count, row, reason in entries[:HOOK_DIAGNOSTIC_SESSIONS_SHOWN])])
+    return lines
 
 
 def _pending_merge_status(ghost_alice_root: Path, platform: str) -> tuple[str, str]:
@@ -695,8 +731,18 @@ def _path_token(path: Path) -> str:
 
 
 def _runtime_shared_file_audit(source_shared: Path, runtime_shared: Path) -> list[dict[str, str]]:
+    # The publisher copies the source tree, including new dependencies. Keep the
+    # entrypoint list as a source-presence check, not as the complete inventory.
+    names = set(RUNTIME_SHARED_FILES)
+    for source in source_shared.rglob("*"):
+        relative = source.relative_to(source_shared)
+        if (any(part in EXCLUDED_COPY_DIR_NAMES or part in EXCLUDED_COPY_FILE_NAMES
+                or Path(part).suffix in EXCLUDED_COPY_FILE_SUFFIXES for part in relative.parts)
+                or not source.is_file()):
+            continue
+        names.add(relative.as_posix())
     findings: list[dict[str, str]] = []
-    for name in RUNTIME_SHARED_FILES:
+    for name in sorted(names):
         source = source_shared / name
         runtime = runtime_shared / name
         base = {"name": name, "kind": "runtime-file"}
@@ -970,14 +1016,20 @@ def _runtime_session_intent_golden_status(
     return STATUS_OK, "golden-pass"
 
 
-def _native_intake_listing(ghost_alice_root: Path, platform: str, flag: str) -> list | str:
-    """One Core ledger listing for doctor, or why it is unavailable; Core writes the records, doctor reads them."""
+def _configured_ledger_root(ghost_alice_root: Path, platform: str) -> Path | None:
+    """Only the selected installation's configured root identifies the ledger doctor may read."""
     try:
         data = json.loads((ghost_alice_root.expanduser() / "config.json").read_text(encoding="utf-8"))
         ledger_root = data["install_locations"][platform]["ledger_root"]
     except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError):
         ledger_root = None
-    if not isinstance(ledger_root, str) or not Path(ledger_root).is_absolute():
+    return Path(ledger_root) if isinstance(ledger_root, str) and Path(ledger_root).is_absolute() else None
+
+
+def _native_intake_listing(ghost_alice_root: Path, platform: str, flag: str) -> list | str:
+    """One Core ledger listing for doctor, or why it is unavailable; Core writes the records, doctor reads them."""
+    ledger_root = _configured_ledger_root(ghost_alice_root, platform)
+    if ledger_root is None:
         return "no installed ledger root"
     # The installer layer runs Core's ledger as a child process and imports none of the runtime.
     ledger = Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
@@ -1014,6 +1066,43 @@ def _native_intake_failure_lines(ghost_alice_root: Path, platform: str) -> list[
     return [f"native-intake-failures: {len(failures)}", *(
         f"  {failure['platform']}/{failure['session_id']}: {failure['error']} x{failure['count']}, "
         f"last {failure['last_at']}: {failure['detail']}" for failure in failures)]
+
+
+def _intake_hook_degraded_lines(ghost_alice_root: Path, platform: str) -> list[str]:
+    """Report existing hook degradation markers, not whether an input reached the ledger. Read-only and status-neutral."""
+    ledger_root = _configured_ledger_root(ghost_alice_root, platform)
+    if ledger_root is None:
+        return ["intake-hook-degraded: unavailable (no installed ledger root)"]
+    platform_root = ledger_root / platform
+    if platform_root.is_symlink():
+        return ["intake-hook-degraded: unavailable (platform directory is a symlink)"]
+    try:
+        folders = sorted(platform_root.iterdir())
+    except FileNotFoundError:
+        return ["intake-hook-degraded: 0"]
+    except OSError as error:
+        return [f"intake-hook-degraded: unavailable ({type(error).__name__})"]
+    records = []
+    unreadable = []
+    for folder in folders:
+        marker = folder / "ledger-degraded.json"
+        if folder.is_symlink() or not folder.is_dir() or marker.is_symlink():
+            continue
+        name = f"{platform}/{folder.name}"
+        try:
+            data = json.loads(marker.read_text(encoding="utf-8"))
+            if (not isinstance(data, dict) or data.get("schema_version") != "session-intent-degrade.v1"
+                    or not isinstance(data.get("reason"), str) or not data["reason"].strip()
+                    or _parse_timestamp(data.get("ts")) is None):
+                raise ValueError("invalid degradation marker")
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError) as error:
+            unreadable.append(f"  {name}: unreadable ({type(error).__name__})")
+            continue
+        records.append(f"  {name}: {' '.join(data['reason'].split())} at {data['ts']}")
+    suffix = f" ({len(unreadable)} markers unreadable)" if unreadable else ""
+    return [f"intake-hook-degraded: {len(records)}{suffix}", *records, *unreadable]
 
 
 def _runtime_core_audit(
@@ -1166,8 +1255,8 @@ def run(args: argparse.Namespace) -> int:
     # Informational: a retention failure stops no work, so the line never changes overall.
     print(f"state-retention: {_retention_failure_line(state_retention.failure_record_path())}")
 
-    # Informational: the hook runner's own command rejections, read from the strict session logs it writes them to.
-    for line in _hook_rejection_lines(install_destination.ghost_root() / "session-logs"):
+    # Informational: the runner's refusals and own failures share one strict-log scan.
+    for line in _hook_diagnostic_lines(install_destination.ghost_root() / "session-logs"):
         print(line)
 
     for skill_root in args.skill_root:
@@ -1219,7 +1308,8 @@ def run(args: argparse.Namespace) -> int:
     # Informational: a wait needs no repair, the user's next typed input clears it, and the hook
     # continued past each recorded intake failure.
     for line in (*_native_intake_wait_lines(ghost_alice_root, args.platform),
-                 *_native_intake_failure_lines(ghost_alice_root, args.platform)):
+                 *_native_intake_failure_lines(ghost_alice_root, args.platform),
+                 *_intake_hook_degraded_lines(ghost_alice_root, args.platform)):
         print(line)
 
     overall = _max_status(statuses)

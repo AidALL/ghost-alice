@@ -14,10 +14,14 @@ PendingMessageContext = Literal[
 
 _USER_COPY: Dict[PendingMessageContext, str] = {
     "session_start": (
-        "This conversation is a new session. Backups of external changes found during a previous " "agent tool update may still await your merge, discard or defer choice. In this conversation, please ask " "'Please review backed-up changes.' to review those backups."
+        "This conversation is a new session. Backups of external changes found during a previous "
+        "agent tool update may still await the human user's merge, discard or defer choice. "
+        "The human user can ask 'Please review backed-up changes.' in this conversation to request a review."
     ),
     "readme": (
-        "This is the backup folder guide. During the agent tool update, external changes found after installation " "were copied here for you to choose whether to merge, discard or defer. If an AI chat is already open, " "please ask 'Please review backed-up changes.' Otherwise, open a new chat and ask the same thing."
+        "This is the backup folder guide. During the agent tool update, external changes found after installation "
+        "were copied here for the human user to choose whether to merge, discard or defer. "
+        "The human user can ask 'Please review backed-up changes.' in an existing or new AI chat to request a review."
     ),
 }
 

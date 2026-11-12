@@ -789,7 +789,7 @@ class InstallOrderTests(CliCase):
              "cleanup_deprecated_installed_skills", "encoding_guard", "preflight", "resume_pending_uninstalls",
              "check_addon_collisions", "sync_runtime_shared", "report_gateway", "install_hooks", "ensure_bootstrap",
              "sync_commands",
-             "verify_after_copy", "write_ownership_markers", "snapshot_after_install", "migrate_state_once",
+             "verify_after_copy", "snapshot_after_install", "migrate_state_once",
              "write_sidecars", "write_install_state_manifest", "write_event", "release")
 
     def setUp(self):
@@ -819,7 +819,6 @@ class InstallOrderTests(CliCase):
         self.stub("installer.hosts.ensure_codex_bootstrap", True)
         self.stub("installer.hosts.sync_commands", 0)
         self.stub("installer.transaction.verify_after_copy", True)
-        self.stub("installer.transaction.write_ownership_markers", True)
         self.stub("installer.transaction.snapshot_after_install", True)
         self.stub("installer.addons.migrate_state_once")
         self.stub("installer.addons.write_sidecars", True)
@@ -882,7 +881,7 @@ class InstallOrderTests(CliCase):
         for name, args, _ in self.calls:
             if name in ("encoding_guard", "preflight"):
                 self.assertIs(args[1], self.collected)
-            if name in ("verify_after_copy", "write_ownership_markers", "write_install_state_manifest"):
+            if name in ("verify_after_copy", "write_install_state_manifest"):
                 self.assertIs(args[3], self.collected)
         self.assertIn("[OK] [5/5] Verification: install state recorded", out) if report.state().report_child else None
 
@@ -964,13 +963,13 @@ class InstallOrderTests(CliCase):
         self.assertEqual(names[-1], "release")
 
     def test_the_earlier_records_are_still_written_after_placement(self):
-        # The install record is written at publish; the four earlier records keep their own steps until their
+        # The install record and copy markers are written at publish; the three earlier records keep their own steps until their
         # readers move to the install record.
         ctx = make_context(self.home, "codex", args=["task-router"])
         rc, _ = self.captured(cli.run_command, cli.INSTALL, ctx)
         self.assertEqual(rc, 0)
         names = [n for n, _, _ in self.calls]
-        for step in ("write_ownership_markers", "snapshot_after_install", "write_sidecars",
+        for step in ("snapshot_after_install", "write_sidecars",
                      "write_install_state_manifest"):
             self.assertIn(step, names)
             self.assertLess(names.index("copy_targets_batch"), names.index(step))
@@ -1004,8 +1003,7 @@ class InstallOrderTests(CliCase):
              "ensure_claude_bootstrap"),
             ("claude", "installer.hosts.ensure_claude_bootstrap", False, 1, None, "sync_commands"),
             ("codex", "installer.hosts.ensure_codex_bootstrap", False, 1, None, "sync_commands"),
-            ("claude", "installer.transaction.verify_after_copy", False, 1, None, "write_ownership_markers"),
-            ("claude", "installer.transaction.write_ownership_markers", False, 1, None, "snapshot_after_install"),
+            ("claude", "installer.transaction.verify_after_copy", False, 1, None, "snapshot_after_install"),
             ("claude", "installer.transaction.snapshot_after_install", False, 1, None, "migrate_state_once"),
             ("claude", "installer.addons.write_sidecars", False, 1, None, "write_install_state_manifest"),
             ("claude", "installer.transaction.write_install_state_manifest", False, 1, None, "write_event"),

@@ -32,6 +32,7 @@ from typing import Sequence
 import content_digest
 import install_lock
 import installed_payload
+from installer_assets import write_ownership_marker
 import state_retention
 from installer.participant import PublishContext
 
@@ -533,7 +534,17 @@ class PublishBatch(ReplacementBatch):
 
     def stage(self):
         super().stage()
-        for item, target in zip(self.prepared, self.journal.data["targets"]):
+        for item, target, selected in zip(self.prepared, self.journal.data["targets"], self.replaced):
+            if (selected["mode"] == "copy" and selected["kind"] in {"skill", "support"}
+                    and item["stage"].is_dir() and not item["stage"].is_symlink()):
+                addon_id = selected["provider"].removeprefix("addon:") if selected["provider"].startswith("addon:") else None
+                write_ownership_marker(
+                    item["stage"], platform=self.request["host"], asset_id=selected["name"],
+                    source_repo=self.request["source"]["root"], source_commit=selected["source_commit"],
+                    install_mode="copy", owner="addon" if addon_id else "ghost-alice", addon_id=addon_id,
+                    provided_kind=selected["kind"],
+                )
+                item["candidate"] = self.identity(item["stage"])
             target.update(stage=str(item["stage"]), rollback=str(item["rollback"]),
                           before=content_digest.state(item["dest"]), candidate=content_digest.state(item["stage"]))
             item["record"] = _record_value(item["stage"], target["mode"])

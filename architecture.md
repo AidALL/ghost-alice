@@ -48,7 +48,7 @@ While a request runs, each participant has one responsibility.
 
 ```mermaid
 flowchart TD
-  U["Human user's purpose and authority"] -->|"Input as written (user-said)"| I["Response model: interpret the input (interpreted-as):<br/>objective, constraints and done conditions"]
+  U["Human user's purpose and authority"] -->|"Input as written (user-said)"| I["Response model: interpret the input (interpreted-as):<br/>objective, constraints and acceptance criteria"]
   I -->|"Work that needs tools, except a local read-only lookup:<br/>new or changed interpretation, before the next tool call"| L["Core code: record the interpretation in the intent ledger"]
   I -->|Interpretation and its assumptions| Q{"Does the human user's input leave more than one reasonable reading<br/>that changes the next action, or a decision only the human user can make?"}
   Q -->|Yes| K["Response model: end the answer with a question that states<br/>the assumption and what changes if it is wrong"]
@@ -58,18 +58,18 @@ flowchart TD
   T -->|Observed results| M
   O["Original evidence"] --> J["Compare claims with originals"]
   M --> J
-  J --> W["Judge the complete answer against the input as is and the interpreted<br/>objective, constraints and done conditions"]
-  I -->|"Input as is and interpreted objective, constraints and done conditions"| W
+  J --> W["Judge the complete answer against the input as written and the interpreted<br/>objective, constraints and acceptance criteria"]
+  I -->|"Input as written and interpreted objective, constraints and acceptance criteria"| W
   W -->|Correction or needed investigation within what the human user currently requests| M
   W --> R{"Completion claims or an authenticated review the human user requested"}
   R -->|Required| C["Core code: authenticate both judgments and source bindings"]
   R -->|Routine explanation| D["Response model: submit the answer"]
   C -->|Status and references| D
-  D --> H["Native host: display the answer"]
+  D --> H["Host: display the answer"]
   H -->|Stop event| SR["Core Stop script: compare the answer with its recorded review<br/>and record this Stop's notice message in stop-notice.json"]
   SR --> S{"Does the message report an unsupported claim, an issue found in the check,<br/>an unresolved criterion or declared remaining work?"}
   S -->|Yes| N["Core Stop script: return the notice text as systemMessage;<br/>the host shows it after the answer"]
-  S -->|No| E["Native host: stop"]
+  S -->|No| E["Host: stop"]
   N --> E
 ```
 
@@ -77,11 +77,11 @@ The model chooses the next judgment target: micro for an individual result, meso
 
 ## Hook calls
 
-The native host runs the registered command of each Core hook and add-on hook through the hook runner, `_shared/hook_profile_gate.py`, which writes each call to the hook log `~/.ghost-alice/session-logs/<host>/<session>/strict-hook-output.jsonl`. When that write fails, the runner records the failure in the retention failure record `~/.ghost-alice/state-retention-failures.jsonl` when it can, and passes the hook's output to the host as usual. Each registered command carries an installation binding, the value that names the installation's locations, including its ledger root. The figure follows one call of an enabled Core hook whose binding is valid. For an add-on hook, the runner takes the same steps and runs the add-on's own script, which is outside Ghost-ALICE, in place of the Core hook script.
+The host runs the registered command of each Core hook and add-on hook through the hook runner, `_shared/hook_profile_gate.py`, which writes each call to the hook log `~/.ghost-alice/session-logs/<host>/<session>/strict-hook-output.jsonl`. When that write fails, the runner records the failure in the retention failure record `~/.ghost-alice/state-retention-failures.jsonl` when it can, and passes the hook's output to the host as usual. Each registered command carries an installation binding, the value that names the installation's locations, including its ledger root. The figure follows one call of an enabled Core hook whose binding is valid. For an add-on hook, the runner takes the same steps and runs the add-on's own script, which is outside Ghost-ALICE, in place of the Core hook script.
 
 ```mermaid
 sequenceDiagram
-  participant H as Native host
+  participant H as Host
   box Ghost-ALICE
     participant R as Hook runner
     participant C as Core hook script
@@ -142,7 +142,7 @@ Before an add-on Stop hook runs, the runner builds this Stop's message with the 
 
 ```mermaid
 sequenceDiagram
-  participant H as Native host
+  participant H as Host
   box Ghost-ALICE
     participant RC as Hook runner for the Core Stop hook
     participant CS as Core Stop script
@@ -170,7 +170,7 @@ flowchart TD
   R["The response model performs the work that the human user's instructions authorize and assesses the results"] --> N{"Currently actionable required follow-up?"}
   N -->|No| A["Answer: supported result and unresolved conditions"]
   N -->|Yes| B["Answer plus recommended additional work"]
-  A --> D["Native host displays the answer. When the Stop notice message's state is notice,<br/>the Core Stop script returns the notice text and the host shows it. The host stops"]
+  A --> D["Host displays the answer. When the Stop notice message's state is notice,<br/>the Core Stop script returns the notice text and the host shows it. The host stops"]
   B --> D
 ```
 
@@ -190,7 +190,7 @@ flowchart LR
 
 Healthy hooks supply current receipts and changed decision-relevant conditions. The common contract and owning skills supply procedures; hooks do not repeat their bodies. Review preparation and recording return references rather than echoing the submitted answer. The complete answer remains available for an explicit later comparison.
 
-The native host independently retains conversation history and builds model requests. Selecting a concise Ghost-ALICE handoff does not remove earlier native messages. Prompt caching, compaction and lower token counts do not by themselves demonstrate that obsolete source bodies have been excluded. Usage observations and native display checks establish only what their original records show.
+The host independently retains conversation history and builds model requests. Selecting a concise Ghost-ALICE handoff does not remove earlier native messages. Prompt caching, compaction and lower token counts do not by themselves demonstrate that obsolete source bodies have been excluded. Usage observations and native display checks establish only what their original records show.
 
 The context gateway applies supported explicit content choices at the server boundary. When actual continued work requires changing the input representation of used material, the model compares that material with the next decision. It does not predict a lifetime or add a judgment call to every lookup. Core code authenticates the native session, current input and original material independently of work authority. The gateway substitutes explicitly judged bodies with conclusions, unresolved conditions and an original retrieval reference when the protocol supports that change. It preserves needed or unjudged general source bodies and sends server answers unchanged. Original history remains available for explicit retrieval.
 
@@ -214,7 +214,7 @@ flowchart LR
 
 ## Evidence and native delivery
 
-The model makes two distinct judgments: each claim against original evidence, and the complete answer against the human user's objective and constraints. Core code authenticates ownership, input bindings and source integrity; IDs and hashes do not determine semantic truth. The native host displays the model's answer. Core code's Stop script compares the answer with the recorded review; it does not generate missing judgments or schedule another task.
+The model makes two distinct judgments: each claim against original evidence, and the complete answer against the human user's objective and constraints. Core code authenticates ownership, input bindings and source integrity; IDs and hashes do not determine semantic truth. The host displays the model's answer. Core code's Stop script compares the answer with the recorded review; it does not generate missing judgments or schedule another task.
 
 The [verification procedure](coding-convention/verification-before-completion/SKILL.md) owns evidence selection and completion claims. Its [response review procedure](coding-convention/verification-before-completion/references/response-review.md#prepare-and-record-the-response-review) owns the recording handoff. Other documents refer to that procedure rather than duplicating its commands.
 

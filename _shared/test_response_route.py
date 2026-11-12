@@ -571,11 +571,12 @@ class ResponseRouteTests(unittest.TestCase):
             tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
                        (json.dumps(state), "codex", "current"))
         before = ledger.read_session_events(**self.coords)
+        observations = [event for event in before if event["event"] == "input-observed"]
+        self.assertEqual(len(observations), 1)
         self.assertEqual(self.api.read_response_route(**self.coords)["status"], "ready")
         self.assertEqual(self.record()["status"], "ready")
         after = ledger.read_session_events(**self.coords)
-        self.assertEqual([e for e in after if e["event"] == "user-input-observed"],
-                         [e for e in before if e["event"] == "user-input-observed"])
+        self.assertEqual([e for e in after if e["event"] == "input-observed"], observations)
         self.assertEqual(ledger.read_session_state(**self.coords)["canonical_input_event_id"], self.event)
 
     def test_older_native_intake_after_import_upgrades_from_attested_event_boundary(self):
@@ -599,11 +600,13 @@ class ResponseRouteTests(unittest.TestCase):
             tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
                        (json.dumps(state), "codex", "current"))
         before = ledger.read_session_events(**coords)
+        observations = [event for event in before if event["event"] == "input-observed"]
+        self.assertEqual(len(observations), 2)
         self.assertEqual(self.api.read_response_route(**coords)["status"], "ready")
         self.assertEqual(self.api.record_response_route(**coords, expected_input_event_id=fresh,
             candidate=self.candidate(), boundary_ref="boundary-1")["status"], "ready")
-        self.assertEqual([e for e in ledger.read_session_events(**coords) if e["event"] == "user-input-observed"],
-                         [e for e in before if e["event"] == "user-input-observed"])
+        self.assertEqual([e for e in ledger.read_session_events(**coords) if e["event"] == "input-observed"],
+                         observations)
 
     def test_older_import_preserved_json_stamp_cannot_authorize_current_route(self):
         self.event = self.setup_owned()

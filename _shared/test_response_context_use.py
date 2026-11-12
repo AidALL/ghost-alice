@@ -1051,20 +1051,28 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
         return result
 
     def test_nested_producer_wrapper_before_later_thinking_preserves_whole_request_and_originals(self):
-        receipt = self.record(); self.close(receipt, signed=True, wrapper=True); self.next_sdk_prompt()
-        request = self.request()
-        self.assert_signed_preserved(request)
+        for disposition in ('replace', 'omit'):
+            with self.subTest(disposition=disposition):
+                self.setUp()
+                receipt = self.record(); self.close(receipt, judgment=False, signed=True, wrapper=True)
+                use.record_use_judgments(self.source, self.event, [dict(use_reference=receipt['reference'],
+                    disposition=disposition, summary='No current need', next_need='Retrieve if needed')])
+                self.next_sdk_prompt()
+                self.assert_signed_preserved(self.request())
 
     def test_thinking_capable_initial_request_preserves_post_use_selection_without_signed_history(self):
         receipt = self.record(); self.close(receipt)
-        for kind in (None, 'enabled', 'adaptive', 'between_tools'):
-            with self.subTest(kind=kind):
-                request = self.request()
-                if kind is None:
-                    del request['thinking']
-                else:
-                    request['thinking'] = {'type': kind}
-                self.assert_signed_preserved(request)
+        for disposition in ('replace', 'omit'):
+            use.record_use_judgments(self.source, self.event, [dict(use_reference=receipt['reference'],
+                disposition=disposition, summary='No current need', next_need='Retrieve if needed')])
+            for kind in (None, 'enabled', 'adaptive', 'between_tools'):
+                with self.subTest(disposition=disposition, kind=kind):
+                    request = self.request()
+                    if kind is None:
+                        del request['thinking']
+                    else:
+                        request['thinking'] = {'type': kind}
+                    self.assert_signed_preserved(request)
 
     def test_signed_unsupported_post_use_reason_survives_empty_or_keep_manual_disposition(self):
         import context_lifecycle as lifecycle

@@ -31,10 +31,26 @@ class TestIoTraceHook(unittest.TestCase):
 
     def test_shell_command_fields_preserve_the_existing_record_limit(self):
         command = 'echo ' + 'synthetic-command ' * 25
-        for name, field in [('Bash', 'command'), ('exec_command', 'cmd'), ('shell', 'cmd')]:
-            with self.subTest(name=name):
-                row = io_trace_hook._extract({'tool_name': name, 'tool_input': {field: command}})
-                self.assertEqual(row['pattern'], command[:200])
+        for name in ('Bash', 'exec_command', 'shell'):
+            for field in ('command', 'cmd'):
+                with self.subTest(name=name, field=field):
+                    row = io_trace_hook._extract({'tool_name': name, 'tool_input': {field: command}})
+                    self.assertEqual(row['pattern'], command[:200])
+
+    def test_shell_command_aliases_use_first_string_and_preserve_structured_operation(self):
+        command = 'cat /fixture/original.txt'
+        cases = (({'command': command, 'cmd': 'cat /fixture/other.txt'}, command),
+                 ({'command': '', 'cmd': command}, ''),
+                 ({'command': None, 'cmd': command}, command),
+                 ({'command': ['not a command'], 'cmd': command}, command),
+                 ({'command': 42, 'cmd': {'not': 'a command'}}, ''))
+        for name in ('Bash', 'exec_command', 'shell'):
+            for tool_input, expected in cases:
+                with self.subTest(name=name, tool_input=tool_input):
+                    row = io_trace_hook._extract({'tool_name': name, 'tool_input': tool_input})
+                    self.assertEqual(row['pattern'], expected)
+                    self.assertEqual(row['path'], '/fixture/original.txt' if expected else 'n/a')
+                    self.assertEqual(row.get('op'), 'read' if expected else None)
 
     def test_main_logs_payload_with_surrogate_path(self):
         raw = (
