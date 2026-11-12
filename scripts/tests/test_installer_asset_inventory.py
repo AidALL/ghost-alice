@@ -222,12 +222,5 @@ class InstallerAssetInventoryTest(unittest.TestCase):
         copied_result = classify_skill_root(copied, expected_asset_id="task-router")
         self.assertEqual(copied_result.ownership, "ghost-alice-managed")
 
-    def test_installers_call_ownership_marker_writer_before_snapshot(self) -> None:
-        transaction_py = (REPO_ROOT / "_shared" / "installer" / "transaction.py").read_text(encoding="utf-8")
-
-        # The Python order (markers before the snapshot) is fixed by _shared/test_installer_cli.py.
-        self.assertIn("installer_assets_cli.py", transaction_py)
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -5,11 +5,14 @@ runner form belongs to Ghost-ALICE. Hooks of other tools stay unchanged.
 """
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import sys
 import tomllib
 import unittest
+from unittest import mock
 
 import hook_definitions
 import install_doctor
@@ -36,6 +39,73 @@ def _without_hook_state(text):
 
 
 class InstalledHookCleanupTests(TempHomeTestCase):
+    def test_failed_permission_save_restores_settings_without_new_removal_authority(self):
+        import addon_skill_permissions as permissions
+        for existing_receipt in (False, True):
+            for failure in ('legacy-backup', 'receipt-publish'):
+                with self.subTest(existing_receipt=existing_receipt, failure=failure):
+                    settings = self._write_settings('claude', {'permissions': {'allow': ['Skill(pilot)', 'Skill(writing-plans)']}})
+                    original_settings = settings.read_bytes()
+                    runtime = install_hooks.runtime_config.config_path(self.fake_home)
+                    runtime.parent.mkdir(parents=True, exist_ok=True)
+                    runtime.write_text('{ "agent_visibility": {"profile": "minimal"} }\n')
+                    original_runtime = runtime.read_bytes()
+                    receipt = permissions._state_path()
+                    receipt.parent.mkdir(parents=True, exist_ok=True)
+                    legacy = receipt.with_name('claude.json')
+                    legacy_bytes = json.dumps({'schema_version': 1, 'settings_file': str(settings.resolve()),
+                                               'addons': {'pilot': {'pilot': True}}}).encode()
+                    legacy.write_bytes(legacy_bytes)
+                    prior_receipt = json.dumps({'schema_version': 2, 'settings_file': str(settings.resolve()),
+                                                'addons': {'pilot': {'pilot': True}},
+                                                'core': {'writing-plans': True}}).encode() if existing_receipt else None
+                    if prior_receipt is None:
+                        receipt.unlink(missing_ok=True)
+                    else:
+                        receipt.write_bytes(prior_receipt)
+                    replace = os.replace
+                    def fail_selected_operation(source, target):
+                        if ((failure == 'legacy-backup' and Path(source) == legacy)
+                                or (failure == 'receipt-publish' and Path(target) == receipt)):
+                            raise PermissionError(f'injected {failure} failure')
+                        return replace(source, target)
+                    with mock.patch.object(permissions.os, 'replace', side_effect=fail_selected_operation):
+                        with self.assertRaisesRegex(PermissionError, f'injected {failure} failure'):
+                            install_hooks.install_hook('claude')
+                    self.assertEqual(settings.read_bytes(), original_settings)
+                    self.assertEqual(runtime.read_bytes(), original_runtime)
+                    self.assertEqual(legacy.read_bytes(), legacy_bytes)
+                    self.assertEqual(receipt.read_bytes() if receipt.exists() else None, prior_receipt)
+                    self._write_settings('claude', {'permissions': {'allow': ['Skill(pilot)', 'Skill(task-router)']}})
+                    install_hooks.uninstall_hook('claude')
+                    self.assertEqual(self._read_settings('claude')['permissions']['allow'],
+                                     ['Skill(pilot)', 'Skill(task-router)'])
+
+    def test_core_permissions_uninstall_preserves_preexisting_and_duplicate_rules(self):
+        self._write_settings('claude', {'permissions': {'allow': ['Skill(task-router)', 'Bash(user-command)']}})
+        install_hooks.install_hook('claude')
+        settings = self._read_settings('claude')
+        settings['permissions']['allow'].append('Skill(writing-plans)')
+        self._write_settings('claude', settings)
+        install_hooks.uninstall_hook('claude')
+        self.assertEqual(self._read_settings('claude')['permissions']['allow'],
+                         ['Skill(task-router)', 'Bash(user-command)', 'Skill(writing-plans)'])
+
+    def test_missing_settings_retires_core_permission_ownership(self):
+        for absent in ('file', 'directory'):
+            with self.subTest(absent=absent):
+                self._write_settings('claude', {})
+                install_hooks.install_hook('claude')
+                if absent == 'directory':
+                    shutil.rmtree(self._config_file('claude').parent)
+                else:
+                    self._config_file('claude').unlink()
+                install_hooks.uninstall_hook('claude')
+                self._write_settings('claude', {'permissions': {'allow': ['Skill(task-router)']}})
+                install_hooks.install_hook('claude')
+                install_hooks.uninstall_hook('claude')
+                self.assertEqual(self._read_settings('claude')['permissions']['allow'], ['Skill(task-router)'])
+
     def retired_forms(self, platform):
         """Every form an older installer wrote for a retired hook: with its marker, or with only its runner id."""
         forms = []

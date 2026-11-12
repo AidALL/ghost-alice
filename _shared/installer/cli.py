@@ -506,8 +506,6 @@ def run_install(ctx: Context) -> int:
     # Records
     if not report.run_logged(transaction.verify_after_copy, ctx, skills_dir, copy_only, collected):
         raise InstallerExit(1)
-    if not report.run_logged(transaction.write_ownership_markers, ctx, skills_dir, copy_only, collected):
-        raise InstallerExit(1)
     if not report.run_logged(transaction.snapshot_after_install, ctx):
         raise InstallerExit(1)
     report.run_logged(addons.migrate_state_once, ctx)

@@ -1150,8 +1150,8 @@ class RetentionFailureDoctorTest(NodeRuntimeRunPathCase):
         self.assertEqual(install_doctor._retention_failure_line(self.record), "record unreadable")
 
 
-class HookRejectionDoctorTest(NodeRuntimeRunPathCase):
-    """Doctor reads the hook runner's command rejections from the strict session logs the runner writes them to."""
+class HookDiagnosticDoctorTest(NodeRuntimeRunPathCase):
+    """Doctor reads explicit rejection and own-failure fields from the runner's strict session logs."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -1192,8 +1192,83 @@ class HookRejectionDoctorTest(NodeRuntimeRunPathCase):
             os.utime(log, (moment, moment))
         return log
 
+    def test_strict_failure_fields_are_reported_once_per_row_without_changing_status_or_records(self):
+        node = self._runtime()
+        snapshot = self.ghost_alice_root / "pending-merges" / "claude" / "snapshot.json"
+        snapshot.parent.mkdir(parents=True)
+        snapshot.write_text("{}", encoding="utf-8")
+        clean_rc, clean = self._run("claude", path_node=node)
+        self.assertEqual(clean_rc, 0)
+        self.assertIn("overall: ok", clean)
+        cases = [
+            ("fallback", {"native_intake_failure": {"recorded": "hook-log", "phase": "reconcile",
+                        "error": "OperationalError", "detail": "database is locked"}}, ""),
+            ("launch", {"launch_failure": {"error": "FileNotFoundError", "errno": 2,
+                        "detail": "missing interpreter"}}, ""),
+            ("prepare", {"stop_notice_failure": "PermissionError: notice path denied"}, ""),
+            ("persist", {}, json.dumps({"continue": True, "stop_notice": {
+                "schema_version": "stop-notice.v1", "file_error": "OSError: disk full"}})),
+        ]
+        snapshots = {}
+        for session, fields, stdout in cases:
+            row = self._row("claude", session, ts=self._stamp(), rejected=False)
+            row.update(event="Stop", stdout=stdout)
+            row["surface_item"].update(fields)
+            if session == "prepare":
+                # Two diagnostic fields in one hook invocation are one failed row.
+                row["surface_item"].update(cases[1][1])
+            log = self._log("claude", session, [row])
+            snapshots[log] = (log.read_bytes(), log.stat().st_mtime_ns)
+        rc, output = self._run("claude", path_node=node)
+        self.assertIn("hook-failures: 4 in 14 days (4 sessions)", output)
+        for detail in ("intake fallback: OperationalError: database is locked",
+                       "launch: FileNotFoundError: missing interpreter",
+                       "hook runner Stop notice: PermissionError: notice path denied",
+                       "Stop notice file: OSError: disk full"):
+            self.assertIn(detail, output)
+        self.assertEqual(rc, clean_rc)
+        self.assertEqual([line for line in output.splitlines() if line.startswith("overall:")],
+                         [line for line in clean.splitlines() if line.startswith("overall:")])
+        for log, snapshot in snapshots.items():
+            self.assertEqual((log.read_bytes(), log.stat().st_mtime_ns), snapshot)
+
+    def test_strict_failure_reader_excludes_ledger_summaries_semantic_notices_and_quoted_fields(self):
+        row = self._row("claude", "normal", ts=self._stamp(), rejected=False)
+        row["event"] = "Stop"
+        row["surface_item"]["native_intake_failure"] = {
+            "recorded": "ledger", "error": "ValueError", "detail": "already in native-intake-failures"}
+        row["stdout"] = json.dumps({"continue": True, "stop_notice": {
+            "schema_version": "stop-notice.v1", "issues": ["assessment-unavailable"],
+            "remaining_work": ["file_error launch_failure stop_notice_failure"]}})
+        quoted = self._row("claude", "normal", ts=self._stamp(), rejected=False)
+        quoted["stdout"] = 'ordinary prose: {"launch_failure": {}, "file_error": "not a notice"}'
+        quoted["stderr"] = "child error"
+        quoted["exit_code"] = 1
+        wrong_event = dict(row, event="PreToolUse", stdout=json.dumps({"stop_notice": {
+            "schema_version": "stop-notice.v1", "file_error": "not a Stop result"}}))
+        self._log("claude", "normal", [row, quoted, wrong_event])
+        _, output = self._run("claude", strict=False)
+        self.assertIn("hook-failures: 0 in 14 days", output)
+
+    def test_strict_failure_reader_respects_window_and_committed_rows(self):
+        rows = []
+        for days in (20, 1, 0):
+            row = self._row("unknown", "failure", ts=self._stamp(days_ago=days), rejected=False)
+            row["surface_item"]["launch_failure"] = {"error": "OSError", "detail": "launch denied"}
+            rows.append(row)
+        log = self._log("unknown", "failure", rows[:2])
+        with log.open("ab") as handle:
+            handle.write(json.dumps(rows[2]).encode("utf-8"))
+        _, output = self._run("claude", strict=False)
+        self.assertIn("hook-failures: 1 in 14 days (1 sessions)", output)
+        with log.open("ab") as handle:
+            handle.write(b"\n")
+        _, output = self._run("claude", strict=False)
+        self.assertIn("hook-failures: 2 in 14 days (1 sessions)", output)
+
     def test_without_session_logs_the_line_is_zero(self):
-        self.assertEqual(install_doctor._hook_rejection_lines(self.session_logs), ["hook-rejections: 0 in 14 days"])
+        self.assertEqual(install_doctor._hook_diagnostic_lines(self.session_logs),
+                         ["hook-rejections: 0 in 14 days", "hook-failures: 0 in 14 days"])
         _, output = self._run("claude", strict=False)
         self.assertIn("hook-rejections: 0 in 14 days", output)
 
@@ -1211,12 +1286,13 @@ class HookRejectionDoctorTest(NodeRuntimeRunPathCase):
         ])
         newer_last = self._stamp(seconds_ago=30)
         self._log("codex", "s-newer", [self._row("codex", "s-newer", ts=newer_last)])
-        lines = install_doctor._hook_rejection_lines(self.session_logs)
+        lines = install_doctor._hook_diagnostic_lines(self.session_logs)
         self.assertEqual(lines, [
             "hook-rejections: 3 in 14 days (2 sessions)",
             f"  codex/s-newer: 1, last {self._printed(newer_last)} tool-checkpoint: hook payload decode failed",
             f"  claude/s-older: 2, last {self._printed(older_last)} adapter-demo-prepare-origin: "
             "registered adapter hash mismatch",
+            "hook-failures: 0 in 14 days",
         ])
         # Doctor for one platform lists every host folder: the audit platform of a rejection can be `unknown`.
         _, output = self._run("claude", strict=False)
@@ -1230,9 +1306,10 @@ class HookRejectionDoctorTest(NodeRuntimeRunPathCase):
     def test_the_listing_shows_the_newest_five_sessions(self):
         for index in range(7):
             self._log("claude", f"s-{index}", [self._row("claude", f"s-{index}", ts=self._stamp(days_ago=index))])
-        lines = install_doctor._hook_rejection_lines(self.session_logs)
+        lines = install_doctor._hook_diagnostic_lines(self.session_logs)
         self.assertEqual(lines[0], "hook-rejections: 7 in 14 days (7 sessions, newest 5 shown)")
-        self.assertEqual([line.split(":")[0].strip() for line in lines[1:]], [f"claude/s-{index}" for index in range(5)])
+        self.assertEqual([line.split(":")[0].strip() for line in lines[1:-1]], [f"claude/s-{index}" for index in range(5)])
+        self.assertEqual(lines[-1], "hook-failures: 0 in 14 days")
 
     def test_sessions_and_rows_older_than_the_retention_window_are_left_out(self):
         # The folder whose log last changed 15 days ago is one the session-logs retention removes; doctor does not
@@ -1240,15 +1317,16 @@ class HookRejectionDoctorTest(NodeRuntimeRunPathCase):
         self._log("claude", "s-gone", [self._row("claude", "s-gone", ts=self._stamp(days_ago=1))], age_days=15)
         self._log("claude", "s-live", [self._row("claude", "s-live", ts=self._stamp(days_ago=20)),
                                        self._row("claude", "s-live", ts=self._stamp(days_ago=3))])
-        lines = install_doctor._hook_rejection_lines(self.session_logs)
-        self.assertEqual(len(lines), 2)
+        lines = install_doctor._hook_diagnostic_lines(self.session_logs)
+        self.assertEqual(len(lines), 3)
         self.assertEqual(lines[0], "hook-rejections: 1 in 14 days (1 sessions)")
         self.assertTrue(lines[1].startswith("  claude/s-live: 1, last "), lines[1])
 
     def test_an_unreadable_log_is_reported(self):
         (self.session_logs / "claude" / "s-dir" / "strict-hook-output.jsonl").mkdir(parents=True)
-        self.assertEqual(install_doctor._hook_rejection_lines(self.session_logs),
-                         ["hook-rejections: unavailable (IsADirectoryError claude/s-dir)"])
+        self.assertEqual(install_doctor._hook_diagnostic_lines(self.session_logs),
+                         ["hook-rejections: unavailable (IsADirectoryError claude/s-dir)",
+                          "hook-failures: unavailable (IsADirectoryError claude/s-dir)"])
         _, output = self._run("claude", strict=False)
         self.assertIn("hook-rejections: unavailable (IsADirectoryError claude/s-dir)", output)
 
@@ -1257,10 +1335,11 @@ class HookRejectionDoctorTest(NodeRuntimeRunPathCase):
         broken = self.session_logs / "codex" / "s-bad" / "strict-hook-output.jsonl"
         broken.parent.mkdir(parents=True)
         broken.write_bytes(b'{"surface_item": {"value_key": "hook-command-rejection"}, broken\n')
-        lines = install_doctor._hook_rejection_lines(self.session_logs)
+        lines = install_doctor._hook_diagnostic_lines(self.session_logs)
         self.assertEqual(lines[0],
                          "hook-rejections: 1 in 14 days (1 sessions; 1 logs unreadable: JSONDecodeError codex/s-bad)")
-        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[-1], "hook-failures: 0 in 14 days (1 logs unreadable: JSONDecodeError codex/s-bad)")
+        self.assertEqual(len(lines), 3)
 
     def test_rejection_reader_ignores_marked_tail_until_its_lf_arrives(self):
         row = self._row("claude", "s-live", ts=self._stamp())
@@ -1270,18 +1349,18 @@ class HookRejectionDoctorTest(NodeRuntimeRunPathCase):
         for unfinished in (tail, b'{"surface_item": {"value_key": "hook-command-rejection"}, broken'):
             with self.subTest(unfinished=unfinished[-12:]):
                 log.write_bytes(committed + unfinished)
-                self.assertEqual(install_doctor._hook_rejection_rows(log), [row])
-                self.assertEqual(install_doctor._hook_rejection_lines(self.session_logs)[0],
+                self.assertEqual(install_doctor._hook_diagnostic_rows(log), [row])
+                self.assertEqual(install_doctor._hook_diagnostic_lines(self.session_logs)[0],
                                  "hook-rejections: 1 in 14 days (1 sessions)")
         log.write_bytes(committed + tail + b"\n")
-        self.assertEqual(install_doctor._hook_rejection_rows(log), [row, row])
+        self.assertEqual(install_doctor._hook_diagnostic_rows(log), [row, row])
 
     def test_rejection_reader_keeps_chunk_spanning_json_and_skips_unmarked_malformed_lines(self):
         row = self._row("claude", "s-large", ts=self._stamp(), reason="first\u2028second")
         row["stdout"] = "x" * (1 << 20)
         log = self._log("claude", "s-large", [row])
         log.write_bytes(b"unmarked malformed row\n" + log.read_bytes())
-        self.assertEqual(install_doctor._hook_rejection_rows(log), [row])
+        self.assertEqual(install_doctor._hook_diagnostic_rows(log), [row])
 
     def test_doctor_reads_the_row_the_runner_writes(self):
         # The runner's own writer, at the path it chooses from the same Ghost-ALICE root.
@@ -1292,10 +1371,81 @@ class HookRejectionDoctorTest(NodeRuntimeRunPathCase):
             hook_profile_gate._append_rejection_audit(
                 "tool-checkpoint", "hook command rejected: hook payload decode failed\n", platform="claude")
         self.assertTrue((self.session_logs / "claude" / "s-real" / "strict-hook-output.jsonl").is_file())
-        lines = install_doctor._hook_rejection_lines(self.session_logs)
+        lines = install_doctor._hook_diagnostic_lines(self.session_logs)
         self.assertEqual(lines[0], "hook-rejections: 1 in 14 days (1 sessions)")
         self.assertTrue(lines[1].startswith("  claude/s-real: 1, last "), lines[1])
         self.assertTrue(lines[1].endswith(" tool-checkpoint: hook payload decode failed"), lines[1])
+
+
+class IntakeDegradeDoctorTest(NodeRuntimeRunPathCase):
+    def setUp(self):
+        super().setUp()
+        self.ledger_root = self.root / "configured-intent"
+        self.config_path.parent.mkdir(parents=True)
+        self.config_path.write_text(json.dumps({"install_locations": {
+            "codex": {"ledger_root": str(self.ledger_root)}}}), encoding="utf-8")
+
+    def _marker(self, session="marked", platform="codex"):
+        import session_intent_analyzer_hook as hook
+        hook._write_degrade_marker(self.ledger_root, platform, {"session_id": session}, "ledger-write-failed")
+        return self.ledger_root / platform / session / "ledger-degraded.json"
+
+    def test_actual_degrade_marker_can_coexist_with_stored_input_and_does_not_change_status(self):
+        import session_intent_analyzer_hook as hook
+        coords = dict(root=self.ledger_root, platform="codex", session_id="marked")
+        hook.record_turn(**coords, raw_input="Stored before receipt failed", recording_path="hook")
+        before_state = hook._LEDGER.read_session_state(**coords)
+        node = self._runtime()
+        snapshot = self.ghost_alice_root / "pending-merges" / "codex" / "snapshot.json"
+        snapshot.parent.mkdir(parents=True)
+        snapshot.write_text("{}", encoding="utf-8")
+        clean_rc, clean = self._run("codex", path_node=node)
+        self.assertEqual(clean_rc, 0)
+        self.assertIn("overall: ok", clean)
+        marker = self._marker()
+        before_marker = (marker.read_bytes(), marker.stat().st_mtime_ns)
+        # Another host's marker and the doctor's golden scratch marker must not enter this host's listing.
+        self._marker("other-host", platform="claude")
+        scratch = self.ghost_alice_root / "doctor" / "session-intent" / "codex" / "doctor-runtime-golden"
+        scratch.mkdir(parents=True)
+        (scratch / marker.name).write_bytes(marker.read_bytes())
+        rc, output = self._run("codex", path_node=node)
+        self.assertIn("intake-hook-degraded: 1", output)
+        self.assertIn("codex/marked: ledger-write-failed", output)
+        self.assertNotIn("other-host", output)
+        self.assertNotIn("doctor-runtime-golden:", output)
+        self.assertNotIn("input not stored", output)
+        self.assertEqual(rc, clean_rc)
+        self.assertEqual([line for line in output.splitlines() if line.startswith("overall:")],
+                         [line for line in clean.splitlines() if line.startswith("overall:")])
+        self.assertEqual((marker.read_bytes(), marker.stat().st_mtime_ns), before_marker)
+        self.assertEqual(hook._LEDGER.read_session_state(**coords), before_state)
+
+    def test_degrade_marker_absence_and_missing_configuration_are_distinct(self):
+        _, output = self._run("codex", strict=False)
+        self.assertIn("intake-hook-degraded: 0", output)
+        self._marker()
+        self.config_path.write_text("{}", encoding="utf-8")
+        _, output = self._run("codex", strict=False)
+        self.assertIn("intake-hook-degraded: unavailable (no installed ledger root)", output)
+        self.assertNotIn("codex/marked:", output)
+
+    def test_degrade_marker_reports_bad_records_beside_readable_records(self):
+        good = self._marker("good")
+        bad = self._marker("bad")
+        unreadable = self._marker("unreadable")
+        unreadable.unlink()
+        unreadable.mkdir()
+        for content in ("{broken", "[]", '{"schema_version":"wrong","reason":"r","ts":"t"}'):
+            with self.subTest(content=content):
+                bad.write_text(content, encoding="utf-8")
+                _, output = self._run("codex", strict=False)
+                self.assertIn("intake-hook-degraded: 1", output)
+                self.assertIn("codex/good: ledger-write-failed", output)
+                self.assertIn("codex/bad: unreadable", output)
+                self.assertIn("codex/unreadable: unreadable (IsADirectoryError)", output)
+                self.assertEqual(bad.read_text(encoding="utf-8"), content)
+                self.assertTrue(good.is_file())
 
 
 class RuntimeCoreAuditTest(unittest.TestCase):
@@ -1365,15 +1515,28 @@ class RuntimeCoreAuditTest(unittest.TestCase):
         self.assertEqual(status, install_doctor.STATUS_OK)
         self.assertEqual(findings[0]["reason"], "not-requested")
 
-    def test_runtime_shared_file_audit_covers_runner_import_dependencies(self):
-        for dependency in (
-            "agent_visibility_policy.py",
-            "runtime_config.py",
-            "work_impact_projection.py",
-            "strict_session_log.py",
-            "text_lines.py",
-        ):
-            self.assertIn(dependency, install_doctor.RUNTIME_SHARED_FILES)
+    def test_runtime_shared_file_audit_follows_the_published_source_inventory(self):
+        for name in ("hook_input.py", "pending_manifest.py", "package/parser.py", "adapter.mjs", "schema.json"):
+            source = self.source / name
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("original", encoding="utf-8")
+            runtime = self.runtime / name
+            runtime.parent.mkdir(parents=True, exist_ok=True)
+            for content, expected in ((None, "runtime-missing"), ("changed", "hash-mismatch"),
+                                      ("original", "hash-match")):
+                with self.subTest(name=name, state=expected):
+                    if content is None:
+                        runtime.unlink(missing_ok=True)
+                    else:
+                        runtime.write_text(content, encoding="utf-8")
+                    findings = install_doctor._runtime_shared_file_audit(self.source, self.runtime)
+                    self.assertEqual([row["reason"] for row in findings if row["name"] == name], [expected])
+        for name in ("__pycache__/ignored.py", "package/ignored.pyc", ".DS_Store"):
+            source = self.source / name
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("not published", encoding="utf-8")
+        names = {row["name"] for row in install_doctor._runtime_shared_file_audit(self.source, self.runtime)}
+        self.assertTrue(names.isdisjoint({"__pycache__/ignored.py", "package/ignored.pyc", ".DS_Store"}))
 
     def test_runtime_shared_file_audit_checks_runner_dependency_content(self):
         for name in ("agent_visibility_policy.py", "fresh_agent_session.py", "project_runtime.py"):
@@ -1459,7 +1622,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
 
         source_shared = Path(__file__).resolve().parent
         shutil.copytree(source_shared, self.runtime, dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns("test_*", "tests", "__pycache__"))
+                        ignore=shutil.ignore_patterns("__pycache__"))
         destination = install_destination.InstallDestination(
             mode="normal", owned_root=str(self.root), platform_dir=str(self.root / "platform"),
             skills_dir=str(self.root / "skills"), ghost_root=str(self.root / "ghost"),

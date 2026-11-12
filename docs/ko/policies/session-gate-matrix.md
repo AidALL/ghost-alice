@@ -38,7 +38,7 @@
 
 응답 모델이 병합 대기 매니페스트를 확인하고 그 항목을 검토하는 시점은 [merge-companion](../../../merge-companion/SKILL.md#entry-and-activation)이 정합니다.
 
-응답 모델은 후속 질문과 상태 질문을 포함한 모든 입력의 작업 선택 기록을 응답 모델이 마지막으로 기록한 입력 해석과 인간 사용자의 지시가 부여한 계속 유효한 권한에 따라 작성합니다. 이전 작업 선택 기록은 Core 코드가 현재 입력으로 기록한 입력(Claude Code에서는 호스트가 대화 기록 행에 사람 입력 표지를 기록한 입력, Codex에서는 Codex의 프롬프트 제출 이벤트(`UserPromptSubmit`)가 전달한 모든 프롬프트)의 작업 선택 기록이 아닙니다. 인간 사용자가 skill-evolution 보고를 요청하거나 그 분석을 허가하면 응답 모델은 같은 세션에 skill-evolution을 별도로 적용할 수 있습니다. 이 절차는 task-router에 입력을 전달하지 않고 작업을 배정하지 않습니다.
+응답 모델은 후속 질문과 상태 질문을 포함한 모든 입력을 해석하고, 공용 계약의 Work Selection 절에 따라 다음 행동을 선택합니다. task-router가 요구할 때 작업 선택 기록을 등록하며, 바로 답하기와 간단한 로컬 조회 경로에서는 등록하지 않습니다. 이전 작업 선택 기록은 Core 코드가 현재 입력으로 기록한 입력(Claude Code에서는 호스트가 대화 기록 행에 사람 입력 표지를 기록한 입력, Codex에서는 Codex의 프롬프트 제출 이벤트(`UserPromptSubmit`)가 전달한 모든 프롬프트)의 작업 선택 기록이 아닙니다. 인간 사용자가 skill-evolution 보고를 요청하거나 그 분석을 허가하면 응답 모델은 같은 세션에 skill-evolution을 별도로 적용할 수 있습니다. 이 절차는 task-router에 입력을 전달하지 않고 작업을 배정하지 않습니다.
 
 응답 모델은 [task-router](../../../task-router/SKILL.md)를 적용하여 작업을 선택하고 작업 선택 기록 후보를 작성합니다. 응답 모델은 [boundary-contract](../../../boundary-contract/SKILL.md)를 따라 작업 범위 선언에 인간 사용자의 지시가 정한 목적을 작성하고, 그 지시가 허가한 작업 안에서 허용 대상과 행동·단계·자원 한도를 선언합니다. 인간 사용자가 금지했거나 프로젝트 지침이 금지했거나 응답 모델이 스스로 정한 더 좁은 한도로 제외한 금지 대상과 행동도 작성합니다. 이 절차들은 호스트의 실행 허용을 부여하지 않습니다.
 
@@ -87,13 +87,13 @@ task-router를 따르는 응답 모델은 인간 사용자가 주로 요청한 �
 
 결정에 영향을 주는 라우팅 안내는 [task-router](../../../task-router/SKILL.md#referenced-contracts)가 담당합니다.
 
-[Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md#completion-check-format)은 공통 `[completion-check]`·`[partial-check]` 형식과 기준·주장·근거 대응을 담당합니다. Core는 현재 소유한 응답 경로에 연결된 주장·원본 자료·응답 전체의 검토가 인증되어야 완료 제출을 수락합니다. 스킬 로드는 절차 안내와 감사 활동이며 별도의 완료 선행 조건이 아닙니다. 최종 완료는 미검증 기준이 없고 모든 판정을 근거가 뒷받침할 것을 요구합니다. 부분 성공 보고는 전체 계약을 유지하고 미해결 기준을 밝히며, 성공한 부분 결과를 전체 작업의 완료로 제시하지 않습니다.
+[Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md#completion-check-format)은 공통 `[completion-check]`·`[partial-check]` 형식과 기준·주장·근거 대응을 담당합니다. Core는 현재 소유한 작업 선택 기록에 연결된 주장·원본 자료·응답 전체의 검토가 인증되어야 완료 제출을 수락합니다. 스킬 로드는 절차 안내와 감사 활동이며 별도의 완료 선행 조건이 아닙니다. 최종 완료는 미검증 기준이 없고 모든 판정을 근거가 뒷받침할 것을 요구합니다. 부분 성공 보고는 전체 계약을 유지하고 미해결 기준을 밝히며, 성공한 부분 결과를 전체 작업의 완료로 제시하지 않습니다.
 
 화면에 보인 기록은 증거가 되지 않습니다. 훅은 화면 표시와 관계없이 감사 기록을 남기고, 응답 모델은 각 주장을 실제 절차의 근거로 뒷받침합니다.
 
 ## tool-checkpoint 표시
 
-공통 계약의 io-trace Transparency Rule이 체크포인트 표시를 맡습니다.
+공용 계약의 io-trace Transparency Rule이 체크포인트 표시를 맡습니다.
 
 
 ## 참고

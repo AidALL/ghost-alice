@@ -66,6 +66,13 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_legacy_proof_contract_reuses_original_binding_and_rejects_changed_condition(self):
         api = completion_assessment
+        state = fixtures.ledger.read_session_state(**self.fixture.coords)
+        state['schema_version'] = 'session-intent-ledger.v1'
+        for criterion in state['acceptance_criteria']:
+            criterion['admitted'] = criterion.pop('selectable')
+        with fixtures.ledger.storage_transaction(self.fixture.root) as connection:
+            connection.execute('UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?',
+                (json.dumps(state), self.fixture.coords['platform'], self.fixture.coords['session_id']))
         original = self.prepare()
         legacy = json.loads(json.dumps({k: v for k, v in original.items() if k != 'candidate_reference'}))
         for row in legacy['contract']['criteria']:
@@ -84,8 +91,19 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.assertEqual(found.reference, recorded['assessment_reference'])
         reply = 'The earlier observation remains recorded.'
         prepared = api.prepare_response_review(self.source, response_text=reply, source_paths=[], reuse_candidate=reference)
-        api.record_response_review(self.source, prepared['candidate_reference'], self.response_review(prepared))
+        # A response written before the rename retains its old contract bytes as well as its old proof.
+        legacy_response = self.stored_candidate(prepared)
+        for criterion in legacy_response['contract']['criteria']:
+            criterion['admitted'] = criterion.pop('selectable')
+        response_reference = api.json_digest(legacy_response)
+        with core._transaction(root) as connection:
+            connection.execute('INSERT INTO core_completion_candidates VALUES (?,?,?)',
+                (response_reference, api._lookup_key(legacy_response['contract'], legacy_response['proof'],
+                    legacy_response['verified_at']), api.canonical_json(legacy_response)))
+        api.record_response_review(self.source, response_reference, self.response_review(prepared))
         self.assertEqual(api.lookup_current_response(self.source, reply).reference, found.reference)
+        self.assertEqual(self.stored_candidate({'candidate_reference': response_reference}), legacy_response)
+        self.assertEqual(fixtures.ledger.read_session_state(**self.fixture.coords), state)
         for change in ('condition', 'owner', 'revision'):
             current_contract = copy.deepcopy(found.candidate['contract'])
             if change == 'condition':

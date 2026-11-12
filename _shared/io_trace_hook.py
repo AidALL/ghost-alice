@@ -135,7 +135,8 @@ def _extract(payload: dict[str, Any]) -> dict[str, str]:
         path = _text(tool_input.get("path"), "cwd")
         pattern = _text(tool_input.get("pattern"))
     elif tool in {"Bash", "exec_command", "shell"}:
-        command = _text(tool_input.get("command" if tool == "Bash" else "cmd"))
+        command = _text(next((tool_input[key] for key in ("command", "cmd")
+                              if isinstance(tool_input.get(key), str)), ""))
         pattern = command[:200]
         op, extracted = _shell_op_and_path(command)
         if extracted:

@@ -92,7 +92,7 @@ bash install.sh --status
 
 The healthy target is `overall: ok`.
 
-Doctor also prints two informational Core lines that do not change `overall`: `native-intake-waits` and `native-intake-failures`. See [intake warning and doctor lists](troubleshooting.md#intake-warning-and-doctor-lists).
+Doctor also prints informational Core lines: `native-intake-waits`, `native-intake-failures`, `hook-failures` and `intake-hook-degraded`. These lists do not change `overall` or the exit code. They report recorded waits, failures or degradation markers; a degradation marker alone does not establish whether an input was stored. See [intake warning and doctor lists](troubleshooting.md#intake-warning-and-doctor-lists).
 
 ## Update
 

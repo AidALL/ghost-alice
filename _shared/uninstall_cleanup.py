@@ -766,7 +766,14 @@ def _runtime_core_item(args: argparse.Namespace) -> dict[str, Any]:
     return _apply_remove_action(item, path, apply_changes=args.apply_changes, reason="trace-backed-support-artifact")
 
 
-def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
+def _support_artifact_items(args: argparse.Namespace, *, preserve_recovery: bool = False) -> list[dict[str, Any]]:
+    if preserve_recovery:
+        preview = argparse.Namespace(**dict(vars(args), apply_changes=False))
+        items = _support_artifact_items(preview)
+        for item in items:
+            if item["action"].startswith("would-"):
+                item.update(action="manual-review", reason="install-state-unavailable-recovery-retained")
+        return items
     manifest_path = args.install_state_manifest
     install_state_dir = manifest_path.parent
     others = _other_platform_install_states(manifest_path, args.platform)
@@ -945,7 +952,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     # The gateway judgment takes the roots this removal deletes, under the same ownership/shared-platform
     # plan as the deletion. A raw manifest row does not establish that its target can go.
     preview = argparse.Namespace(**dict(vars(args), apply_changes=False))
-    planned = _support_artifact_items(preview)
+    planned = _support_artifact_items(preview, preserve_recovery=manifest is None)
     for target in (manifest or {}).get('targets', []):
         if isinstance(target, dict):
             planned.append(_target_item(target, manifest=manifest,
@@ -1004,7 +1011,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                     }
                 )
 
-    items.extend(_support_artifact_items(args))
+    items.extend(_support_artifact_items(args, preserve_recovery=manifest is None))
 
     return {
         "schema_version": 2,

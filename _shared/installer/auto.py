@@ -109,6 +109,7 @@ def _run_compact(ctx: "Context", detected: list[str]) -> int:
            "GHOST_ALICE_INSTALL_EVENT_FILE": str(event_file)}
     for index, platform in enumerate(detected, 1):
         with open(log, "a", encoding="utf-8") as handle:
+            start = handle.tell()
             handle.write(f"\n[auto] ({index}/{total}) Starting install for {platform} (separate install path; "
                          "not a duplicate install)\n")
             process = runner.popen(child_command(ctx, platform), env=env, stdout=handle)
@@ -119,6 +120,7 @@ def _run_compact(ctx: "Context", detected: list[str]) -> int:
                     displayed = synced
                 time.sleep(0.1)
             child_rc = process.wait()
+        report.print_warnings(log, start=start)
         if child_rc != 0:
             rc = 1
             if live:

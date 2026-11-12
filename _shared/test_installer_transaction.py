@@ -546,12 +546,8 @@ class RecordTests(TransactionCase):
         (self.source / "fam" / "three").mkdir()
         (self.source / "fam" / "three" / "SKILL.md").write_text("new source member")
         with self.runner.patch():
-            self.assertTrue(transaction.write_ownership_markers(ctx, ctx.skills_dir, False, collected))
             self.assertTrue(transaction.write_install_state_manifest(ctx, ctx.skills_dir, False, collected, None))
-        marker_args = self.runner.tool_calls("installer_assets_cli.py")[0]
-        marker_names = [marker_args[index + 1] for index, value in enumerate(marker_args) if value == "--target"]
         state_args = self.runner.tool_calls("install_state_writer.py")[0]
-        self.assertEqual([name for name in marker_names if name != "_shared"], ["one", "two"])
         self.assertEqual(state_args[6::4], ["_shared", "one", "two"])
 
     def test_postflight_keeps_a_selected_source_that_disappears(self):
@@ -620,27 +616,6 @@ class RecordTests(TransactionCase):
             ok, out = self.captured(transaction.verify_after_copy, ctx, ctx.skills_dir, False, collected)
         self.assertFalse(ok)
         self.assertIn("[ERROR] Post-install source/destination verification failed; aborting before snapshot", out)
-
-    def test_write_ownership_markers(self):
-        # install.sh:487-536
-        ctx = self.context("codex")
-        with mock.patch("installer.addons.collect_addon_targets", return_value=[Target("noop", self.home / "addon" / "noop", "noop")]):
-            collected = selection.collect_targets(ctx, ["alpha"])
-        (ctx.skills_dir / "_shared").mkdir()
-        (ctx.skills_dir / "noop").mkdir()
-        with self.runner.patch():
-            self.assertTrue(transaction.write_ownership_markers(ctx, ctx.skills_dir, True, collected))
-        args = self.runner.tool_calls("installer_assets_cli.py")[0]
-        self.assertEqual(args[:6], ["--platform", "codex", "--source-repo", str(self.source), "--source-commit", "abc123def"])
-        self.assertEqual(args[6:10], ["--target", "_shared", str(ctx.skills_dir / "_shared"), "copy"])
-        self.assertEqual(args[10:14], ["--target", "alpha", str(ctx.skills_dir / "alpha"), "missing"])
-        self.assertEqual(args[14:19], ["--addon-target", "noop", str(ctx.skills_dir / "noop"), "copy", "noop"])
-        failing = FakeRunner()
-        failing.respond_to("installer_assets_cli.py", ToolResult(1))
-        with failing.patch():
-            ok, out = self.captured(transaction.write_ownership_markers, ctx, ctx.skills_dir, True, collected)
-        self.assertFalse(ok)
-        self.assertIn("[ERROR] Ownership marker write failed; aborting before snapshot", out)
 
     def test_snapshot_and_empty_manifest(self):
         # install.sh:364-409

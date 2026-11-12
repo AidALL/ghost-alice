@@ -385,7 +385,8 @@ def _native_protocol_output(stdout: str, *, hook_id: str) -> tuple[str, bool]:
         projected["continue"] = True
     specific = projected.get("hookSpecificOutput")
     if isinstance(specific, dict) and any(key in specific for key in PERMISSION_FIELDS):
-        if specific.get("permissionDecision") in {"deny", "ask"}:
+        permission = specific.get("permissionDecision")
+        if isinstance(permission, str) and permission in {"deny", "ask"}:
             action = "ask at the host's permission prompt whether to run the tool call" if specific['permissionDecision'] == 'ask' else 'deny the tool call'
             asked.append(f"{action} "
                          f"({_control_reason(specific.get('permissionDecisionReason'), None)})")

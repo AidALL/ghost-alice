@@ -141,7 +141,7 @@ class PublishTests(PublishCase):
         dest = self.codex / "_shared"
         install_transaction.publish(self.request("codex", self.target("_shared", dest, "copy", kind="support")))
         self.assertFalse(dest.is_symlink())
-        self.assertEqual([path.name for path in dest.iterdir()], ["SKILL.md"])
+        self.assertEqual(sorted(path.name for path in dest.iterdir()), [".ghost-alice-install.json", "SKILL.md"])
         entry = self.record()["targets"][str(dest)]
         self.assertEqual((entry["mode"], entry["kind"], entry["baseline"]), ("copy", "support", "recorded"))
         self.assertEqual(entry["files"], content_digest.tree(dest))

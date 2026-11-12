@@ -187,12 +187,13 @@ def log_init() -> Path:
 
 def run_logged(step: Callable[..., T], *args, **kwargs) -> T:
     """Run `step` with its output appended to the install log in compact mode,
-    directly otherwise."""
+    directly otherwise. Surface warnings from this step even when it succeeds."""
     if not compact_output_enabled():
         return step(*args, **kwargs)
     log = log_init()
     previous = _state.sink
-    with open(log, "a", encoding="utf-8") as handle:
+    with open(log, "a+", encoding="utf-8") as handle:
+        start = handle.tell()
         _state.sink = handle
         try:
             with contextlib.redirect_stdout(handle), contextlib.redirect_stderr(handle):
@@ -200,6 +201,17 @@ def run_logged(step: Callable[..., T], *args, **kwargs) -> T:
         finally:
             handle.flush()
             _state.sink = previous
+            if previous is None and not _state.report_child:
+                print_warnings(log, start=start)
+
+
+def print_warnings(path: Path, *, start: int = 0) -> None:
+    """Surface warnings from a logged step or a platform child, once at its outer output boundary."""
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        handle.seek(start)
+        for line in handle:
+            if line.lstrip().startswith("[WARN]"):
+                emit(line.rstrip())
 
 
 def failure_excerpt(path: Path | None, max_lines: int = 8) -> list[str]:

@@ -7,6 +7,7 @@ Dependencies: Python 3.11+ standard library only.
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_left
 import json
 import re
 import shlex
@@ -119,9 +120,13 @@ class _ShellContext:
     quote: str = ""
     case_states: list[str] = field(default_factory=list)
     loop_header: bool = False
+    function_header: bool = False
+    arithmetic: bool = False
     at_start: bool = True
     redirect: str = ""
-    heredocs: list[tuple[str, bool, bool]] = field(default_factory=list)
+    redirect_fd: str = ""
+    stdin_heredoc: int | None = None
+    heredocs: list[tuple[str, bool, bool, bool]] = field(default_factory=list)
 
     def finish_word(self) -> None:
         raw = "".join(self.word)
@@ -135,9 +140,18 @@ class _ShellContext:
         if not decoded:
             return
         if self.redirect:
+            stdin_redirect = self.redirect.startswith('<') and self.redirect_fd in {'', '0'}
+            if stdin_redirect:
+                self.stdin_heredoc = None
             if self.redirect in {"<<", "<<-"}:
-                self.heredocs.append((decoded[0], any(c in raw for c in "'\"\\"), self.redirect == "<<-"))
+                if stdin_redirect:
+                    self.stdin_heredoc = len(self.heredocs)
+                self.heredocs.append((decoded[0], any(c in raw for c in "'\"\\"), self.redirect == "<<-", False))
             self.redirect = ""
+            return
+        if self.function_header:
+            if raw == '{':
+                self.function_header = False
             return
         if self.loop_header:
             if self.at_start and raw == "do":
@@ -152,7 +166,10 @@ class _ShellContext:
                 self.case_states[-1] = "pattern"
             return
         if not self.words:
-            if raw in {"if", "then", "elif", "else", "while", "until", "do", "!", "{", "fi", "done", "}"}:
+            if raw in {"if", "then", "elif", "else", "while", "until", "do", "!", "{", "fi", "done", "}", "coproc"}:
+                return
+            if raw == 'function':
+                self.function_header = True
                 return
             if raw in {"for", "select"}:
                 self.loop_header = True
@@ -164,7 +181,7 @@ class _ShellContext:
             if raw == "esac" and self.case_states:
                 self.case_states.pop()
                 return
-            if re.match(r"[A-Za-z_]\w*=", raw):
+            if re.match(r"[A-Za-z_]\w*\+?=", raw):
                 return
         self.words.extend(decoded)
         self.at_start = False
@@ -172,49 +189,85 @@ class _ShellContext:
     def finish_command(self) -> list[str]:
         self.finish_word()
         words, self.words = self.words, []
+        if self.stdin_heredoc is not None:
+            name, args = effective_argv(words, stdin_receiver=True)
+            delimiter, literal, tabs, _ = self.heredocs[self.stdin_heredoc]
+            self.heredocs[self.stdin_heredoc] = (delimiter, literal, tabs, shell_input_mode(name, args) == 'stdin')
+            self.stdin_heredoc = None
         self.at_start = True
         self.redirect = ""
         return words
 
 
-def hook_command_vectors(command: str) -> Iterable[list[str]]:
+def _shell_command_vectors(command: str) -> Iterable[list[str]]:
     """Read static command positions, never evaluate expansions or run commands.
 
     Nested regions keep their own quotes and grammar state. An explicit stack
     makes case-pattern parentheses distinct from region endings without using
-    Python recursion. Heredoc bodies contribute only permitted substitutions.
+    Python recursion. Heredoc bodies are source ranges, so nested or missing
+    delimiters do not copy and repeatedly search the same remaining suffix.
     """
-    sources = [(command, False)]
+    sources = [(command, 0, len(command), False, {})]
     while sources:
-        text, heredoc_body = sources.pop()
+        text, begin, limit, heredoc_body, line_index = sources.pop()
         contexts = [_ShellContext(expansions_only=heredoc_body, literal_text=heredoc_body)]
-        index = 0
-        while index < len(text):
+        index = begin
+        while index < limit:
             context = contexts[-1]
             char = text[index]
             if context.closing and not context.quote and text.startswith(context.closing, index):
                 context.finish_word()
                 in_pattern = bool(context.case_states and context.case_states[-1] == "pattern")
                 if not in_pattern:
-                    if words := context.finish_command():
+                    if (words := context.finish_command()) and not context.arithmetic:
                         yield words
                     index += len(context.closing)
                     contexts.pop()
                     continue
+            if context.arithmetic and char == ')' and not context.quote:
+                # A lone ')' makes the tentative '((' a nested subshell, not
+                # arithmetic: ((command) | command) and $((command) | command).
+                if words := context.finish_command():
+                    yield words
+                context.arithmetic = False
+                context.closing = ')'
+                index += 1
+                continue
             if context.quote == "'":
                 context.word.append(char)
                 index += 1
                 if char == "'":
                     context.quote = ""
                 continue
-            if char == "\\" and index + 1 < len(text):
+            if text.startswith("$'", index) and not context.quote and not context.literal_text:
+                end = index + 2
+                literal: list[str] = []
+                while end < limit and text[end] != "'":
+                    if text[end] == '\\' and end + 1 < limit:
+                        escaped = text[end + 1]
+                        numeric = re.match(r'\\(?:x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})|([0-7]{1,3}))', text[end: end + 10])
+                        if numeric:
+                            value = next(group for group in numeric.groups() if group is not None)
+                            code = int(value, 8 if numeric.group(4) is not None else 16)
+                            literal.append(chr(code) if code <= 0x10ffff else '')
+                            end += len(numeric.group())
+                            continue
+                        literal.append({'a': '\a', 'b': '\b', 'e': '\x1b', 'E': '\x1b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t', 'v': '\v', '\\': '\\', "'": "'", '"': '"'}.get(escaped, '\\' + escaped))
+                        end += 2
+                    else:
+                        literal.append(text[end])
+                        end += 1
+                context.word.append(shlex.quote(''.join(literal)))
+                index = min(end + 1, limit)
+                continue
+            if char == "\\" and index + 1 < limit:
                 if text[index + 1] != "\n":
                     context.word.append(text[index:index + 2])
                 index += 2
                 continue
             if text.startswith("$((", index):
                 context.word.append("$()")
-                contexts.append(_ShellContext(closing="))", expansions_only=True))
+                contexts.append(_ShellContext(closing="))", arithmetic=True))
                 index += 3
                 continue
             if (text.startswith("$(", index)
@@ -225,8 +278,12 @@ def hook_command_vectors(command: str) -> Iterable[list[str]]:
                 continue
             if char == "`":
                 context.word.append("$()")
-                contexts.append(_ShellContext(closing="`"))
-                index += 1
+                end = index + 1
+                while end < limit and text[end] != '`':
+                    end += 2 if text[end] == '\\' and end + 1 < limit else 1
+                body = re.sub(r'\\([$`\\])', r'\1', text[index + 1:end])
+                sources.append((body, 0, len(body), False, {}))
+                index = min(end + 1, limit)
                 continue
             if context.literal_text:
                 index += 1
@@ -241,32 +298,36 @@ def hook_command_vectors(command: str) -> Iterable[list[str]]:
                 index += 1
                 continue
             if char == "#" and not context.word and not context.expansions_only:
-                newline = text.find("\n", index)
-                index = len(text) if newline < 0 else newline
+                newline = text.find("\n", index, limit)
+                index = limit if newline < 0 else newline
                 continue
             if char in " \t\r\n":
                 context.finish_word()
                 index += 1
                 if char == "\n":
-                    if words := context.finish_command():
+                    words = context.finish_command()
+                    if words and not context.arithmetic:
                         yield words
-                    for delimiter, literal, strip_tabs in context.heredocs:
-                        body: list[str] = []
-                        while index < len(text):
-                            end = text.find("\n", index)
-                            end = len(text) if end < 0 else end + 1
-                            line = text[index:end]
-                            index = end
-                            compared = line.lstrip("\t") if strip_tabs else line
-                            if compared.rstrip("\r\n") == delimiter:
-                                break
-                            body.append(line)
-                        if not literal:
-                            sources.append(("".join(body), True))
+                    for delimiter, literal, strip_tabs, shell_stdin in context.heredocs:
+                        if not line_index:
+                            for match in re.finditer(r'[^\n]*\n|[^\n]+$', text):
+                                line = match.group().rstrip('\r\n')
+                                for strip in (False, True):
+                                    key = (line.lstrip('\t') if strip else line, strip)
+                                    line_index.setdefault(key, []).append((match.start(), match.end()))
+                        candidates = line_index.get((delimiter, strip_tabs), [])
+                        next_line = bisect_left(candidates, (index,))
+                        end, after = candidates[next_line] if next_line < len(candidates) else (limit, limit)
+                        end, after = min(end, limit), min(after, limit)
+                        if not literal or shell_stdin:
+                            sources.append((text, index, end, not shell_stdin, line_index))
+                        index = after
                     context.heredocs.clear()
                 continue
             if char in "<>&;|()":
+                redirect_fd = ''
                 if char in "<>" and "".join(context.word).isdigit():
+                    redirect_fd = ''.join(context.word)
                     context.word.clear()  # Adjacent digits name the redirection's file descriptor.
                 context.finish_word()
                 in_pattern = bool(context.case_states and context.case_states[-1] == "pattern")
@@ -279,15 +340,17 @@ def hook_command_vectors(command: str) -> Iterable[list[str]]:
                     continue
                 if operator in {"<", ">", "<<", "<<-", "<<<", ">>", "<&", ">&", "<>", ">|", "&>"}:
                     context.redirect = operator
+                    context.redirect_fd = redirect_fd
                 else:
-                    if words := context.finish_command():
+                    if (words := context.finish_command()) and not context.arithmetic:
                         yield words
                     if operator in {";;", ";&", ";;&"} and context.case_states:
                         context.case_states[-1] = "pattern"
                     if operator == "(":
                         arithmetic = text.startswith("((", index)
                         contexts.append(_ShellContext(closing="))" if arithmetic else ")",
-                                                      expansions_only=arithmetic or context.expansions_only))
+                                                      arithmetic=arithmetic,
+                                                      expansions_only=context.arithmetic or context.expansions_only))
                         if arithmetic:
                             index += 1
                 index += len(operator)
@@ -295,24 +358,105 @@ def hook_command_vectors(command: str) -> Iterable[list[str]]:
             context.word.append(char)
             index += 1
         for context in reversed(contexts):
-            if words := context.finish_command():
+            if (words := context.finish_command()) and not context.arithmetic:
                 yield words
 
 
+def shell_input_mode(name: str, args: list[str]) -> str:
+    """Identify literal command, stdin or file input using this shell's options."""
+    if name not in SHELL_COMMANDS:
+        return ''
+    index = 0
+    stdin = False
+    while index < len(args):
+        arg = args[index]
+        lowered = arg.lower()
+        if name in {'powershell', 'powershell.exe', 'pwsh', 'pwsh.exe'}:
+            if lowered in {'-command', '-c', '-encodedcommand', '-enc', '-e', '-commandwithargs'}:
+                return 'command'
+            if lowered in {'-file', '-f'} or not arg.startswith('-'):
+                return 'file'
+            index += 2 if lowered in {'-executionpolicy', '-ep', '-inputformat', '-outputformat', '-windowstyle', '-workingdirectory', '-configurationname', '-version'} else 1
+        elif name in {'cmd', 'cmd.exe'}:
+            if lowered in {'/c', '/k'}:
+                return 'command'
+            if not arg.startswith('/'):
+                return 'file'
+            index += 1
+        else:
+            if arg == '--' or (name == 'bash' and arg == '-'):
+                return 'stdin' if stdin or index + 1 == len(args) else 'file'
+            if not arg.startswith(('-', '+')) or arg == '-':
+                return 'stdin' if stdin else 'file'
+            if arg.startswith('--'):
+                index += 2 if arg in {'--rcfile', '--init-file'} else 1
+                continue
+            if arg.startswith('-') and 'c' in arg[1:]:
+                return 'command'
+            stdin = stdin or (arg.startswith('-') and 's' in arg[1:])
+            index += 2 if arg[-1:] in {'o', 'O'} else 1
+    return 'stdin'
+
+
+def hook_command_vectors(command: str) -> Iterable[list[str]]:
+    """Inspect command operands of known launchers without treating data as code."""
+    pending = [command]
+    while pending:
+        for words in _shell_command_vectors(pending.pop()):
+            name, args = effective_argv(words)
+            yield [name, *args]
+            if name == 'find':
+                index = 0
+                while index < len(args):
+                    if args[index] in {'-exec', '-execdir', '-ok', '-okdir'}:
+                        end = index + 1
+                        while end < len(args):
+                            if args[end] == ';' or (args[index] in {'-exec', '-execdir'}
+                                                    and args[end] == '+' and args[end - 1] == '{}'):
+                                break
+                            end += 1
+                        pending.append(shlex.join(args[index + 1:end]))
+                        index = end
+                    index += 1
+            elif name == 'eval':
+                pending.append(' '.join(args[1:] if args[:1] == ['--'] else args))
+            elif name == 'trap':
+                handler = args[1:] if args[:1] == ['--'] else args
+                if len(handler) > 1 and handler[0] and not handler[0].startswith('-'):
+                    pending.append(handler[0])
+            elif name == 'ssh':
+                index = 0
+                while index < len(args) and args[index].startswith('-'):
+                    option = args[index]
+                    if option == '--':
+                        index += 1
+                        break
+                    index += 2 if option in {'-B', '-b', '-c', '-D', '-E', '-e', '-F', '-I', '-i', '-J', '-L', '-l', '-m', '-O', '-o', '-p', '-Q', '-R', '-S', '-W', '-w'} else 1
+                # ssh joins the remote command operands and the remote shell parses them.
+                if index + 1 < len(args):
+                    pending.append(' '.join(args[index + 1:]))
+            elif name in CONTAINER_COMMANDS and args[:1] in (['run'], ['exec']):
+                index = 1
+                entrypoint = ''
+                while index < len(args) and args[index].startswith('-'):
+                    option = args[index]
+                    if option == '--':
+                        index += 1
+                        break
+                    if args[0] == 'run':
+                        if option.startswith('--entrypoint='):
+                            entrypoint = option.partition('=')[2]
+                        elif option == '--entrypoint' and index + 1 < len(args):
+                            entrypoint = args[index + 1]
+                    index += 2 if option in {'-a', '--attach', '--cap-add', '--cap-drop', '--entrypoint', '-e', '--env', '--env-file', '--gpus', '--hostname', '-h', '--mount', '--name', '--network', '-p', '--publish', '--platform', '--runtime', '--security-opt', '-u', '--user', '-v', '--volume', '-w', '--workdir'} else 1
+                inner = ([entrypoint] if entrypoint else []) + args[index + 1:]
+                if inner:
+                    pending.append(shlex.join(inner))
+
+
 def is_shell_command(command: str) -> bool:
-    for words in hook_command_vectors(command):
-        if not words:
-            continue
-        name, args = effective_argv(words)
-        if name in {"curl", "wget"}:
-            return True
-        if name in SHELL_COMMANDS:
-            for arg in args:
-                if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", arg) or arg.lower() in {"/c", "-command"}:
-                    return True
-                if not arg.startswith("-"):
-                    break
-    return False
+    return any(words[0] in {'curl', 'wget'} or shell_input_mode(words[0], words[1:]) == 'command'
+               for words in hook_command_vectors(command))
 
 
 def is_profiled(command: str) -> bool:
@@ -472,10 +616,7 @@ def has_inline_interpreter_args(command: str, args: list[str]) -> bool:
 
 def has_inline_interpreter_command(command: str) -> bool:
     for words in hook_command_vectors(command):
-        if not words:
-            continue
-        name, args = effective_argv(words)
-        if has_inline_interpreter_args(name, args):
+        if has_inline_interpreter_args(words[0], words[1:]):
             return True
     return False
 
@@ -498,10 +639,8 @@ def effective_command_and_args(command: Any, args: Any) -> tuple[str, list[str]]
     return effective_argv([*(command_parts or [""]), *normalized_arg_list(args)])
 
 
-def effective_argv(words: list[str]) -> tuple[str, list[str]]:
-    """Classify a literal argv after known launchers consume their own options."""
-    command = command_family(command_name(words[0])) if words else ""
-    normalized_args = words[1:]
+def effective_argv(words: list[str], *, stdin_receiver: bool = False) -> tuple[str, list[str]]:
+    """Resolve literal argv, stopping at xargs when identifying the input receiver."""
     wrapper_values = {
         'exec': {'-a'}, 'nohup': set(),
         'sudo': {'-u', '--user', '-g', '--group', '-h', '--host', '-p', '--prompt', '-C', '--close-from', '-T', '--command-timeout', '-R', '--chroot', '-D', '--chdir'},
@@ -511,31 +650,54 @@ def effective_argv(words: list[str]) -> tuple[str, list[str]]:
         'stdbuf': {'-i', '--input', '-o', '--output', '-e', '--error'},
         'xargs': {'-a', '--arg-file', '-d', '--delimiter', '-E', '-I', '-L', '-n', '--max-args', '-P', '--max-procs', '-s', '--max-chars'},
         'watch': {'-n', '--interval'},
+        'doas': {'-u', '-C'}, 'setsid': set(),
+        'flock': {'-E', '--conflict-exit-code', '-w', '--timeout'},
+        'env': {'-u', '--unset', '-C', '--chdir', '--argv0'},
     }
-    if command == 'busybox':
-        return effective_argv(normalized_args) if normalized_args and not normalized_args[0].startswith('-') else (command, normalized_args)
-    if command in wrapper_values:
-        if command == 'command' and any(arg in {'-v', '-V'} for arg in normalized_args):
-            return command, normalized_args
-        index = 0
+    start = 0
+    while start < len(words):
+        command = command_family(command_name(words[start]))
+        index = start + 1
+        if stdin_receiver and command == 'xargs':
+            # xargs reads input into child arguments, not child shell source.
+            return command, words[index:]
+        if command == 'busybox':
+            if index < len(words) and not words[index].startswith('-'):
+                start = index
+                continue
+            return command, words[index:]
+        if command not in wrapper_values:
+            return command, words[index:]
         watch_exec = False
-        while index < len(normalized_args):
-            arg = normalized_args[index]
+        while index < len(words):
+            arg = words[index]
             if arg == '--':
                 index += 1
                 break
-            if not arg.startswith('-'):
+            if arg == '-' and command == 'env':
+                index += 1
+                continue
+            if arg == '-' or not arg.startswith('-'):
                 break
+            if command == 'command' and arg in {'-v', '-V'}:
+                return command, words[start + 1:]
+            if command == 'env' and (arg in {'-S', '--split-string'} or arg.startswith('--split-string=')):
+                split = arg.partition('=')[2] if '=' in arg else (words[index + 1] if index + 1 < len(words) else '')
+                consumed = 1 if '=' in arg else 2
+                words = words[:index] + command_words(split) + words[index + consumed:]
+                continue
+            if command == 'flock' and arg in {'-c', '--command'}:
+                return 'sh', ['-c', *words[index + 1:]]
             if command == 'watch':
                 if arg in {'-h', '--help', '-v', '--version'}:
-                    return command, normalized_args
+                    return command, words[start + 1:]
                 if arg == '--exec':
                     watch_exec = True
                 if not arg.startswith('--'):
                     consumes_next = False
                     for offset, option in enumerate(arg[1:], start=1):
                         if option in {'h', 'v'}:
-                            return command, normalized_args
+                            return command, words[start + 1:]
                         if option == 'x':
                             watch_exec = True
                         if option == 'n':
@@ -544,31 +706,20 @@ def effective_argv(words: list[str]) -> tuple[str, list[str]]:
                     index += 2 if consumes_next else 1
                     continue
             index += 2 if arg in wrapper_values[command] else 1
-        if command == 'timeout':
-            index += 1  # timeout consumes a duration before the command.
-        if command == 'watch' and not watch_exec and index < len(normalized_args):
+        if command in {'timeout', 'flock'}:
+            index += 1  # Consume the duration or lock file/file descriptor.
+        if command == 'flock' and index < len(words) and words[index] in {'-c', '--command'}:
+            return 'sh', ['-c', *words[index + 1:]]
+        if command in {'env', 'sudo'}:
+            while index < len(words) and re.match(r'[A-Za-z_]\w*=', words[index]):
+                index += 1
+        if command == 'watch' and not watch_exec and index < len(words):
             # watch's default mode reconstructs a shell command; -x executes argv.
-            return 'sh', ['-c', ' '.join(normalized_args[index:])]
-        return effective_argv(normalized_args[index:]) if index < len(normalized_args) else (command, normalized_args)
-    if command not in ENV_COMMANDS:
-        return command, normalized_args
-
-    expanded_args: list[str] = []
-    index = 0
-    while index < len(normalized_args):
-        arg = normalized_args[index]
-        if arg == "-S" and index + 1 < len(normalized_args):
-            expanded_args.extend(command_words(normalized_args[index + 1]))
-            expanded_args.extend(normalized_args[index + 2 :])
-            break
-        expanded_args.append(arg)
-        index += 1
-
-    for index, arg in enumerate(expanded_args):
-        if not arg or arg.startswith("-") or ("=" in arg and not arg.startswith(("/", "."))):
-            continue
-        return effective_argv(expanded_args[index:])
-    return command, expanded_args
+            return 'sh', ['-c', ' '.join(words[index:])]
+        if index >= len(words):
+            return command, words[start + 1:]
+        start = index
+    return '', []
 
 
 def mcp_details(server: str, config: dict[str, Any], home: Path) -> dict[str, Any]:

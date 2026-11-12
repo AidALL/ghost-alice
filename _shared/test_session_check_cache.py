@@ -48,10 +48,12 @@ class PendingManifestCheckTest(unittest.TestCase):
 
     def test_unreadable_manifest_has_no_receipt_cache_backup_or_new_notice(self):
         import sqlite3
-        for contents in (b"not JSON", b"\xff", b"[]", b'{}', b'{"entries":null}', None):
+        deep_manifest = b'{"entries":' + b'[' * 200_000 + b']' * 200_000 + b'}'
+        for contents in (b"not JSON", b"\xff", b"[]", b'{}', b'{"entries":null}', deep_manifest, None):
             for cached in (False, True):
                 for output_format in ("json", "text"):
-                    with self.subTest(contents=contents, cached=cached, output_format=output_format), tempfile.TemporaryDirectory() as directory:
+                    label = "deep manifest" if contents is deep_manifest else contents
+                    with self.subTest(contents=label, cached=cached, output_format=output_format), tempfile.TemporaryDirectory() as directory:
                         home = Path(directory)
                         manifest = home / ".ghost-alice/pending-merges/codex/manifest.json"
                         manifest.parent.mkdir(parents=True)
@@ -65,6 +67,7 @@ class PendingManifestCheckTest(unittest.TestCase):
                         self.assertTrue(failure_bytes.endswith(b"\n"))
                         [failure] = [json.loads(line) for line in failure_bytes.splitlines()]
                         expected_error = ("IsADirectoryError" if contents is None else
+                                          "RecursionError" if contents is deep_manifest else
                                           "UnicodeDecodeError" if contents == b"\xff" else
                                           "JSONDecodeError" if contents == b"not JSON" else "ValueError")
                         self.assertEqual((failure["policy"], failure["path"], failure["error_type"]),

@@ -194,6 +194,25 @@ class HumanInputBoundaryTests(unittest.TestCase):
 
 
 class StopResponseTextTests(unittest.TestCase):
+    def test_codex_transcript_answer_requires_matching_hook_and_current_turn(self):
+        cases = (({'turn_id': 'current-turn'}, {'turn_id': 'current-turn'}, 'ANSWER'),
+                 ({}, None, ''), ({}, {}, ''),
+                 ({'turn_id': 'other-turn'}, {'turn_id': 'other-turn'}, ''))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'rollout.jsonl'
+            for hook_turn, metadata, expected in cases:
+                with self.subTest(hook_turn=hook_turn, metadata=metadata):
+                    answer = dict(type='message', role='assistant',
+                                  content=[dict(type='output_text', text='ANSWER')])
+                    if metadata is not None:
+                        answer['internal_chat_message_metadata_passthrough'] = metadata
+                    rows = [dict(type='session_meta', payload=dict(id='current')),
+                            dict(type='turn_context', payload=dict(turn_id='current-turn')),
+                            dict(type='response_item', payload=answer)]
+                    path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+                    hook = dict(session_id='current', transcript_path=str(path), **hook_turn)
+                    self.assertEqual(stop_response_text(hook), expected)
+
     def test_transcript_fallback_keeps_a_record_with_a_line_separator(self):
         text = 'first\u2028second'
         rows = [dict(type='session_meta', payload=dict(id='current')),
@@ -245,9 +264,9 @@ class CodexOwnershipTests(unittest.TestCase):
             header = dict(type='session_meta', payload=dict(id='child', forked_from_id='parent',
                 parent_thread_id='parent', model_provider='ghost_alice_context'))
             path.write_text(json.dumps(header) + '\n' + 'unparsed history\n')
-            self.assertEqual(native_transcript.codex_transcript_path(str(home), 'child'), str(path))
+            self.assertEqual(native_transcript.codex_transcript_path(str(home), 'child'), str(path.resolve()))
             self.assertEqual(native_transcript.codex_transcript_path(str(home), 'child',
-                model_provider='ghost_alice_context'), str(path))
+                model_provider='ghost_alice_context'), str(path.resolve()))
             self.assertIsNone(native_transcript.codex_transcript_path(str(home), 'child', model_provider='other'))
 
     def test_fork_metadata_binds_owner_and_current_turn_without_accepting_unrelated_headers(self):

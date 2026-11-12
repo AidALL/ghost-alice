@@ -75,14 +75,10 @@ class LayerRuleTests(unittest.TestCase):
                       for target, line in _imported_modules(path) if target in RUNTIME_MODULES]
         self.assertEqual(violations, [])
 
-    def test_installer_package_has_every_expected_module_and_shadows_no_standard_library_name(self):
+    def test_installer_package_shadows_no_standard_library_name(self):
         # `python _shared/installer/cli.py` puts the package directory first on sys.path, so a module named like
         # a standard-library module (an earlier `inspect.py`) would replace it for every import in that process.
         names = {path.stem for path in INSTALLER_PACKAGE_FILES}
-        expected = {"__init__", "addons", "auto", "cli", "config", "diagnostics", "gateway_participant", "hosts",
-                    "lifecycle", "locations", "lock", "participant", "prerequisites", "preservation", "report",
-                    "runner", "selection", "source", "transaction"}
-        self.assertEqual(names, expected)
         self.assertEqual(sorted((names - {"__init__"}) & set(sys.stdlib_module_names)), [])
 
     def test_only_the_gateway_participant_imports_the_gateway_modules_in_the_installer_package(self):

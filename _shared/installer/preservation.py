@@ -84,7 +84,8 @@ def preflight(ctx: "Context", collected: "Collected") -> bool:
         replaced.extend(["--target", target.name])
     result = runner.run_tool("merge-companion/scripts/diff_collector_cli.py", "--snapshot", str(snapshot),
                              "--pending", str(pending_root), "--manifest", str(manifest),
-                             "--platform", ctx.platform, "--skills-dir", str(skills_dir), *replaced)
+                             "--platform", ctx.platform, "--skills-dir", str(skills_dir),
+                             "--install-record-root", str(locations.record_root()), *replaced)
     if not result.ok:
         report.error("merge-companion preflight change detection failed; aborting install")
         return False

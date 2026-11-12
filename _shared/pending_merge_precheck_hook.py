@@ -99,7 +99,7 @@ def main() -> int:
             result = observe_check(args.root, args.platform, session_id or "unknown", "pending-merges", path,
                                    lambda: pending_manifest.check_pending(path), validate=pending_manifest.valid_check)
         output = _json_payload(args.platform, result) if args.format == "json" else _text_payload(args.platform, result)
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RecursionError) as error:
         # A failed observation cannot supply a clean receipt. It does not stop the host.
         if isinstance(error, UnstableCheckTarget):
             message = _unstable_line(args.platform)

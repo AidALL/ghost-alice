@@ -124,7 +124,7 @@ class ContinuationFeedbackTests(unittest.TestCase):
         self.fixture.record(self.candidate([row]))
         self.assertEqual(self.read()['declared_remaining_work']['items'], [row])
 
-    def test_missing_prerequisite_and_human_stop_preserve_the_current_declared_judgment(self):
+    def test_missing_prerequisite_and_model_reported_human_stop_preserve_the_current_declared_judgment(self):
         row = self.required(); row['prerequisite'] = 'missing'
         self.fixture.record(self.candidate([row], control='model-reported-human-stop'))
         feedback = self.read()['declared_remaining_work']

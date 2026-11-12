@@ -4,7 +4,7 @@ Every placement builds one publish request and calls `install_transaction.publis
 participants the install record names (the gateway participant when a gateway is
 registered); the publish places the targets and writes their install record
 entries in the same step. This module decides what each request names. The
-markers, the snapshot, the sidecars and the install-state are written after placement.
+copy markers belong to the staged payload; the snapshot, the sidecars and the install-state are written after placement.
 """
 
 from __future__ import annotations
@@ -380,31 +380,6 @@ def verify_after_copy(ctx: "Context", skills_dir: Path, copy_only: bool, collect
         return True
     if not runner.run_tool("merge-companion/scripts/install_verifier.py", *args, *targets).ok:
         report.error("Post-install source/destination verification failed; aborting before snapshot")
-        return False
-    return True
-
-
-def write_ownership_markers(ctx: "Context", skills_dir: Path, copy_only: bool, collected: "Collected") -> bool:
-    """`installer_assets_cli.py --platform --source-repo --source-commit --target ... --addon-target ...`."""
-    skills_dir = Path(skills_dir)
-    info = source.resolve_source()
-    targets: list[str] = []
-    shared_dest = skills_dir / "_shared"
-    if collected.support_target_total:
-        targets.extend(["--target", "_shared", str(shared_dest), detect_install_mode(shared_dest, copy_only)])
-    for target in collected.all_targets:
-        dest = skills_dir / target.name
-        mode = detect_install_mode(dest, copy_only)
-        if target.addon_id:
-            targets.extend(["--addon-target", target.name, str(dest), mode, target.addon_id])
-        else:
-            targets.extend(["--target", target.name, str(dest), mode])
-    if not targets:
-        return True
-    result = runner.run_tool("_shared/installer_assets_cli.py", "--platform", ctx.platform,
-                             "--source-repo", str(info.root), "--source-commit", info.head, *targets)
-    if not result.ok:
-        report.error("Ownership marker write failed; aborting before snapshot")
         return False
     return True
 

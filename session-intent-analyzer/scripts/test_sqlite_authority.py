@@ -118,33 +118,42 @@ class SQLiteAuthorityTests(unittest.TestCase):
         self.assertEqual({key: paths[key].read_bytes() for key in originals}, originals)
 
     def test_v1_input_history_survives_read_import_and_v2_write(self):
-        paths = ledger.session_paths(**self.args)
-        paths["dir"].mkdir(parents=True)
-        digest = ledger.text_digest("legacy input")
-        event_id = ledger.json_digest({"event": "user-input-observed", "input_digest": digest})
-        state = ledger.default_state("codex", "session-a")
-        state.update(schema_version="session-intent-ledger.v1", ledger_revision=1,
-                     latest_input_event_id=event_id, latest_input_digest=digest,
-                     latest_input_char_count=len("legacy input"))
-        event = dict(event="user-input-observed", platform="codex", session_id="session-a",
-                     event_id=event_id, input_event_id=event_id, input_digest=digest,
-                     input_char_count=len("legacy input"), ledger_revision=1,
-                     mutation_id="original-mutation", source="agent", ts="2026-01-01T00:00:00Z")
-        paths["state"].write_text(json.dumps(state))
-        paths["events"].write_text(json.dumps(event) + "\n")
-        originals = {key: paths[key].read_bytes() for key in ("state", "events")}
-        self.assertEqual(ledger.read_session_state(**self.args), state)
-        self.assertFalse(ledger.storage_database_path(self.root).exists())
-        ledger.migrate_session(**self.args)
-        with ledger.storage_transaction(self.root) as transaction:
-            self.assertEqual(ledger._current_observation_sequence(transaction, state), 1)
-        ledger.record_turn(**self.args, expected_input_event_id=event_id,
-                           intent_delta={"current_goal": "Continue the existing work"})
-        current = ledger.read_session_state(**self.args)
-        self.assertEqual(current["schema_version"], "session-intent-ledger.v2")
-        self.assertEqual(current["latest_input_event_id"], event_id)
-        self.assertEqual(ledger.read_session_events(**self.args)[0], event)
-        self.assertEqual({key: paths[key].read_bytes() for key in originals}, originals)
+        for anchored in (False, True):
+            with self.subTest(anchored=anchored):
+                root = self.root / ("anchored" if anchored else "without-anchor")
+                args = dict(self.args, root=root)
+                paths = ledger.session_paths(**args)
+                paths["dir"].mkdir(parents=True)
+                digest = ledger.text_digest("legacy input")
+                event_id = ledger.json_digest({"event": "user-input-observed", "input_digest": digest})
+                state = ledger.default_state("codex", "session-a")
+                state.update(schema_version="session-intent-ledger.v1", ledger_revision=1,
+                             latest_input_event_id=event_id, latest_input_digest=digest,
+                             latest_input_char_count=len("legacy input"))
+                stored = dict(state)
+                if not anchored:
+                    for key in ledger.INPUT_ANCHOR_FIELDS:
+                        stored.pop(key)
+                    state["ledger_revision"] = 0
+                event = dict(event="user-input-observed", platform="codex", session_id="session-a",
+                             event_id=event_id, input_event_id=event_id, input_digest=digest,
+                             input_char_count=len("legacy input"), ledger_revision=1,
+                             mutation_id="original-mutation", source="agent", ts="2026-01-01T00:00:00Z")
+                paths["state"].write_text(json.dumps(stored))
+                paths["events"].write_text(json.dumps(event) + "\n")
+                originals = {key: paths[key].read_bytes() for key in ("state", "events")}
+                self.assertEqual(ledger.read_session_state(**args), stored)
+                self.assertFalse(ledger.storage_database_path(root).exists())
+                self.assertEqual(ledger.migrate_session(**args), state)
+                with ledger.storage_transaction(root) as transaction:
+                    self.assertEqual(ledger._current_observation_sequence(transaction, state), 1)
+                ledger.record_turn(**args, expected_input_event_id=event_id,
+                                   intent_delta={"current_goal": "Continue the existing work"})
+                current = ledger.read_session_state(**args)
+                self.assertEqual(current["schema_version"], "session-intent-ledger.v2")
+                self.assertEqual(current["latest_input_event_id"], event_id)
+                self.assertEqual(ledger.read_session_events(**args)[0], event)
+                self.assertEqual({key: paths[key].read_bytes() for key in originals}, originals)
 
     def test_corrupt_database_never_revives_legacy_export(self):
         self.seed()

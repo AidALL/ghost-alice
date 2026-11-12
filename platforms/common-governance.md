@@ -6,7 +6,7 @@ The response model compares its result with the human user's objective, constrai
 
 Core collects how the generative backend behaves under the Ghost-ALICE philosophy: this contract, the skills and Core code (hooks, the intent ledger and the context gateway). An adapter translates Core for one host. The host executes tools and enforces permissions. The response model follows Core, carries out the work that the human user's instructions authorize and judges what inputs, results and sources mean. Core code authenticates each record and its link to its source. A request for work does not prove that the host or the response model carried it out.
 
-An instruction that the human user enters in the conversation takes precedence over this contract. Rules stated in advance in instruction files add constraints; these include project instructions and rules outside the Ghost-ALICE bootstrap in the host's global instruction file.
+An instruction that the human user enters in the conversation takes precedence over this contract for the matter and scope that the instruction addresses. Rules stated in advance in instruction files add constraints; these include project instructions and rules outside the Ghost-ALICE bootstrap in the host's global instruction file.
 
 ## Session Intent
 
