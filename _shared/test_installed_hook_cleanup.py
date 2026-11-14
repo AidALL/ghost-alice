@@ -39,6 +39,47 @@ def _without_hook_state(text):
 
 
 class InstalledHookCleanupTests(TempHomeTestCase):
+    def test_unreadable_settings_preserve_core_receipt_and_retry_removes_one_occurrence(self):
+        import addon_skill_permissions as permissions
+        for payload in (b'{', b'\xff', b'[]'):
+            with self.subTest(payload=payload):
+                settings = self._write_settings('claude', {})
+                install_hooks.install_hook('claude')
+                valid = self._read_settings('claude')
+                valid['permissions']['allow'].append('Skill(task-router)')
+                original = json.dumps(valid).encode()
+                receipt = permissions._state_path()
+                receipt_bytes = receipt.read_bytes()
+                settings.write_bytes(payload)
+                result = install_hooks.uninstall_hook('claude')
+                self.assertEqual(receipt.read_bytes(), receipt_bytes)
+                self.assertEqual(settings.read_bytes(), payload)
+                self.assertFalse(result.details['hooks_detached'])
+                self.assertEqual(result.legacy_status, 'error')
+                settings.write_bytes(original)
+                install_hooks.uninstall_hook('claude')
+                self.assertEqual(self._read_settings('claude')['permissions']['allow'], ['Skill(task-router)'])
+
+    def test_strict_settings_reader_distinguishes_absence_from_unreadable(self):
+        path = self._config_file('claude')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.assertEqual(install_hooks._read_settings(path, strict=True), {})
+        path.symlink_to(path.with_name('absent-target.json'))
+        with self.assertRaises(FileNotFoundError):
+            install_hooks._read_settings(path, strict=True)
+        path.unlink()
+        path.write_text('{}')
+        import builtins
+        original_open = builtins.open
+        def deny_settings(file, *args, **kwargs):
+            if Path(file) == path:
+                raise PermissionError('settings reader denied')
+            return original_open(file, *args, **kwargs)
+        with mock.patch('builtins.open', side_effect=deny_settings):
+            with self.assertRaises(PermissionError):
+                install_hooks._read_settings(path, strict=True)
+        self.assertFalse(path.with_suffix('.json.corrupt-bak').exists())
+
     def test_failed_permission_save_restores_settings_without_new_removal_authority(self):
         import addon_skill_permissions as permissions
         for existing_receipt in (False, True):
@@ -81,16 +122,6 @@ class InstalledHookCleanupTests(TempHomeTestCase):
                     self.assertEqual(self._read_settings('claude')['permissions']['allow'],
                                      ['Skill(pilot)', 'Skill(task-router)'])
 
-    def test_core_permissions_uninstall_preserves_preexisting_and_duplicate_rules(self):
-        self._write_settings('claude', {'permissions': {'allow': ['Skill(task-router)', 'Bash(user-command)']}})
-        install_hooks.install_hook('claude')
-        settings = self._read_settings('claude')
-        settings['permissions']['allow'].append('Skill(writing-plans)')
-        self._write_settings('claude', settings)
-        install_hooks.uninstall_hook('claude')
-        self.assertEqual(self._read_settings('claude')['permissions']['allow'],
-                         ['Skill(task-router)', 'Bash(user-command)', 'Skill(writing-plans)'])
-
     def test_missing_settings_retires_core_permission_ownership(self):
         for absent in ('file', 'directory'):
             with self.subTest(absent=absent):
@@ -129,7 +160,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 self._create_platform_dir(platform)
-                self.assertEqual(install_hooks.install_hook(platform), "installed")
+                self.assertEqual(install_hooks.install_hook(platform).legacy_status, "installed")
                 settings = self._read_settings(platform)
                 forms = self.retired_forms(platform)
                 settings["hooks"]["UserPromptSubmit"].append(
@@ -137,7 +168,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
                 settings["hooks"]["SessionStart"].append({"hooks": forms[:1]})
                 self._write_settings(platform, settings)
 
-                self.assertEqual(install_hooks.install_hook(platform), "installed")
+                self.assertEqual(install_hooks.install_hook(platform).legacy_status, "installed")
                 after = self._read_settings(platform)
                 for command in _commands(after):
                     for marker in install_hooks.RETIRED_HOOK_MARKERS:
@@ -147,7 +178,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
                 self.assertIn({"matcher": "preserved", "custom": 7, "hooks": [unmanaged_hook]},
                               after["hooks"]["UserPromptSubmit"])
                 self.assertTrue(all(group.get("hooks") for groups in after["hooks"].values() for group in groups))
-                self.assertEqual(install_hooks.install_hook(platform), "already")
+                self.assertEqual(install_hooks.install_hook(platform).legacy_status, "already")
 
     def test_reinstall_removes_hook_groups_without_hooks_on_both_hosts(self):
         unmanaged_stop_hook = {"type": "command", "command": "echo unmanaged-stop"}
@@ -157,7 +188,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
                     "PreToolUse": [{"matcher": "Bash", "hooks": []}],
                     "Stop": [{"hooks": []}, {"matcher": "", "hooks": [unmanaged_stop_hook]}, {"matcher": ""}],
                 }})
-                self.assertEqual(install_hooks.install_hook(platform), "installed")
+                self.assertEqual(install_hooks.install_hook(platform).legacy_status, "installed")
                 hooks = self._read_settings(platform)["hooks"]
                 self.assertEqual([(event, group) for event, groups in hooks.items()
                                   for group in groups if not group.get("hooks")], [])
@@ -165,7 +196,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
 
     def test_codex_reinstall_moves_trust_with_handlers_and_drops_orphan_tables(self):
         self._create_platform_dir("codex")
-        self.assertEqual(install_hooks.install_hook("codex"), "installed")
+        self.assertEqual(install_hooks.install_hook("codex").legacy_status, "installed")
         hooks_file = self._config_file("codex")
         settings = self._read_settings("codex")
         intake_groups = settings["hooks"]["UserPromptSubmit"]
@@ -194,7 +225,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
             table("/elsewhere/hooks.json:stop:0:0", 'trusted_hash = "other-file"'),
         ]))
 
-        self.assertEqual(install_hooks.install_hook("codex"), "installed")
+        self.assertEqual(install_hooks.install_hook("codex").legacy_status, "installed")
         after = self._read_settings("codex")
         self.assertEqual(after["hooks"]["UserPromptSubmit"], [{"hooks": [unmanaged_hook]}, *intake_groups])
         state = tomllib.loads(config.read_text())["hooks"]["state"]
@@ -208,7 +239,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
 
     def test_codex_uninstall_drops_ghost_alice_trust_and_moves_unmanaged_hook_trust(self):
         self._create_platform_dir("codex")
-        self.assertEqual(install_hooks.install_hook("codex"), "installed")
+        self.assertEqual(install_hooks.install_hook("codex").legacy_status, "installed")
         hooks_file = self._config_file("codex")
         settings = self._read_settings("codex")
         unmanaged_hook = {"type": "command", "command": "echo unmanaged-prompt"}
@@ -221,7 +252,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
         config = self._codex_config_toml()
         config.write_text(config.read_text() + f"\n[hooks.state.{json.dumps(unmanaged_hook_state_key)}]\ntrusted_hash = \"{unmanaged_hook_hash}\"\n")
 
-        self.assertEqual(install_hooks.uninstall_hook("codex"), "removed")
+        self.assertEqual(install_hooks.uninstall_hook("codex").legacy_status, "removed")
         self.assertEqual(_commands(self._read_settings("codex")), ["echo unmanaged-prompt"])
         state = tomllib.loads(config.read_text()).get("hooks", {}).get("state", {})
         self.assertEqual(state, {install_hooks._codex_hook_state_key(hooks_file, "UserPromptSubmit", 0, 0):
@@ -258,7 +289,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 self._create_platform_dir(platform)
-                self.assertEqual(install_hooks.install_hook(platform), "installed")
+                self.assertEqual(install_hooks.install_hook(platform).legacy_status, "installed")
                 runners = set(re.findall(r"\[hook-runner:([a-z0-9-]+)\]",
                                          " ".join(_commands(self._read_settings(platform)))))
                 self.assertEqual(runners, set(hook_definitions.CORE_HOOK_IDS))

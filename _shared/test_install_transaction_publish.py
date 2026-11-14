@@ -218,17 +218,234 @@ class PublishTests(PublishCase):
         self.assertIn("[WARN] Install record left unchanged:", stderr.getvalue())
         self.assertEqual(self.journal(txid)["phase"], "done")
 
-    def test_only_the_newest_finished_rollback_folders_are_kept(self):
+    def test_publish_does_not_prune_finished_originals_before_full_install_success(self):
         rollbacks = self.ghost / "rollbacks"
-        for name, phase in (("20260101T000000Z-1-aaaaaaaa", "prepare"), ("20260102T000000Z-1-bbbbbbbb", "done"),
-                            ("20260103T000000Z-1-cccccccc", "restored"), ("20260104T000000Z-1-dddddddd", "done")):
+        names = [f"20260101T{index:06d}Z-1-aaaaaaaa" for index in range(22)]
+        for name in names:
             (rollbacks / name).mkdir(parents=True)
-            (rollbacks / name / "journal.json").write_text(json.dumps({"phase": phase}), encoding="utf-8")
-        txid = install_transaction.publish(self.request("claude", self.target("alpha", self.claude / "alpha", "link")),
-                                           rollback_keep=2)
-        # An unfinished publish keeps its folder until it is restored.
-        self.assertEqual(sorted(p.name for p in rollbacks.iterdir()),
-                         ["20260101T000000Z-1-aaaaaaaa", "20260104T000000Z-1-dddddddd", txid])
+            (rollbacks / name / "journal.json").write_text(json.dumps({"phase": "done"}), encoding="utf-8")
+            (rollbacks / name / "user-data").write_bytes(b"sole user copy")
+        txid = install_transaction.publish(self.request("claude", self.target("alpha", self.claude / "alpha", "link")))
+        self.assertEqual(sorted(p.name for p in rollbacks.iterdir()), [*names, txid])
+
+
+class CompletedCleanupTests(PublishCase):
+    def replaced_copy(self, *, kind="skill", name="alpha", extra=None):
+        dest = self.codex / name
+        request = self.request("codex", self.target(name, dest, "copy", kind=kind))
+        install_transaction.publish(request)
+        if extra is not None:
+            extra(dest)
+        txid = install_transaction.publish(request)
+        original = Path(self.journal(txid)["targets"][0]["rollback"])
+        return txid, original
+
+    def test_success_cleanup_removes_managed_originals_and_empty_journals(self):
+        txid, original = self.replaced_copy()
+        install_transaction.cleanup_completed(self.ghost)
+        self.assertFalse(original.exists())
+        self.assertFalse((self.ghost / "rollbacks" / txid).exists())
+
+    def test_full_copy_check_preserves_user_content_excluded_from_hashes(self):
+        for kind, name in (("skill", "alpha"), ("runtime", "beta")):
+            for excluded in (".git", "node_modules", "__pycache__/user-link"):
+                with self.subTest(kind=kind, excluded=excluded):
+                    dest = self.codex / name
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    def extra(path):
+                        item = path / excluded
+                        item.parent.mkdir(parents=True, exist_ok=True)
+                        if excluded.endswith("user-link"):
+                            item.symlink_to(self.src / "alpha")
+                        else:
+                            item.mkdir()
+                            (item / "user-data").write_bytes(b"sole user bytes")
+                    txid, original = self.replaced_copy(kind=kind, name=name, extra=extra)
+                    reasons = install_transaction.cleanup_completed(self.ghost)
+                    self.assertTrue(os.path.lexists(original / excluded))
+                    self.assertTrue(any(str(original) in reason and "unrecorded-copy-content" in reason for reason in reasons))
+
+    def test_generated_cache_does_not_keep_a_managed_runtime_copy(self):
+        def extra(path):
+            (path / "__pycache__").mkdir()
+            (path / "__pycache__" / "cache.pyc").write_bytes(b"cache")
+        _, original = self.replaced_copy(kind="runtime", extra=extra)
+        install_transaction.cleanup_completed(self.ghost)
+        self.assertFalse(original.exists())
+
+    def test_unknown_and_edited_originals_stay_with_their_reasons(self):
+        dest = self.codex / "beta"
+        self.old_copy(dest, "user original\n")
+        txid = install_transaction.publish(self.request("codex", self.target("beta", dest, "copy")))
+        def extra(path):
+            (path / "SKILL.md").write_text("user edit\n")
+        edited_txid, edited = self.replaced_copy(extra=extra)
+        reasons = install_transaction.cleanup_completed(self.ghost)
+        unknown = Path(self.journal(txid)["targets"][0]["rollback"])
+        self.assertEqual((unknown / "SKILL.md").read_text(), "user original\n")
+        self.assertTrue(any(str(unknown) in reason and "without-marker" in reason for reason in reasons))
+        self.assertEqual((edited / "SKILL.md").read_text(), "user edit\n")
+        self.assertTrue(any(str(edited) in reason and "installed-content-changed" in reason for reason in reasons))
+
+    def test_pending_and_current_host_references_keep_originals(self):
+        txid, original = self.replaced_copy()
+        manifest = self.ghost / "pending-merges" / "codex" / "manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(json.dumps({"entries": [{"backup_path": str(original / "SKILL.md"), "decided": False}]}))
+        reasons = install_transaction.cleanup_completed(self.ghost)
+        self.assertTrue(original.exists())
+        self.assertTrue(any("pending-merge-reference" in reason for reason in reasons))
+        manifest.unlink()
+        entry = dict(self.record()["targets"][str(self.codex / "alpha")])
+        entry.update(mode="link", link_target=str(original), source=str(original))
+        installed_payload.update(self.ghost, {"targets": {str(self.claude / "alpha"): entry}})
+        reasons = install_transaction.cleanup_completed(self.ghost)
+        self.assertTrue(original.exists())
+        self.assertTrue(any("current-target-reference" in reason for reason in reasons))
+
+    def test_live_inventory_addon_and_payload_sources_keep_only_the_consumed_original(self):
+        import addon_registry
+        import hash_utils
+        import install_destination
+        from installer import locations
+
+        self.assertEqual(locations.record_root(), self.ghost)
+        for path in (self.ghost, self.claude, self.codex, self.src):
+            install_destination.assert_mutation_path(path)
+
+        for record_kind in ('inventory', 'addon', 'payload'):
+            with self.subTest(record_kind=record_kind):
+                _, original = self.replaced_copy()
+                _, unused = self.replaced_copy(name='beta')
+                live = self.claude / 'consumer'
+                live.symlink_to(original, target_is_directory=True)
+                before = (live / 'SKILL.md').read_bytes()
+                if record_kind == 'inventory':
+                    reference = self.ghost / 'install-state/claude.json'
+                    reference.parent.mkdir(parents=True, exist_ok=True)
+                    reference.write_text(json.dumps(dict(platform='claude', source_root=str(original.parent),
+                        targets=[dict(target_name='consumer', source_path=str(original),
+                                      dest_path=str(live), install_mode='symlink')])))
+                elif record_kind == 'addon':
+                    reference = addon_registry.write_record(dict(schema_version='1.0', addon_id='consumer',
+                        addon_version='1', source=str(original), platform='claude', owner='addon', origin='local',
+                        depends_on_core=[], min_core_version='1', installed_at='t', provided=[dict(kind='skill',
+                            name='consumer', target=str(live), ownership='addon', install_mode='symlink',
+                            content_hash=hash_utils.hash_target(live, 'symlink'), marker='', metadata={})]),
+                        addons_dir=self.ghost / 'addons/claude')
+                else:
+                    installed_payload.update(self.ghost, {'targets': {str(live): dict(name='consumer', kind='skill',
+                        provider='core', mode='link', source=str(original), link_target=str(original),
+                        baseline='recorded', used_by=['claude'])}})
+                    reference = None
+                try:
+                    self.assertIsNone(installed_payload.migrate(self.ghost, ['claude', 'codex'], installer_commit='fixture'))
+                    reasons = install_transaction.cleanup_completed(self.ghost)
+                    self.assertTrue(original.exists(), reasons)
+                    self.assertEqual((live / 'SKILL.md').read_bytes(), before)
+                    self.assertFalse(unused.exists())
+                    self.assertTrue(any(str(original) in reason for reason in reasons))
+                finally:
+                    live.unlink()
+                    if reference is not None:
+                        Path(reference).unlink()
+                    else:
+                        installed_payload.release_target(self.ghost, destination=live, provider='core', platform='claude')
+                install_transaction.cleanup_completed(self.ghost)
+                self.assertFalse(original.exists())
+
+    def test_unreadable_host_references_keep_completed_originals_until_explicit_retry(self):
+        for relative in ('install-state/claude.json', 'addons/claude/consumer.json'):
+            with self.subTest(reference=relative):
+                _, original = self.replaced_copy()
+                before = (original / 'SKILL.md').read_bytes()
+                reference = self.ghost / relative
+                reference.parent.mkdir(parents=True, exist_ok=True)
+                reference.write_text('{unreadable')
+                try:
+                    with self.assertRaises(install_transaction.InstallTransactionError):
+                        install_transaction.cleanup_completed(self.ghost)
+                    self.assertEqual((original / 'SKILL.md').read_bytes(), before)
+                finally:
+                    reference.unlink()
+                install_transaction.cleanup_completed(self.ghost)
+                self.assertFalse(original.exists())
+
+    def test_active_journal_and_malformed_pending_manifest_prevent_cleanup(self):
+        txid, original = self.replaced_copy()
+        journal = install_transaction.Journal.load(self.ghost, txid)
+        journal.mark("prepare")
+        before = (journal.folder / "journal.json").read_bytes()
+        install_transaction.cleanup_completed(self.ghost)
+        self.assertTrue(original.exists())
+        self.assertEqual((journal.folder / "journal.json").read_bytes(), before)
+        journal.mark("done")
+        manifest = self.ghost / "pending-merges" / "codex" / "manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("{")
+        with self.assertRaisesRegex(install_transaction.InstallTransactionError, "pending"):
+            install_transaction.cleanup_completed(self.ghost)
+        self.assertTrue(original.exists())
+
+    def test_command_original_uses_the_saved_payload_baseline(self):
+        source = self.src / "command.md"
+        source.write_text("command v1\n")
+        dest = self.home / ".claude" / "commands" / "command.md"
+        request = self.request("claude", self.target("command", dest, "copy", kind="command", source=source))
+        install_transaction.publish(request)
+        source.write_text("command v2\n")
+        txid = install_transaction.publish(request)
+        original = Path(self.journal(txid)["targets"][0]["rollback"])
+        self.assertEqual(original.read_text(), "command v1\n")
+        install_transaction.cleanup_completed(self.ghost)
+        self.assertFalse(original.exists())
+        self.assertEqual(dest.read_text(), "command v2\n")
+
+    def test_service_reference_keeps_only_the_original_it_needs(self):
+        request = self.request("codex", self.target("alpha", self.codex / "alpha", "copy", kind="runtime"),
+                               self.target("beta", self.codex / "beta", "copy", kind="runtime"))
+        install_transaction.publish(request)
+        txid = install_transaction.publish(request)
+        originals = [Path(target["rollback"]) for target in self.journal(txid)["targets"]]
+        record = self.record()
+        record["service"] = {"program": str(originals[0] / "SKILL.md")}
+        installed_payload.path(self.ghost).write_text(json.dumps(record))
+        reasons = install_transaction.cleanup_completed(self.ghost)
+        self.assertTrue(originals[0].exists())
+        self.assertFalse(originals[1].exists())
+        self.assertTrue(any("current-service-reference:program" in reason for reason in reasons))
+
+    def test_cleanup_failure_keeps_published_files_and_done_phase(self):
+        txid, original = self.replaced_copy()
+        record_before = installed_payload.path(self.ghost).read_bytes()
+        with mock.patch.object(install_transaction, "_remove_path", side_effect=PermissionError("cannot delete")):
+            with self.assertRaisesRegex(install_transaction.InstallTransactionError, "cannot delete"):
+                install_transaction.cleanup_completed(self.ghost)
+        self.assertTrue(original.exists())
+        self.assertEqual((self.codex / "alpha" / "SKILL.md").read_text(), "alpha v2\n")
+        self.assertEqual(self.journal(txid)["phase"], "done")
+        self.assertEqual(installed_payload.path(self.ghost).read_bytes(), record_before)
+
+    def test_a_marker_can_prove_a_legacy_original_without_a_payload_record(self):
+        dest = self.codex / "alpha"
+        self.old_copy(dest)
+        install_transaction.write_ownership_marker(dest, platform="codex", asset_id="alpha", source_repo=str(self.src),
+                                                   source_commit="old", install_mode="copy")
+        txid = install_transaction.publish(self.request("codex", self.target("alpha", dest, "copy")))
+        original = Path(self.journal(txid)["targets"][0]["rollback"])
+        install_transaction.cleanup_completed(self.ghost)
+        self.assertFalse(original.exists())
+
+    def test_unrecorded_content_with_a_metadata_filename_is_preserved(self):
+        txid = install_transaction.publish(self.request("codex", self.target("alpha", self.codex / "alpha", "copy")))
+        folder = self.ghost / "rollbacks" / txid
+        user_file = folder / installed_payload.FILENAME
+        user_file.write_bytes(b"sole user file")
+        reasons = install_transaction.cleanup_completed(self.ghost)
+        self.assertTrue(user_file.exists())
+        self.assertEqual(user_file.read_bytes(), b"sole user file")
+        self.assertTrue(any("unrecognized-publish-content" in reason for reason in reasons))
 
 
 class StagingAndRetentionTests(PublishCase):

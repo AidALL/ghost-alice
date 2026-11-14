@@ -14,6 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import claude_stop_verification_hook as stop
+import hook_input
 import hook_profile_gate as runner
 import io_trace_hook as trace
 import pending_merge_precheck_hook as pending
@@ -58,6 +59,24 @@ class _TerminalInput:
 
 
 class HookInputTest(unittest.TestCase):
+    def test_decoder_limit_failures_preserve_the_cause_as_a_json_error(self):
+        for raw, error in (('[' * 5000 + '0' + ']' * 5000, RecursionError),
+                           ('{"number":' + '1' * 5000 + '}', ValueError)):
+            with self.subTest(error=error.__name__):
+                try:
+                    decoded = json.loads(raw)
+                except error:
+                    pass
+                else:
+                    # A decoder that accepts this input needs no application limit.
+                    self.assertEqual(hook_input.parse_json_object(raw), decoded if isinstance(decoded, dict) else {})
+                    continue
+                with self.assertRaises(json.JSONDecodeError) as caught:
+                    hook_input.parse_json_object(raw)
+                self.assertIsInstance(caught.exception.__cause__, error)
+                self.assertEqual(caught.exception.doc, raw)
+                self.assertEqual(caught.exception.pos, 0)
+
     def test_pending_merge_reads_utf8_bytes_behind_cp949_wrapper(self):
         payload = {"session_id": "세션", "transcript_path": "C:/작업/기록.jsonl"}
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -78,7 +97,8 @@ class HookInputTest(unittest.TestCase):
 
     def test_payload_consumers_use_empty_object_for_empty_malformed_and_non_object_json(self):
         for read in PAYLOAD_READERS:
-            for raw in ("", " \n\t", "{broken", "[]", '"text"', "null", "0"):
+            for raw in ("", " \n\t", "{broken", "[]", '"text"', "null", "0", '[' * 5000 + '0' + ']' * 5000,
+                        '{"number":' + '1' * 5000 + '}'):
                 with self.subTest(reader=read.__module__, raw=raw):
                     with mock.patch.object(sys, "stdin", io.StringIO(raw)):
                         self.assertEqual(read(), {})
@@ -105,7 +125,8 @@ class HookInputTest(unittest.TestCase):
                                 read()
 
     def test_trace_skips_malformed_json_but_logs_empty_and_non_object_input(self):
-        for raw, appended in (("{broken", False), ("", True), (" \n", True), ("[]", True), ("null", True)):
+        for raw, appended in (("{broken", False), ('{"number":' + '1' * 5000 + '}', False),
+                              ("", True), (" \n", True), ("[]", True), ("null", True)):
             with self.subTest(raw=raw), tempfile.TemporaryDirectory() as directory:
                 with mock.patch.dict(os.environ, {"HOME": directory}, clear=True), \
                      mock.patch.object(sys, "stdin", io.StringIO(raw)):
@@ -136,9 +157,10 @@ class HookInputTest(unittest.TestCase):
         code = "import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())"
         command = f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
         encoded = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
-        for raw in ('{\n  "prompt": "상태 확인", "extra": 1\n}\n', '{"prompt": "상태 확인"', '["상태 확인"]\n'):
-            with self.subTest(raw=raw), tempfile.TemporaryDirectory() as directory:
-                environment = dict(os.environ, HOME=directory, GHOST_ALICE_PLATFORM="codex",
+        for raw in ('{\n  "prompt": "상태 확인", "extra": 1\n}\n', '{"prompt": "상태 확인"', '["상태 확인"]\n',
+                    '[' * 5000 + '0' + ']' * 5000, '{"number":' + '1' * 5000 + '}'):
+            with self.subTest(raw_length=len(raw)), tempfile.TemporaryDirectory() as directory:
+                environment = dict(HOME=directory, PATH=os.environ.get('PATH', ''), GHOST_ALICE_PLATFORM="codex",
                                    GHOST_ALICE_SESSION_ID="raw-input", GHOST_ALICE_AGENT_VISIBILITY="strict")
                 with io.TextIOWrapper(io.BytesIO(raw.encode("utf-8")), encoding="cp949", errors="surrogateescape") as stream:
                     with mock.patch.dict(os.environ, environment, clear=True), \

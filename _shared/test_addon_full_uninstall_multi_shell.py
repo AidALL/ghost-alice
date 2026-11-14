@@ -4,8 +4,7 @@ symlink), must:
 
 - preserve the drifted addon's target (the installer does not record the external change's writer),
 - still remove the OTHER, clean addon,
-- HALT before the core wipe (run_full_uninstall aborts when any addon needs
-  the human user's review), so core skills survive for that review, and
+- retain that addon's declared Core dependencies while removing independent Core targets, and
 - exit nonzero so automation/the user sees the unfinished state.
 
 This is the multi-addon counterpart of the single-addon full-uninstall-drift
@@ -47,7 +46,7 @@ def _python_311() -> bool:
 
 
 class FullUninstallMultiAddonDriftTest(unittest.TestCase):
-    def test_full_uninstall_halts_on_one_drifted_addon_preserving_it(self):
+    def test_full_uninstall_preserves_drift_and_dependencies_but_removes_independent_targets(self):
         bash = _find_test_bash()
         if not bash:
             self.skipTest("bash required")
@@ -64,19 +63,21 @@ class FullUninstallMultiAddonDriftTest(unittest.TestCase):
                     env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     timeout=240, check=False)
 
-            # Install two addons (rich + noop) plus the core task-router dependency.
+            # Both addons depend on task-router; skill-evolution is independent.
             inst = run("--platform", "claude", "--addon-source", str(RICH),
-                       "--addon-source", str(DUMMY), "--skip-source-health", "task-router")
+                       "--addon-source", str(DUMMY), "--skip-source-health", "task-router", "skill-evolution")
             self.assertEqual(inst.returncode, 0, msg=inst.stderr + inst.stdout)
 
             rich_skill = Path(home) / ".claude" / "skills" / "richskill"
             noop_skill = Path(home) / ".claude" / "skills" / "noop"
             core_skill = Path(home) / ".claude" / "skills" / "task-router"
+            independent = Path(home) / '.claude/skills/skill-evolution'
             rich_side = Path(home) / ".ghost-alice" / "addons" / "claude" / "rich.json"
             noop_side = Path(home) / ".ghost-alice" / "addons" / "claude" / "noop.json"
             self.assertTrue(rich_skill.is_symlink() or _is_reparse_point(rich_skill), msg="rich install precondition")
             self.assertTrue(noop_skill.is_symlink() or _is_reparse_point(noop_skill), msg="noop install precondition")
             self.assertTrue(core_skill.exists(), msg="core task-router install precondition")
+            self.assertTrue(independent.exists(), msg='independent Core install precondition')
 
             self.assertEqual(sorted(path.stem for path in rich_side.parent.glob("*.json")), ["noop", "rich"])
             # The first addon in the uninstall order is drifted; the later clean addon must still be removed.
@@ -89,9 +90,9 @@ class FullUninstallMultiAddonDriftTest(unittest.TestCase):
             # FULL uninstall (no --addon).
             full = run("--platform", "claude", "--uninstall")
 
-            # Halted for the human user's review -> nonzero.
+            # The requested addon removal is incomplete even though independent cleanup proceeds.
             self.assertNotEqual(full.returncode, 0,
-                                msg="full uninstall must halt when an addon is drifted: " + full.stderr + full.stdout)
+                                msg="full uninstall must report incomplete addon removal: " + full.stderr + full.stdout)
             # Drifted addon preserved (link + externally changed content + sidecar).
             self.assertTrue(noop_skill.is_symlink() or _is_reparse_point(noop_skill), msg="drifted noop skill link must be preserved")
             self.assertEqual(os.path.realpath(noop_skill), os.path.realpath(user_dir))
@@ -100,9 +101,9 @@ class FullUninstallMultiAddonDriftTest(unittest.TestCase):
             # The other, clean addon was removed by the per-addon loop.
             self.assertFalse(os.path.lexists(rich_skill), msg="later clean addon should be removed")
             self.assertFalse(rich_side.exists(), msg="later clean addon sidecar should be removed")
-            # Core wipe was gated: core skills survive until the addon drift is resolved.
             self.assertTrue(core_skill.exists(),
-                            msg="core skills must survive a halted full uninstall (cleanup is gated)")
+                            msg="the retained addon still depends on task-router")
+            self.assertFalse(independent.exists(), msg='independent Core cleanup must proceed')
 
 
 if __name__ == "__main__":

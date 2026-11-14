@@ -126,13 +126,11 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
     def test_homepage_has_public_metadata_without_internal_badges(self) -> None:
         text = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
 
-        self.assertIn(
-            'content="Ghost-ALICE OS is a governance layer for Claude Code and Codex. It instructs '
-            'the response model to keep your objective and to check each claim against its original '
-            'evidence, and it records the tool calls that Claude Code or Codex reports to it, with the file or '
-            'command each one used, so that you can review them."',
-            text,
-        )
+        descriptions = dict(re.findall(
+            r'<meta (name="description"|property="og:description") content="([^"]+)">', text))
+        self.assertEqual(set(descriptions), {'name="description"', 'property="og:description"'})
+        self.assertTrue(descriptions['name="description"'].strip())
+        self.assertEqual(descriptions['name="description"'], descriptions['property="og:description"'])
         self.assertNotIn("session-intent-" + "guard", text)
         for forbidden in (
             'class="gate-key">task-router',

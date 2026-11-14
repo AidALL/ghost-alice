@@ -9,16 +9,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import stat
+import subprocess
 import sys
+import tempfile
 from typing import TYPE_CHECKING
 
 import install_transaction
 import installed_payload
+import addon_registry
+import content_digest
+from installer_assets import unrecorded_copy_content
 import file_lock
 from installer import locations, report, runner
 from installer.runner import InstallerExit
@@ -141,7 +148,7 @@ def check_source_health(*, skip: bool) -> bool:
         else:
             report.warn("Source upstream comparison failed; continuing with local source health checks only.")
     if untracked:
-        report.warn("Source tree has untracked files; continuing because tracked files are clean.")
+        report.warn("Source tree has untracked files; continuing.")
     if tracked_dirty:
         report.warn("Source tree has tracked local changes; continuing. External changes to installed targets remain protected "
                     "by pending-merges backup and manifest checks.")
@@ -395,3 +402,194 @@ def resolve_source() -> SourceInfo:
     else:
         dirty = "unknown"
     return SourceInfo(root=Path(toplevel) if toplevel else root_path, branch=branch, head=head, dirty=dirty)
+
+
+def _version_hash(files: dict[str, str]) -> str:
+    return hashlib.sha256(json.dumps(files, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+def _package_files(root: Path, paths) -> list[str]:
+    """Regular source files under the package's declared roots, without generated caches."""
+    names = set()
+    for relative in paths:
+        selected = root / relative
+        if not selected.resolve().is_relative_to(root.resolve()):
+            raise ValueError(f'Source entry escapes its package: {selected}')
+        if selected.is_file():
+            names.add(selected.relative_to(root).as_posix())
+        elif selected.is_dir():
+            if selected.is_symlink():
+                raise ValueError(f'Source directory link cannot be preserved as fixed bytes: {selected}')
+            for current, dirs, files in os.walk(selected):
+                dirs[:] = [name for name in dirs if name not in install_transaction.EXCLUDED_COPY_DIR_NAMES]
+                for name in dirs:
+                    if (Path(current) / name).is_symlink():
+                        raise ValueError(f'Source directory link cannot be preserved as fixed bytes: {Path(current) / name}')
+                for name in files:
+                    path = Path(current) / name
+                    if not install_transaction._is_excluded_copy_file(path):
+                        names.add(path.relative_to(root).as_posix())
+    return sorted(names)
+
+
+def _version_source_files(root: Path, *, addon: bool = False) -> list[str]:
+    """Git's working files, the saved file list, or the declared paths of a plain source package."""
+    versions = (locations.record_root() / 'versions').resolve()
+    if root.is_relative_to(versions):
+        folder = versions / root.relative_to(versions).parts[0]
+        saved = json.loads((folder / 'version.json').read_text(encoding='utf-8'))
+        prefix = root.relative_to(folder).as_posix() + '/'
+        return sorted(name[len(prefix):] for name in saved['files'] if name.startswith(prefix))
+    listed = _git(root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '.')
+    if listed.ok:
+        names = set(filter(None, (listed.stdout or '').split('\0')))
+        for name in names:
+            if (root / name).is_symlink() and (root / name).is_dir():
+                raise ValueError(f'Source directory link cannot be preserved as fixed bytes: {root / name}')
+        return sorted(name for name in names if (root / name).is_file())
+    if addon:
+        manifest = json.loads((root / 'addons-manifest.json').read_text(encoding='utf-8'))
+        paths = ['addons-manifest.json', *(entry['path'] for entry in manifest['addons'])]
+    else:
+        from installer.selection import ALL_SKILLS
+        catalog = root / 'skill-catalog/skills.json'
+        roots = json.loads(catalog.read_text(encoding='utf-8')).get('install_roots', ALL_SKILLS) if catalog.is_file() else ALL_SKILLS
+        paths = [*roots, '_shared', 'platforms', 'skill-catalog', 'hooks', 'scripts', '.claude/commands',
+                 'install.sh', 'install.ps1', 'install.cmd', 'VERSION']
+    return _package_files(root, paths)
+
+
+def _copy_version_source(root: Path, destination: Path, *, addon: bool = False) -> dict[str, str]:
+    files = {}
+    for name in _version_source_files(root, addon=addon):
+        original, copy = root / name, destination / name
+        if not original.resolve().is_relative_to(root) or not copy.resolve().is_relative_to(destination.resolve()):
+            raise ValueError(f'Source entry escapes its package: {original}')
+        before = install_transaction._file_hash(original)
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(original, copy)
+        if before != install_transaction._file_hash(copy) or before != install_transaction._file_hash(original):
+            raise ValueError(f'Source changed while preserving it: {original}')
+        files[name] = before
+    if not files:
+        raise ValueError(f'No source files found for {root}')
+    return files
+
+
+def _active_versions(root: Path, record: dict) -> dict[Path, set[str]]:
+    """Versions consumed by current targets, service, pending merges, install source or addon registries."""
+    references = install_transaction._cleanup_references(locations.record_root(), record=record)
+    references.append((record.get('source', {}).get('root'), 'install source'))
+    for host in locations.PLATFORMS:
+        for entry in addon_registry.read_all(addons_dir=locations.addons_dir(host)):
+            references.append((entry.get('source'), host + ' addon'))
+    active = {}
+    for value, host in references:
+        if value:
+            path = Path(value).resolve()
+            if path.is_relative_to(root) and path != root:
+                folder = root / path.relative_to(root).parts[0]
+                if folder.is_dir() and not folder.is_symlink():
+                    active.setdefault(folder, set()).add(host)
+    return active
+
+
+def _unchanged_version(folder: Path) -> bool:
+    """Only an intact source version without extra user files is eligible for pruning."""
+    try:
+        saved = json.loads((folder / 'version.json').read_text(encoding='utf-8'))
+        files = saved['files']
+        if not isinstance(files, dict) or unrecorded_copy_content(folder, [*files, 'version.json']):
+            return False
+        return _version_hash(files) == folder.name and all(install_transaction._file_hash(folder / name) == digest
+                                                          for name, digest in files.items())
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def preserve_successful_source(ctx: 'Context') -> list[str]:
+    """Keep the latest three distinct successful source versions; the caller completed a full Core install.
+
+    A version contains actual working bytes and a file list for reinstalling its Core and selected addon sources.
+    Reinstallation uses the saved install.sh/install.ps1 with --adopt-source. Active sources and modified archives
+    stay even when that exceeds three; they are named in the returned report. No Git/index or host settings change.
+    """
+    root = locations.record_root() / 'versions'
+    if root.is_symlink():
+        raise ValueError(f'Source version root is a link: {root}')
+    root = root.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    record = installed_payload.read(locations.record_root()) or {}
+    with tempfile.TemporaryDirectory(prefix='.stage-', dir=root) as temporary:
+        stage = Path(temporary)
+        core_root = Path(runner.REPO_ROOT).resolve()
+        core = _copy_version_source(core_root, stage / 'core')
+        files = {'core/' + name: digest for name, digest in core.items()}
+        sources = ['core']
+        captured = [(core_root, 'core')]
+        for index, selected in enumerate(dict.fromkeys(ctx.addon_sources)):
+            candidate = stage / f'addon-{index}'
+            addon = _copy_version_source(Path(selected).resolve(), candidate, addon=True)
+            relative = 'addons/' + _version_hash(addon)
+            captured.append((Path(selected).resolve(), relative))
+            if relative in sources:
+                shutil.rmtree(candidate)
+                continue
+            destination = stage / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            candidate.rename(destination)
+            sources.append(relative)
+            files.update((relative + '/' + name, digest) for name, digest in addon.items())
+        # The source may have changed after placement verification. Only a source archive that still matches
+        # this host's installed targets is a successful code version; unrelated earlier sources are not claimed.
+        for destination, entry in record.get('targets', {}).items():
+            if ctx.platform not in entry.get('used_by', []):
+                continue
+            original = Path(entry['source']).resolve()
+            for source_root, relative in sorted(captured, key=lambda item: len(item[0].parts), reverse=True):
+                if original.is_relative_to(source_root):
+                    archived = stage / relative / original.relative_to(source_root)
+                    if content_digest.tree(archived) != content_digest.tree(destination):
+                        raise ValueError(f'Preserved source differs from installed code: {destination}')
+                    break
+        folder = root / _version_hash(files)
+        saved = {'files': files, 'sources': sorted(sources), 'platforms': [ctx.platform]}
+        if folder.is_symlink():
+            raise ValueError(f'Preserved source version is a link: {folder}')
+        if folder.exists():
+            previous = json.loads((folder / 'version.json').read_text(encoding='utf-8'))
+            if previous['files'] != files or any(install_transaction._file_hash(folder / name) != digest for name, digest in files.items()):
+                raise ValueError(f'Preserved source version has changed: {folder}')
+            saved['platforms'] = sorted(set(previous.get('platforms', [])) | {ctx.platform})
+        else:
+            # The complete file set moves into place; a failed copy never becomes a saved version.
+            install_transaction._write_json(stage / 'version.json', saved)
+            stage.rename(folder)
+        install_transaction._write_json(folder / 'version.json', saved)
+        os.utime(folder, None)
+    command = ['pwsh', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(folder / 'core/install.ps1')] if os.name == 'nt' else ['bash', str(folder / 'core/install.sh')]
+    command += ['--platform', ctx.platform, '--adopt-source']
+    for selected in sorted(source for source in sources if source != 'core'):
+        command += ['--addon-source', str(folder / selected)]
+    lines = [f'Successful source version: {folder}', 'Reinstall this code: ' + (subprocess.list2cmdline(command) if os.name == 'nt' else shlex.join(command))]
+    try:
+        active = _active_versions(root, record)
+    except (OSError, ValueError, addon_registry.RegistryError, install_transaction.InstallTransactionError) as exc:
+        return [*lines, f'Source versions retained because references could not be checked: {exc}']
+    active.setdefault(folder, set()).add(ctx.platform + ' latest success')
+    successful = sorted((path for path in root.iterdir() if path.is_dir() and not path.is_symlink()
+                         and (path / 'version.json').is_file()),
+                        key=lambda path: (path / 'version.json').stat().st_mtime_ns, reverse=True)
+    latest = set(successful[:3])
+    for obsolete in successful[3:]:
+        if obsolete in active or not _unchanged_version(obsolete):
+            continue
+        try:
+            shutil.rmtree(obsolete)
+        except OSError as exc:
+            raise OSError(f'Source version saved at {folder}; previous version cleanup failed for {obsolete}: {exc}') from exc
+    remaining = [path for path in root.iterdir() if path.is_dir() and not path.name.startswith('.')]
+    if len(remaining) > 3:
+        lines.extend(f'Preserved source in use or modified: {path} ({", ".join(sorted(active.get(path, {"modified or unknown"})))})'
+                     for path in sorted(remaining) if path not in latest)
+    return lines

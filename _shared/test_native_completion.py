@@ -379,6 +379,18 @@ class NativeActivityTests(unittest.TestCase):
 
 
 class NativeCompletionTests(unittest.TestCase):
+    def test_unencodable_answer_has_no_digest_or_accepted_review(self):
+        before = fixtures.ledger.read_session_state(**self.fixture.coords)
+        for text in ('Answer: \ud800', '[partial-check]\n- unverified:\n  - c1: pending \ud800'):
+            with self.subTest(text=ascii(text)), patch.object(completion_assessment, 'lookup_current_response') as lookup:
+                result = native_completion.assess_native_completion(self.source, text=text)
+                self.assertIsNone(result['body_digest'])
+                self.assertTrue(result['body_issue'].startswith('response-unbound:'))
+                self.assertIn('UTF-8', result['body_issue'])
+                self.assertIsNone(result['claim_judgments'])
+                lookup.assert_not_called()
+        self.assertEqual(fixtures.ledger.read_session_state(**self.fixture.coords), before)
+
     def setUp(self):
         self.fixture = fixtures.ResponseRouteTests()
         self.fixture.setUp()
@@ -752,6 +764,8 @@ class RuntimeInstallationIsolationTests(unittest.TestCase):
             for path in Path(__file__).parent.iterdir():
                 if path.is_file() and path.suffix in {'.py', '.mjs', '.json'}:
                     shutil.copy2(path, source_shared / path.name)
+            shutil.copytree(Path(__file__).parent / 'codex_config_toml', source_shared / 'codex_config_toml',
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
             ledger_relative = Path('session-intent-analyzer/scripts/session_intent_ledger.py')
             source_ledger = source / ledger_relative
             source_ledger.parent.mkdir(parents=True)
@@ -769,6 +783,8 @@ class RuntimeInstallationIsolationTests(unittest.TestCase):
                 stream.write('\nuninstalled_source_api = True\n')
             (source_shared / 'completion_assessment.py').write_text(
                 'from completion_check_validator import uninstalled_source_api\n')
+            (source_shared / 'codex_config_toml/__init__.py').write_text(
+                'raise AssertionError("Uninstalled source parser executed")\n')
             with source_ledger.open('a') as stream:
                 stream.write('\ndef reconcile_native_inputs(**kwargs):\n'
                              '    raise AssertionError("Uninstalled source ledger executed")\n')

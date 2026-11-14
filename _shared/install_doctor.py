@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
-import tomllib
+import codex_config_toml as tomllib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence

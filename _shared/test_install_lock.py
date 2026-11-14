@@ -116,6 +116,45 @@ class HeldByProcessTreeTests(unittest.TestCase):
         self.assertEqual(released.returncode, 0, released.stderr)
         self.assertFalse(self.lock.exists())
 
+    def test_command_releases_its_generation_when_the_body_fails(self):
+        with self.assertRaisesRegex(ValueError, 'operation failed'):
+            with install_lock.command_lock(self.lock, owner='addon-uninstall:claude'):
+                self.assertTrue(install_lock.held_by_process_tree(self.lock))
+                self.assertEqual(json.loads(self.lock.read_text())['owner'], 'addon-uninstall:claude')
+                raise ValueError('operation failed')
+        self.assertFalse(self.lock.exists())
+
+    def test_command_reuses_current_or_parent_lock_without_releasing_it(self):
+        for pid in (os.getpid(), os.getppid()):
+            with self.subTest(pid=pid):
+                self.write(dict(pid=pid, generation='existing-generation', owner='installer'))
+                before = self.lock.read_bytes()
+                with install_lock.command_lock(self.lock, owner='addon-uninstall:claude'):
+                    self.assertEqual(self.lock.read_bytes(), before)
+                self.assertEqual(self.lock.read_bytes(), before)
+
+    def test_preview_neither_reads_an_existing_lock_nor_creates_a_new_lock_folder(self):
+        missing = self.lock.parent / 'missing' / 'install.lock'
+        with install_lock.command_lock(missing, owner='preview', enabled=False):
+            self.assertFalse(missing.parent.exists())
+        self.lock.write_text('invalid metadata')
+        with install_lock.command_lock(self.lock, owner='preview', enabled=False):
+            self.assertEqual(self.lock.read_text(), 'invalid metadata')
+        self.assertEqual(list(self.lock.parent.iterdir()), [self.lock])
+
+    def test_command_preserves_a_generation_that_replaced_the_one_it_acquired(self):
+        with install_lock.command_lock(self.lock, owner='addon-uninstall:claude'):
+            self.write(dict(pid=424242, generation='replacement-generation', owner='new-installer'))
+        self.assertEqual(json.loads(self.lock.read_text())['generation'], 'replacement-generation')
+
+    def test_command_refuses_another_holder_before_entering_the_body(self):
+        self.write(dict(pid=424242, generation='other-generation', owner='other'))
+        before = self.lock.read_bytes()
+        with self.assertRaisesRegex(install_lock.InstallLockError, 'already held'):
+            with install_lock.command_lock(self.lock, owner='addon-uninstall:claude'):
+                self.fail('the command entered without owning the lock')
+        self.assertEqual(self.lock.read_bytes(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

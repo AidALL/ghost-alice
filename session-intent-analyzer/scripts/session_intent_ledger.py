@@ -1820,6 +1820,8 @@ def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
     do not establish each item's origin; Core code requires no per-item source.
     Only a decision entry's optional source claims who decided. active_decisions
     contains entries no later entry superseded, and decision_count counts those entries.
+    The Conduct and consumer snapshots section of references/ledger-schema.md
+    defines the projection's version and compatibility contract.
     """
     if isinstance(state_or_path, Path):
         # A single read preserves both semantics and their actual metadata.

@@ -194,12 +194,41 @@ def write_ownership_marker(
     return path
 
 
+def unrecorded_copy_content(path: Path, expected_files: Iterable[str]) -> Optional[str]:
+    """Reject whole-copy deletion when a baseline omits user content or links; allow ordinary generated caches."""
+    if path.is_symlink() or _is_windows_junction(path) or not (path.is_dir() or path.is_file()):
+        return "unrecorded-copy-content"
+    expected_files = set(expected_files)
+    if path.is_file():
+        return None if expected_files == {"."} else "unrecorded-copy-content"
+    generated_dirs = EXCLUDED_DIR_NAMES - {'.git', 'node_modules'}
+
+    def unreadable(error):
+        raise error
+
+    for current, dirs, files in os.walk(path, onerror=unreadable):
+        for name in [*dirs, *files]:
+            child = Path(current) / name
+            relative = child.relative_to(path)
+            rel = relative.as_posix()
+            generated = (bool(set(relative.parts) & generated_dirs) or name == '.DS_Store'
+                         or child.suffix == '.pyc')
+            if (child.is_symlink() or _is_windows_junction(child)
+                    or not (child.is_dir() or child.is_file())
+                    or (not generated and rel != GHOST_ALICE_MARKER_FILENAME
+                        and rel not in expected_files
+                        and not (child.is_dir() and any(key.startswith(rel + '/') for key in expected_files)))):
+                return "unrecorded-copy-content"
+    return None
+
+
 def classify_skill_root(
     path: Path,
     *,
     expected_asset_id: Optional[str] = None,
     repo_root: Optional[Path] = None,
     expected_addon_id: Optional[str] = None,
+    whole_copy: bool = False,
 ) -> AssetClassification:
     """Classify a skill root's ownership.
 
@@ -209,6 +238,10 @@ def classify_skill_root(
     recorded sidecar ``content_hash`` of the link, not here — so this function
     classifies them purely from the link target and does NOT consult
     ``expected_addon_id``.
+
+    ``whole_copy`` also checks entries excluded from the marker hashes before a
+    caller retires or deletes an entire copy. Discardable generated caches stay
+    allowed, but links inside them and unrecorded user content do not.
     """
     asset_id = expected_asset_id or path.name
 
@@ -268,6 +301,10 @@ def classify_skill_root(
             "content-hash-mismatch",
             marker,
         )
+
+    if whole_copy and (reason := unrecorded_copy_content(path, expected_hashes)):
+        return AssetClassification(path, KIND_SKILL_ROOT, marker_asset_id or asset_id,
+                                   OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED, reason, marker)
 
     return AssetClassification(
         path,

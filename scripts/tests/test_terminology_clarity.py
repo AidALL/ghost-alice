@@ -35,6 +35,8 @@ SKIP_PARTS = {
 SKIP_FILES = {
     Path("scripts/public_text_rules.py"),
     Path("scripts/tests/test_terminology_clarity.py"),
+    # Shell inputs retain external command syntax, including xargs -L1.
+    Path("agent-security-scan/scripts/fixtures/hook-command-regressions.json"),
 }
 
 TEXT_SUFFIXES = {".json", ".md", ".mjs", ".py"}

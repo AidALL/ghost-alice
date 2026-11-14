@@ -13,7 +13,7 @@ import sqlite3
 from completion_check_validator import extract_original_proof, looks_like_evidence_claim, validate_completion_text
 from completion_route import select_completion_route
 import ledger_access
-from native_transcript import native_tool_activity, stop_response_text
+from native_transcript import native_tool_activity
 
 
 def _source_status_issue(reasons, *, explanation=False):
@@ -50,8 +50,15 @@ consumers obtain it directly from this Core API and check their input binding.
 """
     if not isinstance(text, str):
         raise ValueError('Invalid native assessment request')
-    if hook_payload is not None and not text.strip():
-        text = stop_response_text(hook_payload)
+    try:
+        body_digest = 'sha256:' + hashlib.sha256(text.encode('utf-8')).hexdigest()
+        encoding_issue = None
+    except UnicodeEncodeError:
+        body_digest = None
+        encoding_issue = (
+            'response-unbound: Core could not encode the observed answer as UTF-8. '
+            'No digest or recorded review was accepted for this answer.'
+        )
     source = dict(source)
     platform, session = source.get('GHOST_ALICE_PLATFORM'), source.get('GHOST_ALICE_SESSION_ID')
     route, context, context_status, context_issue = None, {}, 'unavailable', None
@@ -80,8 +87,8 @@ consumers obtain it directly from this Core API and check their input binding.
     except (ValueError, OSError, ImportError, AttributeError, TypeError, sqlite3.Error) as exc:
         context_issue = str(exc)
     marker = looks_like_evidence_claim(text)
-    review_issue, review_target = None, 'response_review'
-    if text.strip() and not marker and context_status == 'available':
+    review_issue, review_target = encoding_issue, 'response_review'
+    if body_digest is not None and text.strip() and not marker and context_status == 'available':
         # An answer without a control block is judged only when a recorded review
         # binds this exact text; an unrecorded explanation is an ordinary answer.
         from completion_assessment import CompletionAssessmentError, lookup_current_response
@@ -147,7 +154,7 @@ consumers obtain it directly from this Core API and check their input binding.
                 except (CompletionAssessmentError, ValueError, OSError, sqlite3.Error):
                     claim_judgments = None
     return dict(schema_version='native-completion.v1', platform=platform, session_id=session,
-        input_event_id=context.get('input_event_id'), body_digest='sha256:' + hashlib.sha256(text.encode()).hexdigest(),
+        input_event_id=context.get('input_event_id'), body_digest=body_digest,
         context_status=context_status, context_issue=context_issue,
         native_activity=native_activity,
         response_route=route, completion_route=selected, body_issue=issue,

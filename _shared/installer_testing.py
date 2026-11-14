@@ -3,6 +3,8 @@ runner, and a copy of this checkout in its own repository for a test that runs t
 from __future__ import annotations
 
 import atexit
+from dataclasses import asdict
+import json
 from contextlib import ExitStack
 import os
 from pathlib import Path
@@ -15,6 +17,7 @@ from unittest import mock
 from git_hook_paths import git, hook_paths
 from installer import cli, report
 from installer.runner import ToolResult
+from install_hooks import HookStatus
 
 CHECKOUT = Path(__file__).resolve().parents[1]
 _copy_template: Path | None = None
@@ -84,6 +87,12 @@ def make_context(home: Path, platform: str = "claude", **options) -> cli.Context
     return cli.Context(options=opts, platform=platform, skills_dir=skills_dir, addon_sources=list(opts.addon_sources))
 
 
+def hook_status(platform='claude', action='install', status='installed'):
+    """The child hook action's result, including the registration state."""
+    return HookStatus(platform, f'HOOK_{status.upper()}', status, status,
+                      {'action': action, 'items': [], 'errors': []})
+
+
 class FakeRunner:
     """Records every `runner.run_tool` / `runner.run_command` call and answers with scripted results."""
 
@@ -102,6 +111,11 @@ class FakeRunner:
         for matcher, result in self.responses:
             if matcher(script, args):
                 return result(script, args, kwargs) if callable(result) else result
+        if script.endswith('install_hooks.py') and '--format' in args:
+            platform = args[args.index('--platform') + 1]
+            action = 'status' if '--status' in args else 'uninstall' if '--uninstall' in args else 'install'
+            status = hook_status(platform, action, 'removed' if action == 'uninstall' else 'installed')
+            return ToolResult(0, json.dumps({'returncode': 0, 'results': {platform: asdict(status)}}), '')
         return ToolResult(0, "" if kwargs.get("capture") else None, "" if kwargs.get("capture") else None)
 
     def run_tool(self, script, *args, **kwargs):

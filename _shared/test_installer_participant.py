@@ -193,9 +193,9 @@ class RestoreTests(PublishCase):
                                                                            phase="readiness", restored=False))
         with mock.patch.object(install_transaction, "_verify_staged_copy", side_effect=install_transaction.InstallTransactionError("stage")):
             exc = self.publish_with(recorder)
-        # The files are back and the journal says so; the service recovery is what stays unconfirmed.
+        # The files are back, but an unfinished participant keeps the complete recovery pending.
         self.assertEqual(self.snapshot(self.dest), self.before_files)
-        self.assertEqual(self.journal(self.only_txid())["phase"], "restored")
+        self.assertEqual(self.journal(self.only_txid())["phase"], "prepare")
         self.assertEqual((exc.exit_code, exc.code), (5, "GATEWAY_RECOVERY_UNCONFIRMED"))
         self.assertIn("restore failed", str(exc))
 

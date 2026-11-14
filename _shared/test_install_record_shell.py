@@ -112,9 +112,7 @@ class InstallRecordShellTest(unittest.TestCase):
         self.assertEqual(record["installer"], {"commit": head, "schema_version": 1})
         self.assertEqual((record["source"]["root"], record["source"]["commit"]), (str(self.source), head))
         journal = Path(record["last_transaction"]["rollback_dir"]) / "journal.json"
-        self.assertIn('"phase": "done"', journal.read_text(encoding="utf-8"))
-        self.assertEqual([t["dest"] for t in json.loads(journal.read_text(encoding="utf-8"))["targets"]],
-                         [str(self.runtime), str(self.companion)])
+        self.assertFalse(journal.exists(), 'completed managed originals must not accumulate after success')
         self.assertEqual(install_transaction.unfinished(self.ghost), [])
         # No gateway is registered in a temporary home: the record has no service section and the
         # installer writes no gateway receipt or binding.
@@ -149,13 +147,13 @@ class InstallRecordShellTest(unittest.TestCase):
         # Codex is still installed: the shared record and rollbacks stay for it.
         self.assertTrue(record.exists())
         self.assertTrue(rollbacks.is_dir())
+        self.assertEqual(list(rollbacks.iterdir()), [])
         self.assertTrue((self.ghost / "install-state" / "codex.json").is_file())
         self.run_installer("--platform", "codex", "--uninstall")
         self.assertFalse(record.exists())
         self.assertFalse(rollbacks.exists())
         archived = list((self.ghost / "uninstall-backup" / "codex" / "support-state").glob("publish-rollbacks-*"))
-        self.assertEqual(len(archived), 1)
-        self.assertTrue(any(archived[0].rglob("journal.json")))
+        self.assertEqual(archived, [], 'an empty placement folder needs no recovery copy')
 
     def test_the_first_install_over_earlier_records_creates_the_record_from_them(self):
         (self.home / ".codex").mkdir()

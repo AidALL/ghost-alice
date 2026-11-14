@@ -7,9 +7,9 @@ Determinism notes (read before editing the golden fixture):
 - The installer writes <HOME>/.claude/settings.json hooks for every install,
   regardless of how individual skills are materialized, so the per-event hook
   entry counts are environment-independent.
-- ``.ghost-alice-install.json`` ownership markers are only written for skills
-  installed in copy / copy-fallback mode (see
-  ``_shared/installer_assets_cli.py``: ``MARKER_INSTALL_MODES``). On a
+- ``.ghost-alice-install.json`` ownership markers are written by
+  ``_shared/install_transaction.py``: ``PublishBatch.stage`` for copied skill
+  and support targets. On a
   filesystem that supports symlinks (the default for macOS dev hosts and Linux
   CI) skills are symlinked and therefore carry no markers, so
   ``installed_markers`` is the empty list. The snapshot helper still discovers

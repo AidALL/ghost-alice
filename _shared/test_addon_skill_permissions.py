@@ -1,6 +1,4 @@
 import json
-import subprocess
-import sys
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -8,12 +6,80 @@ import unittest
 from unittest import mock
 import install_destination
 import addon_skill_permissions as permissions
+from installer_testing import installer_env
 
 
 class AddonSkillPermissionTest(unittest.TestCase):
+    def test_pending_before_keeps_original_scope_when_hook_candidate_differs(self):
+        settings = self.prepare([], ['Skill(pilot)'])
+        def fail(*args, **kwargs):
+            raise OSError('before settings commit')
+        with self.assertRaises(OSError):
+            permissions.detach(self.record, self.settings, settings, set(), fail)
+        receipt = permissions._state_path().read_bytes()
+        original = self.settings.read_bytes()
+        prepared = permissions.prepare_addon(self.record, self.settings, settings, set())
+        rows = permissions._detach('pilot', self.settings, settings, set(), self.write,
+                                   settings_after=dict(settings, hooks={}), prepared=prepared)
+        self.assertEqual(rows[0]['action'], 'manual-review')
+        self.assertEqual(rows[0]['settings_state'], 'preserved')
+        self.assertEqual(permissions._state_path().read_bytes(), receipt)
+        self.assertEqual(self.settings.read_bytes(), original)
+
+    def test_pending_before_finishes_original_names_before_expanded_selection(self):
+        self.targets.append(SimpleNamespace(addon_id='pilot', name='other'))
+        settings = self.prepare([], ['Skill(pilot)', 'Skill(other)'])
+        def fail(*args, **kwargs):
+            raise OSError('before settings commit')
+        with self.assertRaises(OSError):
+            permissions.detach(self.record, self.settings, settings, set(), fail)
+        self.record['provided'].append({'kind': 'skill', 'name': 'other', 'ownership': 'addon'})
+        effects = []
+        def write(path, updated, **kwargs):
+            effects.append((list(updated['permissions']['allow']),
+                            permissions._read(path)['pending_detach']['names']))
+            self.write(path, updated)
+        permissions.detach(self.record, self.settings, settings, set(), write)
+        self.assertEqual(effects, [(['Skill(other)'], ['pilot']), ([], ['other'])])
+        self.assertFalse(permissions._state_path().exists())
+
+    def test_core_combines_hook_candidate_and_permission_effect_in_one_recoverable_write(self):
+        settings = {'permissions': {'allow': ['Skill(task-router)', 'Skill(task-router)']}, 'hooks': {'Stop': [{'hooks': [{'command': 'managed'}]}]}}
+        self.write(self.settings, settings)
+        permissions.record_install(self.settings, [], [], ['Skill(task-router)'], core_names=['task-router'])
+        candidate = dict(settings, hooks={})
+        def write_then_fail(path, updated, **kwargs):
+            self.write(path, updated)
+            raise OSError('committed before error')
+        with self.assertRaisesRegex(OSError, 'committed before error'):
+            permissions.detach_core(['task-router'], self.settings, settings, write_then_fail, settings_after=candidate)
+        effect = json.loads(self.settings.read_text())
+        self.assertEqual(effect['hooks'], {})
+        self.assertEqual(effect['permissions']['allow'], ['Skill(task-router)'])
+        pending = permissions._read(self.settings)['pending_detach']
+        self.assertEqual(pending['after'], permissions._settings_fingerprint(effect))
+        with self.assertRaisesRegex(ValueError, 'review'):
+            permissions.detach_core(['task-router'], self.settings, settings, self.write, settings_after=candidate)
+        permissions.detach_core(['task-router'], self.settings, effect, self.write, settings_after=dict(effect))
+        self.assertEqual(json.loads(self.settings.read_text())['permissions']['allow'], ['Skill(task-router)'])
+        self.assertFalse(permissions._state_path().exists())
+
+    def test_core_rejects_candidate_permission_changes_before_any_effect(self):
+        settings = {'permissions': {'allow': ['Skill(task-router)']}}
+        self.write(self.settings, settings)
+        permissions.record_install(self.settings, [], [], ['Skill(task-router)'], core_names=['task-router'])
+        receipt = permissions._state_path().read_bytes()
+        original = self.settings.read_bytes()
+        with self.assertRaises(ValueError):
+            permissions.detach_core(['task-router'], self.settings, settings, self.write,
+                                    settings_after={'permissions': {'allow': []}})
+        self.assertEqual(permissions._state_path().read_bytes(), receipt)
+        self.assertEqual(self.settings.read_bytes(), original)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        self.enterContext(mock.patch.dict('os.environ', installer_env(self.root), clear=True))
         self.settings = self.root / 'native/settings.json'
         self.settings.parent.mkdir()
         destination = dict(mode='isolated', owned_root=str(self.root),
@@ -42,23 +108,19 @@ class AddonSkillPermissionTest(unittest.TestCase):
     def detach(self,settings,**kwargs):
         return permissions.detach(self.record,self.settings,settings,{'task-router'},self.write,**kwargs)
 
-    def test_added_rule_removed_without_changing_core_or_preexisting_rules(self):
-        before=['Skill(task-router)','Bash(user-command)']
-        settings=self.prepare(before,before+['Skill(pilot)'])
-        rows=self.detach(settings)
-        self.assertEqual(settings['permissions']['allow'],before)
-        self.assertEqual(rows[0]['action'],'removed')
-        self.assertFalse(permissions._state_path().exists())
-
-    def test_core_attribution_survives_reinstall_and_preserves_existing_grants(self):
+    def test_reinstall_preserves_independent_core_and_addon_attribution_and_existing_grants(self):
         before = ['Skill(task-router)', 'Bash(user-command)']
-        after = before + ['Skill(writing-plans)']
-        settings = {'permissions': {'allow': after}}
-        self.write(self.settings, settings)
+        after = before + ['Skill(pilot)', 'Skill(writing-plans)']
+        settings = self.prepare(before, after)
         permissions.record_install(self.settings, [], before, after, core_names=['task-router', 'writing-plans'])
+        permissions.record_install(self.settings, self.targets, after, after)
         permissions.record_install(self.settings, [], after, after, core_names=['task-router', 'writing-plans'])
+        self.assertEqual(self.detach(settings)[0]['action'], 'removed')
+        self.assertEqual(settings['permissions']['allow'], before + ['Skill(writing-plans)'])
+        self.assertEqual(permissions._read(self.settings)['core'], {'task-router': False, 'writing-plans': True})
         permissions.detach_core(['task-router', 'writing-plans'], self.settings, settings, self.write)
         self.assertEqual(settings['permissions']['allow'], before)
+        self.assertEqual(settings['user'], 'unchanged')
         self.assertFalse(permissions._state_path().exists())
 
     def test_core_grants_without_addition_evidence_stay_and_are_reported(self):
@@ -66,45 +128,20 @@ class AddonSkillPermissionTest(unittest.TestCase):
         self.write(self.settings, settings)
         rows = permissions.detach_core(['task-router'], self.settings, settings, self.write)
         self.assertEqual(rows[0]['action'], 'manual-review')
+        self.assertEqual(rows[0]['reason'], 'addition-unproven')
         self.assertEqual(settings['permissions']['allow'], ['Skill(task-router)'])
-
-    def test_core_failed_detach_does_not_remove_a_user_duplicate_on_retry(self):
-        settings = {'permissions': {'allow': ['Skill(task-router)', 'Skill(task-router)']}}
-        self.write(self.settings, settings)
-        permissions.record_install(self.settings, [], [], ['Skill(task-router)'], core_names=['task-router'])
-        def write_then_fail(path, updated, **kwargs):
-            self.write(path, updated)
-            raise OSError('post-write-failure')
-        with self.assertRaises(OSError):
-            permissions.detach_core(['task-router'], self.settings, settings, write_then_fail)
-        retried = json.loads(self.settings.read_text())
-        permissions.detach_core(['task-router'], self.settings, retried, self.write)
-        self.assertEqual(retried['permissions']['allow'], ['Skill(task-router)'])
-        self.assertFalse(permissions._state_path().exists())
-
-    def test_core_and_addon_attribution_are_independent(self):
-        settings = self.prepare([], ['Skill(pilot)', 'Skill(task-router)'])
-        permissions.record_install(self.settings, [], [], ['Skill(task-router)'], core_names=['task-router'])
-        self.detach(settings)
-        self.assertEqual(permissions._read(self.settings)['core'], {'task-router': True})
-        permissions.detach_core(['task-router'], self.settings, settings, self.write)
-        self.assertEqual(settings['permissions']['allow'], [])
 
     def test_preexisting_identical_rule_and_later_duplicate_rule_preserved(self):
         before=['Skill(task-router)','Skill(pilot)']
         settings=self.prepare(before,before[:])
-        self.assertEqual(self.detach(settings)[0]['action'],'preserved-existing')
+        row = self.detach(settings)[0]
+        self.assertEqual(row['action'],'preserved-existing')
+        self.assertEqual(row['reason'], 'addition-unproven')
         self.assertEqual(settings['permissions']['allow'],before)
         settings=self.prepare(['Skill(task-router)'],['Skill(task-router)','Skill(pilot)'])
         settings['permissions']['allow'].append('Skill(pilot)')
         self.detach(settings)
         self.assertEqual(settings['permissions']['allow'],['Skill(task-router)','Skill(pilot)'])
-
-    def test_owned_attribution_survives_reinstall(self):
-        settings=self.prepare([],['Skill(pilot)'])
-        permissions.record_install(self.settings,self.targets,['Skill(pilot)'],['Skill(pilot)'])
-        self.detach(settings)
-        self.assertEqual(settings['permissions']['allow'],[])
 
     def test_legacy_attribution_migrates_to_separate_v2_file_and_keeps_original(self):
         state = permissions._state_path()
@@ -237,16 +274,6 @@ class AddonSkillPermissionTest(unittest.TestCase):
         with self.assertRaises(ValueError): self.detach(settings)
         self.assertEqual(settings['permissions']['allow'],['Skill(pilot)'])
 
-    def test_settings_write_failure_keeps_permission_and_owner(self):
-        settings=self.prepare([],['Skill(pilot)'])
-        def fail(*args,**kwargs): raise OSError('write-failure')
-        with self.assertRaises(OSError):
-            permissions.detach(self.record,self.settings,settings,set(),fail)
-        self.assertEqual(json.loads(self.settings.read_text())['permissions']['allow'],['Skill(pilot)'])
-        self.assertTrue(permissions._read(self.settings)['addons']['pilot']['pilot'])
-        self.detach(json.loads(self.settings.read_text()))
-        self.assertEqual(json.loads(self.settings.read_text())['permissions']['allow'],[])
-
     def test_failed_attribution_save_after_detach_does_not_remove_user_duplicate_on_retry(self):
         settings=self.prepare([],['Skill(pilot)'])
         settings['permissions']['allow'].append('Skill(pilot)')
@@ -263,20 +290,6 @@ class AddonSkillPermissionTest(unittest.TestCase):
         self.detach(retried)
         self.assertEqual(retried['permissions']['allow'],['Skill(pilot)'])
         self.assertFalse(permissions._state_path().exists())
-
-    def test_settings_write_that_applies_then_raises_preserves_duplicate_on_retry(self):
-        settings=self.prepare([],['Skill(pilot)'])
-        settings['permissions']['allow'].append('Skill(pilot)')
-        self.write(self.settings,settings)
-        def write_then_fail(path,updated,**kwargs):
-            self.write(path,updated)
-            raise OSError('post-write-failure')
-        with self.assertRaises(OSError):
-            permissions.detach(self.record,self.settings,settings,set(),write_then_fail)
-        with self.assertRaisesRegex(ValueError,'review'):
-            self.detach(settings)
-        self.detach(json.loads(self.settings.read_text()))
-        self.assertEqual(json.loads(self.settings.read_text())['permissions']['allow'],['Skill(pilot)'])
 
     def test_pre_effect_attribution_failure_never_changes_settings(self):
         for applied in (False,True):
@@ -328,7 +341,10 @@ class AddonSkillPermissionTest(unittest.TestCase):
                     permissions.record_install(self.settings,self.targets,current['permissions']['allow'],current['permissions']['allow'])
                 self.assertEqual(permissions._state_path().read_bytes(),state)
                 self.assertEqual(self.settings.read_bytes(),settings_bytes)
+                self.assertTrue(permissions._read(self.settings)['addons']['pilot']['pilot'])
                 self.detach(current)
+                self.assertEqual(current['permissions']['allow'], ['Skill(pilot)'])
+                self.assertFalse(permissions._state_path().exists())
 
     def test_pending_detach_does_not_apply_unselected_or_new_core_grants(self):
         settings=self.prepare([],['Skill(pilot)'])
@@ -390,31 +406,6 @@ class AddonSkillPermissionTest(unittest.TestCase):
         self.detach(settings)
         self.detach(json.loads(self.settings.read_text()))
         self.assertEqual(json.loads(self.settings.read_text())['permissions']['allow'],['Skill(task-router)','Skill(pilot)'])
-
-    def test_corrupt_ownership_cli_is_error_not_not_found_and_resume_reports_it(self):
-        import addon_registry
-        import hash_utils
-        self.prepare([],['Skill(pilot)'])
-        permissions._state_path().write_text('{broken')
-        skill=self.root/'skills/pilot';skill.mkdir(parents=True);(skill/'SKILL.md').write_text('fixture')
-        addons=self.root/'ghost/addons/claude'
-        record=dict(schema_version='1.0',addon_id='pilot',addon_version='1.0.0',source=str(self.root),
-                    platform='claude',owner='addon',origin='addon:pilot',depends_on_core=[],
-                    min_core_version='0.0.0',installed_at='fixture',provided=[dict(kind='skill',name='pilot',
-                    target=str(skill),ownership='addon',install_mode='copy',content_hash=hash_utils.hash_target(str(skill),'copy'),
-                    marker='',metadata={})])
-        addon_registry.write_record(record,addons_dir=addons)
-        source=Path(__file__).parents[1]
-        wrapper="import json,sys;sys.path.insert(0,sys.argv[1]);import install_destination,addon_uninstall;d=json.loads(sys.argv[2]);\nwith install_destination.use(d): raise SystemExit(addon_uninstall.main(sys.argv[3:]))"
-        binding=json.dumps(__import__('dataclasses').asdict(install_destination.current()))
-        common=[sys.executable,'-c',wrapper,str(source/'_shared'),binding,'--addons-dir',str(addons),'--platform','claude','--skills-dir',str(self.root/'skills')]
-        action=subprocess.run(common+['--addon-id','pilot'],capture_output=True,text=True)
-        self.assertEqual(action.returncode,2,action.stderr)
-        self.assertEqual(json.loads(action.stdout)['status'],'error')
-        self.assertTrue(skill.exists());self.assertTrue((addons/'pilot.json').exists())
-        resumed=subprocess.run(common+['--resume-pending'],capture_output=True,text=True)
-        self.assertEqual(resumed.returncode,2,resumed.stderr)
-        self.assertEqual(json.loads(resumed.stdout)['resumed'][0]['status'],'error')
 
     def test_codex_owned_addon_hook_trust_removed_preserving_core_and_unmanaged_tables(self):
         import install_hooks

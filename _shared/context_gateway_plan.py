@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 import plistlib
 import re
-import tomllib
+import codex_config_toml as tomllib
 
 from context_gateway_model import (GatewayBlocked, LABEL, Mutation, Plan, Preparation, TABLE_BEGIN, TABLE_END,
     TOP_BEGIN, TOP_END, digest, encoded)
@@ -198,10 +198,12 @@ def render_provider(text, port, scope):
     if type(port) is not int or not 0 < port < 65536 or not isinstance(scope, str) or not scope:
         raise ValueError('An explicit listener port and private local scope are required')
     cleaned = remove_provider(text)
+    bom = '\ufeff' if cleaned.startswith('\ufeff') else ''
+    body = cleaned.removeprefix('\ufeff')
     original = tomllib.loads(cleaned)
     if original.get('model_provider') is not None or PROVIDER in original.get('model_providers', {}):
         raise ValueError('An unowned provider must be preserved')
-    result = (f'{TOP_BEGIN}\nmodel_provider = "{PROVIDER}"\n{TOP_END}\n' + cleaned +
+    result = (bom + f'{TOP_BEGIN}\nmodel_provider = "{PROVIDER}"\n{TOP_END}\n' + body +
         f'\n{TABLE_BEGIN}\n[model_providers.{PROVIDER}]\nname = "Ghost-ALICE context gateway"\n' +
         f'base_url = "http://127.0.0.1:{port}/codex"\nwire_api = "responses"\n' +
         'requires_openai_auth = true\nsupports_websockets = false\n' +

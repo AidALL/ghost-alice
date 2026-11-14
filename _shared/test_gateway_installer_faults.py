@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import socket
 import sqlite3
 import stat
 import subprocess
@@ -228,6 +229,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         from installer import cli, hosts, lifecycle
         from installer.runner import InstallerExit
         from installer_assets import write_ownership_marker
+        from installer_testing import hook_status
         skills = self.home / '.agents/skills'
         for name in [*names, *(['task-router'] if remaining else []), '_shared']:
             target = skills / name
@@ -243,7 +245,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.addCleanup(install_lock.release_lock, lock, generation)
         with mock.patch.dict(os.environ, environment, clear=True), \
                 mock.patch.object(gateway.sys, 'platform', 'darwin'), \
-                mock.patch.object(hosts, 'install_hooks', return_value=True), \
+                mock.patch.object(hosts, 'install_hooks', return_value=hook_status('codex', 'uninstall', 'removed')), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             try:
                 return lifecycle.uninstall(ctx, ['--force', *names])
@@ -275,6 +277,129 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.assertEqual(self.runtime_files(), runtime)
         self.assertEqual((self.root / 'native.json').read_bytes(), native)
         self.assertEqual(self.service(), service)
+
+    def assert_private_service_detached(self):
+        """Observe the native simulator, listener and artifacts, not just the guard result."""
+        native = json.loads((self.root / 'native.json').read_text())
+        self.assertFalse(native['active'])
+        with socket.socket() as listener:
+            listener.settimeout(.2)
+            self.assertNotEqual(listener.connect_ex(('127.0.0.1', native['port'])), 0)
+        self.assertFalse(self.agent.exists())
+        self.assertEqual((self.codex / 'config.toml').read_text(), 'model="native"\n')
+        self.assertIsNone(self.service())
+
+    def full_removal_after_detach(self, fault):
+        """Exercise one fault and its retry while full removal owns the service's runtime."""
+        import install_destination
+        import uninstall_cleanup as cleanup
+        from installer_assets import write_ownership_marker
+        from installer_testing import destination_fixture, installer_env
+
+        target = self.home / '.agents/skills/task-router'
+        target.mkdir(parents=True)
+        (target / 'SKILL.md').write_text('owned discovery skill\n')
+        write_ownership_marker(target, platform='codex', asset_id=target.name,
+            source_repo=str(ROOT), source_commit='fixture', install_mode='copy')
+        self.write_record({'targets': {str(target): dict(
+            name=target.name, kind='skill', mode='copy', provider='core', source=str(ROOT / target.name),
+            source_commit='fixture', used_by=['codex'], installed_at='2026-10-20T00:00:00+00:00',
+            baseline='recorded', files=content_digest.tree(target))}})
+        manifest = self.ghost / 'install-state/codex.json'
+        manifest.parent.mkdir()
+        manifest.write_text(json.dumps(dict(schema_version=1, platform='codex', source_root=str(ROOT),
+            targets=[dict(target_name=target.name, dest_path=str(target), source_path=str(ROOT / target.name),
+                          install_mode='copy')], system_env_changes=[])))
+        snapshot = self.ghost / 'pending-merges/codex/snapshot.json'
+        snapshot.parent.mkdir(parents=True)
+        skill_path = str(target / 'SKILL.md')
+        digest = content_digest.tree(target)['SKILL.md'].removeprefix('sha256:')
+        snapshot.write_text(json.dumps(dict(version=2, platform='codex', files={skill_path: digest},
+            file_records={skill_path: dict(path=skill_path, sha256=digest, asset_id=target.name,
+                                          relative_path='task-router/SKILL.md')})))
+        self.seed()
+        original_files = {path.relative_to(target): path.read_bytes() for path in target.rglob('*') if path.is_file()}
+        original_snapshot = snapshot.read_bytes()
+        environment = installer_env(self.home)
+        environment.update(FAKE_NATIVE_ROOT=str(self.root), FAULT_CASE='',
+            PATH=self.environment['PATH'] + os.pathsep + os.environ.get('PATH', ''))
+        report_path = self.root / 'full-uninstall-report.json'
+        real_remove, real_write = cleanup._remove_path, installed_payload._write
+
+        def remove(path):
+            if fault == 'file-delete' and path == target:
+                self.assert_private_service_detached()
+                raise OSError('injected target deletion failure after service detach')
+            return real_remove(path)
+
+        def write(path, data):
+            if fault == 'record-write' and path == installed_payload.path(self.ghost):
+                previous = installed_payload.read(self.ghost) or {}
+                proposed = json.loads(data)
+                if str(target) in previous.get('targets', {}) and str(target) not in proposed.get('targets', {}):
+                    self.assert_private_service_detached()
+                    self.assertFalse(target.exists())
+                    raise OSError('injected target record write failure after service detach')
+            return real_write(path, data)
+
+        def run(*, inject):
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(mock.patch.dict(os.environ, environment, clear=True))
+                stack.enter_context(install_destination.use(destination_fixture(self.root,
+                    platform_dir=str(self.codex), skills_dir=str(target.parent),
+                    ghost_root=str(self.ghost), ledger_root=str(self.ledger))))
+                stack.enter_context(mock.patch.object(gateway.sys, 'platform', 'darwin'))
+                lock = self.ghost / 'install.lock'
+                generation = install_lock.acquire_lock(lock, owner='installer:test:codex:full-removal')
+                stack.callback(install_lock.release_lock, lock, generation)
+                if inject:
+                    stack.enter_context(mock.patch.object(cleanup, '_remove_path', side_effect=remove))
+                    stack.enter_context(mock.patch.object(installed_payload, '_write', side_effect=write))
+                output = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+                code = cleanup.main(['--platform', 'codex', '--install-state-manifest', str(manifest),
+                                     '--report-path', str(report_path), '--apply'])
+            return code, json.loads(report_path.read_text()), output.getvalue()
+
+        code, report, output = run(inject=True)
+        self.assert_private_service_detached()
+        self.assertNotEqual(code, 0, report)
+        self.assertTrue(report['partial'])
+        self.assertIn('partial:', output)
+        self.assertTrue(any(item.get('kind') == 'context-gateway' and item.get('action') == 'detached'
+                            for item in report['items']))
+        item = next(item for item in report['items'] if item.get('kind') == 'install-target'
+                    and item.get('path') == str(target))
+        self.assertEqual(item['action'], 'manual-review')
+        self.assertEqual(item['file_state'], 'present' if fault == 'file-delete' else 'absent')
+        self.assertIn('injected target', '\n'.join(item.get('errors', [])))
+        self.assertTrue(manifest.is_file())
+        self.assertTrue(snapshot.is_file())
+        self.assertIn(str(target), installed_payload.read(self.ghost)['targets'])
+        self.assertEqual([row['dest_path'] for row in json.loads(manifest.read_text())['targets']], [str(target)])
+        if fault == 'file-delete':
+            self.assertEqual({path.relative_to(target): path.read_bytes()
+                              for path in target.rglob('*') if path.is_file()}, original_files)
+            self.assertEqual(snapshot.read_bytes(), original_snapshot)
+        else:
+            self.assertFalse(target.exists())
+            pruned = json.loads(snapshot.read_text())
+            self.assertNotIn(skill_path, pruned['files'])
+            self.assertNotIn(skill_path, pruned['file_records'])
+        detached_native = (self.root / 'native.json').read_bytes()
+        code, report, _ = run(inject=False)
+        self.assertEqual(code, 0, report)
+        self.assertFalse(report['partial'], report)
+        for path in (target, self.ghost / 'runtime', manifest, snapshot, installed_payload.path(self.ghost)):
+            self.assertFalse(path.exists(), str(path))
+        self.assert_private_service_detached()
+        self.assertEqual((self.root / 'native.json').read_bytes(), detached_native)
+
+    def test_full_removal_file_error_keeps_real_service_detached_and_retry_finishes(self):
+        self.full_removal_after_detach('file-delete')
+
+    def test_full_removal_record_error_keeps_real_service_detached_and_retry_finishes(self):
+        self.full_removal_after_detach('record-write')
 
     def test_dry_run_prints_a_plan_and_exits_without_applying_it(self):
         original = (self.codex / 'config.toml').read_bytes()

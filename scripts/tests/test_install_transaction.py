@@ -8,6 +8,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -34,6 +35,55 @@ def _load_install_lock():
 
 
 class InstallTransactionTest(unittest.TestCase):
+    def test_real_publish_marks_core_support_and_addon_and_restores_them_after_failure(self):
+        import hashlib
+        import install_transaction
+        from installer_assets import classify_skill_root
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            ghost = root / 'ghost'
+            ghost.mkdir()
+            lock = _load_install_lock()
+            generation = lock.acquire_lock(ghost / 'install.lock', owner='marker-publish-test')
+            self.addCleanup(lock.release_lock, ghost / 'install.lock', generation)
+            selected = [('core-skill', 'skill', 'core'), ('_shared', 'support', 'core'),
+                        ('addon-skill', 'skill', 'addon:demo')]
+            targets = []
+            for name, kind, provider in selected:
+                source = root / 'source' / name
+                source.mkdir(parents=True)
+                (source / 'payload.txt').write_bytes(b'original payload')
+                targets.append(dict(name=name, kind=kind, provider=provider, source=str(source),
+                                    source_commit='abc', dest=str(root / 'installed' / name), mode='copy'))
+            request = dict(schema_version=1, host='codex', ghost_root=str(ghost),
+                           installer=dict(commit='abc', schema_version=1),
+                           source=dict(root=str(root / 'source'), commit='abc', dirty='clean', hooks_path='hooks'),
+                           targets=targets)
+            install_transaction.publish(request)
+            originals = {}
+            for target in targets:
+                dest = Path(target['dest'])
+                marker = json.loads((dest / '.ghost-alice-install.json').read_text())
+                addon_id = 'demo' if target['provider'].startswith('addon:') else None
+                self.assertEqual(marker['owner'], 'addon' if addon_id else 'ghost-alice')
+                self.assertEqual(marker['addon_id'], addon_id)
+                self.assertEqual(marker['provided_kind'], target['kind'])
+                self.assertEqual(marker['content_hashes']['payload.txt'], hashlib.sha256(b'original payload').hexdigest())
+                self.assertEqual(classify_skill_root(dest, expected_asset_id=target['name'], expected_addon_id=addon_id).ownership,
+                                 'ghost-alice-managed')
+                if addon_id:
+                    self.assertEqual(classify_skill_root(dest, expected_addon_id='other').ownership, 'ownership-conflict')
+                originals[target['name']] = (dest / '.ghost-alice-install.json').read_bytes()
+                (Path(target['source']) / 'payload.txt').write_bytes(b'updated payload')
+            with mock.patch.object(install_transaction.PublishBatch, 'finalize', side_effect=OSError('finalize denied')):
+                with self.assertRaises(install_transaction.InstallTransactionError):
+                    install_transaction.publish(request)
+            for target in targets:
+                dest = Path(target['dest'])
+                self.assertEqual((dest / 'payload.txt').read_bytes(), b'original payload')
+                self.assertEqual((dest / '.ghost-alice-install.json').read_bytes(), originals[target['name']])
+            lock.release_lock(ghost / 'install.lock', generation)
+
     def _managed_copy(self, source: Path, dest: Path, *, asset_id: str) -> Path:
         shutil.copytree(source, dest)
         write_ownership_marker(

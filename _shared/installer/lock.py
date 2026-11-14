@@ -11,7 +11,7 @@ import os
 
 import install_lock
 import install_transaction
-from installer import locations, report, runner
+from installer import gateway_participant, locations, report
 from installer.runner import InstallerExit
 
 def stale_seconds() -> int:
@@ -46,18 +46,19 @@ def acquire(command: str, platform: str, lock_path: Path | None = None) -> tuple
 
 
 def restore_unfinished_publishes() -> None:
-    """`install_transaction.py recover --ghost-root <root> --txid <id>` for every publish whose journal
-    says neither done nor restored, newest first. A publish that cannot be restored stops the command
-    with exit 1 and names its folder: placing files over a half-finished publish would hide which
-    files are the originals."""
+    """Restore unfinished publishes under the lock, newest first, using the gateway recovery factory.
+    If recovery or staged-file cleanup raises an error, print the transaction's diagnostic
+    and stop the command with exit 1; acquire() releases the lock before propagating that exit.
+    """
     root = locations.record_root()
     for txid in install_transaction.unfinished(root):
-        result = runner.run_tool("_shared/install_transaction.py", "recover", "--ghost-root", str(root),
-                                 "--txid", txid)
-        if not result.ok:
-            report.error(f"An unfinished publish could not be restored; review "
-                         f"{install_transaction.rollbacks_root(root) / txid} and run the installer again")
-            raise InstallerExit(1)
+        try:
+            for line in install_transaction.recover(root, txid,
+                    participant_factory=gateway_participant.recovery_participants):
+                print(line)
+        except install_transaction.InstallTransactionError as exc:
+            report.error(install_transaction.failure_message(exc))
+            raise InstallerExit(1) from exc
 
 
 def release(handle: tuple[Path, str] | None) -> None:

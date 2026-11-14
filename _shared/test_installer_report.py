@@ -58,6 +58,17 @@ class InstallCommandTests(ReportCase):
 
 
 class MessageTests(ReportCase):
+    def test_nested_exception_leaves_and_cleanup_note_keep_recovery_evidence(self):
+        first = PermissionError('new receipt publish denied')
+        second = OSError('legacy receipt restore denied')
+        error = ExceptionGroup('receipt retained at /temporary/claude-v1-original.bak',
+                               [ExceptionGroup('commit', [first]), second])
+        error.add_note('Temporary receipt cleanup failed at /temporary/receipt')
+        output = '\n'.join(report.exception_lines(error))
+        for message in ('PermissionError: new receipt publish denied', 'OSError: legacy receipt restore denied',
+                        '/temporary/claude-v1-original.bak', 'Temporary receipt cleanup failed'):
+            self.assertIn(message, output)
+
     def test_prefixes_without_color_when_not_a_tty(self):
         # report.sh:5-11; colors only on a terminal (install.sh:95-99)
         self.assertEqual(self.captured(report.info, "hello"), "[INFO] hello\n")
@@ -136,7 +147,7 @@ class LogTests(ReportCase):
         previous = sys.get_int_max_str_digits()
         try:
             sys.set_int_max_str_digits(4300)
-            self.assertEqual(report.read_gateway_notes(event_file), ["later-valid"])
+            self.assertEqual(report.read_install_results(event_file), ({}, ["later-valid"], {}))
         finally:
             sys.set_int_max_str_digits(previous)
 
@@ -147,9 +158,10 @@ class LogTests(ReportCase):
         for run in runs:
             (root / f"{run}.log").write_text("log\n")
             (root / f"{run}.events.jsonl").write_text("{}\n")
-        report.log_init()
+        path = report.log_init()
         self.assertEqual(sorted(path.name for path in root.iterdir()),
                          sorted(f"{run}.{suffix}" for run in runs[-30:] for suffix in ("log", "events.jsonl")))
+        self.assertFalse(path.exists())
 
     def test_event_readers_wait_for_lf_and_keep_committed_unicode_strings(self):
         event_file = self.home / "events.jsonl"
@@ -176,15 +188,15 @@ class LogTests(ReportCase):
         note = json.dumps({"type": "gateway-result", "summary": "one\u2028two"}, ensure_ascii=False)
         unfinished = json.dumps({"type": "gateway-result", "summary": "pending"})
         event_file.write_text("invalid\n" + note + "\n" + unfinished)
-        self.assertEqual(report.read_gateway_notes(event_file), ["one\u2028two"])
+        self.assertEqual(report.read_install_results(event_file), ({}, ["one\u2028two"], {}))
         with event_file.open("a") as stream:
             stream.write("\n")
-        self.assertEqual(report.read_gateway_notes(event_file), ["one\u2028two", "pending"])
+        self.assertEqual(report.read_install_results(event_file), ({}, ["one\u2028two", "pending"], {}))
         event_file.write_bytes((note + "\n").encode() + b'{"summary":"\xe2')
-        self.assertEqual(report.read_gateway_notes(event_file), ["one\u2028two"])
+        self.assertEqual(report.read_install_results(event_file), ({}, ["one\u2028two"], {}))
         event_file.write_bytes((note + "\n").encode() + b'{"summary":"\xe2\n')
         with self.assertRaises(UnicodeDecodeError):
-            report.read_gateway_notes(event_file)
+            report.read_install_results(event_file)
 
     def test_log_init_creates_the_install_log_path_once(self):
         # report.sh:78-89
@@ -194,19 +206,6 @@ class LogTests(ReportCase):
         self.assertRegex(path.name, r"^\d{4}-\d{2}-\d{2}-\d{6}-[0-9a-f]{32}\.log$")
         self.assertEqual(os.environ.get("GHOST_ALICE_INSTALL_LOG_FILE"), str(path))
         self.assertEqual(report.log_init(), path)
-
-    def test_log_init_keeps_the_last_thirty_runs_before_it_opens_a_new_log(self):
-        # A run is its .log and its .events.jsonl.
-        root = self.home / ".ghost-alice" / "install"
-        root.mkdir(parents=True)
-        stamps = [f"2026-10-{day:02d}-{hour:02d}0000" for day in range(1, 17) for hour in (9, 21)]
-        for stamp in stamps:
-            (root / f"{stamp}.log").write_text("log\n", encoding="utf-8")
-            (root / f"{stamp}.events.jsonl").write_text("", encoding="utf-8")
-        path = report.log_init()
-        kept = sorted({name.name.split(".", 1)[0] for name in root.iterdir()})
-        self.assertEqual(kept, stamps[2:])
-        self.assertFalse(path.exists())
 
     def test_the_install_log_folder_comes_from_the_installer_locations(self):
         folder = self.home / "configured-install-logs"
@@ -295,7 +294,6 @@ class LineTests(ReportCase):
         self.assertEqual(out, "[INFO] [2/5] Skill sync: 1 skill target, 0 support targets; 0 installed, 0 updated, 1 skipped\n")
 
     def test_hook_suite_label(self):
-        # report.sh:126-129; test_report_hook_suite_label.py
         for platform in ("claude", "codex", ""):
             label = report.hook_suite_label(platform)
             self.assertEqual(label, "session-intent, tool-checkpoint, completion, session-start, session-receipt, io-trace")
@@ -320,7 +318,6 @@ class LineTests(ReportCase):
         self.assertEqual(report.progress_bar(40, 24, 30), "#" * 30)
 
     def test_common_target_progress_line(self):
-        # report.sh:158-163; test_install_progress_line_width.py:101-102, 136-138
         self.assertEqual(report.common_target_progress_line(2, 2, "done"),
                          "        Common targets      [##############################] [2/2] done")
         line = report.common_target_progress_line(26, 26, "common targets synced on all platforms")
@@ -343,6 +340,9 @@ class LineTests(ReportCase):
         self.assertIn("[3/3]", clamped)
         self.assertNotIn("[4/3]", clamped)
         self.assertTrue(clamped.startswith("\r\x1b[2K"))
+        self.assertTrue(self.captured(report.auto_update_common_target_progress_line, 26, 26,
+                                      "common targets synced on all platforms").endswith(
+                                          "[26/26] common targets synced on all platforms"))
 
 
 class ReportTextTests(ReportCase):
@@ -350,16 +350,17 @@ class ReportTextTests(ReportCase):
         # report.sh:187-227; test_installer_default_auto.py:568-594
         start = self.captured(report.print_start, "codex", 5, "dynamic")
         self.assertTrue(start.startswith("Ghost-ALICE OS installation Process Report\n\nTarget\n  Platform: codex\n"
-                                         "  Skills: [5] targets\n  Hooks: enabled\n  Visibility Level: [dynamic]\n\n"
+                                         "  Skills: [5] targets\n  Hooks: registration requested\n  Visibility Level: [dynamic]\n\n"
                                          "Progress\n  [1/5] Preflight           ok\n"))
         self.assertTrue(start.endswith("  [2/5] Skill sync          [0] [Current], [0] [updated], [0] [newly added]"))
         log = report.state().log_file
         self.assertIsNotNone(log)
-        tail = self.captured(report.print_tail, "codex", "dynamic")
+        tail = self.captured(report.print_tail, "codex", "dynamic", hook_statuses={'codex': 'installed'})
         # Codex has no /visibility command, so a Codex-only tail without notes has no Attention section.
         self.assertEqual(tail,
-            "  [3/5] Hooks               session-intent, tool-checkpoint, completion, session-start, session-receipt, io-trace enabled\n"
-            "  [4/5] Runtime config      codex hooks=true, Visibility Level=[dynamic]\n"
+            "  [3/5] codex Hooks: installed\n"
+            "        session-intent, tool-checkpoint, completion, session-start, session-receipt, io-trace registered\n"
+            "  [4/5] Runtime config      Visibility Level=[dynamic]\n"
             "  [5/5] Verification        ok\n\n"
             "Details\n"
             f"  log: {log}\n"
@@ -368,8 +369,8 @@ class ReportTextTests(ReportCase):
         self.assertIn("  Skills: [7] targets\n", full)
         self.assertIn("  Visibility Level: [minimal]\n", full)
         self.assertIn("  [2/5] Skill sync          [1] [Current], [2] [updated], [4] [newly added]\n"
-                      "  [3/5] Hooks               ", full)
-        self.assertIn("  [4/5] Runtime config      claude hooks=true, Visibility Level=[minimal]\n", full)
+                      "  [3/5] claude Hooks: unknown", full)
+        self.assertIn("  [4/5] Runtime config      Visibility Level=[minimal]\n", full)
         self.assertEqual(full.count("Ghost-ALICE OS installation Process Report"), 1)
 
     def test_tail_attention_takes_extra_notes(self):
@@ -401,9 +402,9 @@ class ReportTextTests(ReportCase):
                                     "summary": "Context gateway: registered from /src, 3 files, service running",
                                     "running": True})
         # The same observation from every host is one note.
-        self.assertEqual(report.read_gateway_notes(event_file),
-                         ["Context gateway: registered from /src, 3 files, service running"])
-        self.assertEqual(report.read_gateway_notes(self.home / "absent.jsonl"), [])
+        self.assertEqual(report.read_install_results(event_file),
+                         ({}, ["Context gateway: registered from /src, 3 files, service running"], {}))
+        self.assertEqual(report.read_install_results(self.home / "absent.jsonl"), ({}, [], {}))
 
     def test_print_auto_start_and_full(self):
         # report.sh:229-261; test_installer_default_auto.py:409-433, 476-479
@@ -413,27 +414,32 @@ class ReportTextTests(ReportCase):
         self.assertTrue(start.endswith("        Common targets      [------------------------------] [0/24] common targets synced"))
         full = self.captured(report.print_auto_full, "claude, codex", 24, "dynamic", 24)
         self.assertIn("        Common targets      [##############################] [24/24] common targets synced on all platforms\n"
-                      "  [3/5] Hooks               ", full)
-        self.assertIn("  [4/5] Runtime config      claude, codex hooks=true, Visibility Level=[dynamic]\n", full)
+                      "  [3/5] claude Hooks: unknown", full)
+        self.assertIn("  [4/5] Runtime config      Visibility Level=[dynamic]\n", full)
 
 
 class EventTests(ReportCase):
     def test_events_written_only_when_an_event_file_is_set(self):
         # report.sh:263-275
-        report.write_event("claude", 5, 1, 2, 2)
+        report.write_event("claude", 5, 1, 2, 2, verification="ok")
         report.write_target_event("claude", "x", "skill", "new")
         self.assertEqual(list((self.home).glob("**/*.jsonl")), [])
         event_file = self.home / "run" / "install.events.jsonl"
         with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_EVENT_FILE": str(event_file)}):
             report.configure(verbose=False, report_child=True, tty=False, progress_env="auto", home=self.home)
-        report.write_event("claude", 5, 1, 2, 2)
+        report.write_event("claude", 5, 1, 2, 2, verification="ok")
         report.write_target_event("codex", "task-router", "skill", "updated")
         lines = event_file.read_text(encoding="utf-8").splitlines()
-        self.assertEqual(lines[0], '{"type":"platform-result","platform":"claude","total_targets":5,"current":1,'
-                                   '"updated":2,"new":2,"verification":"ok","hooks":"enabled"}')
+        self.assertEqual(json.loads(lines[0]), dict(type='platform-result', platform='claude', total_targets=5,
+                         current=1, updated=2, new=2, verification='ok', hooks='unknown', hook_notes=[], hook_errors=[]))
         self.assertEqual(lines[1], '{"type":"target-result","platform":"codex","target_id":"task-router",'
                                    '"target_kind":"skill","status":"updated"}')
-        self.assertEqual(json.loads(lines[0])["type"], "platform-result")
+        from install_hooks import HookStatus
+        hook_status = HookStatus('claude', 'HOOK_INSTALLED', 'installed', 'installed',
+                                 {'items': [{'action': 'manual-review'}]})
+        notes = report.write_event('claude', 5, 1, 2, 2, verification='ok', hook_status=hook_status)
+        self.assertEqual(notes, ['partial: permissions retained for review'])
+        self.assertEqual(report.read_install_results(event_file), ({'claude': 'installed'}, notes, {'claude': []}))
 
     def test_progress_readers(self):
         # report.sh:277-305 wrap install_report_events; 0 for a missing or empty file

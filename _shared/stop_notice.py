@@ -10,7 +10,6 @@ the Stop event JSON carries the answer text.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 import re
@@ -74,14 +73,14 @@ def build_stop_notice(platform: str, hook_payload: Mapping[str, Any], env: Mappi
     """Build this Stop's message from the recorded review and the declared remaining work."""
     text = stop_response_text(dict(hook_payload)) if hook_payload else ''
     session = native_session(hook_payload)
-    message = dict(schema_version=SCHEMA_VERSION, platform=platform, session_id=session, input_event_id=None,
-                   body_digest='sha256:' + hashlib.sha256(text.encode()).hexdigest(), state='quiet', control=None,
-                   claims=None, unsupported_claims=[], issues=[], unresolved_criteria=[],
-                   remaining_work={'declared': False}, text='')
     source = ledger_access.source_environment(platform, session, environment=env)
     # An empty answer has no claims or block to compare; the declaration in the current route still stands.
     assessment = assess_native_completion(source, text=text, hook_payload=dict(hook_payload))
-    control = _control(text)
+    message = dict(schema_version=SCHEMA_VERSION, platform=platform, session_id=session, input_event_id=None,
+                   body_digest=assessment['body_digest'], state='quiet', control=None,
+                   claims=None, unsupported_claims=[], issues=[], unresolved_criteria=[],
+                   remaining_work={'declared': False}, text='')
+    control = _control(text) if assessment['body_digest'] is not None else None
     block = extract_control_block(text, control) if control else ''
     message.update(input_event_id=assessment['input_event_id'], control=control,
                    remaining_work=_remaining_work(assessment))

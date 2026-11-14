@@ -9,10 +9,9 @@ import unittest
 from pathlib import Path
 
 import completion_check_validator as validator
-from stop_hook_testing import assert_stop_observation, stop_issue
+from stop_hook_testing import HOOK, assert_stop_observation, stop_issue
 
 
-HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
 VALID = """Business result: 82 hours 40 minutes.
 
 [completion-check]

@@ -284,6 +284,45 @@ def validate_phase_toc_parity(skill_md: Path, text: str, issues: list[Issue]) ->
             )
 
 
+def _tomli_dependency_files(skill_dir: Path, issues: list[Issue]) -> set[Path]:
+    """Only the scanner's exact, licensed upstream Tomli copy uses upstream documentation."""
+    if skill_dir.name != 'agent-security-scan':
+        return set()
+    package = skill_dir / 'scripts/codex_config_toml'
+    if not package.exists():
+        return set()
+    source = skill_dir.parent / '_shared/codex_config_toml'
+    vendor = package / '_vendor/tomli'
+
+    def files(path):
+        return {item.relative_to(path): item.read_bytes() for item in path.rglob('*')
+                if item.is_file() and '__pycache__' not in item.parts and item.suffix != '.pyc'}
+
+    try:
+        original, copied = files(source / '_vendor/tomli'), files(vendor)
+        license_text = (vendor / 'LICENSE').read_text(encoding='utf-8')
+        provenance = (package / 'README.md').read_bytes()
+        notices = (skill_dir.parent / 'THIRD_PARTY_NOTICES.md').read_text(encoding='utf-8')
+        valid = (bool(original) and original == copied
+                 and provenance == (source / 'README.md').read_bytes()
+                 and 'Copyright (c) 2021 Taneli Hukkinen' in license_text
+                 and 'Permission is hereby granted, free of charge' in license_text
+                 and all(token in provenance.decode('utf-8') for token in
+                         ('Tomli 2.4.0', 'MIT', 'https://pypi.org/project/tomli/2.4.0/',
+                          'aa89c3f6c277dd275d8e243ad24f3b5e701491a860d5121f2cdd399fbb31fc9c'))
+                 and all(token in notices for token in
+                         ('Tomli 2.4.0', 'MIT', 'Copyright (c) 2021 Taneli Hukkinen',
+                          '_shared/codex_config_toml/_vendor/tomli/',
+                          'agent-security-scan/scripts/codex_config_toml/_vendor/tomli/')))
+    except (OSError, UnicodeError):
+        valid = False
+    if not valid:
+        issues.append(Issue('ERROR', skill_dir.name, '4', 'vendor-integrity',
+                            'Bundled Tomli must match the shared source and retain its MIT license, provenance and third-party notice'))
+        return set()
+    return {vendor / relative for relative in copied if relative.suffix == '.py'}
+
+
 def validate_phase4_references(skill_md: Path, issues: list[Issue]) -> None:
     skill_name = skill_md.parent.name
     skill_dir = skill_md.parent
@@ -331,7 +370,10 @@ def validate_phase4_references(skill_md: Path, issues: list[Issue]) -> None:
     # 4-3: When scripts/ exists, each executable file needs dependency documentation near the top.
     scripts_dir = skill_dir / "scripts"
     if scripts_dir.is_dir():
+        upstream_documented = _tomli_dependency_files(skill_dir, issues)
         for script in scripts_dir.rglob("*.py"):
+            if script in upstream_documented:
+                continue
             head = script.read_text(encoding="utf-8", errors="replace")[:2000]
             # Look for dependency hints in the shebang, docstring, or comments.
             if not re.search(r"(?im)^\s*#.*depend|requires?\s*:|dependencies\b", head):

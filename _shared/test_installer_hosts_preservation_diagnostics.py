@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
+from dataclasses import asdict
 import os
 from pathlib import Path
 import shutil
@@ -22,7 +24,7 @@ import installed_payload  # noqa: E402
 from installer import diagnostics, hosts, preservation, selection  # noqa: E402
 from installer.runner import ToolResult  # noqa: E402
 from installer.selection import ALL_SKILLS, Target  # noqa: E402
-from installer_testing import FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
+from installer_testing import FakeRunner, hook_status, make_context, make_source, quiet, use_source  # noqa: E402
 
 
 class HostCase(unittest.TestCase):
@@ -59,17 +61,39 @@ class HostCase(unittest.TestCase):
 
 
 class HookRegistrationTests(HostCase):
+    def test_child_registration_states_remain_distinct_and_invalid_evidence_is_error(self):
+        ctx = self.context('claude')
+        for status in ('installed', 'already', 'skipped', 'error'):
+            with self.subTest(status=status):
+                code = 1 if status == 'error' else 0
+                body = dict(returncode=code, results={'claude': asdict(hook_status(status=status))})
+                with mock.patch('installer.runner.run_tool', return_value=ToolResult(code, json.dumps(body), 'child message')):
+                    result, output = self.captured(hosts.install_hooks, ctx, 'install', 'claude')
+                self.assertEqual(result.legacy_status, status)
+                self.assertIn('child message', output)
+        valid = asdict(hook_status())
+        invalid = [ToolResult(0, ''), ToolResult(0, '{'),
+                   ToolResult(1, json.dumps(dict(returncode=1, results={'claude': valid}))),
+                   ToolResult(0, json.dumps(dict(returncode=0, results={'claude': asdict(hook_status(status='error'))}))),
+                   ToolResult(0, json.dumps(dict(returncode=0, results={'codex': valid}))),
+                   ToolResult(0, json.dumps(dict(returncode=0, results={'claude': dict(valid, details={'action': 'uninstall'})}))),
+                   ToolResult(0, json.dumps(dict(returncode=False, results={'claude': valid})))]
+        for result in invalid:
+            with self.subTest(result=result), mock.patch('installer.runner.run_tool', return_value=result):
+                status, _ = self.captured(hosts.install_hooks, ctx, 'install', 'claude')
+                self.assertEqual(status.legacy_status, 'error')
+
     def test_install_hooks_arguments_per_action(self):
         # install.sh:783-847; status and doctor pass no visibility
         ctx = self.context("claude", addon_sources=["/a"])
         with self.runner.patch():
             ok, out = self.captured(hosts.install_hooks, ctx, "install", "claude")
-        self.assertTrue(ok)
+        self.assertEqual(ok.legacy_status, 'installed')
         self.assertIn("[INFO] Agent hook install... (session-intent + tool-checkpoint + completion + "
                       "session-start + session-receipt + io-trace)", out)
         base = ["--core-source-root", str(self.source), "--platform", "claude",
                 "--hook-shared-dir", str(self.ghost / "runtime" / "current" / "_shared"), "--skills-dir", str(ctx.skills_dir)]
-        self.assertEqual(self.runner.tool_calls("install_hooks.py")[0], base + ["--visibility", "dynamic", "--addon-source", "/a"])
+        self.assertEqual(self.runner.tool_calls("install_hooks.py")[0], base + ["--visibility", "dynamic", "--addon-source", "/a", '--format', 'json'])
         strict = FakeRunner()
         with strict.patch():
             hosts.install_hooks(self.context("codex", visibility="strict", addon_sources=["/a"]), "install", "codex")
@@ -77,17 +101,25 @@ class HookRegistrationTests(HostCase):
         status = FakeRunner()
         with status.patch():
             hosts.install_hooks(self.context("claude", visibility="minimal", addon_sources=["/a"]), "status", "claude")
-        self.assertEqual(status.tool_calls("install_hooks.py")[0], base + ["--status", "--addon-source", "/a"])
-        uninstall = FakeRunner()
-        with uninstall.patch():
-            hosts.install_hooks(ctx, "uninstall", "claude")
-        self.assertEqual(uninstall.tool_calls("install_hooks.py")[0], base + ["--uninstall"])
+        self.assertEqual(status.tool_calls("install_hooks.py")[0], base + ["--status", "--addon-source", "/a", '--format', 'json'])
+        settings = self.home / '.claude/settings.json'
+        settings.parent.mkdir(exist_ok=True)
+        data = dict(custom='command-start', hooks={'UserPromptSubmit': [dict(hooks=[
+            dict(type='command', command='echo [session-intent-analyzer]')])]})
+        original = json.dumps(data).encode()
+        data['custom'] = 'earlier-owner-effect'
+        settings.write_text(json.dumps(data))
+        result, _ = self.captured(hosts.install_hooks, ctx, 'uninstall', 'claude',
+                                 backup_sources={settings: original})
+        self.assertEqual(result.legacy_status, 'removed')
+        self.assertEqual(settings.with_suffix('.json.bak').read_bytes(), original)
+        self.assertEqual(json.loads(settings.read_text())['custom'], 'earlier-owner-effect')
         failing = FakeRunner()
         failing.respond_to("install_hooks.py", ToolResult(1))
         with failing.patch():
             ok, out = self.captured(hosts.install_hooks, ctx, "install", "claude")
-        self.assertFalse(ok)
-        self.assertIn("[ERROR] Hook install failed", out)
+        self.assertEqual(ok.legacy_status, 'error')
+        self.assertIn('[ERROR] Hook install returned an invalid result', out)
 
     def test_bootstrap_blocks(self):
         # bootstrap.sh:12-38, 86-112

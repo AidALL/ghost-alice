@@ -7,7 +7,7 @@ import copy
 import json
 import os
 import shutil
-import tomllib
+import codex_config_toml as tomllib
 from collections.abc import Mapping
 from pathlib import Path
 import atomic_write

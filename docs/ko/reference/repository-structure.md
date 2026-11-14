@@ -84,7 +84,7 @@
 
 ## 런타임 상태 보존
 
-`_shared/state_retention.py`는 Core 설치가 `~/.ghost-alice`와 호스트 폴더 아래에 작성하는 파일과 폴더의 표 하나와, 각 항목이 커지지 않게 하는 규칙을 가집니다. 파일을 작성하는 코드가 작성할 때 그 규칙을 적용하므로, 파일을 만든 코드가 규칙이 더 남기지 않는 것을 삭제합니다. `io-trace.jsonl`처럼 여러 프로세스가 덧붙이는 기록은 그 로그에 거는 잠금 하나 아래에서 덧붙이고 규칙을 적용합니다. 그래서 다른 프로세스가 회전하기 전에 읽은 크기로 회전하는 일이 없습니다. 삭제가 실패해도 작성하는 코드는 멈추지 않습니다. 실패는 `~/.ghost-alice/state-retention-failures.jsonl`에 한 줄로 기록되고, 이 파일은 마지막 500줄만 남깁니다. `--doctor`는 이 기록을 `state-retention` 줄로 보고합니다. 로그의 잠금을 2초 넘게 기다린 작성 코드는 규칙을 적용하지 않고 줄만 덧붙인 뒤, 기다린 사실을 같은 파일에 기록합니다. 끝까지 작성하지 못한 로그 줄은 사라집니다. `state_retention.append`는 가능하면 그 실패를 같은 파일에 기록하고, 작성 코드는 계속 실행합니다. 인스톨러가 배포를 중지한 자산을 이동하는 단계만 오류를 전달받아 그 자산을 복원합니다. Windows와 `flock`을 거부하는 파일 시스템에서는 로그 작성 코드가 잠금 없이 규칙을 적용합니다. 인스톨러도 삭제하지 못한 스테이징 폴더나 이전 인스톨러의 롤백 폴더를 같은 파일에 기록합니다. 테스트 하나가 빈 홈에 설치하고, 등록된 훅을 모두 호출하고, 게이트웨이 요청 하나를 전달하고, 제거합니다. 작성된 파일이나 폴더가 표의 어느 항목과도 맞지 않으면 테스트가 실패합니다. 다른 테스트는 파일을 삭제하는 항목에 그 규칙을 적용하는 작성 코드가 없으면 실패합니다.
+`_shared/state_retention.py`는 Core 설치가 `~/.ghost-alice`와 호스트 폴더 아래에 작성하는 파일·폴더와 각 항목의 보존 규칙을 기록합니다. 로그 작성자는 작성 시점에 크기·개수 제한을 적용하며, 여러 프로세스가 덧붙일 때는 로그 잠금 하나 아래에서 추가와 회전을 수행합니다. 일반 로그 유지 작업이 실패하면 `~/.ghost-alice/state-retention-failures.jsonl`에 한 줄을 기록하고 작성자는 계속 실행합니다. 이 파일은 마지막 500줄을 남기며 `--doctor`가 보고합니다. 로그 잠금을 2초 넘게 기다리면 보존 규칙을 적용하지 않고 줄을 덧붙인 뒤 기다린 사실을 기록합니다. 끝까지 쓰지 못한 로그 줄의 실패도 가능하면 기록합니다. Windows와 `flock`을 거부하는 파일 시스템에서는 기존 잠금 없는 동작을 유지합니다. 스테이징 폴더 삭제 실패도 같은 진단 파일에 기록합니다. 필수 폐기·이전 사본 정리는 [담당 절차](installer-architecture.md#폐기와-최종-정리)에 따라 미완료를 호출자에게 전달합니다. 보존 표의 `retired-assets` 항목은 명명 전용 방식 `owner-completed`를 사용하며, `state_retention.apply()`가 해당 사본을 삭제하지 않습니다. 테스트는 생성된 경로에 표 항목이 있는지, 자동 삭제 규칙을 적용하는 작성자가 있는지 확인합니다.
 
 | 경로 | 규칙 | 적용 주체 |
 | --- | --- | --- |
@@ -92,11 +92,13 @@
 | `~/.ghost-alice/io-trace.jsonl` | 10,000줄을 넘으면 마지막 5,000줄만 남김 | io-trace 행마다 |
 | `~/.ghost-alice/install/` | 최근 설치 실행 30회분, 실행마다 로그 하나와 이벤트 기록 하나 | 인스톨러, 새 로그를 열기 전 |
 | `~/.ghost-alice/install-state/<host>-events.jsonl` | 5MB를 넘으면 이전 파일 하나로 이동 | 게시 실패나, 더 이상 설치하지 않는 스킬·명령을 백업으로 옮길 때마다 |
-| `~/.ghost-alice/rollbacks/` | 끝난 게시 중 최근 20개. 끝나지 않은 게시는 복원될 때까지 남김 | 게시마다 |
+| `~/.ghost-alice/rollbacks/` | `owner-completed`: 현재 의존이 없는 변경 없는 관리 원본을 삭제하며 미완료 복구와 외부 변경을 보존 | 전체 또는 일부 Core 설치 성공 뒤 [완료된 게시 정리](installer-architecture.md#설치에-성공한-코드-버전) |
+| `~/.ghost-alice/versions/` | 현재 버전을 포함한 성공 코드 버전 총 3개. 실제 사용 중이거나 수정되어 추가로 보존한 버전은 경로와 이유를 표시 | 완료된 게시 정리 뒤 [성공 소스 보관 담당자](installer-architecture.md#설치에-성공한-코드-버전) |
+| `~/.ghost-alice/deprecated-skill-backups/`, `~/.claude/retired-command-backups/` | `owner-completed`: 담당자가 완료 근거로 복구·검토 필요가 해소된 사본을 삭제하고, 미완료·수정·미확인 사본은 보존 | [최종 정리 담당자](installer-architecture.md#폐기와-최종-정리) |
 | `~/.ghost-alice/uninstall-reports/` | 최근 보고서 30개 | 제거 명령, 새 보고서를 작성하기 전 |
 | `~/.ghost-alice/context-gateway/usage.jsonl` | 20MB를 넘으면 이전 파일 하나로 이동 | 게이트웨이 이벤트마다 |
 | `~/.ghost-alice/context-gateway/service.log` | 5MB를 넘으면 `service.log.1`로 복사한 뒤 비움. launchd가 서비스를 위해 이 파일을 열어 두기 때문 | 게이트웨이, 시작할 때 |
 | `~/.ghost-alice/context-gateway/backups/` | 최근 등록 5개와 설치 기록이 가리키는 백업 | 게이트웨이 등록이 성공할 때마다 |
 | 호스트 폴더의 `settings.json.bak*`, `hooks.json.bak*` | 최근 3개 | 훅 설정을 작성할 때마다 |
 
-한도를 크게 넘은 파일은 최근 부분만 한도만큼 지난 파일로 남깁니다. 게이트웨이는 요청 필드를 항목 수, 바이트 합, 종류·역할별 개수로 기록하고, 사용량 이벤트마다 사용량 값을 하나만 기록합니다. `response-end`에는 응답이 끝난 방식을 `completed`, `client-closed`, `upstream-closed` 중 하나로 기록합니다. 클라이언트가 연결을 닫으면 `service.log`에 traceback 대신 이 결과가 남습니다. 설치 기록, 호스트 설정, 설치된 스킬과 런타임은 같은 자리에 덮어씁니다. `~/.ghost-alice/uninstall-backup/<host>/support-state/` 아래의 제거 보존 사본, 병합 대기 사본, 더 이상 설치하지 않는 스킬·명령의 백업에는 사용자 변경분이 들어 있을 수 있으므로 프로그램이 삭제하지 않습니다. 영수증의 저장소 루트에 있는 Core 원장 데이터베이스 `.tmp/session-intent/ghost-state.sqlite3`는 이 표 밖에 있으며 행을 기한 없이 유지합니다.
+한도를 크게 넘은 파일은 최근 부분만 한도만큼 지난 파일로 남깁니다. 게이트웨이는 요청 필드를 항목 수, 바이트 합, 종류·역할별 개수로 기록하고, 사용량 이벤트마다 사용량 값을 하나만 기록합니다. `response-end`에는 응답이 끝난 방식을 `completed`, `client-closed`, `upstream-closed` 중 하나로 기록합니다. 클라이언트가 연결을 닫으면 `service.log`에 traceback 대신 이 결과가 남습니다. 설치 기록, 호스트 설정, 설치된 스킬과 런타임은 같은 자리에 덮어씁니다. 보존 프로그램은 외부 변경이 들어 있을 수 있는 `~/.ghost-alice/uninstall-backup/<host>/support-state/` 아래의 제거 보존 사본과 병합 대기 사본을 보존합니다. 폐기 사본은 위의 `owner-completed` 규칙을 따릅니다. 영수증의 저장소 루트에 있는 Core 원장 데이터베이스 `.tmp/session-intent/ghost-state.sqlite3`는 이 표 밖에 있으며 행을 기한 없이 유지합니다.

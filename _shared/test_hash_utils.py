@@ -44,17 +44,23 @@ class HashTargetMarkerTest(unittest.TestCase):
         legacy = hashlib.sha256(b"SKILL.md\0body\n\0").hexdigest()
         entry = {"name": "skill", "target": str(self.d), "install_mode": "copy", "content_hash": legacy}
         self.assertTrue(_same_addon_target_is_clean(self.d, legacy, "copy"))
-        self.assertEqual(_process_target(entry, allowed_roots=[self.d.parent], apply_changes=False)["action"], "would-remove")
+        self.assertEqual(_process_target(entry, allowed_roots=[self.d.parent],
+                         addons_dir=self.d.parent / 'addons/codex', platform='codex')["action"], "would-remove")
         self.assertEqual(entry["content_hash"], legacy)
         self.assertTrue(hash_utils.hash_target(self.d, "copy").startswith("tree-v2:"))
         (self.d / "SKILL.md").write_text("external change")
         self.assertFalse(_same_addon_target_is_clean(self.d, legacy, "copy"))
-        self.assertEqual(_process_target(entry, allowed_roots=[self.d.parent], apply_changes=False)["action"], "manual-review")
+        self.assertEqual(_process_target(entry, allowed_roots=[self.d.parent],
+                         addons_dir=self.d.parent / 'addons/codex', platform='codex')["action"], "manual-review")
 
     def test_new_directory_baseline_still_authorizes_clean_removal(self):
-        from addon_uninstall import _process_target
+        from addon_uninstall import _process_target, _apply_target
         entry = {"name": "skill", "target": str(self.d), "install_mode": "copy", "content_hash": hash_utils.hash_target(self.d, "copy")}
-        self.assertEqual(_process_target(entry, allowed_roots=[self.d.parent], apply_changes=True)["action"], "removed")
+        item = _process_target(entry, allowed_roots=[self.d.parent],
+                               addons_dir=self.d.parent / 'addons/codex', platform='codex')
+        _apply_target(item, entry, allowed_roots=[self.d.parent],
+                      addons_dir=self.d.parent / 'addons/codex', platform='codex')
+        self.assertEqual(item["action"], "removed")
         self.assertFalse(self.d.exists())
 
     def test_copy_hash_ignores_managed_marker(self):

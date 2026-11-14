@@ -17,8 +17,9 @@
   provider blocks, None until a registration recorded it), `config_backup`,
   `registered_at`, `restarted_at` and `listener_ready`.
 
-`update` is the one writer of record sections and `restore` puts back a copy a
-publish saved; both write through a temporary file and a rename, and refuse unless
+`update` writes record sections, `release_target` removes a confirmed host reference,
+and `restore` puts back a copy a publish saved; each writes through a temporary file
+and a rename, and refuses unless
 this process or the process that started it holds the install lock. `migrate`
 builds the record once from the records an earlier installer wrote and
 `migrate_service` the `service` section once from the gateway's installation
@@ -198,6 +199,37 @@ def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None]) -> dic
             if isinstance(previous, Mapping) and isinstance(previous.get("used_by"), list):
                 merged["used_by"] = sorted(set(previous["used_by"]) | set(merged["used_by"]))
             targets[key] = merged
+    _write(path(ghost_root), _encode(record))
+    return record
+
+
+def release_target(ghost_root: Path | str, *, destination: Path | str,
+                   provider: str, platform: str) -> dict | None:
+    """Release one confirmed host reference at an exact destination and provider.
+
+    The caller confirms removal or shared-reference release before calling. Other
+    hosts keep the target entry; the last host removes it. Missing references are
+    unchanged, and this operation never changes service or recovery records.
+    """
+    _require_lock(ghost_root)
+    key = str(destination)
+    if not _absolute(key) or not isinstance(provider, str) or not provider or not isinstance(platform, str) or not platform:
+        raise RecordError("release_target needs an absolute destination, provider and platform")
+    record = read(ghost_root)
+    if record is None or key not in record.get("targets", {}):
+        return record
+    targets = record["targets"]
+    entry = _check_entry(key, targets[key])
+    if not isinstance(entry.get("provider"), str) or not entry["provider"]:
+        raise RecordError(f"target {key} needs a provider")
+    if entry["provider"] != provider or platform not in entry["used_by"]:
+        return record
+    remaining = [host for host in entry["used_by"] if host != platform]
+    if remaining:
+        entry["used_by"] = remaining
+        targets[key] = entry
+    else:
+        del targets[key]
     _write(path(ghost_root), _encode(record))
     return record
 

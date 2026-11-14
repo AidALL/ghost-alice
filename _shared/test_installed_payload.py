@@ -135,6 +135,95 @@ class SchemaAndWriteTests(RecordCase):
             installed_payload.read(self.ghost)
 
 
+class ReleaseTargetTests(RecordCase):
+    def release(self, destination="/a", provider="core", platform="codex"):
+        self.assertTrue(callable(getattr(installed_payload, "release_target", None)),
+                        "installed_payload must own removal of a confirmed host reference")
+        return installed_payload.release_target(self.ghost, destination=destination,
+                                                provider=provider, platform=platform)
+
+    def test_releasing_one_host_preserves_other_hosts_targets_and_sections(self):
+        self.hold_lock()
+        record = {
+            "schema_version": 1,
+            "targets": {
+                "/a": _entry(used_by=["claude", "codex"]),
+                "/alphabet": _entry(),
+                "/runtime/_shared": _entry(kind="runtime", used_by=["codex"]),
+                "/addon": _entry(provider="addon-x", used_by=["codex"]),
+            },
+            "service": {"runtime_root": "/runtime/_shared", "preserved": True},
+            "last_transaction": {"rollback_dir": "/rollbacks/old"},
+        }
+        self.record.write_text(json.dumps(record), encoding="utf-8")
+        rollback = self.home / "saved-record.json"
+        rollback.write_bytes(self.record.read_bytes())
+        saved = rollback.read_bytes()
+        expected = json.loads(json.dumps(record))
+        expected["targets"]["/a"]["used_by"] = ["claude"]
+
+        self.assertEqual(self.release(), expected)
+        self.assertEqual(json.loads(self.record.read_text()), expected)
+        after = self.record.read_bytes()
+        self.assertEqual(self.release(), expected)
+        self.assertEqual(self.record.read_bytes(), after)
+        self.assertEqual(rollback.read_bytes(), saved)
+
+    def test_releasing_the_last_host_removes_only_the_exact_provider_and_path(self):
+        self.hold_lock()
+        installed_payload.update(self.ghost, {"targets": {
+            "/a": _entry(used_by=["codex"]),
+            "/a/child": _entry(used_by=["codex"]),
+            "/alphabet": _entry(used_by=["codex"]),
+        }})
+        before = self.record.read_bytes()
+        self.release(provider="addon-x")
+        self.release(destination="/missing")
+        self.assertEqual(self.record.read_bytes(), before)
+        self.release()
+        expected = {"/a/child": _entry(used_by=["codex"]), "/alphabet": _entry(used_by=["codex"])}
+        self.assertEqual(installed_payload.read(self.ghost)["targets"], expected)
+        after = self.record.read_bytes()
+        self.release()
+        self.assertEqual(self.record.read_bytes(), after)
+
+    def test_missing_record_stays_missing(self):
+        self.hold_lock()
+        self.assertIsNone(self.release())
+        self.assertFalse(self.record.exists())
+
+    def test_release_requires_the_install_lock(self):
+        with self.assertRaises(installed_payload.NotLockHolder):
+            self.release()
+        self.assertFalse(self.record.exists())
+
+    def test_malformed_records_and_selected_entries_are_preserved_and_reported(self):
+        self.hold_lock()
+        values = ["{broken", "[]", '{"schema_version": 2, "targets": {}}',
+                  '{"schema_version": 1, "targets": []}']
+        for entry in (None, {}, _entry(used_by="codex"), _entry(used_by=[42]), _entry(provider=None)):
+            values.append(json.dumps({"schema_version": 1, "targets": {"/a": entry}}))
+        for raw in values:
+            with self.subTest(raw=raw):
+                self.record.write_text(raw, encoding="utf-8")
+                before = self.record.read_bytes()
+                with self.assertRaises(installed_payload.RecordError):
+                    self.release()
+                self.assertEqual(self.record.read_bytes(), before)
+
+    def test_failed_release_write_keeps_record_and_can_be_retried(self):
+        self.hold_lock()
+        installed_payload.update(self.ghost, {"targets": {"/a": _entry(used_by=["codex"])}})
+        before = self.record.read_bytes()
+        with mock.patch.object(installed_payload.os, "replace", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                self.release()
+        self.assertEqual(self.record.read_bytes(), before)
+        self.assertFalse(list(self.ghost.glob(".*.tmp")))
+        self.release()
+        self.assertEqual(installed_payload.read(self.ghost)["targets"], {})
+
+
 class LockOwnerTests(RecordCase):
     def test_update_without_the_install_lock_is_refused(self):
         with self.assertRaises(installed_payload.NotLockHolder):

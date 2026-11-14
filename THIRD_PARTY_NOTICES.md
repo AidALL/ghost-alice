@@ -2,10 +2,11 @@
 
 Ghost-ALICE OS project-owned source code and documentation are licensed under the Apache License, Version 2.0. See `LICENSE`.
 
-This file records bundled third-party reference material and provenance that is not assumed to be project-owned Apache-2.0 content unless explicitly stated.
+This file records bundled third-party code, reference material and provenance that is not assumed to be project-owned Apache-2.0 content unless explicitly stated.
 ## Contents
 
 - [Bundled Reference Material](#bundled-reference-material)
+- [Bundled Code](#bundled-code)
 - [Project-Owned Implementations With External Provenance](#project-owned-implementations-with-external-provenance)
   - [`coding-convention/`](#coding-convention)
 - [Maintainer Checklist](#maintainer-checklist)
@@ -14,6 +15,12 @@ This file records bundled third-party reference material and provenance that is 
 ## Bundled Reference Material
 
 The core repository ships no bundled third-party reference material. If reference data is added, record its source URL, license, copyright notice, and local path here for release readiness.
+
+## Bundled Code
+
+Tomli 2.4.0 supplies the Codex TOML 1.1 parser. Its source files and MIT license are unmodified. Copyright (c) 2021 Taneli Hukkinen. Upstream sources: [PyPI](https://pypi.org/project/tomli/2.4.0/) and [GitHub](https://github.com/hukkin/tomli/tree/2.4.0).
+
+The shared source is `_shared/codex_config_toml/_vendor/tomli/`; the standalone scanner distribution copy is `agent-security-scan/scripts/codex_config_toml/_vendor/tomli/`. Both include upstream `LICENSE`. The parent package's `README.md` records the source archive SHA-256 and the command that generates the scanner copy from the shared source.
 
 ## Project-Owned Implementations With External Provenance
 
@@ -30,6 +37,6 @@ Do not assume that copied, translated, or closely adapted upstream documentation
 
 ## Maintainer Checklist
 
-- Keep this file in sync when adding bundled external reference material.
+- Keep this file in sync when adding bundled external code or reference material.
 - Keep source URLs and local locators specific enough for a future license audit.
 - Prefer linking to upstream documentation over copying long upstream text.

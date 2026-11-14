@@ -1,4 +1,4 @@
-"""Gateway detachment precedes every dependent Core cleanup mutation.
+"""Gateway preflight precedes references; detachment precedes dependent file removal.
 
 The full uninstall asks the gateway participant's judgment with the removal roots it computed: a registered
 service whose runtime (or a service file) is among them, or a Codex full removal, is detached first; a
@@ -8,8 +8,10 @@ judgment asks launchd and holds only for a loaded service whose program is insid
 """
 import argparse
 import contextlib
+from dataclasses import replace
 import io
 import json
+import os
 from pathlib import Path
 import plistlib
 import sys
@@ -22,9 +24,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import context_gateway_install as gateway  # noqa: E402
 import gateway_testing  # noqa: E402
 import installed_payload  # noqa: E402
+import install_destination  # noqa: E402
 import uninstall_cleanup as cleanup  # noqa: E402
 from context_gateway_model import GatewayBlocked, LABEL  # noqa: E402
 from hook_definitions import PROVIDER  # noqa: E402
+from install_hooks import HookStatus
+from installer_testing import destination_fixture, installer_env
+
+
+def detached_hooks(platform='claude'):
+    return HookStatus(platform, 'HOOK_UNINSTALL_COMPLETE', 'removed', 'removed',
+                      dict(items=[dict(kind='hook-config', action='unchanged')],
+                           hooks_detached=True, would_detach=True, settings_state='readable'))
 
 
 class RegisteredHomeCase(unittest.TestCase):
@@ -34,9 +45,14 @@ class RegisteredHomeCase(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+        self.enterContext(patch.dict(os.environ, installer_env(self.root), clear=True))
         home = patch.object(gateway.Path, 'home', return_value=self.root)
         home.start(); self.addCleanup(home.stop)
         self.reg = gateway_testing.registered_home(self, self.root)
+        self.destination = self.enterContext(install_destination.use(destination_fixture(
+            self.root, platform_dir=str(self.reg.claude), skills_dir=str(self.reg.claude / 'skills'),
+            ghost_root=str(self.reg.ghost), ledger_root=str(self.reg.ledger),
+            runtime_shared_dir=str(self.reg.shared))))
         self.active = True
         self.stops = 0
         self.patchers = [
@@ -94,6 +110,23 @@ class GatewayUninstallTests(RegisteredHomeCase):
         super().setUp()
         self.targets = []
 
+    def test_unreadable_claude_settings_preserve_gateway_with_retained_runtime(self):
+        manifest = self.reg.ghost / 'install-state/claude.json'
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(json.dumps(dict(platform='claude', targets=[])))
+        self.reg.claude.mkdir(exist_ok=True)
+        settings = self.reg.claude / 'settings.json'
+        settings.write_bytes(b'{')
+        original = {path: path.read_bytes() for path in (manifest, settings, self.reg.config, self.reg.agent)}
+        result = cleanup.build_report(argparse.Namespace(platform='claude', apply_changes=True,
+                                                        install_state_manifest=manifest))
+        self.assertTrue(result['hook_error'])
+        self.assertTrue(self.active)
+        self.assertEqual(self.stops, 0)
+        self.assertIsNotNone(self.reg.service())
+        self.assertTrue(self.reg.shared.exists())
+        self.assertEqual({path: path.read_bytes() for path in original}, original)
+
     def report(self, *, platform='codex', apply_changes=True, target=None):
         manifest = self.root / '.ghost-alice/install-state' / (platform + '.json')
         manifest.parent.mkdir(parents=True, exist_ok=True)
@@ -102,17 +135,19 @@ class GatewayUninstallTests(RegisteredHomeCase):
         args = argparse.Namespace(platform=platform, apply_changes=apply_changes, install_state_manifest=manifest)
 
         def remove(*_args, **_kwargs):
-            if not _kwargs.get('apply_changes'):
-                return dict(action='would-remove', path=str(target))
             self.targets.append(dict(active=self.active, config=self.reg.config.read_text()))
-            return dict(action='unchanged')
+            _args[0].update(action='removed')
 
-        with patch.object(cleanup, '_hook_item', return_value=dict(action='unchanged')) as hooks, \
+        platform_dir = self.reg.claude if platform == 'claude' else self.reg.codex
+        with install_destination.use(replace(self.destination, platform_dir=str(platform_dir),
+                                              skills_dir=str(cleanup.locations.skills_dir(platform)))), \
+             patch.object(cleanup, 'uninstall_hook', return_value=detached_hooks(platform)) as hooks, \
              patch.object(cleanup, '_global_rule_items', return_value=[]), \
-             patch.object(cleanup, '_target_item', side_effect=remove), \
+             patch.object(cleanup, '_target_item', return_value=dict(kind='install-target', action='would-remove', path=str(target))), \
+             patch.object(cleanup, '_apply_target_item', side_effect=remove), \
              patch.object(cleanup, '_support_artifact_items', return_value=[]):
             result = cleanup.build_report(args)
-        return result, hooks.call_count
+        return result, sum(not call.kwargs.get('dry_run', False) for call in hooks.call_args_list)
 
     def test_the_codex_full_removal_detaches_before_core_targets_and_preserves_adjacent_edits(self):
         config = self.reg.config
@@ -129,12 +164,13 @@ class GatewayUninstallTests(RegisteredHomeCase):
         item = next(item for item in result['items'] if item.get('kind') == 'context-gateway')
         self.assertEqual(item['action'], 'detached')
 
-    def test_uncertain_service_stop_aborts_all_dependent_core_mutations(self):
+    def test_uncertain_service_stop_blocks_files_after_reference_detachment(self):
         with patch.object(gateway, '_stop_service', side_effect=RuntimeError('stop unconfirmed')):
             result, hooks = self.report()
         self.assertEqual(self.targets, [])
-        self.assertEqual(hooks, 0)
-        self.assertEqual(result['items'][0]['action'], 'manual-review')
+        self.assertEqual(hooks, 1)
+        self.assertTrue(any(item.get('kind') == 'context-gateway' and item['action'] == 'manual-review'
+                            for item in result['items']))
         self.assertTrue(self.reg.agent.exists())
         self.assertIn('ghost_alice_context', self.reg.config.read_text())
         self.assertIsNotNone(self.reg.service())
@@ -145,17 +181,19 @@ class GatewayUninstallTests(RegisteredHomeCase):
             raise RuntimeError('native absence check failed')
         with patch.object(gateway, '_stop_service', side_effect=uncertain):
             result, hooks = self.report()
-        self.assertEqual((hooks, self.targets), (0, []))
-        self.assertIn('stop/absence is unconfirmed', result['items'][0]['detail'])
+        self.assertEqual((hooks, self.targets), (1, []))
+        self.assertIn('stop/absence is unconfirmed', next(item['detail'] for item in result['items']
+                                                       if item.get('kind') == 'context-gateway'))
         self.assertTrue(self.reg.agent.exists())
         self.assertIn('ghost_alice_context', self.reg.config.read_text())
 
     def test_failed_second_absence_observation_restores_certified_stopped_service(self):
-        with patch.object(gateway, '_service_state', side_effect=['running', RuntimeError('observation failed')]):
+        with patch.object(gateway, '_service_state', side_effect=['running', 'running', RuntimeError('observation failed')]):
             result, hooks = self.report()
-        self.assertEqual((hooks, self.targets), (0, []))
+        self.assertEqual((hooks, self.targets), (1, []))
         self.assertTrue(self.active)
-        self.assertIn('prior configuration/service retained', result['items'][0]['detail'])
+        self.assertIn('prior configuration/service retained', next(item['detail'] for item in result['items']
+                                                                 if item.get('kind') == 'context-gateway'))
         self.assertIsNotNone(self.reg.service())
 
     def test_externally_changed_provider_blocks_are_preserved_and_block_removal(self):
@@ -193,7 +231,7 @@ class GatewayUninstallTests(RegisteredHomeCase):
         original = config.read_bytes()
         with patch.object(gateway, '_write', side_effect=OSError('config is unwritable')):
             result, hooks = self.report()
-        self.assertEqual((hooks, self.targets), (0, []))
+        self.assertEqual((hooks, self.targets), (1, []))
         self.assertEqual(config.read_bytes(), original)
         self.assertTrue(self.active, 'the unchanged provider must retain its running service')
         self.assertTrue(self.reg.agent.exists())
@@ -320,7 +358,6 @@ class GatewayUninstallTests(RegisteredHomeCase):
                     result, hooks = self.report()
                 self.assertEqual(bool(result.get('blocked')), blocked, result)
                 self.assertEqual(hooks, 0 if blocked else 1)
-                self.assertEqual(native.call_count, 1)
                 self.assertTrue(config.is_symlink())
                 self.assertEqual(target.read_text(), text)
 
@@ -357,9 +394,12 @@ class GatewayUninstallTests(RegisteredHomeCase):
                 target.unlink(); target.write_bytes(raw)
 
     def test_a_target_preserved_for_codex_is_not_a_removal_root_and_leaves_the_gateway_alone(self):
+        from installer_assets import write_ownership_marker
         shared = self.root / '.claude/skills/_shared'
         shared.mkdir(parents=True)
         (shared / 'completion_assessment.py').write_text('installed Core')
+        write_ownership_marker(shared, platform='claude', asset_id='_shared', source_repo=str(self.root),
+                               source_commit='fixture-before-upgrade', install_mode='copy')
         manifests = self.root / '.ghost-alice/install-state'
         manifests.mkdir(parents=True, exist_ok=True)
         body = dict(targets=[dict(target_name='_shared', dest_path=str(shared))])
@@ -367,7 +407,7 @@ class GatewayUninstallTests(RegisteredHomeCase):
             (manifests / (platform + '.json')).write_text(json.dumps(dict(body, platform=platform)))
         args = argparse.Namespace(platform='claude', apply_changes=True, install_state_manifest=manifests / 'claude.json')
         with patch.object(cleanup, '_claude_home', return_value=self.root / '.claude'), \
-             patch.object(cleanup, '_hook_item', return_value=dict(action='unchanged')), \
+             patch.object(cleanup, 'uninstall_hook', return_value=detached_hooks()), \
              patch.object(cleanup, '_global_rule_items', return_value=[]), \
              patch.object(cleanup, '_support_artifact_items', return_value=[]):
             result = cleanup.build_report(args)

@@ -37,6 +37,7 @@ GATEWAY_MODULES = ("context_gateway_install", "context_gateway_plan", "context_g
 # Shared modules belong to neither layer: the installer, the runtime and the skills may all import them, so a
 # shared module imports only the standard library and the shared modules this table names for it.
 SHARED_MODULES = {
+    "codex_config_toml": {"_vendor"},
     "hook_definitions": set(),
     "install_lock": {"file_lock"},
     "content_digest": set(),
@@ -98,8 +99,21 @@ class LayerRuleTests(unittest.TestCase):
     def test_shared_modules_import_only_the_standard_library_and_their_named_shared_modules(self):
         for name, allowed in SHARED_MODULES.items():
             with self.subTest(module=name):
-                imported = {target for target, _ in _imported_modules(SHARED / f"{name}.py")}
+                path = SHARED / 'codex_config_toml' / '__init__.py' if name == 'codex_config_toml' else SHARED / f'{name}.py'
+                imported = {target for target, _ in _imported_modules(path)}
                 self.assertEqual(imported - set(sys.stdlib_module_names) - {"__future__"}, allowed)
+
+    def test_codex_syntax_package_imports_only_its_relative_vendor(self):
+        tree = ast.parse((SHARED / 'codex_config_toml' / '__init__.py').read_text())
+        imports = [node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))]
+        self.assertEqual(len(imports), 1)
+        self.assertIsInstance(imports[0], ast.ImportFrom)
+        self.assertEqual((imports[0].level, imports[0].module), (1, '_vendor.tomli'))
+
+    def test_runtime_configuration_does_not_import_installer_modules(self):
+        imported = {target for target, _ in _imported_modules(SHARED / 'runtime_config.py')}
+        self.assertEqual(imported & set(INSTALLER_MODULES), set())
+        self.assertIn('codex_config_toml', imported)
 
     def test_no_module_is_both_shared_and_in_a_layer(self):
         self.assertEqual(set(SHARED_MODULES) & (set(RUNTIME_MODULES) | set(INSTALLER_MODULES)), set())

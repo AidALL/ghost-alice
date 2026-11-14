@@ -125,7 +125,6 @@ class TargetTests(SelectionCase):
                                                 "skill-evolution", "agent-security-scan", "merge-companion",
                                                 "necessity-gate", "session-intent-analyzer", "compact-handoff",
                                                 "task-router"))
-        self.assertEqual(selection.DEPRECATED_INSTALLED_SKILLS, ("harness-security-scan", "session-intent-guard"))
 
     def test_expand_single_family_and_missing(self):
         # targets.sh:5-26
@@ -175,24 +174,36 @@ class TargetTests(SelectionCase):
 
 
 class CleanupTests(SelectionCase):
-    def test_deprecated_skills_move_to_backups_then_retired_assets_runs(self):
-        # targets.sh:340-376
+    def test_retirement_owner_preserves_unknown_names_and_moves_proven_core(self):
+        import retired_assets
+        from installer_assets import write_ownership_marker
         ctx = self.context("claude")
         skills_root = ctx.skills_dir
         (skills_root / "harness-security-scan").mkdir(parents=True)
-        (skills_root / "harness-security-scan" / "SKILL.md").write_text("old", encoding="utf-8")
-        (skills_root / "session-intent-guard").symlink_to(self.source / "alpha")
+        private = skills_root / "harness-security-scan" / "SKILL.md"
+        private.write_text("private", encoding="utf-8")
+        managed = skills_root / "session-intent-guard"
+        managed.mkdir()
+        (managed / 'SKILL.md').write_text('old managed\n')
+        write_ownership_marker(managed, platform='claude', asset_id=managed.name,
+                               source_repo=str(self.source), source_commit='old', install_mode='copy')
         calls = []
-        with mock.patch("installer.runner.run_tool", side_effect=lambda *a, **k: (calls.append((a, k)), runner.ToolResult(0))[1]):
+        def invoke(*args, **kwargs):
+            calls.append((args, kwargs))
+            return runner.ToolResult(retired_assets.main(list(args[1:])))
+        with mock.patch("installer.runner.run_tool", side_effect=invoke), \
+                mock.patch('uninstall_cleanup._platforms_referencing_target', return_value=[]), \
+                mock.patch('uninstall_cleanup.release_target_records', create=True) as release:
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 self.assertTrue(selection.cleanup_deprecated_installed_skills(ctx, skills_root))
         backups = sorted((self.home / ".ghost-alice" / "deprecated-skill-backups").iterdir())
-        self.assertEqual([b.name.rsplit("-", 1)[0] for b in backups], ["harness-security-scan", "session-intent-guard"])
-        self.assertFalse((skills_root / "harness-security-scan").exists())
-        self.assertFalse((skills_root / "session-intent-guard").is_symlink())
-        self.assertIn(f"[WARN] Deprecated installed skill moved out of discovery path: harness-security-scan -> {backups[0]}",
-                      out.getvalue())
+        self.assertEqual(private.read_text(), 'private')
+        self.assertFalse(managed.exists())
+        self.assertEqual(len(backups), 1)
+        self.assertEqual((backups[0] / managed.name / 'SKILL.md').read_text(), 'old managed\n')
+        release.assert_called_once_with(root=self.home / '.ghost-alice', platform='claude', destination=managed,
+                                        kind='skill', provider='core')
         self.assertEqual(len(calls), 1)
         args, kwargs = calls[0]
         self.assertEqual(args, ("_shared/retired_assets.py", "--skills-root", str(skills_root), "--source-root",
@@ -200,11 +211,11 @@ class CleanupTests(SelectionCase):
                                 "--commands-root", str(self.home / ".claude" / "commands")))
         self.assertTrue(kwargs.get("no_bytecode"))
 
-    def test_missing_skills_root_is_a_no_op(self):
+    def test_missing_skills_root_still_delegates_backup_resume_and_command_cleanup(self):
         ctx = self.context("claude")
-        with mock.patch("installer.runner.run_tool") as run_tool:
+        with mock.patch("installer.runner.run_tool", return_value=runner.ToolResult(0)) as run_tool:
             self.assertTrue(selection.cleanup_deprecated_installed_skills(ctx, self.home / "nowhere"))
-        run_tool.assert_not_called()
+        run_tool.assert_called_once()
 
     def test_retirement_failure_returns_false(self):
         ctx = self.context("codex")

@@ -1,13 +1,17 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from scripts import validate_skills
+
+
 SKILL_ROOTS = (
     "adversarial-verification",
     "agent-security-scan",
@@ -23,6 +27,50 @@ SKILL_ROOTS = (
 
 
 class SkillStructureCleanlinessTest(unittest.TestCase):
+    def tomli_fixture(self, root):
+        source = ROOT / '_shared/codex_config_toml'
+        shutil.copytree(source, root / '_shared/codex_config_toml', ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        skill = root / 'agent-security-scan'
+        shutil.copytree(source, skill / 'scripts/codex_config_toml', ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        shutil.copy2(ROOT / 'agent-security-scan/SKILL.md', skill / 'SKILL.md')
+        shutil.copy2(ROOT / 'THIRD_PARTY_NOTICES.md', root / 'THIRD_PARTY_NOTICES.md')
+        return skill
+
+    def test_only_the_exact_unmodified_tomli_vendor_uses_upstream_dependency_docs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            skill = self.tomli_fixture(Path(temporary))
+            outside = skill / 'scripts/other/_vendor/tomli/undocumented.py'
+            outside.parent.mkdir(parents=True)
+            outside.write_text('print("project script")\n')
+            first_party = skill / 'scripts/codex_config_toml/project.py'
+            first_party.write_text('print("project script")\n')
+            issues = []
+            validate_skills.validate_phase4_references(skill / 'SKILL.md', issues)
+            warnings = [issue.message for issue in issues if issue.rule == '4-3']
+            self.assertEqual(len(warnings), 2, warnings)
+            self.assertTrue(any('other/_vendor/tomli/undocumented.py' in message for message in warnings))
+            self.assertTrue(any('codex_config_toml/project.py' in message for message in warnings))
+
+    def test_missing_license_or_modified_vendor_fails_the_integrity_check(self):
+        for change in ('license', 'parser', 'notice', 'provenance'):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                skill = self.tomli_fixture(root)
+                package = skill / 'scripts/codex_config_toml'
+                if change == 'license':
+                    (package / '_vendor/tomli/LICENSE').unlink()
+                elif change == 'parser':
+                    with (package / '_vendor/tomli/_parser.py').open('a') as handle:
+                        handle.write('\n# modified vendor\n')
+                elif change == 'notice':
+                    (root / 'THIRD_PARTY_NOTICES.md').write_text('Missing bundled-code notice.\n')
+                else:
+                    (package / 'README.md').unlink()
+                issues = []
+                validate_skills.validate_phase4_references(skill / 'SKILL.md', issues)
+                self.assertTrue(any(issue.rule == 'vendor-integrity' and issue.severity == 'ERROR' for issue in issues),
+                                [issue.to_dict() for issue in issues])
+
     def test_validate_skills_has_no_structure_warnings(self) -> None:
         result = subprocess.run(
             [sys.executable, "scripts/validate_skills.py", "--json"],

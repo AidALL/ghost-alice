@@ -9,10 +9,9 @@ import unittest
 from pathlib import Path
 
 from test_completion_recovery import VALID
-from stop_hook_testing import assert_stop_observation, skill_call, user_role_row
+from stop_hook_testing import HOOK, assert_stop_observation, skill_call, user_role_row
 import stop_hook_testing as skill_fixture
 
-HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
 
 
 class TraceDisplayRepairTests(unittest.TestCase):

@@ -16,7 +16,7 @@ The current state schema is `session-intent-ledger.v2`. Core code also reads v1 
 
 `--read-intent` returns the current `routing_keywords`, `routing_summary`, input identity, revision and detail pointers. Keywords select procedures; they do not replace proof. The response model uses `--read-state --pointer /constraints/0` (or another returned pointer) only when that detail is needed. `--expected-input-event-id` and `--expected-revision` reject a stale lookup. Unqualified `--read-state` returns the same compact references as `--read-intent`. Use `--export-to` when a diagnostic that the human user's instructions authorize requires a complete file export; the CLI returns its paths.
 
-`keywords_input_event_id` identifies the current input that Core code recorded when the response model wrote the keywords, so an unchanged retained keyword is not mistaken for a fresh interpretation. On Claude Code, that recorded input is an input whose transcript row carries the host's human-origin markers; on Codex, it is a prompt that Codex's prompt-submit event (`UserPromptSubmit`) delivers.
+`keywords_input_event_id` identifies the current input that Core code recorded when the response model wrote the keywords, so an unchanged retained keyword is not mistaken for a fresh interpretation. [Canonical intake provenance](#canonical-intake-provenance) defines which input Core code records as current.
 
 ## intent-state.json
 
@@ -47,6 +47,8 @@ The Python ledger writer replaces scalar goal/summary fields with the latest sem
 An acceptance criterion row holds `id`, `summary`, `source`, `selectable` and the owner pair. The row holds no proof; the response review holds the judgments about the criterion. The response model writes a `user-said` source as its claim that the human user directly supplied the criterion. Core code does not check the sender and, when the response model supplies no `selectable` flag, defaults it to true for `user-said`, `previous-tool` and `system-doc`. The flag means the criterion can be selected; it does not prove the human user's approval. Recording the same ID and owner pair replaces the summary and source; Core code changes the `selectable` flag only from the response model's explicit boolean or the default for the supplied source label. A response route that selected the earlier row no longer reads as ready. A wording change counts as a changed acceptance criterion because the parser cannot establish semantic equivalence. A semantic update that records acceptance criteria rewrites every row with these fields only. A stored criterion field the ledger does not define carries no meaning and never blocks a read or a write.
 
 ## Conduct and consumer snapshots
+
+The `consumer_snapshot` result's `schema_version` identifies this consumer projection, not the schema stored in the input. The projection can retain legacy field names in nested records; readers apply the existing compatibility aliases. Calling `consumer_snapshot` does not migrate or rewrite the input state.
 
 A conduct entry contains ID, summary, failure_pattern, corrective_rule, source, status (`open | encoded`) and occurrence_count. Summary supplies the readable lesson when the split failure/correction fields are absent. A supported repeated same-ID correction increments the count; status-only updates do not. Encoded means the lesson is reflected in a gate skill or memory that the human user approved, not that the original task is complete.
 

@@ -44,7 +44,11 @@ import os
 import re
 import shutil
 import sys
-from installer import codex_toml as tomllib
+from contextlib import ExitStack, redirect_stdout
+from dataclasses import asdict
+from functools import partial
+from installer.report import exception_lines
+import codex_config_toml as tomllib
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
@@ -65,7 +69,6 @@ from hook_definitions import POSIX_HOOK_PYTHON_LAUNCHER, normalize_hook_id, reso
 import runtime_config
 import install_destination
 import state_retention
-import addon_installer
 from addon_installer import AddonManifestError, load_addon_targets
 import retired_assets
 from text_lines import split_lines
@@ -280,6 +283,10 @@ def _prepare_destination_runtime(destination, *, dry_run=False):
     sources = [(source_root / ledger, target.parent / ledger)]
     sources.extend((source, target / source.name) for source in (source_root / '_shared').iterdir()
                    if source.is_file() and source.suffix in {'.py', '.mjs', '.json'})
+    parser_source = source_root / '_shared/codex_config_toml'
+    sources.extend((source, target / source.relative_to(source_root / '_shared'))
+                   for source in parser_source.rglob('*')
+                   if source.is_file() and '__pycache__' not in source.parts and source.suffix != '.pyc')
     for source, output in sources:
         install_destination.assert_mutation_path(output)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -290,6 +297,10 @@ def _prepare_destination_runtime(destination, *, dry_run=False):
     expected = {output for _, output in sources}
     for stale in (target.iterdir() if target.is_dir() else ()):
         if stale.is_file() and stale.suffix in {'.py', '.mjs', '.json'} and stale not in expected:
+            install_destination.assert_mutation_path(stale)
+            stale.unlink()
+    for stale in (target / 'codex_config_toml').rglob('*'):
+        if stale.is_file() and stale not in expected:
             install_destination.assert_mutation_path(stale)
             stale.unlink()
 
@@ -508,14 +519,6 @@ def _print_addon_target_summary(addon_sources: list[str], platform: str | None =
     return 0
 
 
-def _ghost_alice_installed_skill_names() -> list[str]:
-    """Return Core skill names from the managed catalog.
-
-    On every install run the installer writes Skill(...) allow rules into Claude Code settings only for these Core names. Arbitrary directories under an installed skills root get no rule.
-    """
-    return _discover_ghost_alice_skill_names_from_catalog()
-
-
 def _verified_addon_skill_names(addon_sources: Any, platform_key: str) -> list[str]:
     """Return names from manifest-validated addon targets for one platform."""
     if not addon_sources:
@@ -526,12 +529,6 @@ def _verified_addon_skill_names(addon_sources: Any, platform_key: str) -> list[s
         platform=platform_key,
     )
     return sorted({target.name for target in targets})
-
-
-def _claude_ghost_alice_skill_permissions(addon_sources: Any = ()) -> list[str]:
-    names = set(_ghost_alice_installed_skill_names())
-    names.update(_verified_addon_skill_names(addon_sources, "claude"))
-    return [f"Skill({name})" for name in sorted(names)]
 
 
 def _is_stale_legacy_checkout_path_permission(item: Any) -> bool:
@@ -851,17 +848,8 @@ def _platform_session_start_entry(platform_key: str, event: str) -> dict[str, An
     return _hook_runner_command_entry("session-start", command, SESSION_START_MARKER, platform_key=platform_key)
 
 
-def _resolve_addon_hooks(addon_sources: Any, platform_key: str) -> list[tuple[str, str, str, str]]:
-    """Resolve observational addon hooks for one platform.
-
-    Returns [(addon_id, hook_id, event_intent, script_abs_path)]. Re-uses
-    addon_installer.load_addon_targets, which fail-closes on a forbidden hook
-    event or an escaping script, so a bad addon manifest aborts the hook install.
-    """
-    if not addon_sources:
-        return []
-    import addon_installer
-    targets = addon_installer.load_addon_targets(list(addon_sources), platform=platform_key)
+def _addon_hooks(targets) -> list[tuple[str, str, str, str]]:
+    """Return each validated addon's hooks once, even when it supplies several skills."""
     out: list[tuple[str, str, str, str]] = []
     seen: set[str] = set()
     for target in targets:
@@ -971,13 +959,20 @@ def _log(msg: str) -> None:
     print(f"  [install_hooks] {msg}")
 
 
-def _read_settings(path: Path, *, backup_corrupt: bool = True) -> dict:
-    if not path.exists():
-        return {}
+def _read_settings(path: Path, *, backup_corrupt: bool = True, strict: bool = False) -> dict:
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError('Hook settings must be a JSON object')
+        return data
+    except FileNotFoundError:
+        if os.path.lexists(path):
+            raise
+        return {}
     except json.JSONDecodeError as e:
+        if strict:
+            raise
         _log(f"WARNING: Failed to parse JSON at {path} ({e})")
         if backup_corrupt:
             backup = path.with_suffix(".json.corrupt-bak")
@@ -988,6 +983,8 @@ def _read_settings(path: Path, *, backup_corrupt: bool = True) -> dict:
             _log("  File may be corrupted. Continuing with empty settings without modifying it.")
         return {}
     except OSError as e:
+        if strict:
+            raise
         _log(f"WARNING: Failed to read {path} ({e})")
         return {}
 
@@ -999,11 +996,51 @@ def _report_saved(path: Path) -> None:
         pass
 
 
+def _settings_backup_bytes(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        if os.path.lexists(path):
+            raise
+        return None
+
+
+def settings_backup_sources(platform_key: str) -> dict[Path, bytes | None]:
+    """Capture command-start files; only a genuinely absent path has no backup."""
+    paths = [PLATFORMS[platform_key]['hook_file']()]
+    if platform_key == 'codex':
+        paths.append(_resolve_codex_config_toml())
+    return {path: _settings_backup_bytes(path) for path in paths}
+
+
+def _write_settings_backup(path: Path, backup_sources: Mapping[Path, bytes | None] | None) -> Path | None:
+    """Publish the supplied command original, or this standalone writer's original."""
+    if backup_sources is None:
+        if not path.exists():
+            return None
+    else:
+        original = backup_sources[path]
+        if original is None:
+            return None
+    backup = path.with_suffix(f'{path.suffix}.bak')
+    install_destination.assert_mutation_path(backup)
+    if backup_sources is None:
+        shutil.copy2(path, backup)
+    else:
+        runtime_config._atomic_write_bytes(backup, original)
+        if path.exists():
+            shutil.copystat(path, backup)
+    _log(f"Backup created: {backup}")
+    return backup
+
+
 def _write_settings(
     path: Path,
     data: dict,
     dry_run: bool = False,
     report_saved: bool = True,
+    *,
+    backup_sources: Mapping[Path, bytes | None] | None = None,
 ) -> None:
     if dry_run:
         _log(f"DRY-RUN: Would write to {path}:")
@@ -1011,11 +1048,7 @@ def _write_settings(
         return
     install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        backup = path.with_suffix(".json.bak")
-        install_destination.assert_mutation_path(backup)
-        shutil.copy2(path, backup)
-        _log(f"Backup created: {backup}")
+    if _write_settings_backup(path, backup_sources) is not None:
         state_retention.apply("hook-settings-backups", path, protect=_pending_merges_root())
     runtime_config._atomic_write_json(path, data)
     if report_saved:
@@ -1055,7 +1088,8 @@ def _read_text_file(path: Path) -> str:
         return f.read()
 
 
-def _write_text_file(path: Path, content: str, dry_run: bool = False) -> None:
+def _write_text_file(path: Path, content: str, dry_run: bool = False, *,
+                     backup_sources: Mapping[Path, bytes | None] | None = None) -> None:
     if dry_run:
         _log(f"DRY-RUN: Would write text to {path}:")
         print(content, end="" if content.endswith("\n") else "\n")
@@ -1063,11 +1097,7 @@ def _write_text_file(path: Path, content: str, dry_run: bool = False) -> None:
 
     install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        backup = path.with_suffix(f"{path.suffix}.bak")
-        install_destination.assert_mutation_path(backup)
-        shutil.copy2(path, backup)
-        _log(f"Backup created: {backup}")
+    _write_settings_backup(path, backup_sources)
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     _log(f"Saved: {path}")
@@ -1145,10 +1175,7 @@ def _toml_table_assignments(
 
 def _toml_table_values(content: str, header: str) -> dict[str, Any] | None:
     """Read a table by its decoded path, independently of its source notation."""
-    try:
-        values = tomllib.loads(content)
-    except tomllib.TOMLDecodeError:
-        return None
+    values = tomllib.loads(content)
     path = tomllib.loads(header)
     while path:
         name, path = next(iter(path.items()))
@@ -1362,9 +1389,9 @@ def _codex_hook_feature_enabled() -> bool:
         return False
     try:
         content = _read_text_file(config_file)
-    except OSError:
+        return _codex_hook_feature_enabled_in_content(content)
+    except (OSError, ValueError):
         return False
-    return _codex_hook_feature_enabled_in_content(content)
 
 
 CODEX_HOOK_EVENT_KEY_LABELS = {
@@ -1816,6 +1843,48 @@ def _remove_stale_hook_entries(
     return _remove_hook_commands_by_command(hooks_list, stale)
 
 
+def _core_hook_specs(platform_key, node_runtime=_NODE_RUNTIME_OMITTED):
+    """Declare Core registrations; entry builders run only for install and status."""
+    platform = PLATFORMS[platform_key]
+    rows = [
+        ('session-intent', platform['hook_intent'], SESSION_INTENT_MARKER,
+         LEGACY_SESSION_INTENT_MARKERS, 'session-intent-analyzer', _platform_session_intent_entry),
+        ('tool-checkpoint', 'pre_tool_use', TOOL_CHECKPOINT_MARKER,
+         LEGACY_TOOL_CHECKPOINT_MARKERS, 'tool-checkpoint',
+         partial(_platform_tool_checkpoint_entry, node_runtime=node_runtime)),
+        ('completion', platform.get('stop_hook_intent'), STOP_HOOK_MARKER,
+         (), 'completion', _platform_stop_hook_entry),
+        ('session-start', platform.get('session_start_intent'), SESSION_START_MARKER,
+         (), 'session-start', _platform_session_start_entry),
+        ('session-receipt', platform.get('session_start_intent'), SESSION_RECEIPT_MARKER,
+         (), 'session-receipt', _platform_session_receipt_entry),
+    ]
+    rows.extend(('io-trace', intent, IO_TRACE_MARKER, (), 'io-trace', _platform_io_trace_entry)
+                for intent in platform['io_trace_intents'])
+    for hook_id, intent, marker, legacy_markers, label, builder in rows:
+        if intent:
+            event = resolve_hook_event(intent, platform_key)
+            if hook_id != 'session-intent':
+                label = f'{event} {label}'
+            yield hook_id, event, marker, legacy_markers, label, partial(builder, platform_key, event)
+
+
+def _install_core_hook(hooks_obj, event, entry, marker, hook_id, label, *, extra_markers=()):
+    """Replace stale registrations and add the expected Core command once."""
+    hooks = hooks_obj.setdefault(event, [])
+    command = _entry_command(entry)
+    removed = _remove_stale_hook_entries(
+        hooks, marker, command, extra_markers=extra_markers, hook_id=hook_id)
+    if removed:
+        _log(f"  Removed {removed} stale {label} hook(s)")
+    if _hook_already_exists(hooks, marker, expected_command=command):
+        _log(f"  {label} hook already exists. Skipping")
+        return bool(removed)
+    hooks.append(entry)
+    _log(f"  {label} hook added")
+    return True
+
+
 # Markers of the hooks Core installs now. Retired markers live in RETIRED_HOOK_MARKERS.
 GHOST_ALICE_HOOK_MARKERS = (
     SESSION_INTENT_MARKER,
@@ -1829,17 +1898,12 @@ GHOST_ALICE_HOOK_MARKERS = (
 
 def _ensure_claude_ghost_alice_skill_permissions(
     settings: dict[str, Any],
-    addon_sources: Any = (),
+    core_names,
+    addon_targets,
 ) -> bool:
-    permissions = settings.get("permissions")
-    if not isinstance(permissions, dict):
-        permissions = {}
-        settings["permissions"] = permissions
-
-    allow = permissions.get("allow")
-    if not isinstance(allow, list):
-        allow = []
-        permissions["allow"] = allow
+    """Apply the validated grant selection that the caller also records in its receipt."""
+    permissions = settings.setdefault("permissions", {})
+    allow = permissions.setdefault("allow", [])
 
     original_len = len(allow)
     retired = {f"Skill({name})" for name in retired_assets.RETIRED_SKILLS}
@@ -1847,7 +1911,8 @@ def _ensure_claude_ghost_alice_skill_permissions(
                 if not _is_stale_legacy_checkout_path_permission(item) and item not in retired]
     existing = {item for item in allow if isinstance(item, str)}
     changed = len(allow) != original_len
-    for rule in _claude_ghost_alice_skill_permissions(addon_sources):
+    for name in sorted(set(core_names) | {target.name for target in addon_targets}):
+        rule = f"Skill({name})"
         if rule in existing:
             continue
         allow.append(rule)
@@ -1865,7 +1930,7 @@ def install_hook(
     skills_dir: str | Path | None = None,
     node_runtime: str | Path | None = None,
     *, destination: install_destination.InstallDestination | dict | None = None,
-) -> str:
+) -> HookStatus:
     """Install hooks into a single framework.
 
     Return values:
@@ -1885,20 +1950,20 @@ def install_hook(
             if PLATFORMS[platform_key]["detect"]() or resolved.mode == "isolated":
                 _prepare_destination_runtime(resolved,dry_run=dry_run)
             result = install_hook(platform_key,dry_run,addon_sources,resolved.skills_dir,node_runtime)
-            if not dry_run and result in {"installed","already"}:
+            if not dry_run and result.legacy_status in {"installed","already"}:
                 runtime_config.save_config({"install_locations":{platform_key: __import__('dataclasses').asdict(resolved)}},home=_home())
             return result
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
     config_dir = platform["config_dir"]()
-    hook_key = resolve_hook_event(platform["hook_intent"], platform_key)
 
     _log(f"── {name} ──")
 
     if not platform["detect"]():
         _log(f"  {config_dir} not found. Assuming {name} is not installed, skipping")
-        return "skipped"
+        return HookStatus(platform_key, 'HOOK_INSTALL_SKIPPED', STATUS_LABELS['skipped'], 'skipped',
+                          {'action': 'install', 'items': [], 'errors': []}, 'platform-directory-missing')
 
     if node_runtime is None:
         selected_node_runtime = _ensure_node_runtime_for_hook_install(platform_key)
@@ -1922,28 +1987,42 @@ def install_hook(
     )
 
     _log(f"  Hook config file: {settings_file}")
-    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
-
-    permission_before = list(settings.get("permissions", {}).get("allow", [])) if isinstance(settings.get("permissions"), dict) and isinstance(settings.get("permissions", {}).get("allow", []), list) else []
+    settings_error = None
+    try:
+        settings = _read_settings(settings_file, strict=True)
+    except json.JSONDecodeError as error:
+        settings_error = error
+        settings = _read_settings(settings_file, backup_corrupt=not dry_run)
 
     changed = False
 
+    permission_items = []
+    permission_data = None
     if platform_key == "claude":
-        if _ensure_claude_ghost_alice_skill_permissions(settings, addon_sources):
+        import addon_skill_permissions
+        try:
+            if settings_error is not None:
+                raise ValueError('Unreadable original settings; permission attribution preserved') from settings_error
+            permission_before = list(addon_skill_permissions._allow(settings))
+            permission_data = addon_skill_permissions.prepare_install(settings_file)
+        except (ValueError, OSError, UnicodeError) as error:
+            permission_items.append(dict(kind='permission', action='manual-review',
+                                         reason='permission-attribution-unresolved', detail=str(error)))
+            _log(f'[WARN] Permissions retained for review: {error}')
+    core_names = _discover_ghost_alice_skill_names_from_catalog()
+    addon_targets = (load_addon_targets(list(addon_sources), core_skill_names=core_names, platform=platform_key)
+                     if addon_sources else [])
+    if permission_data is not None:
+        if _ensure_claude_ghost_alice_skill_permissions(settings, core_names, addon_targets):
             _log("  Updated Ghost-ALICE Skill permissions")
             changed = True
 
     if "hooks" not in settings:
         settings["hooks"] = {}
+    _validate_hook_settings(settings)
     hooks_obj = settings["hooks"]
     # Codex keys trust by handler position; record positions before any edit so trust can follow its handler.
     hooks_before = _hook_positions(settings_file, hooks_obj) if platform_key == "codex" else []
-
-    if hook_key not in hooks_obj:
-        hooks_obj[hook_key] = []
-    hook_list = hooks_obj[hook_key]
-
-    require_dispatcher = False
 
     if platform_key in hook_definitions.SUPPORTED_PLATFORMS:
         if _ensure_hook_dispatcher_installed(dry_run=dry_run):
@@ -1954,193 +2033,22 @@ def install_hook(
         _log(f"  Removed {removed} retired hook(s)")
         changed = True
 
-    # Install the session-intent-analyzer hook (updates the session intent ledger for every prompt the host submits under the user role).
-    session_intent_entry = _platform_session_intent_entry(platform_key, hook_key)
-    session_intent_command = _entry_command(session_intent_entry)
-    removed = _remove_stale_hook_entries(
-        hook_list,
-        SESSION_INTENT_MARKER,
-        session_intent_command,
-        require_dispatcher=require_dispatcher,
-        extra_markers=LEGACY_SESSION_INTENT_MARKERS,
-        hook_id="session-intent",
-    )
-    if removed:
-        _log(f"  Removed {removed} stale session-intent-analyzer hook(s)")
-        changed = True
-
-    if _hook_already_exists(
-        hook_list,
-        SESSION_INTENT_MARKER,
-        require_dispatcher=require_dispatcher,
-        expected_command=session_intent_command,
-    ):
-        _log("  session-intent-analyzer hook already exists. Skipping")
-    else:
-        hook_list.append(session_intent_entry)
-        _log("  session-intent-analyzer hook added")
-        changed = True
-
-    # Install the pre_tool_use hook (tool-checkpoint: enforce narration before tool calls).
-    tool_checkpoint_key = resolve_hook_event("pre_tool_use", platform_key)
-    tool_checkpoint_entry = _platform_tool_checkpoint_entry(
-        platform_key,
-        tool_checkpoint_key,
-        selected_node_runtime,
-    )
-    tool_checkpoint_command = _entry_command(tool_checkpoint_entry)
-    if tool_checkpoint_key not in hooks_obj:
-        hooks_obj[tool_checkpoint_key] = []
-    tool_checkpoint_list = hooks_obj[tool_checkpoint_key]
-    removed = _remove_stale_hook_entries(
-        tool_checkpoint_list,
-        TOOL_CHECKPOINT_MARKER,
-        tool_checkpoint_command,
-        require_dispatcher=require_dispatcher,
-        extra_markers=LEGACY_TOOL_CHECKPOINT_MARKERS,
-        hook_id="tool-checkpoint",
-    )
-    if removed:
-        _log(f"  Removed {removed} stale {tool_checkpoint_key} tool-checkpoint hook(s)")
-        changed = True
-
-    if _hook_already_exists(
-        tool_checkpoint_list,
-        TOOL_CHECKPOINT_MARKER,
-        require_dispatcher=require_dispatcher,
-        expected_command=tool_checkpoint_command,
-    ):
-        _log(f"  {tool_checkpoint_key} tool-checkpoint hook already exists. Skipping")
-    else:
-        tool_checkpoint_list.append(tool_checkpoint_entry)
-        _log(f"  {tool_checkpoint_key} tool-checkpoint hook added")
-        changed = True
-
-    # Install the on_agent_stop hook (verification-before-completion reminder).
-    stop_intent = platform.get("stop_hook_intent")
-    if stop_intent and platform.get("stop_hook_entry"):
-        stop_key = resolve_hook_event(stop_intent, platform_key)
-        stop_entry = _platform_stop_hook_entry(platform_key, stop_key)
-        stop_command = _entry_command(stop_entry)
-        if stop_key not in hooks_obj:
-            hooks_obj[stop_key] = []
-        stop_list = hooks_obj[stop_key]
-        removed = _remove_stale_hook_entries(
-            stop_list,
-            STOP_HOOK_MARKER,
-            stop_command,
-            require_dispatcher=require_dispatcher,
-            hook_id="completion",
-        )
-        if removed:
-            _log(f"  Removed {removed} stale {stop_key} completion hook(s)")
-            changed = True
-        if _hook_already_exists(
-            stop_list,
-            STOP_HOOK_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=stop_command,
-        ):
-            _log(f"  {stop_key} completion hook already exists. Skipping")
-        else:
-            stop_list.append(stop_entry)
-            _log(f"  {stop_key} completion hook added")
-            changed = True
-
-        # Install the SessionStart hook (pending-merge-session-start layer: automatic merge-companion check).
-    ss_intent = platform.get("session_start_intent")
-    if ss_intent and platform.get("session_start_entry"):
-        ss_key = resolve_hook_event(ss_intent, platform_key)
-        ss_entry = _platform_session_start_entry(platform_key, ss_key)
-        ss_command = _entry_command(ss_entry)
-        if ss_key not in hooks_obj:
-            hooks_obj[ss_key] = []
-        ss_list = hooks_obj[ss_key]
-        removed = _remove_stale_hook_entries(
-            ss_list,
-            SESSION_START_MARKER,
-            ss_command,
-            require_dispatcher=require_dispatcher,
-            hook_id="session-start",
-        )
-        if removed:
-            _log(f"  Removed {removed} stale {ss_key} session-start hook(s)")
-            changed = True
-        if _hook_already_exists(
-            ss_list,
-            SESSION_START_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=ss_command,
-        ):
-            _log(f"  {ss_key} session-start hook already exists. Skipping")
-        else:
-            ss_list.append(ss_entry)
-            _log(f"  {ss_key} session-start hook added")
-            changed = True
-
-        # Install the session receipt hook: the host repeats session start after resume, clear and compaction.
-        receipt_entry = _platform_session_receipt_entry(platform_key, ss_key)
-        receipt_command = _entry_command(receipt_entry)
-        removed = _remove_stale_hook_entries(
-            ss_list,
-            SESSION_RECEIPT_MARKER,
-            receipt_command,
-            require_dispatcher=require_dispatcher,
-            hook_id="session-receipt",
-        )
-        if removed:
-            _log(f"  Removed {removed} stale {ss_key} session-receipt hook(s)")
-            changed = True
-        if _hook_already_exists(
-            ss_list,
-            SESSION_RECEIPT_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=receipt_command,
-        ):
-            _log(f"  {ss_key} session-receipt hook already exists. Skipping")
-        else:
-            ss_list.append(receipt_entry)
-            _log(f"  {ss_key} session-receipt hook added")
-            changed = True
-
-    # Install the io-trace tool-use audit hook.
-    for io_trace_intent in platform["io_trace_intents"]:
-        post_tool_key = resolve_hook_event(io_trace_intent, platform_key)
-        io_entry = _platform_io_trace_entry(platform_key, post_tool_key)
-        if io_entry:
-            io_command = _entry_command(io_entry)
-            if post_tool_key not in hooks_obj:
-                hooks_obj[post_tool_key] = []
-            pt_list = hooks_obj[post_tool_key]
-            removed = _remove_stale_hook_entries(
-                pt_list,
-                IO_TRACE_MARKER,
-                io_command,
-                require_dispatcher=require_dispatcher,
-                hook_id="io-trace",
-            )
-            if removed:
-                _log(f"  Removed {removed} stale {post_tool_key} io-trace hook(s)")
-                changed = True
-            if not _hook_already_exists(
-                pt_list,
-                IO_TRACE_MARKER,
-                require_dispatcher=require_dispatcher,
-                expected_command=io_command,
-            ):
-                pt_list.append(io_entry)
-                _log(f"  {post_tool_key} io-trace hook added")
-                changed = True
-            else:
-                _log(f"  {post_tool_key} io-trace hook already exists. Skipping")
-        elif platform_key in hook_definitions.SUPPORTED_PLATFORMS:
+    for hook_id, event, marker, legacy_markers, label, build_entry in _core_hook_specs(platform_key, selected_node_runtime):
+        if (hook_id == 'completion' and not platform.get('stop_hook_entry') or
+                hook_id in {'session-start', 'session-receipt'} and not platform.get('session_start_entry')):
+            continue
+        entry = build_entry()
+        if entry:
+            changed |= _install_core_hook(
+                hooks_obj, event, entry, marker, hook_id, label, extra_markers=legacy_markers)
+        elif hook_id == 'io-trace' and platform_key in hook_definitions.SUPPORTED_PLATFORMS:
             _log("  io_trace_hook.py not found. Skipping io-trace hook")
 
     # Trust only exact event/command pairs produced by verified addon sources in
     # this install; marker text in pre-existing hooks this installer did not write is not ownership evidence.
     verified_addon_commands: set[tuple[str, str]] = set()
     # Wire observational addon hooks after the Core suite. Empty addon_sources leaves the hook configuration unchanged.
-    for addon_id, hook_id, event_intent, script_path in _resolve_addon_hooks(addon_sources, platform_key):
+    for addon_id, hook_id, event_intent, script_path in _addon_hooks(addon_targets):
         event_name = resolve_hook_event(event_intent, platform_key)
         marker = f"[addon:{addon_id}] {hook_id}"
         # The generated command embeds "{marker} [hook-runner:...]", so the marker is always followed by a space. Matching on "marker " makes removal exact and prevents a hook id that is a prefix of another (obs vs obs2) from colliding.
@@ -2183,37 +2091,21 @@ def install_hook(
         ):
             changed = True
 
-    if not changed:
-        if not dry_run and selected_node_runtime is not None:
-            _persist_node_runtime(platform_key, selected_node_runtime)
-            if platform_key == "claude":
-                import addon_skill_permissions
-                addon_skill_permissions.record_install(
-                    settings_file,
-                    load_addon_targets(list(addon_sources), core_skill_names=_ghost_alice_installed_skill_names(), platform="claude"),
-                    permission_before, settings.get("permissions", {}).get("allow", []),
-                    core_names=_ghost_alice_installed_skill_names(),
-                )
-        return "already"
-
-    _write_settings(
-        settings_file,
-        settings,
-        dry_run=dry_run,
-        report_saved=False,
-    )
+    if changed:
+        _write_settings(settings_file, settings, dry_run=dry_run, report_saved=False)
     if not dry_run and selected_node_runtime is not None:
         try:
             _persist_node_runtime(platform_key, selected_node_runtime)
-            if platform_key == "claude":
-                import addon_skill_permissions
+            if permission_data is not None:
                 addon_skill_permissions.record_install(
-                    settings_file,
-                    load_addon_targets(list(addon_sources), core_skill_names=_ghost_alice_installed_skill_names(), platform="claude"),
+                    settings_file, addon_targets,
                     permission_before, settings.get("permissions", {}).get("allow", []),
-                    core_names=_ghost_alice_installed_skill_names(),
+                    core_names=core_names,
+                    prepared=permission_data,
                 )
         except Exception as persistence_error:
+            if not changed:
+                raise
             rollback_errors: list[Exception] = []
             try:
                 _restore_settings_snapshot(
@@ -2237,10 +2129,17 @@ def install_hook(
                     [persistence_error, *rollback_errors],
                 )
             raise
+    if not changed:
+        return HookStatus(platform_key, 'HOOK_INSTALL_ALREADY', STATUS_LABELS['already'], 'already',
+                          {'action': 'install', 'items': permission_items, 'errors': []})
     if not dry_run:
         _report_saved(settings_file)
     _log("  Hook installation complete")
-    return "installed"
+    return HookStatus(platform_key, 'HOOK_INSTALL_COMPLETE', STATUS_LABELS['installed'], 'installed',
+                      {'action': 'install', 'items': permission_items, 'errors': [],
+                       'settings_recovered': settings_error is not None,
+                       'settings_read_errors': exception_lines(settings_error) if settings_error else [],
+                       'settings_backup': str(settings_file.with_suffix('.json.corrupt-bak')) if settings_error and not dry_run else None})
 
 
 # ── Uninstall ─────────────────────────────────────────────
@@ -2396,28 +2295,26 @@ def _follow_codex_hook_trust(settings_file: Path, settings: dict[str, Any], befo
     return True
 
 
-def _write_removed_hook_settings(settings_file, settings, platform_key, moves):
+def _write_removed_hook_settings(settings_file, settings, platform_key, moves, *, backup_sources=None):
     """Commit trust/settings atomically per file; restore trust on settings failure."""
     if platform_key != "codex":
-        _write_settings(settings_file, settings, dry_run=False)
+        _write_settings(settings_file, settings, dry_run=False, backup_sources=backup_sources)
         return
     config_file = _resolve_codex_config_toml()
     if not config_file.exists():
-        _write_settings(settings_file, settings, dry_run=False)
+        _write_settings(settings_file, settings, dry_run=False, backup_sources=backup_sources)
         return
     original = config_file.read_bytes()
     stat_before = config_file.stat()
     content = _reconcile_codex_hook_trust(original.decode('utf-8'), settings_file, settings, moves).encode('utf-8')
     if content == original:
-        _write_settings(settings_file, settings, dry_run=False)
+        _write_settings(settings_file, settings, dry_run=False, backup_sources=backup_sources)
         return
     install_destination.assert_mutation_path(config_file)
-    backup = config_file.with_suffix('.toml.bak')
-    install_destination.assert_mutation_path(backup)
-    shutil.copy2(config_file, backup)
+    backup = _write_settings_backup(config_file, backup_sources)
     runtime_config._atomic_write_bytes(config_file, content)
     try:
-        _write_settings(settings_file, settings, dry_run=False)
+        _write_settings(settings_file, settings, dry_run=False, backup_sources=backup_sources)
     except BaseException as error:
         try:
             runtime_config._atomic_write_bytes(config_file, original)
@@ -2458,7 +2355,7 @@ def _remove_hook_settings_commands(hooks_obj, predicate) -> int:
                for groups in hooks_obj.values() if isinstance(groups, list))
 
 
-def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) -> int:
+def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False, backup_sources=None) -> int:
     """Remove one addon's observational hook entries by exact marker.
 
     SECURITY: only a well-formed ``[addon:<id>] <hook_id>`` marker is honored; any
@@ -2473,21 +2370,21 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
     if platform is None:
         return 0
     settings_file = platform["hook_file"]()
-    if not settings_file.exists():
-        return 0
-    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
+    if backup_sources is None and not dry_run:
+        backup_sources = settings_backup_sources(platform_key)
+    settings = _read_settings(settings_file, strict=True)
+    _validate_hook_settings(settings)
     hooks_obj = settings.get("hooks", {})
-    if not isinstance(hooks_obj, dict):
-        return 0
     # Ownership proof: remove only the command generated by _hook_runner_command(). An unmanaged hook can contain the marker text, or even a fake [hook-runner:] token; it is not ours unless the comment carries the exact generated marker/runner signature and argv invokes the same normalized hook id.
     before = _hook_positions(settings_file, hooks_obj)
     total = _remove_hook_settings_commands(hooks_obj, lambda command: _is_exact_addon_hook_command(command, marker))
     if total and not dry_run:
-        _write_removed_hook_settings(settings_file, settings, platform_key, _trust_moves(before, settings_file, hooks_obj))
+        _write_removed_hook_settings(settings_file, settings, platform_key, _trust_moves(before, settings_file, hooks_obj),
+                                     backup_sources=backup_sources)
     return total
 
 
-def remove_retired_hooks(*, platform_key: str, dry_run: bool = False) -> int:
+def remove_retired_hooks(*, platform_key: str, dry_run: bool = False, backup_sources=None) -> int:
     """Remove every retired hook registration from one platform's hook file.
 
     One rule (`_is_retired_hook_command`) for the retired core markers, the retired runner ids and the adapter
@@ -2497,16 +2394,16 @@ def remove_retired_hooks(*, platform_key: str, dry_run: bool = False) -> int:
     if platform is None:
         return 0
     settings_file = platform["hook_file"]()
-    if not settings_file.exists():
-        return 0
-    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
+    if backup_sources is None and not dry_run:
+        backup_sources = settings_backup_sources(platform_key)
+    settings = _read_settings(settings_file, strict=True)
+    _validate_hook_settings(settings)
     hooks_obj = settings.get("hooks", {})
-    if not isinstance(hooks_obj, dict):
-        return 0
     before = _hook_positions(settings_file, hooks_obj)
     total = _remove_retired_hooks(hooks_obj)
     if total and not dry_run:
-        _write_removed_hook_settings(settings_file, settings, platform_key, _trust_moves(before, settings_file, hooks_obj))
+        _write_removed_hook_settings(settings_file, settings, platform_key, _trust_moves(before, settings_file, hooks_obj),
+                                     backup_sources=backup_sources)
     return total
 
 
@@ -2529,7 +2426,7 @@ def _remove_managed_addon_entries(hooks_list: list) -> int:
     return _remove_hook_commands_by_command(hooks_list, _is_managed_addon_command)
 
 
-def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None) -> str:
+def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None, backup_sources=None) -> HookStatus:
     """Remove hooks from a single framework.
 
     Return values:
@@ -2541,74 +2438,130 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
     if destination is not None:
         resolved = _destination_action(platform_key,destination,"uninstall",dry_run=dry_run)
         with install_destination.use(resolved):
-            return uninstall_hook(platform_key,dry_run)
+            return uninstall_hook(platform_key, dry_run, backup_sources=backup_sources)
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
-    config_dir = platform["config_dir"]()
-    hook_key = resolve_hook_event(platform["hook_intent"], platform_key)
 
     _log(f"── {name} ──")
 
     settings_existed = settings_file.exists()
     if settings_existed:
         _log(f"  Hook config file: {settings_file}")
-    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
-
-    permission_removed = False
+    details = dict(action='uninstall', items=[], hooks_detached=False, settings_state='unknown', errors=[])
+    try:
+        if backup_sources is None and not dry_run:
+            backup_sources = settings_backup_sources(platform_key)
+        settings = _read_settings(settings_file, strict=True)
+        _validate_hook_settings(settings)
+    except (OSError, ValueError, UnicodeError) as error:
+        details.update(settings_state='unreadable', errors=exception_lines(error))
+        details['items'].append(dict(kind='hook-config', target_name=f'{platform_key}-hooks',
+                                     action='manual-review', reason='settings-unreadable', errors=details['errors']))
+        return HookStatus(platform_key, 'HOOK_ACTION_ERROR', STATUS_LABELS['error'], 'error', details)
+    original = copy.deepcopy(settings)
+    candidate = copy.deepcopy(settings)
+    hooks_obj = candidate.get('hooks', {})
+    hooks_before = _hook_positions(settings_file, hooks_obj)
+    total_removed = _remove_managed_hook_entries(platform_key, hooks_obj)
+    if total_removed:
+        _remove_empty_hook_groups(hooks_obj)
+    permission_items = []
+    permission_prepared = None
     if platform_key == "claude":
         import addon_skill_permissions
-        permission_items = addon_skill_permissions.detach_core(
-            _ghost_alice_installed_skill_names(), settings_file, settings, _write_settings, dry_run=dry_run,
-        )
-        permission_removed = any(item["action"] in {"removed", "would-remove"} for item in permission_items)
-        unowned = [item["name"] for item in permission_items if item["action"] == "manual-review"]
-        if unowned:
-            print(f"[WARN] Preserved Core Skill permissions without addition records: {', '.join(unowned)}")
+        try:
+            core_names = _discover_ghost_alice_skill_names_from_catalog()
+            permission_prepared = addon_skill_permissions.prepare_core(
+                core_names, settings_file, settings)
+            details['pending_owner'] = addon_skill_permissions.pending_owner(permission_prepared)
+        except (OSError, ValueError, UnicodeError) as error:
+            permission_items.append(dict(kind='permission', action='manual-review',
+                                         reason='permission-attribution-unresolved', detail=str(error)))
 
-    if not platform["detect"]():
-        _log(f"  {config_dir} not found. Skipping")
-        return "skipped"
+    final_candidate = candidate
+    def write_final(path, updated, **kwargs):
+        nonlocal final_candidate
+        final_candidate = copy.deepcopy(updated)
+        _write_removed_hook_settings(path, updated, platform_key,
+                                     _trust_moves(hooks_before, path, updated.get('hooks', {})),
+                                     backup_sources=backup_sources)
+    try:
+        if permission_prepared is not None:
+            permission_items.extend(addon_skill_permissions.detach_core(
+                core_names, settings_file, settings, write_final,
+                dry_run=dry_run, settings_after=candidate, prepared=permission_prepared))
+        elif not dry_run and candidate != settings:
+            write_final(settings_file, candidate)
+    except (OSError, ValueError, ExceptionGroup) as error:
+        details['errors'] = exception_lines(error)
+        permission_items.append(dict(kind='permission' if platform_key == 'claude' else 'hook-config',
+                                     action='manual-review', reason='settings-or-receipt-write-failed',
+                                     errors=details['errors']))
 
-    if not settings_existed:
-        _log("  No hook config file. There are no hooks to remove")
-        return "not_found"
+    if dry_run:
+        details.update(settings_state='readable' if settings_existed else 'missing',
+                       would_detach=not any(item.get('settings_state') == 'preserved' for item in permission_items))
+    else:
+        try:
+            actual, detached, commands = _read_hook_references(platform_key)
+            details.update(hooks_detached=detached, remaining_commands=commands)
+            details['settings_state'] = ('after' if actual == final_candidate else
+                                         'before' if actual == original else 'other')
+        except (OSError, ValueError, UnicodeError) as error:
+            details['errors'].extend(exception_lines(error))
+            details['settings_state'] = 'unreadable'
+    details['items'].extend(permission_items)
+    unowned = [item for item in permission_items if item.get('action') in {'manual-review', 'preserved-existing'}]
+    if unowned:
+        _log('[WARN] Permissions retained for review: removal lacks confirmed installer addition evidence or finalization.')
+    for line in details['errors']:
+        _log(f'[ERROR] {line}')
+    failed = bool(details['errors']) or (not dry_run and not details['hooks_detached'])
+    permission_removed = any(row['action'] in {'removed', 'would-remove'} for row in permission_items)
+    legacy = ('error' if failed else 'removed' if total_removed or permission_removed else
+              'skipped' if not platform['detect']() else 'not_found')
+    if total_removed:
+        _log(f'  {"Would remove" if dry_run else "Removed"} {total_removed} hook(s)')
+    details['items'].append(dict(kind='hook-config', target_name=f'{platform_key}-hooks',
+                                 action='manual-review' if failed and not details['hooks_detached'] else
+                                 'hook-uninstall-dry-run' if dry_run else 'hook-uninstall',
+                                 result=legacy, hooks_detached=details['hooks_detached'],
+                                 reason='hook-detach-unresolved' if failed and not details['hooks_detached'] else 'managed-hooks-detached'))
+    return HookStatus(platform_key, 'HOOK_ACTION_ERROR' if failed else 'HOOK_UNINSTALL_COMPLETE',
+                      STATUS_LABELS[legacy], legacy, details)
 
-    hooks_obj = settings.get("hooks", {})
-    hook_list = hooks_obj.get(hook_key, [])
-    hooks_before = _hook_positions(settings_file, hooks_obj)
 
+def _read_hook_references(platform_key):
+    """Read the effect and apply the same managed-command predicate as removal."""
+    actual = _read_settings(PLATFORMS[platform_key]['hook_file'](), strict=True)
+    _validate_hook_settings(actual)
+    hooks = actual.get('hooks', {})
+    detached = not _remove_managed_hook_entries(platform_key, copy.deepcopy(hooks))
+    commands = [handler.get('command', '') for groups in hooks.values()
+                for group in groups for handler in group.get('hooks', [])] if not detached else []
+    return actual, detached, commands
+
+
+def _validate_hook_settings(settings):
+    hooks = settings.get('hooks', {})
+    if not isinstance(hooks, dict):
+        raise ValueError('Hook settings hooks must be an object')
+    for groups in hooks.values():
+        if not isinstance(groups, list) or any(not isinstance(group, dict) or
+                not isinstance(group.get('hooks', []), list) or
+                any(not isinstance(handler, dict) or ('command' in handler and not isinstance(handler['command'], str))
+                    for handler in group.get('hooks', [])) for group in groups):
+            raise ValueError('Hook settings entries must contain lists of handler objects')
+
+
+def _remove_managed_hook_entries(platform_key, hooks_obj):
+    """Apply the same ownership predicates to the plan and the read-back check."""
     total_removed = _remove_retired_hooks(hooks_obj)
-
-    def marked(*markers: str) -> Callable[[str], bool]:
-        return lambda command: any(marker in command for marker in markers)
-
-    # Remove the session-intent-analyzer hook (same UserPromptSubmit event).
-    total_removed += _remove_hook_commands_by_command(
-        hook_list, marked(SESSION_INTENT_MARKER, *LEGACY_SESSION_INTENT_MARKERS))
-
-    # Remove the tool-checkpoint PreToolUse hook.
-    total_removed += _remove_hook_commands_by_command(
-        hooks_obj.get(resolve_hook_event("pre_tool_use", platform_key), []),
-        marked(TOOL_CHECKPOINT_MARKER, *LEGACY_TOOL_CHECKPOINT_MARKERS))
-
-    # Remove the on_agent_stop hook.
-    stop_intent = platform.get("stop_hook_intent")
-    if stop_intent:
+    for _, event, marker, legacy_markers, _, _ in _core_hook_specs(platform_key):
+        markers = (marker, *legacy_markers)
         total_removed += _remove_hook_commands_by_command(
-            hooks_obj.get(resolve_hook_event(stop_intent, platform_key), []), marked(STOP_HOOK_MARKER))
-
-    # Remove the SessionStart hooks.
-    ss_intent = platform.get("session_start_intent")
-    if ss_intent:
-        total_removed += _remove_hook_commands_by_command(
-            hooks_obj.get(resolve_hook_event(ss_intent, platform_key), []),
-            marked(SESSION_START_MARKER, SESSION_RECEIPT_MARKER))
-
-    # Also remove the io-trace hooks.
-    for io_trace_intent in platform["io_trace_intents"]:
-        total_removed += _remove_hook_commands_by_command(
-            hooks_obj.get(resolve_hook_event(io_trace_intent, platform_key), []), marked(IO_TRACE_MARKER))
+            hooks_obj.get(event, []), lambda command: any(value in command for value in markers))
 
     # Full uninstall also strips every MANAGED addon observational hook, so a drifted addon hook is never left firing
     # live after a full uninstall.
@@ -2616,18 +2569,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
         if isinstance(ev_list, list):
             total_removed += _remove_managed_addon_entries(ev_list)
 
-    if total_removed == 0:
-        _log("  No hooks found. Nothing to remove")
-        return "removed" if permission_removed else "not_found"
-
-    _remove_empty_hook_groups(hooks_obj)
-    if dry_run:
-        _write_settings(settings_file, settings, dry_run=True)
-    else:
-        _write_removed_hook_settings(settings_file, settings, platform_key,
-                                     _trust_moves(hooks_before, settings_file, hooks_obj))
-    _log(f"  Removed {total_removed} hook(s)")
-    return "removed"
+    return total_removed
 
 
 # ── Status Check ──────────────────────────────────────────
@@ -2647,7 +2589,6 @@ def check_status_detail(
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
-    hook_key = resolve_hook_event(platform["hook_intent"], platform_key)
 
     if not platform["detect"]():
         _log(f"  {name}: not installed (directory missing)")
@@ -2672,87 +2613,24 @@ def check_status_detail(
 
     settings = _read_settings(settings_file, backup_corrupt=False)
     hooks_obj = settings.get("hooks", {})
-    hook_list = hooks_obj.get(hook_key, [])
     selected_node_runtime = (
         _resolve_node_runtime(platform_key)
         if node_runtime is _NODE_RUNTIME_OMITTED
         else node_runtime
     )
 
-    require_dispatcher = False
-    session_intent_entry = _platform_session_intent_entry(platform_key, hook_key)
-    session_intent_present, session_intent_ok = _hook_marker_match_status(
-        hook_list,
-        SESSION_INTENT_MARKER,
-        require_dispatcher=require_dispatcher,
-        expected_command=_entry_command(session_intent_entry),
-    )
-
-    tool_checkpoint_key = resolve_hook_event("pre_tool_use", platform_key)
-    tool_checkpoint_list = hooks_obj.get(tool_checkpoint_key, [])
-    tool_checkpoint_entry = _platform_tool_checkpoint_entry(
-        platform_key,
-        tool_checkpoint_key,
-        selected_node_runtime,
-    )
-    tool_checkpoint_present, tool_checkpoint_ok = _hook_marker_match_status(
-        tool_checkpoint_list,
-        TOOL_CHECKPOINT_MARKER,
-        require_dispatcher=require_dispatcher,
-        expected_command=_entry_command(tool_checkpoint_entry),
-    )
-
-    stop_ok = False
-    stop_present = False
-    stop_intent = platform.get("stop_hook_intent")
-    if stop_intent:
-        stop_key = resolve_hook_event(stop_intent, platform_key)
-        stop_list = hooks_obj.get(stop_key, [])
-        stop_entry = _platform_stop_hook_entry(platform_key, stop_key)
-        stop_present, stop_ok = _hook_marker_match_status(
-            stop_list,
-            STOP_HOOK_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=_entry_command(stop_entry),
-        )
-
-    session_start_ok = True
-    session_start_present = True
-    session_receipt_ok = True
-    session_receipt_present = True
-    ss_intent = platform.get("session_start_intent")
-    if ss_intent and platform.get("session_start_entry"):
-        ss_key = resolve_hook_event(ss_intent, platform_key)
-        ss_list = hooks_obj.get(ss_key, [])
-        ss_entry = _platform_session_start_entry(platform_key, ss_key)
-        session_start_present, session_start_ok = _hook_marker_match_status(
-            ss_list,
-            SESSION_START_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=_entry_command(ss_entry),
-        )
-        session_receipt_present, session_receipt_ok = _hook_marker_match_status(
-            ss_list,
-            SESSION_RECEIPT_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=_entry_command(_platform_session_receipt_entry(platform_key, ss_key)),
-        )
-
-    io_trace_ok = True
-    io_trace_present = True
-    for io_trace_intent in platform["io_trace_intents"]:
-        post_tool_key = resolve_hook_event(io_trace_intent, platform_key)
-        io_entry = _platform_io_trace_entry(platform_key, post_tool_key)
-        if io_entry:
-            pt_list = hooks_obj.get(post_tool_key, [])
-            event_present, event_ok = _hook_marker_match_status(
-                pt_list,
-                IO_TRACE_MARKER,
-                require_dispatcher=require_dispatcher,
-                expected_command=_entry_command(io_entry),
-            )
-            io_trace_present = io_trace_present and event_present
-            io_trace_ok = io_trace_ok and event_ok
+    required = {hook_id: (True, True) for hook_id in hook_definitions.CORE_HOOK_IDS}
+    if not platform.get('stop_hook_intent'):
+        required['completion'] = (False, False)
+    for hook_id, event, marker, _, _, build_entry in _core_hook_specs(platform_key, selected_node_runtime):
+        if hook_id in {'session-start', 'session-receipt'} and not platform.get('session_start_entry'):
+            continue
+        entry = build_entry()
+        if entry:
+            present, matches = _hook_marker_match_status(
+                hooks_obj.get(event, []), marker, expected_command=_entry_command(entry))
+            previous_present, previous_matches = required[hook_id]
+            required[hook_id] = previous_present and present, previous_matches and matches
 
     if platform_key == "codex" and not _codex_hook_feature_enabled():
         _log(f"  {name}: hooks.json exists but config.toml does not enable hooks")
@@ -2764,14 +2642,6 @@ def check_status_detail(
             details={"reason": "feature_flag_disabled"},
         )
 
-    required = {
-        "session-intent": (session_intent_present, session_intent_ok),
-        "tool-checkpoint": (tool_checkpoint_present, tool_checkpoint_ok),
-        "completion": (stop_present, stop_ok),
-        "session-start": (session_start_present, session_start_ok),
-        "session-receipt": (session_receipt_present, session_receipt_ok),
-        "io-trace": (io_trace_present, io_trace_ok),
-    }
     if platform_key == "claude":
         permissions = settings.get("permissions")
         allow = permissions.get("allow", []) if isinstance(permissions, dict) else []
@@ -2959,6 +2829,7 @@ def main() -> int:
         version=f"install_hooks.py {VERSION}",
     )
     parser.add_argument("--destination-file", help="JSON installation location binding")
+    parser.add_argument('--format', choices=('text', 'json'), default='text')
     parser.add_argument("--core-source-root",help="Core source APIs independent of installed runtime")
     parser.add_argument("--ledger-root",help="Explicit authoritative ledger root independent of source")
     args = parser.parse_args()
@@ -2982,17 +2853,24 @@ def main() -> int:
         if destination.mode == "isolated" and (args.hook_shared_dir or args.skills_dir or args.list_addons):
             parser.error("isolated destination conflicts with override/list action")
 
-    if destination is not None:
-        with install_destination.use(destination):
-            return _execute_actions(args,destination)
-    if not args.list_addons:
+    if destination is None and not args.list_addons:
         for target in ([args.platform] if args.platform else PLATFORMS):
             _destination_action(target, _default_destination(target),
                 "status" if args.status else "uninstall" if args.uninstall else "install", dry_run=args.dry_run)
-    return _execute_actions(args)
+    results = {}
+    with ExitStack() as stack:
+        if destination is not None:
+            stack.enter_context(install_destination.use(destination))
+        if args.format == 'json':
+            stack.enter_context(redirect_stdout(sys.stderr))
+        returncode = _execute_actions(args, destination, results=results)
+    if args.format == 'json':
+        print(json.dumps({'results': {key: asdict(value) for key, value in results.items()},
+                          'returncode': returncode}))
+    return returncode
 
 
-def _execute_actions(args, destination=None):
+def _execute_actions(args, destination, *, results):
     _log(f"install_hooks.py v{VERSION}")
     _log(f"Home directory: {Path.home()}")
     if args.list_addons:
@@ -3011,9 +2889,8 @@ def _execute_actions(args, destination=None):
         _log(f"  Agent visibility: profile={args.agent_visibility}")
 
     targets = [args.platform] if args.platform else list(PLATFORMS.keys())
-    results: dict[str, str | HookStatus] = {}
     selected_node_runtimes: list[str | None] = []
-    has_error = False
+    action = "status" if args.status else ("uninstall" if args.uninstall else "install")
 
     for key in targets:
         previous_hook_shared_dir = os.environ.get(HOOK_SHARED_DIR_ENV)
@@ -3046,17 +2923,18 @@ def _execute_actions(args, destination=None):
                     node_runtime=node_runtime,
                     destination=destination,
                 )
-        except Exception as e:
-            _log(f"ERROR: {PLATFORMS[key]['name']}. {e}")
-            results[key] = "error"
-            has_error = True
+        except Exception as error:
+            errors = exception_lines(error)
+            for line in errors:
+                _log(f'[ERROR] {PLATFORMS[key]["name"]}: {line}')
+            results[key] = HookStatus(key, 'HOOK_ACTION_ERROR', STATUS_LABELS['error'], 'error',
+                                      {'action': action, 'errors': errors, 'items': []})
         finally:
             if previous_hook_shared_dir is None:
                 os.environ.pop(HOOK_SHARED_DIR_ENV, None)
             else:
                 os.environ[HOOK_SHARED_DIR_ENV] = previous_hook_shared_dir
 
-    action = "status" if args.status else ("uninstall" if args.uninstall else "install")
     _print_summary(action, results)
     if not args.uninstall:
         _print_runtime_visibility_status()
@@ -3066,7 +2944,7 @@ def _execute_actions(args, destination=None):
         else:
             _print_node_runtime_guidance()
 
-    return 1 if has_error else 0
+    return 1 if any(result.legacy_status == 'error' for result in results.values()) else 0
 
 
 if __name__ == "__main__":

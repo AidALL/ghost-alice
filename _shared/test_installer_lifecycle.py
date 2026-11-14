@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import subprocess
 import sys
 import shutil
 import tempfile
@@ -21,7 +22,7 @@ import gateway_testing  # noqa: E402
 from context_gateway_model import LABEL  # noqa: E402
 from installer import lifecycle  # noqa: E402
 from installer.runner import InstallerExit, ToolResult  # noqa: E402
-from installer_testing import FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
+from installer_testing import hook_status, FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
 
 
 class LifecycleCase(unittest.TestCase):
@@ -69,7 +70,7 @@ class LifecycleCase(unittest.TestCase):
                   {"action": "removed" if kwargs.get("apply_changes", True) else "would-remove"})
         self.stub("installer.hosts.remove_claude_bootstrap_if_unused", True)
         self.stub("installer.hosts.remove_codex_bootstrap_if_unused", True)
-        self.stub("installer.hosts.install_hooks", True)
+        self.stub("installer.hosts.install_hooks", hook_status(action="uninstall", status="removed"))
         self.stub("installer.lifecycle.run_full_uninstall", 0)
 
     @staticmethod
@@ -101,7 +102,7 @@ class UninstallTests(LifecycleCase):
         self.patches.close()
         self.patches = contextlib.ExitStack()
         self.stub_removal_flow()
-        self.patches.enter_context(mock.patch("installer.addons.uninstall_addon", side_effect=lambda ctx, aid: results[aid]))
+        self.patches.enter_context(mock.patch("installer.addons.uninstall_addon", side_effect=lambda ctx, aid, **kwargs: results[aid]))
         rc, out = self.captured(lifecycle.uninstall, self.ctx, ["--addon", "noop", "--addon", "known", "--addon", "gone", "--addon", "kept"])
         self.assertEqual(rc, 1)
         self.assertIn("[WARN] Addon gone: not installed (nothing to remove)", out)
@@ -117,7 +118,8 @@ class UninstallTests(LifecycleCase):
     def test_no_arguments_runs_the_full_uninstall(self):
         self.stub_removal_flow()
         self.assertEqual(lifecycle.uninstall(self.ctx, []), 0)
-        self.assertEqual(self.calls[-2:], ["resume_pending_uninstalls", "run_full_uninstall"])
+        self.assertEqual(self.calls[-1:], ["run_full_uninstall"])
+        self.assertNotIn("resume_pending_uninstalls", self.calls)
 
     def test_bare_addon_ids_are_promoted(self):
         # uninstall.sh:66-79, 303-312
@@ -152,7 +154,7 @@ class UninstallTests(LifecycleCase):
         self.assertIn("[OK] 3 item(s) removed.", out)
         self.assertEqual([c for c in self.calls if c in ("guard_gateway_removal",
                                                          "remove_claude_bootstrap_if_unused", "install_hooks")],
-                         ["guard_gateway_removal", "remove_claude_bootstrap_if_unused", "install_hooks"])
+                         ["guard_gateway_removal", "install_hooks", "remove_claude_bootstrap_if_unused"])
 
     def test_force_skips_dependency_checks_and_hooks_stay_when_skills_remain(self):
         self.stub_removal_flow()
@@ -172,7 +174,7 @@ class UninstallTests(LifecycleCase):
         self.assertNotIn("install_hooks", self.calls)
         self.patches.enter_context(mock.patch("installer.transaction.guard_gateway_removal", return_value=0))
         self.patches.enter_context(mock.patch("installer.selection.has_managed_installs", return_value=False))
-        self.patches.enter_context(mock.patch("installer.hosts.install_hooks", return_value=False))
+        self.patches.enter_context(mock.patch("installer.hosts.install_hooks", return_value=hook_status(action="uninstall", status="error")))
         _, out = self.captured(lambda: self.assertRaises(InstallerExit, lifecycle.uninstall, self.ctx, ["alpha"]))
         self.assertIn("[ERROR] Hook removal failed. Aborting skill removal", out)
 
@@ -192,26 +194,11 @@ class UninstallTests(LifecycleCase):
 
 
 class FullUninstallTests(LifecycleCase):
-    def test_full_uninstall_order_and_stop(self):
-        # uninstall.sh:480-488
-        self.stub("installer.addons.resume_pending_uninstalls")
-        self.stub("installer.addons.uninstall_all_before_full", True)
-        self.stub("installer.lifecycle.run_uninstall_cleanup", 0)
-        rc, out = self.captured(lifecycle.run_full_uninstall, self.ctx)
-        self.assertEqual(rc, 0)
-        self.assertIn("[INFO] Full uninstall: removing Ghost-ALICE managed hooks, bootstrap, support state, and install targets.", out)
-        self.assertEqual(self.calls, ["resume_pending_uninstalls", "uninstall_all_before_full", "run_uninstall_cleanup"])
-        self.patches.enter_context(mock.patch("installer.addons.uninstall_all_before_full", return_value=False))
-        rc, out = self.captured(lifecycle.run_full_uninstall, self.ctx)
-        self.assertEqual(rc, 1)
-        self.assertIn("[ERROR] Full uninstall stopped because one or more addon targets need the human user's review.", out)
-
-    def test_run_uninstall_cleanup_arguments(self):
-        # uninstall.sh:440-455
+    def test_full_uninstall_passes_cleanup_scope_and_failure_status(self):
         runner = FakeRunner()
         runner.respond_to("uninstall_cleanup.py", ToolResult(1))
         with runner.patch():
-            self.assertEqual(lifecycle.run_uninstall_cleanup(self.ctx), 1)
+            self.assertEqual(lifecycle.run_full_uninstall(self.ctx), 1)
         self.assertEqual(runner.tool_calls("uninstall_cleanup.py")[0],
                          ["--platform", "claude", "--install-state-manifest", str(self.ghost / "install-state" / "claude.json"),
                           "--apply"])
@@ -222,7 +209,7 @@ class SelectedRemovalOwnershipTests(LifecycleCase):
         super().setUp()
         self.stub("installer.transaction.migrate_record")
         self.stub("installer.addons.resume_pending_uninstalls")
-        self.stub("installer.hosts.install_hooks", True)
+        self.stub("installer.hosts.install_hooks", hook_status(action="uninstall", status="removed"))
         self.stub("installer.hosts.remove_claude_bootstrap_if_unused", False)
         self.patches.enter_context(mock.patch("installer.selection.ALL_SKILLS", ("alpha", "fam")))
         self.dependents = self.patches.enter_context(mock.patch("installer.addons.dependents_rc", return_value=0))
@@ -231,7 +218,7 @@ class SelectedRemovalOwnershipTests(LifecycleCase):
 
     def installed(self, name, *, linked=False, modified=False):
         from installer_assets import write_ownership_marker
-        source = self.source / name if name in {"alpha", "_shared"} else self.source / "fam" / name
+        source = self.source / name if (self.source / name).is_dir() else self.source / "fam" / name
         path = self.ctx.skills_dir / name
         if linked:
             path.symlink_to(source)
@@ -247,7 +234,7 @@ class SelectedRemovalOwnershipTests(LifecycleCase):
         self.state.parent.mkdir(parents=True, exist_ok=True)
         value = dict(schema_version=1, platform="claude", source_root=str(self.source),
             targets=[dict(target_name=name, dest_path=str(self.ctx.skills_dir/name),
-                          source_path=str(self.source/name if name in {"alpha", "_shared"} else self.source/'fam'/name),
+                          source_path=str(self.source/name if (self.source/name).is_dir() else self.source/'fam'/name),
                           install_mode="copy") for name in names])
         self.state.write_text(json.dumps(value), encoding="utf-8")
 
@@ -291,6 +278,29 @@ class SelectedRemovalOwnershipTests(LifecycleCase):
         self.assertTrue(alpha.is_symlink())
         self.assertTrue(shared.is_symlink())
 
+    def test_failed_last_skill_hook_detach_preserves_files_and_inventory(self):
+        alpha, shared = self.installed('alpha'), self.installed('_shared', linked=True)
+        self.inventory('alpha', '_shared')
+        original = self.state.read_bytes()
+        with mock.patch('installer.hosts.install_hooks',
+                        return_value=hook_status(action='uninstall', status='error')):
+            self.assertRaises(InstallerExit, lifecycle.uninstall, self.ctx, ['alpha'])
+        self.assertTrue((alpha / 'SKILL.md').is_file())
+        self.assertTrue(shared.is_symlink())
+        self.assertEqual(self.state.read_bytes(), original)
+
+    def test_last_skill_hook_detach_observes_intact_files(self):
+        alpha, shared = self.installed('alpha'), self.installed('_shared', linked=True)
+        self.inventory('alpha', '_shared')
+        def detach(*args, **kwargs):
+            self.assertTrue((alpha / 'SKILL.md').is_file())
+            self.assertTrue(shared.is_symlink())
+            return hook_status(action='uninstall', status='removed')
+        with mock.patch('installer.hosts.install_hooks', side_effect=detach):
+            self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ['alpha'])[0], 0)
+        self.assertFalse(alpha.exists())
+        self.assertFalse(shared.is_symlink())
+
     def test_managed_link_and_modified_copy_remove_without_losing_earlier_backup(self):
         alpha = self.installed("alpha", linked=True)
         one = self.installed("one", modified=True)
@@ -315,15 +325,82 @@ class SelectedRemovalOwnershipTests(LifecycleCase):
         self.assertTrue(one.exists())
         self.assertEqual([row['target_name'] for row in json.loads(self.state.read_text())['targets']], ['one'])
 
-    def test_other_host_reference_preserves_target_and_current_inventory(self):
+    def test_other_host_reference_preserves_target_and_releases_current_inventory(self):
         alpha = self.installed("alpha")
         self.inventory("alpha")
         other = self.state.with_name('codex.json')
-        other.write_text(json.dumps(dict(platform='codex', targets=[dict(dest_path=str(alpha))])))
-        original = self.state.read_bytes()
-        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ["alpha"])[0], 1)
+        other.write_text(json.dumps(dict(platform='codex', source_root=str(self.source), targets=[
+            dict(target_name='alpha', dest_path=str(alpha), install_mode='copy')])))
+        other_bytes = other.read_bytes()
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ["alpha"])[0], 0)
         self.assertTrue(alpha.exists())
-        self.assertEqual(self.state.read_bytes(), original)
+        self.assertEqual(json.loads(self.state.read_text())['targets'], [])
+        self.assertEqual(other.read_bytes(), other_bytes)
+        self.assertNotIn(alpha, self.guard.call_args.args[1])
+        self.assertFalse(lifecycle.selection.has_managed_installs(self.ctx.skills_dir, 'claude'))
+
+    def recorded_removal_with_collector(self, name='alpha', *, shared=False):
+        import content_digest
+        import installed_payload
+        import install_lock
+        checkout = Path(__file__).resolve().parents[1]
+        companion_source = self.source/'merge-companion'
+        companion_source.mkdir()
+        (companion_source/'SKILL.md').write_text('---\nname: merge-companion\n---\nCompanion fixture\n')
+        (companion_source/'scripts').symlink_to(checkout/'merge-companion'/'scripts', target_is_directory=True)
+        self.patches.enter_context(mock.patch('installer.selection.ALL_SKILLS', ('alpha', 'fam', 'merge-companion')))
+        target, one = self.installed(name), self.installed('one')
+        self.inventory(name, 'one')
+        original_files = {p.relative_to(target): p.read_bytes() for p in target.rglob('*') if p.is_file()}
+        generation = install_lock.acquire_lock(self.ghost/'install.lock', owner='test')
+        self.addCleanup(install_lock.release_lock, self.ghost/'install.lock', generation)
+        entry = dict(name=name, kind='skill', mode='copy', provider='core', source=str(self.source/name),
+            source_commit='fixture', baseline='recorded', installed_at='2026-10-02T00:00:00Z',
+            used_by=['claude', 'codex'] if shared else ['claude'], files=content_digest.tree(target))
+        installed_payload.update(self.ghost, {'targets': {str(target): entry}})
+        snapshot = self.ghost/'pending-merges'/'claude'/'snapshot.json'
+        snapshot.parent.mkdir(parents=True)
+        hashes = {str(target/'SKILL.md'): '0'*64,
+                  str(one/'SKILL.md'): content_digest.tree(one)['SKILL.md'].removeprefix('sha256:')}
+        snapshot.write_text(json.dumps(dict(version=2, platform='claude', captured_at='2026-10-01T00:00:00Z',
+            files=hashes, file_records={path: dict(path=path, sha256=digest,
+                relative_path=str(Path(path).relative_to(self.ctx.skills_dir))) for path, digest in hashes.items()})))
+        manifest = snapshot.with_name('manifest.json')
+        manifest.write_text(json.dumps(dict(version=1, entries=[])))
+        collector = companion_source/'scripts/diff_collector_cli.py'
+
+        def collect():
+            result = subprocess.run([sys.executable, str(collector), '--snapshot', str(snapshot),
+                '--pending', str(snapshot.parent), '--manifest', str(manifest), '--platform', 'claude',
+                '--skills-dir', str(self.ctx.skills_dir), '--install-record-root', str(self.ghost)],
+                cwd=self.source, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(json.loads(manifest.read_text())['entries'], [])
+
+        # The newer recorded placement must supersede the deliberately older snapshot.
+        collect()
+        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, [name])[0], 0)
+        remaining = installed_payload.read(self.ghost)['targets']
+        if shared:
+            self.assertEqual({p.relative_to(target): p.read_bytes() for p in target.rglob('*') if p.is_file()}, original_files)
+            self.assertEqual(remaining[str(target)], dict(entry, used_by=['codex']))
+        else:
+            self.assertFalse(target.exists())
+            self.assertNotIn(str(target), remaining)
+        self.assertEqual(set(json.loads(snapshot.read_text())['files']), {str(one/'SKILL.md')})
+        self.assertEqual(set(json.loads(snapshot.read_text())['file_records']), {str(one/'SKILL.md')})
+        self.assertEqual([r['target_name'] for r in json.loads(self.state.read_text())['targets']], ['one'])
+        # Both CLI helpers run from the checkout after the installed companion itself is gone.
+        collect()
+
+    def test_payload_reference_and_snapshot_are_released_before_inventory(self):
+        self.recorded_removal_with_collector(shared=True)
+
+    def test_recorded_target_removal_does_not_reappear_in_diff_manifest(self):
+        self.recorded_removal_with_collector()
+
+    def test_merge_companion_removal_keeps_checkout_record_cleanup_and_diff_collection_available(self):
+        self.recorded_removal_with_collector('merge-companion')
 
     def test_target_appearing_after_absent_preview_is_not_deleted(self):
         self.inventory("alpha")
@@ -406,7 +483,7 @@ class RecordedInventoryRetentionTests(LifecycleCase):
         self.patches.enter_context(mock.patch("installer.selection.ALL_SKILLS", ("alpha", "fam")))
         # Keep real configuration effects while using the fixture's selected source tree.
         self.patches.enter_context(mock.patch.object(hosts, "install_hooks",
-            side_effect=lambda ctx, action, platform: install_hooks.uninstall_hook(platform) in {"removed", "not_found"}))
+            side_effect=lambda ctx, action, platform, **kwargs: install_hooks.uninstall_hook(platform, **kwargs)))
         checkout = Path(__file__).resolve().parents[1]
         shutil.copy2(checkout / "_shared" / "global_rule_blocks.py", self.source / "_shared" / "global_rule_blocks.py")
         targets = []

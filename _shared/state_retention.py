@@ -3,7 +3,7 @@
 `POLICIES` names every file and folder a Core installation creates under the Ghost-ALICE state root and the host
 folders, and how each stays bounded. A writer calls `apply(name, path)` at its own moment for an entry that removes
 something: size rotation, keep the newest N, age or line count. A log that several processes append to is written
-through `append(name, path, text)`. Overwritten files and material kept for the user are named only. `apply` never
+through `append(name, path, text)`. Overwritten files, user-kept material and owner-completed cleanup are named only. `apply` never
 raises: a failure is one line in `state-retention-failures.jsonl` under the Ghost-ALICE state root, which the
 `retention-failures` entry bounds and doctor reads. `append` records a failed write there too. `entry_for` names the
 entry a created path belongs to, so a test can require every created path to have one.
@@ -31,7 +31,7 @@ from text_lines import committed_length, split_lines
 
 MB = 1024 * 1024
 DAY = 86400
-METHODS = ("size-rotation", "keep-newest", "age", "line-count", "overwrite", "user-kept")
+METHODS = ("size-rotation", "keep-newest", "age", "line-count", "overwrite", "user-kept", "owner-completed")
 FAILURES = "state-retention-failures.jsonl"
 
 
@@ -85,8 +85,8 @@ _TABLE = (
     Policy("retention-failures", "line-count", ("{ghost}/" + FAILURES,), target=FAILURES, limit=500, keep=500),
     Policy("io-trace", "line-count", ("{ghost}/io-trace.jsonl",), target="io-trace.jsonl", limit=10_000,
            keep=5_000),
-    Policy("publish-rollbacks", "keep-newest", ("{record}/rollbacks/*", "{record}/rollbacks/*/**"),
-           target="rollbacks", limit=20, folders_only=True),
+    Policy("publish-rollbacks", "owner-completed", ("{record}/rollbacks/*", "{record}/rollbacks/*/**")),
+    Policy("install-versions", "owner-completed", ("{record}/versions/*", "{record}/versions/*/**")),
     Policy("hook-settings-backups", "keep-newest", ("{claude}/settings.json.bak*", "{codex}/hooks.json.bak*"),
            target="*.json", limit=3, order="mtime", members="{name}.bak*", siblings=True, files_only=True,
            skip_links=True),
@@ -117,7 +117,9 @@ _TABLE = (
             "{record}/pending-merges/*/READ-ME-FIRST.md")),
     Policy("pending-merge-copies", "user-kept",
            ("{record}/pending-merges/*/*.bak", "{record}/pending-merges/*/legacy-targets/**")),
-    Policy("retired-assets", "user-kept",
+    # The retirement/cleanup owner deletes only copies whose completion evidence
+    # resolves recovery and review; incomplete, modified and unknown copies stay.
+    Policy("retired-assets", "owner-completed",
            ("{record}/deprecated-skill-backups/**", "{claude}/retired-command-backups/**")),
     Policy("addon-state", "overwrite",
            ("{record}/addons/*/*.json", "{record}/addons/*/*.json.removing", "{ghost}/addon-permissions/*.json",

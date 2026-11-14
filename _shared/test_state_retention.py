@@ -64,7 +64,7 @@ class PolicyTableTests(unittest.TestCase):
             "install-state-events": ("size-rotation", 5 * MB, None),
             "retention-failures": ("line-count", 500, 500),
             "io-trace": ("line-count", 10_000, 5_000),
-            "publish-rollbacks": ("keep-newest", 20, None),
+            "publish-rollbacks": ("owner-completed", None, None),
             "hook-settings-backups": ("keep-newest", 3, None),
         }
         for name, (method, limit, keep) in expected.items():
@@ -80,13 +80,23 @@ class PolicyTableTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(policy.name, name)
                 self.assertIn(policy.method, state_retention.METHODS)
-                if policy.method in ("overwrite", "user-kept"):
+                if policy.method in ("overwrite", "user-kept", "owner-completed"):
                     self.assertTrue(policy.patterns)
 
     def test_kept_material_is_never_deleted_by_the_program(self):
-        for name in ("uninstall-backup", "retired-assets", "pending-merge-copies", "live-smoke"):
+        for name in ("uninstall-backup", "pending-merge-copies", "live-smoke"):
             with self.subTest(name=name):
                 self.assertEqual(state_retention.POLICIES[name].method, "user-kept")
+
+    def test_retired_copies_are_deleted_only_by_their_completion_owner(self):
+        self.assertEqual(state_retention.POLICIES['retired-assets'].method, 'owner-completed')
+        with tempfile.TemporaryDirectory() as temporary:
+            backup = Path(temporary) / 'retired'
+            backup.mkdir()
+            original = backup / 'SKILL.md'
+            original.write_bytes(b'recovery original\n')
+            self.assertEqual(state_retention.apply('retired-assets', backup), ())
+            self.assertEqual(original.read_bytes(), b'recovery original\n')
 
 
 class SizeRotationTests(RetentionTestCase):
@@ -228,17 +238,14 @@ class KeepNewestTests(RetentionTestCase):
         self.assertEqual(kept, {stamps[0], *stamps[-5:]})
         self.assertTrue((backups / f"{stamps[0]}-artifacts" / "manifest.json").exists())
 
-    def test_entries_the_owner_marks_ineligible_are_neither_counted_nor_deleted(self):
+    def test_publish_original_cleanup_belongs_to_the_publish_owner(self):
         root = self.root / "rollbacks"
         root.mkdir()
         names = [f"2026102{index}T000000000000Z-1-abcd" for index in range(5)]
         for name in names:
             (root / name).mkdir()
-        unfinished = {names[0]}
-        policy = state_retention.POLICIES["publish-rollbacks"]._replace(limit=2)
-        with mock.patch.dict(state_retention.POLICIES, {"publish-rollbacks": policy}):
-            state_retention.apply("publish-rollbacks", root, eligible=lambda path: path.name not in unfinished)
-        self.assertEqual(sorted(path.name for path in root.iterdir()), [names[0], names[3], names[4]])
+        state_retention.apply("publish-rollbacks", root, limit=0)
+        self.assertEqual(sorted(path.name for path in root.iterdir()), names)
 
     def test_hook_backups_keep_the_newest_by_time_and_never_touch_links_or_pending_merges(self):
         settings = self.root / "settings.json"
@@ -383,7 +390,9 @@ class AppendTests(RetentionTestCase):
         pending = self.root / "pending"
         pending.mkdir()
         (pending / "install-state").write_text("", encoding="utf-8")  # the audit log's folder cannot be created
-        with self.assertRaises(OSError):
+        with mock.patch('uninstall_cleanup.release_target_records', create=True), \
+                mock.patch('uninstall_cleanup._platforms_referencing_target', return_value=[]), \
+                self.assertRaises(OSError):
             retired_assets._retire(asset, ownership=retired_assets.OWNERSHIP_GHOST_ALICE_MANAGED,
                                    backup_root=self.root / "backups", platform="claude",
                                    source_root=self.root, pending_root=pending)
@@ -601,7 +610,7 @@ class EntryCallerTests(unittest.TestCase):
     def test_every_removing_entry_has_a_caller(self):
         callers = _entry_callers()
         for name, policy in state_retention.POLICIES.items():
-            if policy.method in ("overwrite", "user-kept"):
+            if policy.method in ("overwrite", "user-kept", "owner-completed"):
                 continue
             with self.subTest(name=name):
                 self.assertIn(name, callers, f"no writer applies {name}")

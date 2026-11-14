@@ -55,13 +55,17 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
     for addon_id in promoted:
         if addon_id not in addon_ids:
             addon_ids.append(addon_id)
+    if not skills and not addon_ids:
+        return run_full_uninstall(ctx)
+    from install_hooks import settings_backup_sources
+    backups = settings_backup_sources(ctx.platform)
     # Snapshot which requested addons exist before the resume runs.
     known_before = {addon_id for addon_id in addon_ids
                     if (addons_dir / f"{addon_id}.json").is_file() or (addons_dir / f"{addon_id}.json.removing").is_file()}
-    addons.resume_pending_uninstalls(ctx)
+    addons.resume_pending_uninstalls(ctx, backup_sources=backups)
     removed = failed = 0
     for addon_id in addon_ids:
-        code = addons.uninstall_addon(ctx, addon_id)
+        code = addons.uninstall_addon(ctx, addon_id, backup_sources=backups)
         if code == 0:
             removed += 1
         elif code == 1:
@@ -74,18 +78,17 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
             failed += 1
             report.warn(f"Addon {addon_id}: uninstall left items for the human user to review")
     if not skills:
-        if addon_ids:
-            if removed > 0:
-                report.ok(f"{removed} addon(s) removed.")
-            else:
-                report.info("No addon targets to remove.")
-            return 1 if failed else 0
-        return run_full_uninstall(ctx)
+        if removed > 0:
+            report.ok(f"{removed} addon(s) removed.")
+        else:
+            report.info("No addon targets to remove.")
+        return 1 if failed else 0
     selection.validate_requested_skills(skills)
     report.info("Removing selected skills...")
     skills_dir = Path(ctx.skills_dir)
     candidates = {target.name: target for skill in skills for target in selection.expand_skill_targets(skill)}
     removal: list[tuple[str, Path, Path]] = []
+    shared_references: list[tuple[str, Path, Path]] = []
     absent: list[tuple[str, Path, Path]] = []
     dependency_status: dict[str, int] = {}
     for label, target in candidates.items():
@@ -109,17 +112,22 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
         proposed = transaction.remove_installed_target(ctx, label, path, source_path=target.path, apply_changes=False)
         if proposed["action"] in {"would-remove", "would-quarantine-remove"}:
             removal.append((label, path, target.path))
+        elif proposed['action'] == 'would-release-reference':
+            shared_references.append((label, path, target.path))
         elif proposed["action"] == "missing":
             absent.append((label, path, target.path))
         else:
             failed += 1
             report.warn(f"Preserving {label}: {proposed['reason']}")
-    if not selection.has_managed_installs(skills_dir, ctx.platform, excluding=tuple(path for _, path, _ in removal)):
+    if not selection.has_managed_installs(skills_dir, ctx.platform,
+            excluding=tuple(path for _, path, _ in [*removal, *shared_references])):
         shared = skills_dir / "_shared"
         proposed = transaction.remove_installed_target(ctx, "_shared", shared,
             source_path=runner.REPO_ROOT / "_shared", apply_changes=False)
         if proposed["action"] in {"would-remove", "would-quarantine-remove"}:
             removal.append(("_shared", shared, runner.REPO_ROOT / "_shared"))
+        elif proposed['action'] == 'would-release-reference':
+            shared_references.append(('_shared', shared, runner.REPO_ROOT / '_shared'))
         elif proposed["action"] == "missing":
             absent.append(("_shared", shared, runner.REPO_ROOT / "_shared"))
         else:
@@ -128,19 +136,28 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
     guard = transaction.guard_gateway_removal(ctx, [path for _, path, _ in removal])
     if guard != 0:
         return guard
+    if selection.has_managed_installs(skills_dir, ctx.platform,
+            excluding=tuple(path for _, path, _ in [*removal, *shared_references])):
+        report.info("Managed skills remain; keeping hooks installed.")
+    elif hosts.install_hooks(ctx, "uninstall", ctx.platform, backup_sources=backups).legacy_status == 'error':
+        report.error("Hook removal failed. Aborting skill removal")
+        raise InstallerExit(1)
     absent_paths = {path for _, path, _ in absent}
-    for label, path, source_path in [*removal, *absent]:
-        if label == "_shared" and selection.has_managed_installs(skills_dir, ctx.platform):
+    released_paths = []
+    for label, path, source_path in sorted([*removal, *shared_references, *absent], key=lambda row: row[0] == '_shared'):
+        if label == "_shared" and selection.has_managed_installs(skills_dir, ctx.platform, excluding=tuple(released_paths)):
             failed += 1
             report.warn("Preserving _shared: a Core target remains after removal")
             continue
         result = transaction.remove_installed_target(ctx, label, path, source_path=source_path,
                                                      only_if_absent=path in absent_paths)
-        if result["action"] in {"removed", "quarantined-removed"}:
+        if result["action"] in {"removed", "quarantined-removed", "reference-released"}:
             removed += 1
+            released_paths.append(path)
         elif result["action"] != "missing":
             failed += 1
-            report.warn(f"Preserving {label}: {result['reason']}")
+            report.warn(f"Removal incomplete for {path}: {result['reason']}; "
+                        f"file {result.get('file_state', 'retained')}; {result.get('detail', '')}")
     if ctx.platform == "claude":
         if hosts.remove_claude_bootstrap_if_unused(ctx, skills_dir):
             removed += 1
@@ -151,29 +168,15 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
         report.info("No skills to remove.")
     else:
         report.ok(f"{removed} item(s) removed.")
-    if selection.has_managed_installs(skills_dir, ctx.platform):
-        report.info("Managed skills remain; keeping hooks installed.")
-    elif not hosts.install_hooks(ctx, "uninstall", ctx.platform):
-        report.error("Hook removal failed. Aborting skill removal")
-        raise InstallerExit(1)
     return 1 if failed else 0
 
 
-def run_uninstall_cleanup(ctx: "Context") -> int:
-    """`uninstall_cleanup.py --platform --install-state-manifest --apply`."""
+def run_full_uninstall(ctx: "Context") -> int:
+    """Run the gateway, addon and Core cleanup as one itemized report."""
+    report.info("Full uninstall: removing Ghost-ALICE managed hooks, bootstrap, support state, and install targets.")
     return runner.run_tool("_shared/uninstall_cleanup.py", "--platform", ctx.platform,
                            "--install-state-manifest", str(locations.install_state_path(ctx.platform)),
                            "--apply").returncode
-
-
-def run_full_uninstall(ctx: "Context") -> int:
-    """Resume, remove every addon (stop when one is preserved), then cleanup."""
-    report.info("Full uninstall: removing Ghost-ALICE managed hooks, bootstrap, support state, and install targets.")
-    addons.resume_pending_uninstalls(ctx)
-    if not addons.uninstall_all_before_full(ctx):
-        report.error("Full uninstall stopped because one or more addon targets need the human user's review.")
-        return 1
-    return run_uninstall_cleanup(ctx)
 
 
 def run_repair(ctx: "Context") -> int:

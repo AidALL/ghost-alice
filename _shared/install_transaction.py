@@ -7,8 +7,8 @@ moves into `~/.ghost-alice/rollbacks/<txid>/`, whose `journal.json` says what th
 publish replaces and how far it got (`prepare`, then `done` or `restored`). The
 participants are called before and after the publish and, when it fails, before
 and after the restore; this module knows only their interface
-(`installer.participant`). Any failure restores the files and the record with the
-cause's exit code. `recover --txid` restores a publish that stopped before its
+(`installer.participant`). An ordinary failure attempts file, record and participant
+restoration with the cause's exit code. `recover --txid` restores a publish that stopped before its
 journal said `done`, and `unfinished` lists those publishes.
 """
 
@@ -27,12 +27,14 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 import content_digest
 import install_lock
 import installed_payload
+import installer_assets
 from installer_assets import write_ownership_marker
+import pending_manifest
 import state_retention
 from installer.participant import PublishContext
 
@@ -241,12 +243,11 @@ def _write_target_progress_event(
 
 class ReplacementBatch:
     """Reversible filesystem participant; its caller owns service recovery and names the rollback folder the
-    replaced originals move into. `rollback_keep` replaces the retention table's limit for that folder."""
-    def __init__(self, targets, *, rollback_root, rollback_keep=None,
+    replaced originals move into."""
+    def __init__(self, targets, *, rollback_root,
                  progress_callback=None, progress_event_file=None, progress_events=None):
         self.targets = [(Path(src), Path(dst), mode) for src, dst, mode in targets]
         self.root = Path(rollback_root)
-        self.keep = rollback_keep
         self.callback, self.event_file, self.events = progress_callback, progress_event_file, progress_events
         if self.events is not None and len(self.events) != len(self.targets):
             raise InstallTransactionError('progress event count must match target count')
@@ -352,7 +353,7 @@ class ReplacementBatch:
                     state_retention.record_failure("install-staging", stage_root, exc)
 
 
-def _wrapped_failure(exc, batch, detail=None):
+def _wrapped_failure(exc, batch=None, detail=None):
     """An InstallTransactionError that keeps the cause's code, exit code, outcome and phase."""
     if detail is not None:
         wrapped = InstallTransactionError(detail)
@@ -363,7 +364,7 @@ def _wrapped_failure(exc, batch, detail=None):
     for name in ('code', 'exit_code', 'outcome'):
         if hasattr(exc, name):
             setattr(wrapped, name, getattr(exc, name))
-    wrapped.phase = getattr(exc, 'phase', batch.phase)
+    wrapped.phase = getattr(exc, 'phase', batch.phase if batch is not None else 'rollback')
     return wrapped
 
 
@@ -424,6 +425,11 @@ class Journal:
         self.data["phase"] = phase
         self.save()
 
+    def checkpoint(self, participant: str, state: dict) -> None:
+        """Save the participant's recovery facts before it changes an external service."""
+        self.data["participants"][participant] = state
+        self.save()
+
     @classmethod
     def begin(cls, request: dict, targets: list[dict]) -> "Journal":
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -436,7 +442,7 @@ class Journal:
             copy = installed_payload.FILENAME
         journal = cls(folder, {
             "schema_version": JOURNAL_SCHEMA_VERSION, "txid": folder.name, "phase": "prepare",
-            "host": request["host"], "created_at": _now(), "record_copy": copy,
+            "host": request["host"], "created_at": _now(), "record_copy": copy, "participants": {},
             "targets": [{key: target[key] for key in ("name", "kind", "mode", "source", "dest")}
                         for target in targets]})
         journal.save()
@@ -521,14 +527,14 @@ class PublishBatch(ReplacementBatch):
     """
 
     def __init__(self, request: dict, replaced: list[dict], current: list[dict], journal: Journal, *,
-                 rollback_keep=None, progress_callback=None, progress_events=None):
+                 progress_callback=None, progress_events=None):
         self.request, self.journal = request, journal
         self.replaced, self.current = replaced, current
         self.ghost_root = Path(request["ghost_root"])
         progress = request.get("progress") or {}
         super().__init__([(target["source"], target["dest"], "symlink" if target["mode"] == "link" else "copy")
                           for target in replaced],
-                         rollback_root=journal.folder, rollback_keep=rollback_keep,
+                         rollback_root=journal.folder,
                          progress_callback=progress_callback, progress_event_file=progress.get("event_file"),
                          progress_events=progress_events)
 
@@ -577,13 +583,9 @@ class PublishBatch(ReplacementBatch):
     def restore(self):
         super().restore()
         installed_payload.restore(self.ghost_root, self.journal.record_copy())
-        self.journal.mark("restored")
 
     def finalize(self):
         self.journal.mark("done")
-        # The newest finished publish folders stay; an unfinished one stays until it is restored.
-        state_retention.apply("publish-rollbacks", rollbacks_root(self.ghost_root), limit=self.keep,
-                              eligible=lambda folder: _journal_phase(folder) in (*FINISHED_PHASES, "absent"))
 
 
 def _validated_request(request) -> dict:
@@ -629,16 +631,183 @@ def _require_lock(ghost_root) -> None:
         raise InstallTransactionError(f"publish runs only under the install lock of this process or its parent: {lock}")
 
 
-def publish(request: dict, participants: Sequence = (), *, rollback_keep: int | None = None) -> str:
+def _cleanup_references(ghost_root: Path, *, record: dict | None = None) -> list[tuple[Path, str]]:
+    references = []
+    record = (installed_payload.read(ghost_root) or {}) if record is None else record
+    for dest, entry in record.get("targets", {}).items():
+        if not isinstance(entry, dict) or not entry.get("used_by"):
+            continue
+        reason = "current-target-reference:" + ",".join(sorted(entry["used_by"]))
+        for value in (dest, entry.get("source"), entry.get("link_target")):
+            if isinstance(value, str) and value:
+                path = Path(value)
+                references.append((path if path.is_absolute() else Path(dest).parent / path,
+                                   reason))
+        path = Path(dest)
+        if content_digest._is_link(path):
+            references.append((path.resolve(), reason))
+    service = record.get("service") or {}
+    if not isinstance(service, dict):
+        raise ValueError("current service record is not an object")
+    for key in ("runtime_root", "program", "launch_agent", "state_path", "config_path", "config_backup"):
+        value = service.get(key)
+        if isinstance(value, str) and value:
+            references.append((Path(value), f"current-service-reference:{key}"))
+    pending = ghost_root / "pending-merges"
+    if pending.exists():
+        for host in pending.iterdir():
+            manifest = host / "manifest.json"
+            if not manifest.exists():
+                continue
+            try:
+                data = pending_manifest.read_json(manifest)
+                if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
+                    raise ValueError("manifest needs entries")
+                for entry in data["entries"]:
+                    if not isinstance(entry, dict):
+                        raise ValueError("manifest entry is not an object")
+                    if pending_manifest.is_pending(entry):
+                        for key in ("source_path", "backup_path"):
+                            value = entry.get(key)
+                            if isinstance(value, str) and value:
+                                path = Path(value)
+                                references.append((path if path.is_absolute() else manifest.parent / path,
+                                                   f"pending-merge-reference:{manifest}"))
+            except (OSError, ValueError) as exc:
+                raise InstallTransactionError(f"completed publish cleanup cannot read pending manifest {manifest}: {exc}") from exc
+    return references
+
+
+def _reference_reason(path: Path, references: list[tuple[Path, str]], *, ghost_root: Path, platform: str) -> str | None:
+    """Keep recorded consumers and ask the live-reference owner about every host's inventory and addons."""
+    original = path.absolute()
+    for reference, reason in references:
+        # Do not resolve the original: deleting a recorded old link does not delete its source.
+        for candidate in (reference.absolute(), reference.resolve()):
+            if candidate == original or original in candidate.parents or candidate in original.parents:
+                return reason
+    from uninstall_cleanup import _platforms_referencing_target
+    hosts = _platforms_referencing_target(path, current_manifest=ghost_root/'install-state'/f'{platform}.json',
+                                         current_platform=platform, include_current=True, source_tree=True)
+    return 'live-host-source-reference:' + ','.join(hosts) if hosts else None
+
+
+def _original_cleanup_reason(original: Path, target: dict, record: dict) -> str | None:
+    entry = record.get("targets", {}).get(target.get("dest"))
+    if isinstance(entry, dict) and entry.get("baseline") in ("recorded", "migrated"):
+        if entry.get("mode") == "link" and isinstance(entry.get("link_target"), str):
+            return "installed-link-changed" if content_digest.compare(entry, original)["link_target_differs"] else None
+        if entry.get("mode") == "copy" and isinstance(entry.get("files"), dict):
+            if any(content_digest.compare(entry, original).values()):
+                return "installed-content-changed"
+            return installer_assets.unrecorded_copy_content(original, entry["files"])
+    if target.get("kind") in ("skill", "support") and not original.is_symlink():
+        classified = installer_assets.classify_skill_root(original, expected_asset_id=target.get("name"), whole_copy=True)
+        if classified.ownership == installer_assets.OWNERSHIP_GHOST_ALICE_MANAGED:
+            return None
+        return classified.reason
+    return "no-installed-baseline"
+
+
+def cleanup_completed(ghost_root: Path | str) -> tuple[str, ...]:
+    """Discard redundant managed publish originals under the install lock after installation or target removal.
+
+    Return retained paths with their reasons. An unreadable dependency or failed deletion raises outside
+    publish's restore boundary; cleanup never reverts the caller's file changes. Successful source versions have
+    their own owner and retention policy. This function neither creates backups nor rewrites journals.
+    """
+    ghost_root = Path(ghost_root)
+    _require_lock(ghost_root)
+    root = rollbacks_root(ghost_root)
+    if root.is_symlink():
+        return (f"{root}: linked-publish-root",)
+    if not root.exists():
+        return ()
+    retained = []
+    try:
+        active = unfinished(ghost_root)
+        if active:
+            return tuple(f"{root / txid}: unfinished-publish" for txid in active)
+        references = _cleanup_references(ghost_root)
+        for folder in sorted(root.iterdir()):
+            if folder.is_symlink() or not folder.is_dir():
+                retained.append(f"{folder}: unrecognized-publish-entry")
+                continue
+            if _journal_phase(folder) not in FINISHED_PHASES:
+                retained.append(f"{folder}: no-finished-journal")
+                continue
+            if (folder / JOURNAL_FILENAME).is_symlink():
+                retained.append(f"{folder}: linked-publish-journal")
+                continue
+            journal = Journal.load(ghost_root, folder.name)
+            if (journal.data.get("schema_version") != JOURNAL_SCHEMA_VERSION
+                    or journal.data.get("txid") != folder.name
+                    or journal.data.get("record_copy") not in (None, installed_payload.FILENAME)
+                    or any(not isinstance(target, dict) for target in journal.data.get("targets", []))):
+                retained.append(f"{folder}: unrecognized-journal")
+                continue
+            if journal.record_copy() is not None and journal.record_copy().is_symlink():
+                retained.append(f"{folder}: linked-installed-baseline")
+                continue
+            try:
+                before = installed_payload.read(folder) if journal.record_copy() is not None else None
+            except installed_payload.RecordError as exc:
+                retained.append(f"{folder}: unavailable-installed-baseline: {exc}")
+                continue
+            unrecognized_original = False
+            for target in journal.data.get("targets", []):
+                value = target.get("rollback")
+                if not isinstance(value, str):
+                    continue
+                original = Path(value)
+                if original.parent != folder or not original.name.startswith("rollback-"):
+                    retained.append(f"{folder}: unrecognized-original-path: {original}")
+                    unrecognized_original = True
+                    continue
+                if not os.path.lexists(original):
+                    continue
+                reason = (_reference_reason(original, references, ghost_root=ghost_root, platform=journal.data.get('host', ''))
+                          or _original_cleanup_reason(original, target, before or {}))
+                if reason:
+                    retained.append(f"{original}: {reason}")
+                else:
+                    _remove_path(original)
+            if unrecognized_original:
+                continue
+            metadata = {JOURNAL_FILENAME}
+            if journal.record_copy() is not None:
+                metadata.add(installed_payload.FILENAME)
+            remaining = [path for path in folder.iterdir() if path.name not in metadata]
+            if remaining:
+                known = {target.get("rollback") for target in journal.data.get("targets", [])}
+                retained.extend(f"{path}: unrecognized-publish-content" for path in remaining if str(path) not in known)
+                continue
+            reason = _reference_reason(folder, references, ghost_root=ghost_root, platform=journal.data.get('host', ''))
+            if reason:
+                retained.append(f"{folder}: {reason}")
+                continue
+            if any(path.is_symlink() or not path.is_file() for path in folder.iterdir()):
+                retained.append(f"{folder}: unrecognized-publish-metadata")
+                continue
+            for path in folder.iterdir():
+                path.unlink()
+            folder.rmdir()
+    except (OSError, ValueError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, InstallTransactionError):
+            raise
+        raise InstallTransactionError(f"completed publish cleanup failed under {root}: {exc}; cleanup did not revert earlier file changes") from exc
+    return tuple(retained)
+
+
+def publish(request: dict, participants: Sequence = ()) -> str:
     """Publish the request's targets and their install record entries; return the transaction id.
 
     When the request replaces targets, every participant's `before_publish` runs after
     the staging and before any install location changes, and `after_publish` once the
     files and the record are published. On failure, `before_restore` runs first;
-    the batch restores files and the record and writes `restored` to the journal;
-    then `after_restore` runs. A failure before that journal update leaves it
-    unfinished. An `after_restore` failure leaves the completed file/record restore
-    marked `restored`, even when the participant could not restore its service.
+    the batch restores files and the record, then `after_restore` runs. Only a
+    complete restore writes `restored` to the journal; an unfinished participant
+    leaves recovery pending even when the files and record are already back.
     InstallTransactionError retains the original cause's exit code unless the
     failed recovery supplies its own code. A recovery failure also names the
     folder for review.
@@ -653,7 +822,8 @@ def publish(request: dict, participants: Sequence = (), *, rollback_keep: int | 
         raise InstallTransactionError(f"publish journal cannot be written under "
                                       f"{rollbacks_root(request['ghost_root'])}: {exc}") from exc
     context = PublishContext(ghost_root=Path(request["ghost_root"]), host=request["host"], txid=journal.txid,
-                             destinations=tuple(Path(target["dest"]) for target in replaced))
+                             destinations=tuple(Path(target["dest"]) for target in replaced),
+                             checkpoint=journal.checkpoint)
     progress = request.get("progress") or {}
     statuses = [target.get("status") for target in replaced]
     callback = None
@@ -667,7 +837,7 @@ def publish(request: dict, participants: Sequence = (), *, rollback_keep: int | 
     if progress.get("event_file"):
         events = [{"platform": request["host"], "target_id": target["name"], "target_kind": target["kind"],
                    "status": target["status"]} for target in replaced]
-    batch = PublishBatch(request, replaced, current, journal, rollback_keep=rollback_keep,
+    batch = PublishBatch(request, replaced, current, journal,
                          progress_callback=callback, progress_events=events)
     # Only current links change no file, so the participants have nothing to do.
     attending = list(participants) if replaced else []
@@ -687,6 +857,7 @@ def publish(request: dict, participants: Sequence = (), *, rollback_keep: int | 
             batch.restore()
             for participant in attending:
                 participant.after_restore(context)
+            journal.mark("restored")
         except Exception as recovery:
             cause = recovery if hasattr(recovery, "exit_code") else exc
             wrapped = _wrapped_failure(cause, batch, f"{wrapped}; restore failed ({recovery}); review {journal.folder}")
@@ -728,34 +899,65 @@ def _recovery_action(folder: Path, target: dict):
                                   f"review {folder}")
 
 
-def recover(ghost_root, txid: str) -> list[str]:
+def recover(ghost_root, txid: str, *,
+            participant_factory: Callable[[PublishContext, dict | None, dict | None], Sequence] | None = None) -> list[str]:
     """Restore the publish `txid` from its journal unless the journal says done or restored.
 
     Every target is checked before any changes: the install location must still hold
     what the publish left there (or its original), and a moved original must still be
-    kept with its recorded before state. Then the originals return, the install record
-    returns to its saved copy and the journal says `restored`. Returns one line per restored target.
+    kept with its recorded before state. The installer supplies a participant factory
+    when service recovery facts need interpretation; without it only proven file-only
+    recovery is allowed. Reconstructed participants confirm service
+    absence before the originals and record return, then restore prior service state.
+    Only a complete recovery marks `restored`. Returns one line per restored target.
     """
     journal = Journal.load(ghost_root, txid)
     if journal.phase in FINISHED_PHASES:
         return []
-    actions = [action for action in (_recovery_action(journal.folder, target)
-                                     for target in reversed(journal.data.get("targets", []))) if action]
-    lines = []
-    for action, dest, kept in actions:
-        if action in ("replace", "remove"):
-            _remove_path(dest)
-        if action == "remove":
-            lines.append(f"Removed {dest}; it did not exist before publish {txid}")
-            continue
-        _rename_path(kept, dest)
-        lines.append(f"Restored {dest} from {kept}")
-    installed_payload.restore(ghost_root, journal.record_copy())
-    journal.mark("restored")
-    for target in journal.data.get("targets", []):
-        stage = target.get("stage")
-        if stage and os.path.lexists(stage) and content_digest.state(stage) == target.get("candidate"):
-            _remove_path(Path(stage))
+    try:
+        actions = [action for action in (_recovery_action(journal.folder, target)
+                                         for target in reversed(journal.data.get("targets", []))) if action]
+        context = PublishContext(ghost_root=Path(ghost_root), host=journal.data.get("host", ""), txid=txid,
+                                 destinations=tuple(Path(target["dest"]) for target in journal.data.get("targets", [])))
+        copy = journal.record_copy()
+        states = journal.data.get("participants")
+        if "participants" in journal.data and not isinstance(states, dict):
+            raise InstallTransactionError("Invalid participant recovery facts; review the journal with the installer")
+        # An empty checkpoint set establishes that no participant reached its effects;
+        # an unreadable original record can still return byte-for-byte in this case.
+        original_record = installed_payload.read(copy.parent) if copy is not None and states != {} else None
+        if participant_factory is None:
+            if states or (states is None and (original_record or {}).get("service") is not None):
+                raise InstallTransactionError("Participant recovery requires the installer owner; run the installer again")
+            attending = ()
+        else:
+            attending = participant_factory(context, states, original_record)
+        for participant in attending:
+            participant.before_restore(context)
+        lines = []
+        for action, dest, kept in actions:
+            if action in ("replace", "remove"):
+                _remove_path(dest)
+            if action == "remove":
+                lines.append(f"Removed {dest}; it did not exist before publish {txid}")
+                continue
+            _rename_path(kept, dest)
+            lines.append(f"Restored {dest} from {kept}")
+        installed_payload.restore(ghost_root, copy)
+        for participant in attending:
+            participant.after_restore(context)
+        journal.mark("restored")
+    except Exception as exc:
+        raise _wrapped_failure(exc, detail=f"publish recovery failed ({exc}); review {journal.folder}") from exc
+    try:
+        for target in journal.data.get("targets", []):
+            stage = target.get("stage")
+            if stage and os.path.lexists(stage) and content_digest.state(stage) == target.get("candidate"):
+                _remove_path(Path(stage))
+    except Exception as exc:
+        raise _wrapped_failure(exc, detail=(
+            "The installer restored the files, install record and required service state for this publish, "
+            f"but could not inspect or remove staged files ({exc}); review {journal.folder}")) from exc
     return lines
 
 
@@ -781,6 +983,13 @@ def _write_progress(label: str, done: int, statuses: Sequence[str]) -> None:
     sys.stdout.flush()
 
 
+def failure_message(exc: InstallTransactionError) -> str:
+    """The recovery diagnostic shared by the low CLI and the installer's lock owner."""
+    if hasattr(exc, "code"):
+        return json.dumps(dict(status=exc.outcome, error_code=exc.code, phase=exc.phase, detail=str(exc)))
+    return str(exc)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     try:
@@ -790,10 +999,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             raise AssertionError(args.command)
     except InstallTransactionError as exc:
-        if hasattr(exc, 'code'):
-            print(json.dumps(dict(status=exc.outcome, error_code=exc.code, phase=exc.phase, detail=str(exc))), file=sys.stderr)
-        else:
-            print(str(exc), file=sys.stderr)
+        print(failure_message(exc), file=sys.stderr)
         return getattr(exc, 'exit_code', 1)
     return 0
 
