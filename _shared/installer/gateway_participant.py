@@ -78,6 +78,34 @@ def affects(service: dict, locations, *, remove_codex: bool = False) -> bool:
                for file in (Path(service[key]) for key in SERVICE_FILE_KEYS) for location in locations)
 
 
+def recovery_participants(ctx: PublishContext, states: dict | None, original_record: dict | None) -> list:
+    """Reconstruct only the gateway whose prior running state the publish saved before its effects.
+
+    An older affected journal cannot establish that state and waits for review. A new
+    journal without a gateway checkpoint has not reached a gateway service effect.
+    """
+    service = (original_record or {}).get("service")
+    if states is None:
+        if isinstance(service, dict) and affects(service, ctx.destinations):
+            raise GatewayFailure("The journal has no prior gateway running state; review the service before recovery",
+                                 phase="rollback")
+        return []
+    if not isinstance(states, dict):
+        raise GatewayFailure("The journal's participant recovery facts are unreadable", phase="rollback")
+    if "gateway" not in states:
+        return []
+    saved = states["gateway"]
+    if (not isinstance(saved, dict) or type(saved.get("was_running")) is not bool
+            or not isinstance(service, dict) or saved.get("service") != service
+            or not affects(service, ctx.destinations)):
+        raise GatewayFailure("The journal cannot establish the gateway's prior running state and ownership",
+                             phase="rollback")
+    chosen = GatewayParticipant(ctx.ghost_root, service)
+    chosen.affected = chosen.recovering = True
+    chosen.was_running = chosen.stopped = saved["was_running"]
+    return [chosen]
+
+
 class UnreadableRecordParticipant:
     """Stands in for the gateway participant while the install record cannot be read: a publish that touches
     the runtime is held until the record is reviewed; a publish elsewhere goes on."""
@@ -110,6 +138,7 @@ class GatewayParticipant:
         self.domain = gateway_platform.service_domain(self.platform)
         self.agent = Path(service["launch_agent"])
         self.affected = self.was_running = self.stopped = self.started = False
+        self.stop_attempted = self.recovering = False
 
     def _listener(self) -> dict:
         return json.loads(Path(self.service["state_path"]).read_bytes())
@@ -124,13 +153,16 @@ class GatewayParticipant:
             self.was_running = owned_service_state(self.effects, self.domain, self.agent) == "running"
         except Exception as exc:
             raise GatewayServiceError("Service state is unavailable; no installed artifacts changed") from exc
+        if ctx.checkpoint is None:
+            raise GatewayBlocked("Gateway publish needs a transaction recovery checkpoint before service effects")
+        ctx.checkpoint("gateway", {"service": dict(self.service), "was_running": self.was_running})
         if self.was_running:
+            self.stop_attempted = True
             try:
                 self.effects.stop(self.domain)
             except Exception as exc:
                 raise GatewayServiceError("Gateway service stop/absence is unconfirmed; no active files changed; "
                                           "retain Core for review", phase="stop") from exc
-            self.stopped = True
         try:
             absent = owned_service_state(self.effects, self.domain, self.agent) == "absent"
         except Exception:
@@ -138,6 +170,7 @@ class GatewayParticipant:
         if not absent:
             raise GatewayServiceError("Gateway service absence is unconfirmed; no active files changed; retain Core "
                                       "for review", phase="verify-absence")
+        self.stopped = self.was_running
 
     def after_publish(self, ctx: PublishContext) -> None:
         if not (self.affected and self.stopped):
@@ -155,16 +188,25 @@ class GatewayParticipant:
         self.service = section
 
     def before_restore(self, ctx: PublishContext) -> None:
-        if not self.started:
+        if not (self.started or self.recovering or self.stop_attempted):
             return
         try:
+            if self.platform != "darwin":
+                raise RuntimeError("Gateway recovery needs its macOS launchctl owner")
             if owned_service_state(self.effects, self.domain, self.agent) == "running":
+                if not (self.started or self.recovering or self.stopped):
+                    # A failed stop left the prior service running and no files changed.
+                    self.stopped = False
+                    return
+                if self.recovering and not self.was_running:
+                    raise RuntimeError("The previously stopped service was started outside this publish")
                 self.effects.stop(self.domain)
             if owned_service_state(self.effects, self.domain, self.agent) != "absent":
                 raise RuntimeError("Candidate stop is unconfirmed")
         except Exception as exc:
             raise GatewayFailure(f"Candidate service stop is unconfirmed: {exc}", phase="rollback") from exc
         self.started = False
+        self.stopped = self.was_running
 
     def after_restore(self, ctx: PublishContext) -> None:
         if not (self.was_running and self.stopped):

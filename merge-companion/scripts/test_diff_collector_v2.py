@@ -265,6 +265,7 @@ class TestDiffCollectorV2(unittest.TestCase):
             manifest_path=self.manifest,
             platform="codex",
         )
+        first_id = read_manifest(self.manifest)["entries"][0]["id"]
         register_changes_in_manifest(
             changes,
             pending_dir=self.pending,
@@ -274,6 +275,7 @@ class TestDiffCollectorV2(unittest.TestCase):
 
         manifest = read_manifest(self.manifest)
         self.assertEqual(len(manifest["entries"]), 1)
+        self.assertEqual(manifest["entries"][0]["id"], first_id)
         self.assertEqual(len(list(self.pending.rglob("*.bak"))), 1)
         self.assertEqual(Path(manifest["entries"][0]["backup_path"]).read_text(), "user edit")
 
@@ -326,32 +328,6 @@ class TestDiffCollectorV2(unittest.TestCase):
         self.assertEqual(changes[0]["change_kind"], "encoding-invalid")
         self.assertEqual(changes[0]["snapshot_encoding"], "utf-8")
         self.assertEqual(changes[0]["current_encoding"], "binary-or-non-utf8")
-
-    def test_same_change_id_is_stable_across_registration_attempts(self):
-        skill_file = self.skills_dir / "task-router" / "SKILL.md"
-        skill_file.parent.mkdir()
-        skill_file.write_text("original", encoding="utf-8")
-        snap = self.root / "snapshot.json"
-        capture_snapshot(snap, [skill_file], "codex", skills_dir=self.skills_dir)
-        skill_file.write_text("user edit", encoding="utf-8")
-        changes = collect_external_changes(snap, [skill_file], skills_dir=self.skills_dir)
-
-        register_changes_in_manifest(
-            changes,
-            pending_dir=self.pending,
-            manifest_path=self.manifest,
-            platform="codex",
-        )
-        first_id = read_manifest(self.manifest)["entries"][0]["id"]
-
-        register_changes_in_manifest(
-            changes,
-            pending_dir=self.pending,
-            manifest_path=self.manifest,
-            platform="codex",
-        )
-
-        self.assertEqual(read_manifest(self.manifest)["entries"][0]["id"], first_id)
 
     def test_recurrent_change_keeps_decisions_and_backups_on_their_own_occurrence(self):
         source = self.skills_dir / "task-router" / "SKILL.md"

@@ -2,12 +2,14 @@
 name: agent-security-scan
 description: "Scans the host's settings, hooks, skills, Model Context Protocol config and credential files for exposed secrets, remote fetches and side-effecting shell commands, after any of them changes or governance rules from another project are adopted, or when the human user asks to check them."
 compatibility:
-  - "Python 3.11+ standard library"
+  - "Python 3.11+ standard library and bundled Tomli 2.4.0"
 ---
 
 # Agent Security Scan
 
 The response model uses this skill for a report-only static review of host settings, hooks, skill text and Model Context Protocol configuration. The default scanner reads local files and reports exposed credentials, remote fetches and instructions, shell side effects, package-manager use and broad execution or protocol exposure. External security runtimes are optional.
+
+When interpreting command findings, read [static command support](references/static-command-support.md) for the supported literal paths, external execution conditions and dynamic-input limits.
 
 ## Scope and trigger
 
@@ -35,7 +37,7 @@ Apply the scan after relevant hooks, skills, server configuration or credential 
     "severity": "high - command can run without protective gate",
     "rule": "unprofiled-shell-command",
     "path": "/path/settings.json",
-    "message": "hook command executes through shell without Ghost-ALICE profile gate",
+    "message": "hook command defines a shell execution path without Ghost-ALICE profile gate",
     "mitigation": "mitigate"
   }]
 }

@@ -25,7 +25,7 @@ from installer.runner import InstallerExit, ToolResult  # noqa: E402
 from installer.selection import ALL_SKILLS, Collected, Target  # noqa: E402
 from installer.source import HookPathChange  # noqa: E402
 from installer.transaction import report_gateway, verify_after_copy  # noqa: E402
-from installer_testing import FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
+from installer_testing import FakeRunner, hook_status, make_context, make_source, quiet, use_source  # noqa: E402
 
 
 HELP = """Usage:
@@ -761,13 +761,12 @@ class UnfinishedPublishTests(CliCase):
     def test_a_publish_that_cannot_be_restored_stops_every_locked_command_with_exit_1(self):
         folder = self.home / ".ghost-alice" / "rollbacks" / "20261020T000000Z-1-aaaaaaaa"
         folder.mkdir(parents=True)
-        (folder / "journal.json").write_text(json.dumps({"schema_version": 1, "phase": "prepare"}), encoding="utf-8")
+        (folder / "journal.json").write_text("{broken", encoding="utf-8")
         self.stub("installer.cli.prepare_install")
         for target in ("installer.cli.run_install", "installer.lifecycle.uninstall", "installer.lifecycle.run_repair",
                        "installer.preservation.cleanup_pending"):
             self.stub(target, 0)
         runner = FakeRunner()
-        runner.respond_to("install_transaction.py", ToolResult(1), arg="recover")
         locked = [command for command in cli.COMMANDS if command.lock]
         self.assertEqual(sorted(command.lock for command in locked),
                          ["cleanup-pending", "gateway", "install", "repair", "uninstall"])
@@ -814,7 +813,7 @@ class InstallOrderTests(CliCase):
         self.stub("installer.transaction.record_current_links")
         self.stub("installer.transaction.sync_runtime_shared", True)
         self.stub("installer.transaction.report_gateway")
-        self.stub("installer.hosts.install_hooks", True)
+        self.stub("installer.hosts.install_hooks", side_effect=lambda ctx, action, platform: hook_status(platform, action))
         self.stub("installer.hosts.ensure_claude_bootstrap", True)
         self.stub("installer.hosts.ensure_codex_bootstrap", True)
         self.stub("installer.hosts.sync_commands", 0)
@@ -823,7 +822,9 @@ class InstallOrderTests(CliCase):
         self.stub("installer.addons.migrate_state_once")
         self.stub("installer.addons.write_sidecars", True)
         self.stub("installer.transaction.write_install_state_manifest", True)
-        self.stub("installer.report.write_event")
+        self.stub("installer.source.preserve_successful_source", ["Saved source version"])
+        self.stub("install_transaction.cleanup_completed", ())
+        self.stub("installer.report.write_event", side_effect=report.write_event)
 
     def collect(self, ctx, skills):
         targets = [Target("task-router", self.source / "task-router"), Target("alpha", self.source / "alpha")]
@@ -974,20 +975,11 @@ class InstallOrderTests(CliCase):
             self.assertIn(step, names)
             self.assertLess(names.index("copy_targets_batch"), names.index(step))
 
-    def test_failed_step_stops_the_install(self):
-        self.patches.enter_context(mock.patch("installer.hosts.install_hooks", return_value=False))
-        ctx = make_context(self.home, "claude")
-        out = self.expect_exit(1, cli.run_command, cli.INSTALL, ctx)
-        self.assertIn("[ERROR] Hook install failed. Aborting skill install", out)
-        names = [n for n, _, _ in self.calls]
-        self.assertNotIn("ensure_claude_bootstrap", names)
-        self.assertNotIn("verify_after_copy", names)
-        self.assertEqual(names[-1], "release")
-
     def test_every_required_step_failure_stops_the_install_and_releases_the_lock(self):
         # Every step the bash installer aborted on (installer_lib/install.sh:880-1139) still aborts the install:
-        # the failing step itself ran, the step after it never runs, no install event is written, and the lock is
-        # released last. Placement failures carry their own codes: install_shared propagates the transaction's
+        # the failing step itself ran, the step after it never runs, and the lock is
+        # released last. A hook failure reports its result without claiming later verification ran.
+        # Placement failures carry their own codes: install_shared propagates the transaction's
         # code, a failed link or copy exits 1.
         cases = (
             ("claude", "installer.selection.cleanup_deprecated_installed_skills", False, 1, None, "encoding_guard"),
@@ -999,7 +991,7 @@ class InstallOrderTests(CliCase):
             ("codex", "installer.transaction.copy_targets_batch", False, 1, None, "sync_runtime_shared"),
             ("claude", "installer.transaction.sync_runtime_shared", False, 1,
              "[ERROR] Runtime shared core sync failed. Aborting hook install", "report_gateway"),
-            ("claude", "installer.hosts.install_hooks", False, 1, "[ERROR] Hook install failed. Aborting skill install",
+            ("claude", "installer.hosts.install_hooks", hook_status(status='error'), 1, "[ERROR] Hook install failed. Aborting skill install",
              "ensure_claude_bootstrap"),
             ("claude", "installer.hosts.ensure_claude_bootstrap", False, 1, None, "sync_commands"),
             ("codex", "installer.hosts.ensure_codex_bootstrap", False, 1, None, "sync_commands"),
@@ -1011,6 +1003,10 @@ class InstallOrderTests(CliCase):
         for platform, target, failure, code, message, never_called in cases:
             with self.subTest(platform=platform, step=target.rsplit(".", 1)[-1]):
                 self.calls.clear()
+                event_file = self.home / "failed-install.events.jsonl"
+                event_file.unlink(missing_ok=True)
+                report.configure(verbose=False, report_child=True, tty=False, progress_env="off",
+                                 home=self.home, event_file=event_file)
                 with mock.patch(target, return_value=failure) as failing:
                     ctx = make_context(self.home, platform, args=["task-router", "alpha"])
                     out = self.expect_exit(code, cli.run_command, cli.INSTALL, ctx)
@@ -1019,7 +1015,14 @@ class InstallOrderTests(CliCase):
                     self.assertIn(message, out)
                 names = [n for n, _, _ in self.calls]
                 self.assertNotIn(never_called, names)
-                self.assertNotIn("write_event", names)
+                events = [json.loads(line) for line in event_file.read_text().splitlines()] if event_file.exists() else []
+                events = [event for event in events if event.get("type") == "platform-result"]
+                if target == "installer.hosts.install_hooks":
+                    self.assertNotIn("verify_after_copy", names)
+                    self.assertEqual([(event["hooks"], event["verification"]) for event in events],
+                                     [("error", "not-run")])
+                else:
+                    self.assertEqual(events, [])
                 self.assertEqual(names[-1], "release")
 
     def test_update_hint_names_the_reported_install_command(self):
@@ -1042,6 +1045,38 @@ class InstallOrderTests(CliCase):
         self.captured(cli.run_command, cli.INSTALL, ctx)
         _, args, _ = next(c for c in self.calls if c[0] == "collect_targets")
         self.assertEqual(args[1], list(ALL_SKILLS))
+
+    def test_only_a_full_core_success_preserves_a_source_version_before_success_output(self):
+        for requested in ([], list(ALL_SKILLS), ['task-router']):
+            with self.subTest(requested=requested):
+                self.calls.clear()
+                self.captured(cli.run_command, cli.INSTALL, make_context(self.home, 'codex', args=requested))
+                names = self.names()
+                self.assertLess(names.index('write_install_state_manifest'), names.index('cleanup_completed'))
+                self.assertLess(names.index('cleanup_completed'), names.index('write_event'))
+                if requested == ['task-router']:
+                    self.assertNotIn('preserve_successful_source', names)
+                else:
+                    self.assertLess(names.index('write_install_state_manifest'), names.index('preserve_successful_source'))
+                    self.assertLess(names.index('cleanup_completed'), names.index('preserve_successful_source'))
+                    self.assertLess(names.index('preserve_successful_source'), names.index('write_event'))
+
+    def test_source_version_failure_reports_placed_code_without_final_success(self):
+        with mock.patch('installer.source.preserve_successful_source', side_effect=OSError('archive disk full')):
+            output = self.expect_exit(1, cli.run_command, cli.INSTALL, make_context(self.home, 'codex'))
+        self.assertIn('Code placement finished, but preserving the successful source version failed', output)
+        self.assertNotIn('write_event', self.names())
+        self.assertEqual(self.names()[-1], 'release')
+
+    def test_completed_publish_cleanup_failure_prevents_version_and_success_reporting(self):
+        for requested in ([], ['task-router']):
+            with self.subTest(requested=requested):
+                self.calls.clear()
+                with mock.patch('install_transaction.cleanup_completed', side_effect=cli.install_transaction.InstallTransactionError('old copy is locked')):
+                    output = self.expect_exit(1, cli.run_command, cli.INSTALL, make_context(self.home, 'codex', args=requested))
+                self.assertIn('Code placement finished, but completed-publish cleanup failed', output)
+                self.assertNotIn('preserve_successful_source', self.names())
+                self.assertNotIn('write_event', self.names())
 
 
 if __name__ == "__main__":

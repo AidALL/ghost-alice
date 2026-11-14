@@ -64,6 +64,109 @@ class TransactionCase(unittest.TestCase):
         return result, out.getvalue()
 
 
+class OriginalCopyCleanupTests(TransactionCase):
+    def setUp(self):
+        super().setUp()
+        import uninstall_cleanup
+        self.cleanup = uninstall_cleanup
+        self.ctx = self.context()
+        self.target = self.ctx.skills_dir / 'alpha'
+
+    def original(self, *, scoped=False, review=False):
+        from installer_assets import write_ownership_marker
+        self.target.mkdir()
+        (self.target / 'SKILL.md').write_bytes(b'only old original\n')
+        write_ownership_marker(self.target, platform='claude', asset_id='alpha',
+            source_repo=str(self.source), source_commit='old', install_mode='copy')
+        folder = (self.ctx.skills_dir / '.ghost-alice-install-rollbacks' if scoped
+                  else self.ghost / 'install-rollbacks')
+        folder.mkdir(parents=True)
+        original = folder / 'rollback-alpha-20261001T000000Z-1-abcdef12'
+        self.target.rename(original)
+        if review:
+            manifest = self.ghost / 'pending-merges/claude/manifest.json'
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(json.dumps(dict(version=1, entries=[dict(platform='claude',
+                source_path=str(self.target), backup_path=str(original), decided=False)])))
+        return original
+
+    def completed(self, action='replacement-verified', *, destination=None):
+        import content_digest
+        dest = destination or self.target
+        if action == 'replacement-verified':
+            dest.mkdir(parents=True)
+            (dest / 'SKILL.md').write_bytes(b'new version\n')
+            self.ghost.mkdir(parents=True, exist_ok=True)
+            (self.ghost / 'installed-payload.json').write_text(json.dumps(dict(schema_version=1, targets={
+                str(dest): dict(name='alpha', kind='skill', provider='core', mode='copy',
+                               baseline='recorded', used_by=['claude'], files=content_digest.tree(dest))})))
+        return [dict(target_name='alpha', source_path=str(self.source / 'alpha'), dest_path=str(dest),
+                     source_root=str(self.source), provider='core', action=action)]
+
+    def clean(self, completed):
+        return self.cleanup.cleanup_obsolete_copies(root=self.ghost, platform='claude', completed=completed)
+
+    def test_new_host_location_removes_unused_managed_copy_without_inventing_its_old_path(self):
+        original = self.original()
+        new_target = self.home / 'new-claude/skills/alpha'
+        rows = self.clean(self.completed(destination=new_target))
+        self.assertFalse(original.exists())
+        self.assertEqual(rows[0]['action'], 'removed')
+        self.assertEqual(rows[0]['target_path'], str(new_target))
+        self.assertNotIn('original_path', rows[0])
+
+    def test_requested_removal_deletes_only_old_managed_copy_when_target_is_missing(self):
+        original = self.original()
+        rows = self.clean(self.completed('missing'))
+        self.assertFalse(original.exists())
+        self.assertEqual(rows[0]['action'], 'removed')
+
+    def test_scoped_clean_original_is_removed_after_verified_replacement(self):
+        original = self.original(scoped=True)
+        rows = self.clean(self.completed())
+        self.assertFalse(original.exists())
+        self.assertEqual(rows[0]['target_path'], str(self.target))
+        self.assertEqual(rows[0]['action'], 'removed')
+
+    def test_pending_review_keeps_the_copy_it_actually_references(self):
+        original = self.original(review=True)
+        rows = self.clean(self.completed('missing'))
+        self.assertEqual((original / 'SKILL.md').read_bytes(), b'only old original\n')
+        self.assertEqual(rows[0]['reason'], 'pending-original-review')
+
+    def test_same_target_pending_review_does_not_keep_an_unreferenced_old_copy(self):
+        original = self.original()
+        pending = self.ghost / 'pending-merges/claude'
+        pending.mkdir(parents=True)
+        user_copy = pending / 'user-original'
+        user_copy.write_bytes(b'user changes\n')
+        (pending / 'manifest.json').write_text(json.dumps(dict(version=1, entries=[dict(platform='claude',
+            source_path=str(self.target), backup_path=str(user_copy), decided=False)])))
+        rows = self.clean(self.completed())
+        self.assertFalse(original.exists())
+        self.assertEqual(rows[0]['action'], 'removed')
+        self.assertEqual(user_copy.read_bytes(), b'user changes\n')
+
+    def test_relative_link_ownership_cannot_be_inferred_from_the_current_target_parent(self):
+        folder = self.ghost / 'install-rollbacks'
+        folder.mkdir(parents=True)
+        original = folder / 'rollback-alpha-20261001T000000Z-1-abcdef12'
+        link = os.path.relpath(self.source / 'alpha', self.target.parent)
+        original.symlink_to(link)
+        completed = self.completed()
+        rows = self.clean(completed)
+        self.assertEqual(os.readlink(original), link)
+        self.assertEqual(rows[0]['reason'], 'cleanup-scope-unconfirmed')
+        # The older pending record can identify this link's original base.
+        pending = self.ghost / 'pending-merges/claude/manifest.json'
+        pending.parent.mkdir(parents=True)
+        pending.write_text(json.dumps(dict(version=1, entries=[dict(platform='claude',
+            source_path=str(self.target), backup_path=str(original), decided=True)])))
+        rows = self.clean(completed)
+        self.assertFalse(original.is_symlink())
+        self.assertEqual(rows[0]['action'], 'removed')
+
+
 class PlacementTests(TransactionCase):
     """The placement calls each build one publish request and call `install_transaction.publish` in this
     process with the participants the install record names."""
@@ -482,34 +585,32 @@ class RecordMigrationTests(TransactionCase):
             _, out = self.captured(transaction.migrate_record, self.context("codex"))
         self.assertEqual(out, "")
 
-    def test_the_migration_step_removes_the_two_old_rollback_folders_once(self):
-        # An earlier installer kept replaced copies there; nothing writes them now.
-        legacy = [self.ghost / "install-rollbacks", self.home / ".claude" / "skills" / ".ghost-alice-install-rollbacks"]
-        for folder in legacy:
-            (folder / "rollback-alpha-20261001T000000Z-1-abcd" / "SKILL.md").parent.mkdir(parents=True)
-            (folder / "rollback-alpha-20261001T000000Z-1-abcd" / "SKILL.md").write_text("old\n", encoding="utf-8")
-        with mock.patch("installed_payload.migrate", return_value=None), \
-             mock.patch("installed_payload.migrate_service", return_value=None):
-            _, out = self.captured(transaction.migrate_record, self.context("claude"))
-            _, again = self.captured(transaction.migrate_record, self.context("codex"))
-        for folder in legacy:
-            self.assertFalse(folder.exists())
-            self.assertIn(f"[INFO] Removed the earlier installer's rollback folder {folder}", out)
-        self.assertEqual(again, "")
-
-    def test_an_old_rollback_folder_that_cannot_be_removed_is_reported_and_recorded(self):
-        folder = self.ghost / "install-rollbacks"
-        folder.mkdir(parents=True)
-        with mock.patch("installed_payload.migrate", return_value=None), \
-             mock.patch("installed_payload.migrate_service", return_value=None), \
-             mock.patch.object(transaction, "_remove_path", side_effect=PermissionError(13, "Permission denied")), \
-             mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(self.ghost)}):
-            _, out = self.captured(transaction.migrate_record, self.context("claude"))
-        self.assertIn(f"[WARN] The earlier installer's rollback folder {folder} could not be removed", out)
-        rows = [json.loads(line) for line in
-                (self.ghost / "state-retention-failures.jsonl").read_text(encoding="utf-8").splitlines()]
-        self.assertEqual([(row["policy"], row["error_type"]) for row in rows],
-                         [("earlier-rollback-folders", "PermissionError")])
+    def test_record_migration_preserves_old_original_bytes_and_links(self):
+        # Migrating records proves neither replacement nor release of a recovery original.
+        roots = [self.ghost / "install-rollbacks",
+                 self.home / ".claude" / "skills" / ".ghost-alice-install-rollbacks"]
+        for outcome in ("success", "targets-error", "service-error"):
+            with self.subTest(outcome=outcome):
+                originals = []
+                for root in roots:
+                    folder = root / outcome
+                    folder.mkdir(parents=True)
+                    original = folder / "SKILL.md"
+                    original.write_bytes(b"only original\n")
+                    link = folder / "source"
+                    link.symlink_to("../original-checkout")
+                    originals.append((original, link))
+                with mock.patch("installed_payload.migrate", return_value=None,
+                                side_effect=installed_payload.RecordError("targets failed")
+                                if outcome == "targets-error" else None), \
+                     mock.patch("installed_payload.migrate_service", return_value=None,
+                                side_effect=installed_payload.RecordError("service failed")
+                                if outcome == "service-error" else None):
+                    self.captured(transaction.migrate_record, self.context("claude"))
+                for original, link in originals:
+                    self.assertTrue(original.is_file(), str(original))
+                    self.assertEqual(original.read_bytes(), b"only original\n")
+                    self.assertEqual(os.readlink(link), "../original-checkout")
 
     def test_a_migration_that_cannot_finish_is_reported_and_the_install_goes_on(self):
         with mock.patch("installed_payload.migrate", side_effect=installed_payload.RecordError("bad snapshot")), \
@@ -625,7 +726,8 @@ class RecordTests(TransactionCase):
             self.assertTrue(transaction.snapshot_after_install(ctx))
         self.assertTrue(pending.is_dir())
         self.assertEqual(self.runner.tool_calls("snapshot_cli.py")[0],
-                         ["--output", str(pending / "snapshot.json"), "--platform", "claude", "--skills-dir", str(ctx.skills_dir)])
+                         ["--output", str(pending / "snapshot.json"), "--platform", "claude", "--skills-dir", str(ctx.skills_dir),
+                          "--install-record-root", str(self.ghost)])
         self.assertEqual(self.runner.tool_calls("pending_manifest_writer.py"), [[str(pending / "manifest.json"), "claude"]])
         (pending / "manifest.json").write_text("{}", encoding="utf-8")
         again = FakeRunner()

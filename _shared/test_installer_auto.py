@@ -187,9 +187,9 @@ class CompactAutoTests(AutoCase):
         ctx = self.context(args=["task-router"])
         self.child_results = {
             "claude": (0, ['{"type":"target-result","platform":"claude","target_id":"_shared","target_kind":"support","status":"new"}',
-                           '{"type":"platform-result","platform":"claude","total_targets":5,"current":0,"updated":0,"new":5,"verification":"ok","hooks":"enabled"}']),
+                           '{"type":"platform-result","platform":"claude","total_targets":5,"current":0,"updated":0,"new":5,"verification":"ok","hooks":"installed"}']),
             "codex": (0, ['{"type":"target-result","platform":"codex","target_id":"_shared","target_kind":"support","status":"new"}',
-                          '{"type":"platform-result","platform":"codex","total_targets":5,"current":0,"updated":0,"new":5,"verification":"ok","hooks":"enabled"}']),
+                          '{"type":"platform-result","platform":"codex","total_targets":5,"current":0,"updated":0,"new":5,"verification":"ok","hooks":"skipped"}']),
         }
         rc, out = self.run_children(ctx, ["claude", "codex"])
         self.assertEqual(rc, 0)
@@ -209,9 +209,21 @@ class CompactAutoTests(AutoCase):
         self.assertIn("Ghost-ALICE OS installation Process Report", out)
         self.assertIn("  Platform: claude, codex\n  Skills: [5] common targets\n", out)
         self.assertIn("        Common targets      [######------------------------] [1/5] common targets synced on all platforms\n", out)
-        self.assertIn("  [4/5] Runtime config      claude, codex hooks=true, Visibility Level=[dynamic]\n", out)
+        self.assertIn('claude Hooks: installed', out)
+        self.assertIn('codex Hooks: skipped (platform directory missing)', out)
+        self.assertNotIn('hooks=true', out)
         self.assertIn(f"  log: {log}\n", out)
         self.assertNotIn("[auto] Install failed", out)
+
+    def test_child_error_event_preserves_every_leaf_beyond_excerpt_limit(self):
+        errors = ['ExceptionGroup: backup retained at /temporary/claude-v1-original.bak']
+        errors.extend(f'{index}. PermissionError: receipt error {index}' for index in range(12))
+        event = json.dumps(dict(type='platform-result', platform='claude', hooks='error', hook_errors=errors))
+        self.child_results = {'claude': (1, [event])}
+        rc, output = self.run_children(self.context(args=['task-router']), ['claude'])
+        self.assertEqual(rc, 1)
+        for error in errors:
+            self.assertEqual(output.count(error + '\n'), 1, output)
 
     def test_the_tail_carries_the_childrens_gateway_note_once(self):
         note = "Context gateway: registered from /src, 32 files, service running"

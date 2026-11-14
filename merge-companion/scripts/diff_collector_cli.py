@@ -11,13 +11,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from diff_collector import collect_external_changes, register_changes_in_manifest
-from file_walker import walk_installed_copy_files
-import installed_payload
-from hook_definitions import SUPPORTED_PLATFORMS
-
-
-def _walk_installed_copy_files(skills_dir: Path, targets: list[str] | tuple[str, ...] = ()) -> list[Path]:
-    return walk_installed_copy_files(skills_dir, targets)
+from file_walker import copy_comparison_scope, walk_installed_copy_files
 
 
 def main() -> int:
@@ -32,18 +26,9 @@ def main() -> int:
                    help="skill root this install replaces; checked even without its install marker")
     args = p.parse_args()
     skills_dir = Path(args.skills_dir)
-    files = _walk_installed_copy_files(skills_dir, args.target)
-    published = {}
-    if args.install_record_root:
-        try:
-            record = installed_payload.read(Path(args.install_record_root)) or {}
-            published = {path: entry for path, entry in record.get("targets", {}).items()
-                         if isinstance(entry, dict) and isinstance(entry.get("used_by"), list)
-                         and all(isinstance(host, str) and host in SUPPORTED_PLATFORMS for host in entry["used_by"])
-                         and args.platform in entry["used_by"]
-                         and (not args.target or entry.get("name") in args.target)}
-        except installed_payload.RecordError as exc:
-            print(f"[WARN] Cannot read published baseline; preserving snapshot comparison: {exc}")
+    published, excluded = copy_comparison_scope(skills_dir, args.platform,
+        Path(args.install_record_root) if args.install_record_root else None, args.target)
+    files = walk_installed_copy_files(skills_dir, args.target, excluded_roots=excluded)
     changes = collect_external_changes(Path(args.snapshot), files, skills_dir=skills_dir, published_targets=published)
     register_changes_in_manifest(
         changes,

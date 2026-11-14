@@ -35,6 +35,7 @@ import install_destination  # noqa: E402
 import file_lock  # noqa: E402
 import pending_manifest  # noqa: E402
 from snapshot import capture_snapshot, load_snapshot  # noqa: E402
+from installer_testing import installer_env
 
 
 class UninstallTestBase(unittest.TestCase):
@@ -42,6 +43,7 @@ class UninstallTestBase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
+        self.enterContext(mock.patch.dict(os.environ, installer_env(self.root), clear=True))
         # platform-scoped layout: sidecars live under addons/<platform>/
         self.addons = self.root / ".ghost-alice" / "addons" / "claude"
         self.skills = self.root / ".claude" / "skills"
@@ -108,6 +110,109 @@ class UninstallTestBase(unittest.TestCase):
 
 
 class CoreUninstallTest(UninstallTestBase):
+    def test_standalone_addon_cli_removes_its_payload_reference_under_the_install_lock(self):
+        import installed_payload
+        import install_lock
+        self._install('alpha', ['one'])
+        target = self.skills/'one'
+        ghost = self.root/'.ghost-alice'
+        generation = install_lock.acquire_lock(ghost/'install.lock', owner='test')
+        try:
+            installed_payload.update(ghost, {'targets': {str(target): dict(
+                name='one', kind='skill', mode='link', link_target=os.readlink(target), provider='addon:alpha',
+                baseline='recorded', used_by=['claude'])}})
+        finally:
+            install_lock.release_lock(ghost/'install.lock', generation)
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = un.main(['--addons-dir', str(self.addons), '--platform', 'claude',
+                            '--skills-dir', str(self.skills), '--addon-id', 'alpha'])
+        self.assertEqual(code, 0)
+        self.assertEqual(installed_payload.read(ghost)['targets'], {})
+        self.assertFalse((ghost/'install.lock').exists())
+        self.assertFalse(os.path.lexists(target))
+
+    def test_shared_addon_file_remains_and_only_requesting_host_record_is_removed(self):
+        self._install('alpha', ['one'])
+        record = reg.read_record('alpha', addons_dir=self.addons)
+        record['platform'] = 'codex'
+        other_dir = self.addons.parent/'codex'
+        reg.write_record(record, addons_dir=other_dir)
+        other = reg.sidecar_path('alpha', addons_dir=other_dir)
+        before = other.read_bytes()
+        link = os.readlink(self.skills/'one')
+        result = self._uninstall('alpha')
+        self.assertEqual(result['status'], 'removed')
+        self.assertEqual(os.readlink(self.skills/'one'), link)
+        self.assertEqual(other.read_bytes(), before)
+        self.assertFalse(reg.sidecar_path('alpha', addons_dir=self.addons).exists())
+        self.assertEqual(next(i for i in result['items'] if i.get('name') == 'one')['action'], 'reference-released')
+
+    def test_partial_removal_prunes_successful_target_inventory_only(self):
+        self._install('alpha', ['one', 'two'])
+        state = self.root/'.ghost-alice/install-state/claude.json'
+        state.parent.mkdir(parents=True)
+        state.write_text(json.dumps(dict(schema_version=1, platform='claude', targets=[dict(
+            target_name=name, dest_path=str(self.skills/name), owner='addon', addon_id='alpha',
+            install_mode='symlink') for name in ('one', 'two')])))
+        (self.skills/'two').unlink()
+        (self.skills/'two').symlink_to(self.root/'personal-source')
+        result = self._uninstall('alpha')
+        self.assertEqual(result['status'], 'partial')
+        self.assertFalse(os.path.lexists(self.skills/'one'))
+        self.assertEqual([row['target_name'] for row in json.loads(state.read_text())['targets']], ['two'])
+        self.assertTrue(self._marker('alpha').exists())
+        self.assertTrue(reg.sidecar_path('alpha', addons_dir=self.addons).exists())
+
+    def test_unreadable_settings_are_not_permission_attribution_retention(self):
+        self._install('first', ['one'])
+        settings = self.root / '.claude/settings.json'
+        settings.write_bytes(b'\xff')
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            code = un.main(['--addons-dir', str(self.addons), '--skills-dir', str(self.skills),
+                            '--addon-id', 'first'])
+        self.assertEqual(code, 2)
+        result = json.loads(output.getvalue())
+        self.assertNotEqual(result['status'], 'permissions-retained')
+        self.assertTrue(result.get('errors') or any(item.get('errors') for item in result['items']))
+        self.assertEqual(settings.read_bytes(), b'\xff')
+        self.assertTrue((self.skills / 'one').exists())
+
+    def test_resume_without_markers_does_not_require_settings(self):
+        self.addons.mkdir(parents=True)
+        (self.root / '.claude/settings.json').mkdir(parents=True)
+        self.assertEqual(un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills]), [])
+
+    def test_resume_snapshot_failure_is_a_reported_error(self):
+        self._install('first', ['one'])
+        self._marker('first').write_text('{}')
+        (self.root / '.claude/settings.json').mkdir()
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            code = un.main(['--addons-dir', str(self.addons), '--skills-dir', str(self.skills), '--resume-pending'])
+        self.assertEqual(code, 2)
+        result = json.loads(output.getvalue())['resumed'][0]
+        self.assertEqual(result['status'], 'error')
+        self.assertTrue(self._marker('first').exists())
+
+    def test_resume_two_addons_keeps_the_command_start_backup(self):
+        from types import SimpleNamespace
+        import addon_skill_permissions
+        targets = []
+        for addon_id, name in (('first', 'one'), ('second', 'two')):
+            self._install(addon_id, [name])
+            self._marker(addon_id).write_text('{}')
+            targets.append(SimpleNamespace(addon_id=addon_id, name=name))
+        settings = self.root / '.claude/settings.json'
+        allowed = ['Bash(custom)', 'Skill(one)', 'Skill(two)']
+        settings.write_text(json.dumps(dict(permissions=dict(allow=allowed))))
+        addon_skill_permissions.record_install(settings, targets, ['Bash(custom)'], allowed)
+        original = settings.read_bytes()
+        results = un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills])
+        self.assertEqual([row['status'] for row in results], ['removed', 'removed'])
+        self.assertEqual(settings.with_suffix('.json.bak').read_bytes(), original)
+        self.assertEqual(json.loads(settings.read_text())['permissions']['allow'], ['Bash(custom)'])
+        for name in ('one', 'two'):
+            self.assertFalse((self.skills / name).exists())
+
     def test_public_apply_aliases_remove_once(self):
         for index, selection in enumerate(({"apply_changes": True}, {"confirm": True},
                                            {"apply_changes": True, "confirm": True})):
@@ -397,7 +502,11 @@ class CoreUninstallTest(UninstallTestBase):
                             raise PermissionError("temporary pending read failure")
                         return read_text(candidate, *args, **kwargs)
 
-                    with mock.patch.object(Path, "read_text", read):
+                    from installer import runner
+                    subprocess_failure = (mock.patch.object(runner, 'run_tool', return_value=runner.ToolResult(
+                        1, '', 'temporary pending read failure'))
+                        if filename == 'snapshot.json' and failure == 'read' else contextlib.nullcontext())
+                    with subprocess_failure, mock.patch.object(Path, "read_text", read):
                         with self.assertRaises((OSError, ValueError)):
                             self._uninstall(addon_id)
                     self.assertEqual(sidecar.read_bytes(), sidecar_before)
@@ -537,6 +646,43 @@ class ExecutableDetachmentOrderTest(UninstallTestBase):
         for command in self.retained_commands:
             self.assertIn(command, commands)
 
+    def test_other_owner_pending_preserves_settings_and_selected_addon_files(self):
+        import addon_skill_permissions as permissions
+        settings = json.loads(self.settings.read_text())
+        settings['permissions'] = {'allow': ['Skill(task-router)']}
+        self.settings.write_text(json.dumps(settings))
+        permissions.record_install(self.settings, [], [], ['Skill(task-router)'], core_names=['task-router'])
+        def fail(*args, **kwargs):
+            raise OSError('before settings commit')
+        with self.assertRaises(OSError):
+            permissions.detach_core(['task-router'], self.settings, settings, fail)
+        original = self.settings.read_bytes()
+        receipt = permissions._state_path().read_bytes()
+        result = self._uninstall('demo-addon')
+        self.assertEqual(result['status'], 'partial')
+        self.assertEqual(self.settings.read_bytes(), original)
+        self.assertEqual(permissions._state_path().read_bytes(), receipt)
+        self.assertTrue(os.path.lexists(self.skills / 'pilot-skill'))
+
+    def test_own_pending_finishes_before_hook_changes(self):
+        import addon_skill_permissions as permissions
+        from types import SimpleNamespace
+        settings = json.loads(self.settings.read_text())
+        settings['permissions'] = {'allow': ['Skill(pilot-skill)']}
+        self.settings.write_text(json.dumps(settings))
+        permissions.record_install(self.settings, [SimpleNamespace(addon_id='demo-addon', name='pilot-skill')],
+                                   [], ['Skill(pilot-skill)'])
+        record = reg.read_record('demo-addon', addons_dir=self.addons)
+        def fail(*args, **kwargs):
+            raise OSError('before settings commit')
+        with self.assertRaises(OSError):
+            permissions.detach(record, self.settings, settings, set(), fail)
+        result = self._uninstall('demo-addon')
+        self.assertEqual(result['status'], 'removed')
+        self.assertFalse(permissions._state_path().exists())
+        self.assertEqual(json.loads(self.settings.read_text())['permissions']['allow'], [])
+        self._assert_detached()
+
     def test_hooks_are_detached_before_first_target_deletion(self):
         remove = un._symlink_safe_remove
         observed = []
@@ -595,6 +741,226 @@ class ExecutableDetachmentOrderTest(UninstallTestBase):
         self.assertTrue(self._marker("demo-addon").exists())
         resumed = un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills], platform="claude")
         self.assertEqual([r["status"] for r in resumed], ["removed"])
+
+    def _public_failure_report(self, *, record_failure, resume, unreadable_record=None, unreadable_target=False):
+        import content_digest
+        import installed_payload
+        import install_state_writer
+        from installer import locations
+
+        ghost = self.root / '.ghost-alice'
+        target = self.skills / 'pilot-skill'
+        state = ghost / 'install-state/claude.json'
+        state.parent.mkdir(parents=True)
+        state.write_text(json.dumps(dict(platform='claude', targets=[dict(
+            target_name='pilot-skill', dest_path=str(target), addon_id='demo-addon')])) )
+        entry = dict(name='pilot-skill', kind='skill', provider='addon:demo-addon',
+                     baseline='recorded', used_by=['claude'])
+        if self._install_modes[target] in {'symlink', 'junction'}:
+            entry.update(mode='link', link_target=content_digest.link_target(target))
+        else:
+            entry.update(mode='copy', files=content_digest.tree(target))
+        installed_payload.path(ghost).write_text(json.dumps(dict(schema_version=1, targets={str(target): entry})))
+        self.assertEqual(locations.record_root(), ghost)
+        self.assertEqual(locations.skills_dir('claude'), self.skills)
+        for path in (target.parent, state, self.settings, installed_payload.path(ghost)):
+            install_destination.assert_mutation_path(path)
+        if resume:
+            record = reg.read_record('demo-addon', addons_dir=self.addons)
+            un._write_marker(self._marker('demo-addon'), 'demo-addon', record['provided'])
+        args = ['--addons-dir', str(self.addons), '--platform', 'claude', '--skills-dir', str(self.skills),
+                *(['--resume-pending'] if resume else ['--addon-id', 'demo-addon'])]
+
+        def invoke():
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = un.main(args)
+            raw = output.getvalue()
+            payload = json.loads(raw[raw.index('{'):])
+            return code, payload['resumed'][0] if resume else payload
+
+        primary = OSError('requested removal interrupted')
+        failed = False
+        unreadable = (target if unreadable_target else self._marker('demo-addon') if unreadable_record == 'marker' else
+                      reg.sidecar_path('demo-addon', addons_dir=self.addons) if unreadable_record == 'sidecar' else None)
+
+        def interrupted(*args, **kwargs):
+            nonlocal failed
+            failed = True
+            raise primary
+
+        def observe_metadata(operation):
+            def observed(path, *args, **kwargs):
+                if failed and str(path) == str(unreadable):
+                    raise PermissionError('removal state lookup denied')
+                return operation(path, *args, **kwargs)
+            return observed
+
+        owner, operation = (install_state_writer, 'remove_targets') if record_failure else (un, '_symlink_safe_remove')
+        with mock.patch.object(owner, operation, side_effect=interrupted), \
+                mock.patch.object(os, 'stat', observe_metadata(os.stat)), \
+                mock.patch.object(os, 'lstat', observe_metadata(os.lstat)):
+            code, result = invoke()
+        self.assertEqual(code, 2)
+        self._assert_detached()
+        self.assertEqual(os.path.lexists(target), not record_failure)
+        self.assertTrue(self._marker('demo-addon').exists())
+        self.assertTrue(reg.sidecar_path('demo-addon', addons_dir=self.addons).exists())
+        self.assertEqual([row['dest_path'] for row in json.loads(state.read_text())['targets']], [str(target)])
+        self.assertEqual(str(target) in installed_payload.read(ghost)['targets'], not record_failure)
+        self.assertEqual(result['status'], 'error')
+        self.assertEqual(result['reason'], str(primary))
+        self.assertTrue(result['items'], 'the public failure must retain the observed target and hook results')
+        item = next(row for row in result['items'] if row.get('kind') == 'addon-target')
+        self.assertEqual(item['target'], str(target))
+        self.assertEqual(item['file_state'], 'unknown' if unreadable_target else 'absent' if record_failure else 'present')
+        self.assertEqual(item['detail'], 'requested removal interrupted')
+        if unreadable_target:
+            self.assertEqual(item['file_state_error'], 'removal state lookup denied')
+        self.assertEqual({row['action'] for row in result['items'] if row.get('kind') in {'hook', 'adapter'}}, {'removed'})
+        expected = {str(reg.sidecar_path('demo-addon', addons_dir=self.addons)), str(self._marker('demo-addon'))}
+        self.assertEqual(set(result['retry_records']), expected - ({str(unreadable)} if unreadable else set()))
+        if unreadable_record is not None:
+            self.assertEqual(result['retry_record_errors'], {str(unreadable): 'removal state lookup denied'})
+            self.assertIs(result['has_pending_marker'], None if unreadable_record == 'marker' else True)
+
+        code, result = invoke()
+        self.assertEqual((code, result['status']), (0, 'removed'))
+        self._assert_detached()
+        self.assertFalse(os.path.lexists(target))
+        self.assertFalse(self._marker('demo-addon').exists())
+        self.assertFalse(reg.sidecar_path('demo-addon', addons_dir=self.addons).exists())
+        self.assertEqual(json.loads(state.read_text())['targets'], [])
+        self.assertNotIn(str(target), installed_payload.read(ghost)['targets'])
+
+    def test_cli_file_failure_reports_detached_hooks_remaining_file_and_retry_records(self):
+        self._public_failure_report(record_failure=False, resume=False)
+
+    def test_cli_record_failure_reports_detached_hooks_absent_file_and_retry_records(self):
+        self._public_failure_report(record_failure=True, resume=False)
+
+    def test_resume_file_failure_reports_detached_hooks_remaining_file_and_retry_records(self):
+        self._public_failure_report(record_failure=False, resume=True)
+
+    def test_resume_record_failure_reports_detached_hooks_absent_file_and_retry_records(self):
+        self._public_failure_report(record_failure=True, resume=True)
+
+    def test_cli_record_failure_keeps_its_result_when_marker_lookup_is_denied(self):
+        self._public_failure_report(record_failure=True, resume=False, unreadable_record='marker')
+
+    def test_resume_file_failure_keeps_its_result_when_sidecar_lookup_is_denied(self):
+        self._public_failure_report(record_failure=False, resume=True, unreadable_record='sidecar')
+
+    def test_cli_file_failure_reports_unknown_when_target_lookup_is_denied(self):
+        self._public_failure_report(record_failure=False, resume=False, unreadable_target=True)
+
+    def test_resume_record_failure_reports_unknown_when_target_lookup_is_denied(self):
+        self._public_failure_report(record_failure=True, resume=True, unreadable_target=True)
+
+    def test_direct_api_keeps_original_exception_when_all_removal_state_lookups_fail(self):
+        primary = OSError('requested removal interrupted')
+        records = {self._marker('demo-addon'), reg.sidecar_path('demo-addon', addons_dir=self.addons)}
+        target_path = self.skills / 'pilot-skill'
+        denied_paths = {str(path) for path in records | {target_path}}
+        failed = False
+
+        def interrupted(*args):
+            nonlocal failed
+            failed = True
+            raise primary
+
+        def observe_metadata(operation):
+            def observed(path, *args, **kwargs):
+                if failed and str(path) in denied_paths:
+                    raise PermissionError('removal state lookup denied')
+                return operation(path, *args, **kwargs)
+            return observed
+
+        with mock.patch.object(un, '_symlink_safe_remove', side_effect=interrupted), \
+                mock.patch.object(os, 'stat', observe_metadata(os.stat)), \
+                mock.patch.object(os, 'lstat', observe_metadata(os.lstat)), self.assertRaises(OSError) as captured:
+            self._uninstall('demo-addon')
+        self.assertIs(captured.exception, primary)
+        result = captured.exception.uninstall_result
+        self.assertEqual((result['status'], result['reason']), ('error', str(primary)))
+        self.assertEqual(result['retry_records'], [])
+        self.assertEqual(result['retry_record_errors'], {str(path): 'removal state lookup denied' for path in records})
+        self.assertIsNone(result['has_pending_marker'])
+        target = next(item for item in result['items'] if item.get('kind') == 'addon-target')
+        self.assertEqual(target['file_state'], 'unknown')
+        self.assertEqual(target['file_state_error'], 'removal state lookup denied')
+        self.assertEqual({item['action'] for item in result['items'] if item.get('kind') in {'hook', 'adapter'}}, {'removed'})
+        json.dumps(result)
+        self._assert_detached()
+        self.assertTrue(os.path.lexists(self.skills / 'pilot-skill'))
+        for path in records:
+            self.assertTrue(path.exists())
+        self.assertEqual(self._uninstall('demo-addon')['status'], 'removed')
+        self.assertFalse(os.path.lexists(self.skills / 'pilot-skill'))
+        for path in records:
+            self.assertFalse(path.exists())
+
+    def test_record_failure_reports_absent_when_target_parent_became_a_regular_file(self):
+        import install_state_writer
+        primary = OSError('inventory cleanup interrupted')
+
+        def interrupted(*args, **kwargs):
+            self.skills.rmdir()
+            self.skills.write_text('replacement parent')
+            raise primary
+
+        with mock.patch.object(install_state_writer, 'remove_targets', side_effect=interrupted), \
+                self.assertRaises(OSError) as captured:
+            self._uninstall('demo-addon')
+        self.assertIs(captured.exception, primary)
+        item = next(row for row in primary.uninstall_result['items'] if row.get('kind') == 'addon-target')
+        self.assertEqual((item['file_state'], item['detail']), ('absent', str(primary)))
+        self.assertNotIn('file_state_error', item)
+        self.assertEqual(self.skills.read_text(), 'replacement parent')
+        self._assert_detached()
+        self.assertTrue(self._marker('demo-addon').exists())
+        self.skills.unlink()
+        self.skills.mkdir()
+        self.assertEqual(self._uninstall('demo-addon')['status'], 'removed')
+        self.assertFalse(self._marker('demo-addon').exists())
+
+    def _public_finalization_failure(self, *, marker_failure):
+        marker = self._marker('demo-addon')
+        sidecar = reg.sidecar_path('demo-addon', addons_dir=self.addons)
+        args = ['--addons-dir', str(self.addons), '--platform', 'claude', '--skills-dir', str(self.skills),
+                '--addon-id', 'demo-addon']
+        unlink = Path.unlink
+
+        def deny_marker(path, *args, **kwargs):
+            if path == marker:
+                raise OSError('removal marker locked')
+            return unlink(path, *args, **kwargs)
+
+        denied = (mock.patch.object(Path, 'unlink', deny_marker) if marker_failure else
+                  mock.patch.object(reg, 'remove_record', side_effect=OSError('sidecar locked')))
+        output = io.StringIO()
+        with denied, contextlib.redirect_stdout(output):
+            code = un.main(args)
+        raw = output.getvalue()
+        result = json.loads(raw[raw.index('{'):])
+        self.assertEqual((code, result['status']), (2, 'error'))
+        self._assert_detached()
+        self.assertFalse(os.path.lexists(self.skills / 'pilot-skill'))
+        self.assertEqual(sidecar.exists(), not marker_failure)
+        self.assertTrue(marker.exists())
+        self.assertEqual(set(result['retry_records']), {str(marker)} if marker_failure else {str(sidecar), str(marker)})
+        self.assertEqual(next(item['action'] for item in result['items'] if item.get('kind') == 'addon-target'), 'removed')
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(un.main(args), 0)
+        self.assertFalse(sidecar.exists())
+        self.assertFalse(marker.exists())
+        self._assert_detached()
+
+    def test_cli_sidecar_failure_reports_removed_files_and_remaining_retry_records(self):
+        self._public_finalization_failure(marker_failure=False)
+
+    def test_cli_marker_failure_reports_removed_files_and_only_the_remaining_marker(self):
+        self._public_finalization_failure(marker_failure=True)
 
     def test_dry_run_keeps_registrations_files_and_sidecar(self):
         original = self.settings.read_bytes()

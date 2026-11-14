@@ -61,7 +61,7 @@ def _is_unresolved_relative_to(path: Path, parent: Path) -> bool:
 
 
 def _classify_clean(path: Path, *, asset_id: str, repo_root: Path) -> tuple[bool, str]:
-    result = classify_skill_root(path, expected_asset_id=asset_id, repo_root=repo_root)
+    result = classify_skill_root(path, expected_asset_id=asset_id, repo_root=repo_root, whole_copy=True)
     return result.ownership == OWNERSHIP_GHOST_ALICE_MANAGED, result.reason
 
 

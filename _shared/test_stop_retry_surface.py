@@ -8,10 +8,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from stop_hook_testing import assert_stop_observation, reply, skill_call, user_role_row
+from stop_hook_testing import HOOK, assert_stop_observation, reply, skill_call, user_role_row
 
 
-HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
 ANSWER = "Business result: 82 hours 40 minutes."
 CHECK_WITHOUT_EVIDENCE = """[completion-check]
 - acceptance-criteria:

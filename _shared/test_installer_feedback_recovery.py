@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -22,6 +23,33 @@ from test_install_transaction_publish import PublishCase
 
 
 class PublishedOwnershipTests(PublishCase):
+    def test_host_comparison_omits_released_copies_but_inspects_explicit_replacements(self):
+        scripts = Path(__file__).resolve().parents[1] / 'merge-companion/scripts'
+        dest = self.codex / 'alpha'
+        install_transaction.publish(self.request('codex', self.target('alpha', dest, 'copy')))
+        recorded = self.record()
+        recorded['targets'][str(dest)]['used_by'] = ['claude']
+        (self.ghost / 'installed-payload.json').write_text(json.dumps(recorded))
+        pending = self.ghost / 'pending-merges/codex'
+        baseline, manifest = pending / 'snapshot.json', pending / 'manifest.json'
+        environment = installer_env(self.home)
+        def run(script, *args):
+            result = subprocess.run([sys.executable, str(scripts/script), *args],
+                env=environment, cwd=self.home, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        run('snapshot_cli.py', '--output', str(baseline), '--platform', 'codex',
+            '--skills-dir', str(self.codex), '--install-record-root', str(self.ghost))
+        self.assertEqual(json.loads(baseline.read_text())['files'], {})
+        (dest/'SKILL.md').write_text('user edit in the other host copy')
+        args = ['--snapshot', str(baseline), '--pending', str(pending), '--manifest', str(manifest),
+            '--platform', 'codex', '--skills-dir', str(self.codex), '--install-record-root', str(self.ghost)]
+        run('diff_collector_cli.py', *args)
+        self.assertFalse(manifest.exists())
+        run('diff_collector_cli.py', *args, '--target', 'alpha')
+        entries = json.loads(manifest.read_text())['entries']
+        self.assertEqual([row['source_path'] for row in entries], [str(dest/'SKILL.md')])
+        self.assertEqual(Path(entries[0]['backup_path']).read_bytes(), (dest/'SKILL.md').read_bytes())
+
     def test_collector_adopts_only_an_explicit_valid_host_list(self):
         scripts = Path(__file__).resolve().parents[1] / 'merge-companion/scripts'
         with mock.patch.object(sys, 'path', [str(scripts), *sys.path]):
@@ -52,35 +80,62 @@ class PublishedOwnershipTests(PublishCase):
                 entries = json.loads(manifest.read_text()).get('entries', []) if manifest.exists() else []
                 self.assertEqual(len(entries), expected_changes)
 
-    def test_retry_after_source_adds_and_deletes_files_uses_published_baseline(self):
+    def test_selected_retry_uses_published_baselines_for_every_walked_skill(self):
         scripts = Path(__file__).resolve().parents[1] / 'merge-companion/scripts'
         with mock.patch.object(sys, 'path', [str(scripts), *sys.path]):
             import snapshot
             import diff_collector
-        dest = self.codex / 'alpha'
-        obsolete = self.src / 'alpha/obsolete.md'
-        obsolete.write_text('old source content')
-        request = self.request('codex', self.target('alpha', dest, 'copy'))
+            from manifest_io import read_manifest
+        for name in ('alpha', 'beta'):
+            (self.src / name / 'obsolete.md').write_text('old source content')
+        request = self.request('codex', *(self.target(name, self.codex / name, 'copy') for name in ('alpha', 'beta')))
         install_transaction.publish(request)
-        baseline = self.ghost / 'pending-merges/codex/snapshot.json'
-        snapshot.capture_snapshot(baseline, list(dest.glob('*.md')), 'codex', self.codex)
+        pending = self.ghost / 'pending-merges/codex'
+        baseline, manifest = pending / 'snapshot.json', pending / 'manifest.json'
+        snapshot.capture_snapshot(baseline, list(self.codex.rglob('*.md')), 'codex', self.codex)
         before = baseline.read_bytes()
-        obsolete.unlink()
-        (self.src / 'alpha/new.md').write_text('new source content')
+        for name in ('alpha', 'beta'):
+            (self.src / name / 'obsolete.md').unlink()
+            (self.src / name / 'new.md').write_text('new source content')
         install_transaction.publish(request)
         recorded = self.record()['targets']
-        self.assertEqual(diff_collector.collect_external_changes(baseline, list(dest.glob('*.md')), self.codex,
-                                                               published_targets=recorded), [])
-        self.assertEqual(baseline.read_bytes(), before)
-        (dest / 'new.md').write_text('external edit after interrupted install')
-        (dest / 'user.md').write_text('external addition')
+        command = [sys.executable, '-B', str(scripts / 'diff_collector_cli.py'), '--snapshot', str(baseline),
+                   '--pending', str(pending), '--manifest', str(manifest), '--platform', 'codex',
+                   '--skills-dir', str(self.codex), '--target', 'alpha', '--install-record-root', str(self.ghost)]
+        environment = installer_env(self.home)
+        result = subprocess.run(command, text=True, capture_output=True, env=environment, cwd=self.home)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(read_manifest(manifest)['entries'], [])
+        self.assertEqual(list(pending.rglob('*.bak')), [])
+
+        dest = self.codex / 'beta'
+        captured_at = json.loads(before)['captured_at']
+        for invalid_baseline in ({'installed_at': captured_at}, {'baseline': 'migrated'},
+                                 {'files': {'new.md': 'not-a-digest'}}):
+            with self.subTest(rejected_baseline=invalid_baseline):
+                rejected = {**recorded, str(dest): {**recorded[str(dest)], **invalid_baseline}}
+                changes = diff_collector.collect_external_changes(baseline, list(self.codex.rglob('*.md')), self.codex,
+                                                                  published_targets=rejected)
+                self.assertIn((str(dest / 'new.md'), 'added'), {(row['path'], row['change_kind']) for row in changes})
+
+        user_edits = {dest / 'new.md': b'external edit after interrupted install',
+                      dest / 'user.md': b'external addition'}
+        for path, content in user_edits.items():
+            path.write_bytes(content)
         marker = dest / '.ghost-alice-install.json'
         marker_data = json.loads(marker.read_text())
         marker_data['content_hashes']['new.md'] = snapshot.file_hash(dest / 'new.md')
         marker.write_text(json.dumps(marker_data))
-        changes = diff_collector.collect_external_changes(baseline, list(dest.glob('*.md')), self.codex,
-                                                          published_targets=recorded)
-        self.assertEqual({Path(row['path']).name for row in changes}, {'new.md', 'user.md'})
+        result = subprocess.run(command, text=True, capture_output=True, env=environment, cwd=self.home)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        entries = read_manifest(manifest)['entries']
+        self.assertEqual({(row['source_path'], row['change_kind']) for row in entries},
+                         {(str(dest / 'new.md'), 'modified'), (str(dest / 'user.md'), 'added')})
+        for entry in entries:
+            expected = user_edits[Path(entry['source_path'])]
+            self.assertEqual(Path(entry['backup_path']).read_bytes(), expected)
+            self.assertEqual(Path(entry['source_path']).read_bytes(), expected)
+        self.assertEqual(baseline.read_bytes(), before)
 
     def test_copy_owns_its_files_before_the_next_install_stage(self):
         dest = self.codex / 'alpha'

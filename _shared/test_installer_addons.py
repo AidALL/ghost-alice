@@ -190,21 +190,32 @@ class ManifestTests(AddonCase):
         self.assertFalse(ok)
         self.assertIn("[ERROR] Addon sidecar write failed; aborting install", out)
 
-    def test_migrate_state_once(self):
-        # install.sh:766-781
-        ctx = self.context("claude")
-        with self.runner.patch():
-            addons.migrate_state_once(ctx)
-        self.assertEqual(self.runner.calls, [])
-        state = self.home / ".ghost-alice" / "install-state" / "claude.json"
+    def test_migration_excludes_nested_core_and_preserves_existing_addon_and_unknown_target(self):
+        import addon_migration
+        from installer import selection
+        state = self.home / '.ghost-alice/install-state/claude.json'
+        sidecars = self.home / '.ghost-alice/addons/claude'
+        ctx = self.context('claude')
+        addons.migrate_state_once(ctx)
+        self.assertFalse(sidecars.exists())
         state.parent.mkdir(parents=True)
-        state.write_text("{}", encoding="utf-8")
-        with self.runner.patch():
+        peer = dict(target_name='peer', addon_id='peer', dest_path='/installed/peer',
+                    source_path='/source/peer', install_mode='copy', target_tree_hash='hash')
+        state.write_text(json.dumps({'targets': [peer]}))
+        addon_migration.run_migration(platform='claude', install_state_path=state, addons_dir=sidecars,
+                                     core_skill_names=[], installed_at='original')
+        original = (sidecars / 'peer.json').read_bytes()
+        state.write_text(json.dumps({'targets': [peer, {'target_name': 'one'}, {'target_name': 'two'},
+                                                {'target_name': 'mystery'}]}))
+        def execute(script, *args, **kwargs):
+            self.assertEqual(script, '_shared/addon_migration.py')
+            return ToolResult(addon_migration.main(list(args)), '', '')
+        with mock.patch.object(selection, 'ALL_SKILLS', ('alpha', 'fam')), \
+             mock.patch('installer.runner.run_tool', side_effect=execute):
             addons.migrate_state_once(ctx)
-        args = self.runner.tool_calls("addon_migration.py")[0]
-        self.assertEqual(args[:6], ["--platform", "claude", "--install-state", str(state),
-                                    "--addons-dir", str(self.home / ".ghost-alice" / "addons" / "claude")])
-        self.assertEqual([args[i + 1] for i, t in enumerate(args) if t == "--core-skill"], list(ALL_SKILLS))
+        report = json.loads((sidecars / '_migration-report.json').read_text())
+        self.assertEqual([row['target_name'] for row in report['unresolved_targets']], ['mystery'])
+        self.assertEqual((sidecars / 'peer.json').read_bytes(), original)
 
     def test_repair_missing(self):
         # install.sh:665-675
@@ -222,51 +233,43 @@ class ManifestTests(AddonCase):
 
 class UninstallHelperTests(AddonCase):
     def test_resume_pending_uninstalls(self):
-        # uninstall.sh:269-281
         ctx = self.context("codex")
-        with self.runner.patch():
-            addons.resume_pending_uninstalls(ctx)
-        self.assertEqual(self.runner.calls, [])
-        (self.home / ".ghost-alice" / "addons" / "codex").mkdir(parents=True)
-        self.runner.respond_to("addon_uninstall.py", ToolResult(1, "resumed noop\n", "warning\n"))
-        with self.runner.patch():
-            addons.resume_pending_uninstalls(ctx)
-        args = self.runner.tool_calls("addon_uninstall.py")[0]
-        self.assertEqual(args, ["--resume-pending", "--addons-dir", str(self.home / ".ghost-alice" / "addons" / "codex"),
-                                "--skills-dir", str(ctx.skills_dir), "--skills-dir", str(self.home / ".claude" / "commands"),
-                                "--skills-dir", str(self.home / ".ghost-alice" / "resources" / "codex"),
-                                "--platform", "codex", "--apply"])
-        self.assertEqual((self.home / ".ghost-alice" / "addon-resume.log").read_text(encoding="utf-8"), "resumed noop\nwarning\n")
+        addons.resume_pending_uninstalls(ctx)
+        log = self.home / '.ghost-alice/addon-resume.log'
+        self.assertFalse(log.exists())
+        directory = self.home / '.ghost-alice/addons/codex'
+        directory.mkdir(parents=True)
+        completed = directory / 'gone.json.removing'
+        completed.write_text('{}')
+        pending = directory / 'bad.json.removing'
+        pending.write_text('{}')
+        (directory / 'bad.json').write_text('{')
+        addons.resume_pending_uninstalls(ctx)
+        results = json.loads(log.read_text())['resumed']
+        self.assertEqual({row['addon_id']: row['status'] for row in results},
+                         {'gone': 'resumed-noop', 'bad': 'error'})
+        self.assertFalse(completed.exists())
+        self.assertTrue(pending.exists())
+        self.assertEqual((directory / 'bad.json').read_text(), '{')
 
     def test_uninstall_addon_and_dependents(self):
-        # uninstall.sh:329-333, 367-368
         ctx = self.context("claude")
-        self.runner.respond(lambda s, a: "--addon-id" in a, ToolResult(2))
+        code, output = self.captured(addons.uninstall_addon, ctx, 'noop')
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(output)['status'], 'not-found')
+        sidecar = self.home / '.ghost-alice/addons/claude/noop.json'
+        sidecar.parent.mkdir(parents=True)
+        sidecar.write_text('{')
+        code, output = self.captured(addons.uninstall_addon, ctx, 'noop')
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(output)['status'], 'error')
+        self.assertEqual(sidecar.read_text(), '{')
         self.runner.respond(lambda s, a: "--dependents" in a, ToolResult(2))
         with self.runner.patch():
-            self.assertEqual(addons.uninstall_addon(ctx, "noop"), 2)
             self.assertEqual(addons.dependents_rc(ctx, "task-router"), 2)
-        removal, dependents = self.runner.tool_calls("addon_uninstall.py")
-        self.assertEqual(removal[:2], ["--addon-id", "noop"])
-        self.assertEqual(removal[-3:], ["--platform", "claude", "--apply"])
+        [dependents] = self.runner.tool_calls("addon_uninstall.py")
         self.assertEqual(dependents, ["--dependents", "task-router", "--addons-dir",
                                       str(self.home / ".ghost-alice" / "addons" / "claude")])
-
-    def test_uninstall_all_before_full(self):
-        # uninstall.sh:457-478
-        ctx = self.context("claude")
-        self.assertTrue(addons.uninstall_all_before_full(ctx))
-        addons_dir = self.home / ".ghost-alice" / "addons" / "claude"
-        addons_dir.mkdir(parents=True)
-        for name in ("noop.json", "rich.json", "Bad_Name.json", "x.json.removing"):
-            (addons_dir / name).write_text("{}", encoding="utf-8")
-        self.runner.respond(lambda s, a: "--addon-id" in a and a[a.index("--addon-id") + 1] == "rich", ToolResult(2))
-        with self.runner.patch():
-            ok, out = self.captured(addons.uninstall_all_before_full, ctx)
-        self.assertFalse(ok)
-        ids = [a[1] for a in self.runner.tool_calls("addon_uninstall.py")]
-        self.assertEqual(ids, ["noop", "rich"])
-        self.assertIn("[WARN] Full uninstall preserved addon rich; the human user must review its preserved files before sidecar cleanup", out)
 
     def test_installed_ids_and_promotion(self):
         # uninstall.sh:50-79

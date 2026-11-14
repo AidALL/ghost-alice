@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
-import shutil
 import sys
 from typing import TYPE_CHECKING
 
@@ -21,7 +20,6 @@ import install_transaction
 import installed_payload
 from installer import gateway_participant, locations, report, runner, source
 from installer.runner import ToolResult
-import state_retention
 
 if TYPE_CHECKING:
     from installer.cli import Context
@@ -261,7 +259,7 @@ def _report_unrecorded_service() -> tuple[str, bool] | None:
 def migrate_record(ctx: "Context") -> None:
     """Create the install record once from an earlier installer's records (`installed_payload.migrate`)
     for every host, then the gateway's `service` section once from its installation receipt
-    (`installed_payload.migrate_service`), then remove the earlier installer's rollback folders; a migration
+    (`installed_payload.migrate_service`); a migration
     that cannot finish is reported and the command goes on."""
     root = locations.record_root()
     try:
@@ -280,24 +278,31 @@ def migrate_record(ctx: "Context") -> None:
     if service is not None:
         report.info(f"Gateway record created from its installation receipt: {service['label']} "
                     f"(companion targets added {service['companions']})")
-    remove_earlier_rollback_folders()
 
 
-def remove_earlier_rollback_folders() -> None:
-    """Remove the two folders where an earlier installer kept the copies it replaced: `~/.ghost-alice/
-    install-rollbacks` and the Claude skills folder's `.ghost-alice-install-rollbacks`. A publish keeps what it
-    replaces in `rollbacks/<txid>/`, so nothing writes these folders now; a removal that fails is reported."""
-    for folder in (locations.record_root() / "install-rollbacks",
-                   locations.skills_dir("claude") / ".ghost-alice-install-rollbacks"):
-        if not (folder.exists() or folder.is_symlink()):
-            continue
-        try:
-            _remove_path(folder)
-        except OSError as exc:
-            report.warn(f"The earlier installer's rollback folder {folder} could not be removed: {exc}")
-            state_retention.record_failure("earlier-rollback-folders", folder, exc)
-            continue
-        report.info(f"Removed the earlier installer's rollback folder {folder}")
+def cleanup_obsolete_copies(ctx: "Context", collected: "Collected") -> bool:
+    """Hand verified placements to the original-copy cleanup owner before final success."""
+    from uninstall_cleanup import cleanup_obsolete_copies as cleanup
+    root = locations.record_root()
+    targets = [(target.name, target.path, Path(ctx.skills_dir)/target.name, target.provider)
+               for target in collected.all_targets]
+    if collected.support_target_total:
+        targets.append(('_shared', runner.REPO_ROOT/'_shared', Path(ctx.skills_dir)/'_shared', 'core'))
+    record = installed_payload.read(root)
+    targets.extend((entry['name'], Path(entry['source']), Path(dest), entry['provider'])
+                   for dest, entry in (record or {}).get('targets', {}).items()
+                   if entry.get('kind') == 'runtime' and ctx.platform in entry.get('used_by', []))
+    completed = [dict(target_name=name, source_path=str(src), dest_path=str(dest), provider=provider,
+                      source_root=str(runner.REPO_ROOT), action='replacement-verified')
+                 for name, src, dest, provider in targets]
+    results = cleanup(root=root, platform=ctx.platform, completed=completed)
+    for item in results:
+        message = f"Previous original {item['path']}: {item['action']} ({item['reason']})"
+        if item['action'] == 'manual-review':
+            report.warn(message)
+        elif item['action'] != 'preserved':
+            report.info(message)
+    return not any(item['action'] == 'manual-review' for item in results)
 
 
 def detect_install_mode(dest: Path, copy_only: bool) -> str:
@@ -310,13 +315,6 @@ def detect_install_mode(dest: Path, copy_only: bool) -> str:
     return "missing"
 
 
-def _remove_path(target: Path) -> None:
-    if target.is_symlink() or target.is_file():
-        target.unlink()
-    else:
-        shutil.rmtree(target)
-
-
 def remove_installed_target(ctx: "Context", label: str, target: Path, *,
                             source_path: Path | None = None, apply_changes: bool = True,
                             only_if_absent: bool = False) -> dict:
@@ -326,7 +324,7 @@ def remove_installed_target(ctx: "Context", label: str, target: Path, *,
     destination from the current host inventory; historical publish records stay.
     """
     import install_state_writer
-    from uninstall_cleanup import _target_item
+    from uninstall_cleanup import _target_item, _apply_target_item, release_target_records
 
     target = Path(target)
     state_path = locations.install_state_path(ctx.platform)
@@ -344,13 +342,25 @@ def remove_installed_target(ctx: "Context", label: str, target: Path, *,
         if source_path is not None:
             row["source_path"] = str(source_path)
     result = _target_item(row, manifest=manifest, manifest_path=state_path,
-                          platform=ctx.platform, apply_changes=apply_changes and not only_if_absent)
+                          platform=ctx.platform)
+    if apply_changes and not only_if_absent:
+        try:
+            _apply_target_item(result, row, manifest=manifest, manifest_path=state_path, platform=ctx.platform)
+        except (OSError, ValueError) as exc:
+            result.update(action='manual-review', reason='target-removal-failed', detail=str(exc))
     if only_if_absent and result["action"] != "missing":
         result.update(action="manual-review", reason="target-appeared-after-preview")
-    if apply_changes and result["action"] in {"removed", "quarantined-removed", "missing"}:
-        install_state_writer.remove_targets(state_path, destinations=[target])
+    if apply_changes and result["action"] in {"removed", "quarantined-removed", "missing", "reference-released"}:
+        try:
+            release_target_records(root=locations.record_root(), platform=ctx.platform, destination=target,
+                                   kind='support' if label == '_shared' else 'skill', state_path=state_path)
+        except (OSError, ValueError, installed_payload.NotLockHolder) as exc:
+            result.update(action='manual-review', reason='target-record-cleanup-failed', detail=str(exc),
+                          file_state='present' if os.path.lexists(target) else 'absent')
+            return result
         if result["action"] != "missing":
-            report.ok(f"{label} removed")
+            report.ok(f"{label}: current host reference released; shared files retained" if
+                      result['action'] == 'reference-released' else f"{label} removed")
             if result.get("backup_path"):
                 report.info(f"Preserved {label}: {result['backup_path']}")
     return result
@@ -395,7 +405,8 @@ def snapshot_after_install(ctx: "Context") -> bool:
         report.error(f"merge-companion snapshot directory cannot be created; aborting install: {pending_root}")
         return False
     result = runner.run_tool("merge-companion/scripts/snapshot_cli.py", "--output", str(snapshot),
-                             "--platform", ctx.platform, "--skills-dir", str(ctx.skills_dir))
+                             "--platform", ctx.platform, "--skills-dir", str(ctx.skills_dir),
+                             "--install-record-root", str(locations.record_root()))
     if not result.ok:
         report.error("merge-companion snapshot capture failed; aborting install")
         return False

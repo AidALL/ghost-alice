@@ -92,7 +92,7 @@ bash install.sh --status
 
 정상 목표는 `overall: ok`입니다.
 
-Doctor는 Core 정보 줄 `native-intake-waits`, `native-intake-failures`, `hook-failures`, `intake-hook-degraded`도 출력합니다. 이 목록은 `overall`과 종료 코드를 바꾸지 않습니다. Doctor는 기록된 대기·실패·처리 오류 표지를 보고하며, 처리 오류 표지만으로 입력의 저장 여부를 판단하지 않습니다. [입력 경고와 doctor 목록](troubleshooting.md#입력-경고와-doctor-목록)을 참고해 주세요.
+Doctor는 Core 정보 항목 `native-intake-waits`, `native-intake-failures`, `hook-failures`, `intake-hook-degraded`를 출력합니다. 이 목록은 기록된 대기·실패·입력 훅 오류 표지를 보고하며 `overall`과 종료 코드를 변경하지 않습니다. 입력 훅 오류 표지만으로 입력 저장 여부를 판정할 수 없습니다. [입력 경고와 doctor 목록](troubleshooting.md#입력-경고와-doctor-목록)에서 각 목록의 조회 대상을 설명합니다.
 
 ## 업데이트
 

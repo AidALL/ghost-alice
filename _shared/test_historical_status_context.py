@@ -6,10 +6,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from stop_hook_testing import assert_stop_observation
+from stop_hook_testing import HOOK, assert_stop_observation
 
 
-HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
 
 
 class ExplicitControlRouteBindingTests(unittest.TestCase):

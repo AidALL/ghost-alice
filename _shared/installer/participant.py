@@ -15,18 +15,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Callable, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
 class PublishContext:
     """What one publish tells its participants: the record root, the host, the transaction id and the
-    install locations the publish replaces (links the publish only records are not among them)."""
+    install locations the publish replaces (links the publish only records are not among them).
+    `checkpoint` persists a participant's recovery facts in the transaction journal before its effects."""
 
     ghost_root: Path
     host: str
     txid: str
     destinations: tuple[Path, ...]
+    checkpoint: Callable[[str, dict], None] | None = None
 
 
 @runtime_checkable

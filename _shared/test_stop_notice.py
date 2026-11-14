@@ -12,12 +12,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import stop_hook_testing as evidence
-from stop_hook_testing import assert_stop_observation
+from stop_hook_testing import HOOK, assert_stop_observation
 
-HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
 NOTICE_FILE = "GHOST_ALICE_STOP_NOTICE_FILE"
 # The test writes source labels as the response model's origin claims, not as sender authentication.
 COMPLETE = """Result: the report is ready.
@@ -92,6 +92,81 @@ class StopNoticeCase(unittest.TestCase):
 
 
 class StopNoticeMessageTests(StopNoticeCase):
+    def test_transcript_append_cannot_replace_the_body_observed_for_this_notice(self):
+        import native_transcript
+        import stop_notice
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env = dict(HOME=temporary, USERPROFILE=temporary, PATH=os.environ.get('PATH', ''))
+            evidence.review_format_fixture(root, 'claude', PARTIAL, env)
+            transcript = root / 'transcript.jsonl'
+            user = dict(evidence.user_role_row('Synthetic protocol fixture'), sessionId='fixture-stop')
+            answer = dict(evidence.reply(PARTIAL), sessionId='fixture-stop')
+            transcript.write_text(json.dumps(user) + '\n', encoding='utf-8')
+            payload = dict(session_id='fixture-stop', transcript_path=str(transcript))
+
+            def observe_then_append(data):
+                text = native_transcript.stop_response_text(data)
+                with transcript.open('a', encoding='utf-8') as stream:
+                    stream.write(json.dumps(answer) + '\n')
+                return text
+
+            with patch.object(stop_notice, 'stop_response_text', observe_then_append):
+                observed = stop_notice.build_stop_notice('claude', payload, env)
+            self.assertEqual(observed['body_digest'], 'sha256:' + hashlib.sha256(b'').hexdigest())
+            self.assertEqual(observed['state'], 'quiet')
+            self.assertIsNone(observed['control'])
+            self.assertIsNone(observed['claims'])
+            self.assertEqual(observed['unresolved_criteria'], [])
+            next_notice = stop_notice.build_stop_notice('claude', payload, env)
+            self.assertEqual(next_notice['body_digest'], 'sha256:' + hashlib.sha256(PARTIAL.encode()).hexdigest())
+            self.assertEqual(next_notice['state'], 'notice')
+            self.assertEqual(next_notice['control'], 'partial-check')
+            self.assertEqual(next_notice['unresolved_criteria'], [
+                dict(criterion='c2', reason='the checker is not installed')])
+
+    def test_decoder_limit_json_cli_returns_continue_without_creating_completion_evidence(self):
+        for raw in ('[' * 5000 + '0' + ']' * 5000, '{"number":' + '1' * 5000 + '}'):
+            with self.subTest(raw=raw[:20]), tempfile.TemporaryDirectory() as temporary:
+                env = dict(HOME=temporary, USERPROFILE=temporary, PATH=os.environ.get('PATH', ''))
+                result = subprocess.run([sys.executable, '-B', str(HOOK), '--platform', 'codex'],
+                    input=raw.encode(), capture_output=True, env=env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, b'')
+                payload = json.loads(result.stdout.decode('utf-8'))
+                self.assertTrue(payload['continue'])
+                self.assertIsNone(payload['stop_notice']['claims'])
+                self.assertIsNone(payload['stop_notice']['input_event_id'])
+                self.assertFalse((Path(temporary) / '.ghost-alice').exists())
+
+    def test_unencodable_answer_cli_keeps_valid_remaining_work_without_projecting_answer(self):
+        for text in ('Answer: \ud800', PARTIAL.replace('the checker is not installed', 'pending \ud800')):
+            with self.subTest(text=ascii(text)), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                env = dict(HOME=temporary, USERPROFILE=temporary, PATH=os.environ.get('PATH', ''))
+                evidence.review_format_fixture(root, 'codex', PARTIAL, env, declared_remaining_work=declared())
+                path = root / 'notice.json'
+                env[NOTICE_FILE] = str(path)
+                result = subprocess.run([sys.executable, '-B', str(HOOK), '--platform', 'codex'],
+                    input=json.dumps(dict(session_id='fixture-stop', last_assistant_message=text)).encode(),
+                    capture_output=True, env=env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, b'')
+                payload = json.loads(result.stdout.decode('utf-8'))
+                self.assertTrue(payload['continue'])
+                message = payload['stop_notice']
+                self.assertEqual(message['state'], 'notice')
+                self.assertIsNone(message['body_digest'])
+                self.assertIsNone(message['control'])
+                self.assertIsNone(message['claims'])
+                self.assertEqual(message['unresolved_criteria'], [])
+                self.assertEqual(message['issues'][0]['code'], 'response-unbound')
+                self.assertIn('UTF-8', message['issues'][0]['detail'])
+                self.assertTrue(message['remaining_work']['items'])
+                self.assertEqual(json.loads(path.read_text(encoding='utf-8')), message)
+                self.assertNotIn('\ud800', json.dumps(message, ensure_ascii=False))
+                self.assertNotIn('\ud800', payload['systemMessage'])
+
     def test_native_session_reads_every_host_session_key_and_no_environment(self):
         import stop_notice
         self.assertEqual(stop_notice.native_session({"conversation_id": "c-1"}), "c-1")

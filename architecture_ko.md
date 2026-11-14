@@ -65,11 +65,11 @@ flowchart TD
   R -->|필요| C["Core 코드: 두 판단과 출처 연결 인증"]
   R -->|설명만 하는 답변| D["응답 모델: 답변 제출"]
   C -->|상태와 참조| D
-  D --> H["네이티브 호스트: 답변 표시"]
+  D --> H["호스트: 답변 표시"]
   H -->|Stop 이벤트| SR["Core Stop 스크립트: 답변을 기록된 검토와 대조하고<br/>이번 Stop의 안내 메시지를 stop-notice.json에 기록"]
   SR --> S{"메시지에 뒷받침되지 않는 주장, 대조에서 찾은 문제,<br/>미해결 기준, 선언된 남은 작업이 있습니까?"}
   S -->|예| N["Core Stop 스크립트: 안내 글을 systemMessage로 반환,<br/>호스트가 답변 뒤에 표시"]
-  S -->|아니요| E["네이티브 호스트: 정지"]
+  S -->|아니요| E["호스트: 정지"]
   N --> E
 ```
 
@@ -77,11 +77,11 @@ flowchart TD
 
 ## 훅 호출
 
-네이티브 호스트는 Core 훅과 애드온 훅의 등록된 명령을 모두 훅 실행기 `_shared/hook_profile_gate.py`로 실행하고, 실행기는 호출마다 훅 로그 `~/.ghost-alice/session-logs/<host>/<session>/strict-hook-output.jsonl`에 기록합니다. 이 기록이 실패하면 실행기는 가능하면 그 실패를 보존 실패 기록 `~/.ghost-alice/state-retention-failures.jsonl`에 기록하고, 훅의 출력을 평소대로 호스트에 전달합니다. 등록된 명령에는 원장 위치를 비롯한 설치 위치를 담은 값(설치 바인딩)이 들어 있습니다. 그림은 켜져 있고 설치 바인딩이 올바른 Core 훅의 호출 한 번을 따릅니다. 애드온 훅에서도 실행기는 같은 단계를 거치고, Core 훅 스크립트 자리에서 Ghost-ALICE 밖에 있는 애드온 스크립트를 실행합니다.
+호스트는 Core 훅과 애드온 훅의 등록된 명령을 모두 훅 실행기 `_shared/hook_profile_gate.py`로 실행하고, 실행기는 호출마다 훅 로그 `~/.ghost-alice/session-logs/<host>/<session>/strict-hook-output.jsonl`에 기록합니다. 이 기록이 실패하면 실행기는 가능하면 그 실패를 보존 실패 기록 `~/.ghost-alice/state-retention-failures.jsonl`에 기록하고, 훅의 출력을 평소대로 호스트에 전달합니다. 등록된 명령에는 원장 위치를 비롯한 설치 위치를 담은 값(설치 바인딩)이 들어 있습니다. 그림은 켜져 있고 설치 바인딩이 올바른 Core 훅의 호출 한 번을 따릅니다. 애드온 훅에서도 실행기는 같은 단계를 거치고, Core 훅 스크립트 자리에서 Ghost-ALICE 밖에 있는 애드온 스크립트를 실행합니다.
 
 ```mermaid
 sequenceDiagram
-  participant H as 네이티브 호스트
+  participant H as 호스트
   box Ghost-ALICE
     participant R as 훅 실행기
     participant C as Core 훅 스크립트
@@ -142,7 +142,7 @@ Ghost-ALICE Stop notice: the recorded review does not support 1 of 2 claims.
 
 ```mermaid
 sequenceDiagram
-  participant H as 네이티브 호스트
+  participant H as 호스트
   box Ghost-ALICE
     participant RC as Core Stop 훅의 실행기
     participant CS as Core Stop 스크립트
@@ -190,7 +190,7 @@ flowchart LR
 
 정상 훅은 현재 영수증과 다음 판단에 영향을 주는 변경 조건을 제공합니다. 절차는 공통 계약과 소유 스킬이 제공하며, 훅은 그 전문을 반복하지 않습니다. 답변 검토의 준비·기록은 제출한 답변을 다시 반환하지 않고 참조를 반환합니다. 답변 전문은 이후의 명시적인 비교를 위해 보존됩니다.
 
-네이티브 호스트는 대화 이력을 별도로 보존하고 모델 요청을 구성합니다. Ghost-ALICE 인계를 간결하게 선택해도 이전 네이티브 메시지가 제거되지는 않습니다. 캐싱·압축·토큰 감소만으로 불필요한 원문이 제외되었다고 판단할 수 없습니다. 사용량 관찰과 답변 표시 검사는 원본 기록이 보여주는 범위만 입증합니다.
+호스트는 대화 이력을 별도로 보존하고 모델 요청을 구성합니다. Ghost-ALICE 인계를 간결하게 선택해도 이전 네이티브 메시지가 제거되지는 않습니다. 캐싱·압축·토큰 감소만으로 불필요한 원문이 제외되었다고 판단할 수 없습니다. 사용량 관찰과 답변 표시 검사는 원본 기록이 보여주는 범위만 입증합니다.
 
 문맥 게이트웨이는 지원되는 명시적 내용 선택을 서버 전송 경계에 적용합니다. 실제 후속 작업에서 사용한 자료의 입력 표현을 바꿀 필요가 생기면, 모델은 그 자료를 다음 판단에 필요한 정보와 비교합니다. 미래의 사용 기간을 예측하거나 모든 조회에 별도 판정 호출을 추가하지 않습니다. Core 코드는 작업 권한과 별개로 네이티브 세션·현재 입력·원본 자료를 인증합니다. 게이트웨이는 프로토콜이 해당 변경을 지원할 때 명시적인 사용 후 판단이 있는 본문을 결론·미해결 조건·원문 조회 참조로 대체합니다. 계속 필요한 일반 원문과 판단하지 않은 일반 원문은 유지하고, 서버 답변은 그대로 전달합니다. 원본 이력은 명시적으로 조회할 수 있습니다.
 
@@ -214,7 +214,7 @@ flowchart LR
 
 ## 근거와 네이티브 표시
 
-모델은 각 주장을 원본 근거와 비교하는 판단과 답변 전체를 인간 사용자의 목적·제약에 비추어 평가하는 판단을 구분하여 수행합니다. Core 코드는 소유권·입력 연결·출처 무결성을 인증하며, 식별자와 해시가 의미적 진실을 결정하지는 않습니다. 네이티브 호스트가 모델의 답변을 표시합니다. Core 코드의 Stop 스크립트는 답변을 기록된 검토와 대조하며, 누락된 판단을 생성하거나 다음 작업을 예약하지 않습니다.
+모델은 각 주장을 원본 근거와 비교하는 판단과 답변 전체를 인간 사용자의 목적·제약에 비추어 평가하는 판단을 구분하여 수행합니다. Core 코드는 소유권·입력 연결·출처 무결성을 인증하며, 식별자와 해시가 의미적 진실을 결정하지는 않습니다. 호스트가 모델의 답변을 표시합니다. Core 코드의 Stop 스크립트는 답변을 기록된 검토와 대조하며, 누락된 판단을 생성하거나 다음 작업을 예약하지 않습니다.
 
 [검증 절차](coding-convention/verification-before-completion/SKILL.md)는 근거 선택과 완료 주장을 소유합니다. 그 [답변 검토 절차](coding-convention/verification-before-completion/references/response-review.md#prepare-and-record-the-response-review)는 기록의 인계를 소유합니다. 다른 문서는 명령을 복제하지 않고 해당 절차를 참조합니다.
 

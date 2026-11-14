@@ -22,7 +22,7 @@ import installed_payload  # noqa: E402
 from installer import report  # noqa: E402
 from installer import runner  # noqa: E402
 from installer import source  # noqa: E402
-from installer_testing import make_context, use_source  # noqa: E402
+from installer_testing import checkout_copy, installer_env, make_context, use_source  # noqa: E402
 
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
@@ -67,6 +67,266 @@ class SourceCase(unittest.TestCase):
             with use_source(repo):
                 result = source.check_source_health(skip=skip)
         return result, out.getvalue()
+
+
+class SuccessfulSourceVersionsTests(SourceCase):
+    def setUp(self):
+        super().setUp()
+        self.repo = init_repo(self.root / 'repo')
+        self.ctx = make_context(self.root / 'home', 'claude')
+        self.versions = self.root / 'home/.ghost-alice/versions'
+
+    def save(self, platform='claude', root=None, addons=()):
+        self.ctx.platform = platform
+        self.ctx.addon_sources = list(map(str, addons))
+        with use_source(root or self.repo):
+            lines = source.preserve_successful_source(self.ctx)
+        folders = sorted(self.versions.iterdir()) if self.versions.exists() else []
+        return folders, lines
+
+    def test_saved_bytes_include_local_changes_and_repeat_hosts_share_one_version(self):
+        (self.repo / '.gitignore').write_text('private.txt\n')
+        (self.repo / 'private.txt').write_text('private')
+        (self.repo / 'tracked.txt').write_text('local change')
+        (self.repo / 'new.txt').write_text('untracked code')
+        before = (self.repo / '.git/index').read_bytes()
+        folders, lines = self.save()
+        self.assertEqual(len(folders), 1)
+        kept = folders[0] / 'core'
+        self.assertEqual((kept / 'tracked.txt').read_text(), 'local change')
+        self.assertEqual((kept / 'new.txt').read_text(), 'untracked code')
+        self.assertFalse((kept / 'private.txt').exists())
+        self.assertFalse((kept / '.git').exists())
+        self.assertIn('--adopt-source', '\n'.join(lines))
+        self.assertEqual(self.save('codex')[0], folders)
+        self.assertEqual((self.repo / '.git/index').read_bytes(), before)
+
+    def test_latest_three_versions_remain_beside_an_older_live_version(self):
+        folders, _ = self.save()
+        first = folders[0]
+        link = self.root / 'home/.claude/skills/alpha'
+        link.parent.mkdir(parents=True)
+        link.symlink_to(first / 'core')
+        earlier_source = self.root / 'earlier-checkout'
+        record = {'targets': {str(link): {'used_by': ['claude'], 'source': str(earlier_source),
+                                         'mode': 'link', 'link_target': str(earlier_source)},
+                              str(self.root / 'absent'): {'used_by': ['claude'],
+                                                         'source': str(self.versions / 'absent/core')}}}
+        with mock.patch.object(source.installed_payload, 'read', return_value=record):
+            for number in range(1, 5):
+                (self.repo / 'tracked.txt').write_text(str(number))
+                folders, _ = self.save()
+        self.assertEqual(len(folders), 4)
+        self.assertIn(first, folders)
+        self.assertTrue(link.exists())
+        self.assertEqual(sorted((folder / 'core/tracked.txt').read_text() for folder in folders), ['2', '3', '4', 'one\n'])
+
+    def test_source_changed_after_placement_does_not_become_a_successful_version(self):
+        installed = self.root / 'installed.py'
+        installed.write_text('placed bytes')
+        (self.repo / 'tracked.txt').write_text('changed after placement')
+        record = {'targets': {str(installed): {'source': str(self.repo / 'tracked.txt'),
+                                              'used_by': ['claude'], 'mode': 'copy'}}}
+        with mock.patch.object(source.installed_payload, 'read', return_value=record):
+            with self.assertRaisesRegex(ValueError, 'Preserved source differs from installed code'):
+                self.save()
+        self.assertEqual(list(self.versions.iterdir()), [])
+
+    def test_plain_package_uses_catalog_and_saved_source_reuses_its_file_list(self):
+        plain = self.root / 'package'
+        (plain / 'skill-catalog').mkdir(parents=True)
+        (plain / 'skill-catalog/skills.json').write_text(json.dumps({'install_roots': ['alpha']}))
+        (plain / 'alpha').mkdir()
+        (plain / 'alpha/SKILL.md').write_text('alpha')
+        (plain / 'install.sh').write_text('entrypoint')
+        (plain / 'private.txt').write_text('unrelated user material')
+        folders, _ = self.save(root=plain)
+        self.assertEqual(len(folders), 1)
+        kept = folders[0] / 'core'
+        self.assertTrue((kept / 'alpha/SKILL.md').is_file())
+        self.assertFalse((kept / 'private.txt').exists())
+        (kept / 'personal.txt').write_text('not source inventory')
+        self.assertEqual(self.save(root=kept)[0], folders)
+
+    def test_selected_addon_sources_are_fixed_and_named_in_the_existing_install_command(self):
+        addon = self.root / 'addon-package'
+        (addon / 'demo/skill').mkdir(parents=True)
+        (addon / 'addons-manifest.json').write_text(json.dumps({'manifest_version': 1,
+                                                             'addons': [{'id': 'demo', 'path': 'demo'}]}))
+        (addon / 'demo/addon.json').write_text('{}')
+        (addon / 'demo/skill/SKILL.md').write_text('old addon bytes')
+        (addon / 'private.txt').write_text('unrelated material')
+        folders, lines = self.save(addons=[addon])
+        self.assertEqual(len(folders), 1)
+        kept = next((folders[0] / 'addons').iterdir())
+        (addon / 'demo/skill/SKILL.md').write_text('new addon bytes')
+        self.assertEqual((kept / 'demo/skill/SKILL.md').read_text(), 'old addon bytes')
+        self.assertFalse((kept / 'private.txt').exists())
+        self.assertIn('--addon-source', '\n'.join(lines))
+        self.assertIn(str(kept), '\n'.join(lines))
+
+    def test_all_live_versions_survive_with_named_references_when_more_than_three_are_needed(self):
+        record = {'targets': {}}
+        with mock.patch.object(source.installed_payload, 'read', return_value=record):
+            for number in range(4):
+                (self.repo / 'tracked.txt').write_text(str(number))
+                folders, lines = self.save()
+                latest = next(folder for folder in folders if (folder / 'core/tracked.txt').read_text() == str(number))
+                record['targets'][str(number)] = {'source': str(latest / 'core'), 'used_by': ['claude']}
+        self.assertEqual(len(folders), 4)
+        extra = next(folder for folder in folders if (folder / 'core/tracked.txt').read_text() == '0')
+        self.assertIn(str(extra), '\n'.join(lines))
+        self.assertIn('claude', '\n'.join(lines))
+
+    def test_a_changed_archive_and_old_successes_survive_a_failed_new_copy(self):
+        folders, _ = self.save()
+        first = folders[0]
+        (first / 'core/tracked.txt').write_text('user edit to preserved source')
+        for number in range(4):
+            (self.repo / 'tracked.txt').write_text(str(number))
+            folders, _ = self.save()
+        self.assertIn(first, folders)
+        before = set(folders)
+        with mock.patch.object(source.shutil, 'copy2', side_effect=OSError('disk full')):
+            with self.assertRaisesRegex(OSError, 'disk full'):
+                self.save()
+        self.assertEqual(set(self.versions.iterdir()), before)
+
+    def test_failed_old_version_deletion_reports_the_saved_new_version(self):
+        oldest = self.save()[0][0]
+        for number in range(1, 3):
+            (self.repo / 'tracked.txt').write_text(str(number))
+            self.save()
+        (self.repo / 'tracked.txt').write_text('latest')
+        remove = shutil.rmtree
+        def fail_old_version(path, *args, **kwargs):
+            if Path(path).resolve() == oldest.resolve():
+                raise PermissionError('old version is locked')
+            return remove(path, *args, **kwargs)
+        with mock.patch.object(source.shutil, 'rmtree', side_effect=fail_old_version):
+            with self.assertRaisesRegex(OSError, 'Source version saved.*previous version cleanup failed'):
+                self.save()
+        self.assertEqual(len(list(self.versions.iterdir())), 4)
+
+    def test_a_directory_link_cannot_be_silently_omitted_from_the_saved_source(self):
+        (self.repo / 'code').mkdir()
+        (self.repo / 'code/file.py').write_text('source')
+        (self.repo / 'linked-code').symlink_to(self.repo / 'code', target_is_directory=True)
+        git(self.repo, 'add', 'linked-code')
+        with self.assertRaisesRegex(ValueError, 'Source directory link cannot be preserved'):
+            self.save()
+        self.assertEqual(list(self.versions.iterdir()), [])
+
+    def test_version_root_link_never_redirects_the_archive_writer(self):
+        outside = self.root / 'unrelated'
+        outside.mkdir()
+        self.versions.parent.mkdir(parents=True)
+        self.versions.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'Source version root is a link'):
+            self.save()
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_windows_reinstall_command_selects_supported_powershell(self):
+        with mock.patch.object(source, 'os', wraps=os) as windows:
+            windows.name = 'nt'
+            _, lines = self.save('codex')
+        self.assertIn('Reinstall this code: pwsh -NoProfile -ExecutionPolicy Bypass -File ', '\n'.join(lines))
+        self.assertIn('core/install.ps1', '\n'.join(lines))
+
+    def test_archive_pruning_uses_whole_copy_rules_for_caches_links_and_extra_content(self):
+        folder = self.save()[0][0]
+        self.assertTrue(source._unchanged_version(folder))
+        cache = folder / 'core/__pycache__'
+        cache.mkdir()
+        (cache / 'generated.pyc').write_bytes(b'generated cache')
+        self.assertTrue(source._unchanged_version(folder))
+        link = cache / 'user-link'
+        link.symlink_to(self.repo / 'tracked.txt')
+        self.assertFalse(source._unchanged_version(folder))
+        link.unlink()
+        extra = folder / 'personal.txt'
+        extra.write_text('user content')
+        self.assertFalse(source._unchanged_version(folder))
+        extra.unlink()
+        (folder / 'core/tracked.txt').unlink()
+        self.assertFalse(source._unchanged_version(folder))
+
+    def test_service_and_pending_merge_consumers_keep_their_source_versions(self):
+        service_version = self.save()[0][0]
+        (self.repo / 'tracked.txt').write_text('pending version')
+        pending_version = next(folder for folder in self.save()[0] if folder != service_version)
+        pending = self.versions.parent / 'pending-merges/claude/manifest.json'
+        pending.parent.mkdir(parents=True)
+        pending.write_text(json.dumps({'entries': [{'backup_path': str(pending_version / 'core/tracked.txt'), 'decided': False}]}))
+        record = {'service': {'program': str(service_version / 'core/tracked.txt')}}
+        with mock.patch.object(source.installed_payload, 'read', return_value=record):
+            for number in range(4):
+                (self.repo / 'tracked.txt').write_text(str(number))
+                folders, _ = self.save()
+        self.assertEqual(len(folders), 5)
+        self.assertIn(service_version, folders)
+        self.assertIn(pending_version, folders)
+        self.assertEqual(sorted((folder / 'core/tracked.txt').read_text() for folder in folders),
+                         ['1', '2', '3', 'one\n', 'pending version'])
+
+
+class SuccessfulSourceReinstallTests(unittest.TestCase):
+    def test_full_installs_share_a_version_and_the_saved_installer_reinstalls_its_old_bytes(self):
+        checkout = checkout_copy(self)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            live, home = root / 'package', root / 'home'
+            shutil.copytree(checkout, live, ignore=shutil.ignore_patterns('.git', '__pycache__'))
+            (home / '.claude').mkdir(parents=True)
+            (home / '.codex').mkdir()
+            settings = home / '.claude/settings.json'
+            settings.write_text('{"userPreference":"keep-me"}')
+            codex_settings = home / '.codex/config.toml'
+            codex_settings.write_text('user_preference = "keep-me"\n')
+            env = installer_env(home)
+            env.update(PYTHONDONTWRITEBYTECODE='1', GIT_CEILING_DIRECTORIES=str(root))
+            # Package-manager setup and live service observation are outside this temporary installation.
+            entry = ('import sys; sys.path.insert(0, sys.argv.pop(1)); from installer import cli; '
+                     'cli.prerequisites.install_prerequisites=lambda: True; '
+                     'cli.transaction.report_gateway=lambda ctx: None; raise SystemExit(cli.main(sys.argv[1:]))')
+            def install(package, platform, *skills):
+                result = subprocess.run([sys.executable, '-B', '-c', entry, str(package / '_shared'),
+                                         '--platform', platform, '--adopt-source', *skills], cwd=package, env=env,
+                                        text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                self.assertEqual(result.returncode, 0, result.stdout[-6000:])
+                return result.stdout
+            original = (live / 'task-router/SKILL.md').read_bytes()
+            install(live, 'claude')
+            versions = home / '.ghost-alice/versions'
+            first = next(versions.iterdir())
+            install(live, 'codex')
+            self.assertEqual(list(versions.iterdir()), [first])
+            saved = json.loads((first / 'version.json').read_text())
+            self.assertEqual(saved['platforms'], ['claude', 'codex'])
+            (live / 'task-router/SKILL.md').write_bytes(original + b'\nChanged working source.\n')
+            install(live, 'claude')
+            install(live, 'codex')
+            codex_settings.write_text('rollback_user_sentinel = "keep-current"\n' + codex_settings.read_text())
+            self.assertEqual(len(list(versions.iterdir())), 2)
+            output = install(first / 'core', 'claude')
+            target = home / '.claude/skills/task-router'
+            self.assertEqual(target.resolve(), first / 'core/task-router')
+            self.assertEqual((target / 'SKILL.md').read_bytes(), original)
+            self.assertIn('keep-me', settings.read_text())
+            self.assertEqual(len(list(versions.iterdir())), 2)
+            self.assertIn('Reinstall this code:', output)
+            install(first / 'core', 'codex')
+            copied = home / '.agents/skills/task-router'
+            self.assertFalse(copied.is_symlink())
+            self.assertEqual((copied / 'SKILL.md').read_bytes(), original)
+            self.assertIn('user_preference = "keep-me"', codex_settings.read_text())
+            self.assertIn('rollback_user_sentinel = "keep-current"', codex_settings.read_text())
+            self.assertEqual(len(list(versions.iterdir())), 2)
+            successful_versions = set(versions.iterdir())
+            for _ in range(2):
+                install(first / 'core', 'codex', 'task-router')
+                self.assertEqual(set(versions.iterdir()), successful_versions)
+                self.assertEqual(list((home / '.ghost-alice/rollbacks').glob('*/rollback-*')), [])
 
 
 class SourceHealthTests(SourceCase):
@@ -158,12 +418,14 @@ class SourceHealthTests(SourceCase):
         (repo / "note.txt").write_text("untracked\n", encoding="utf-8")
         ok, out = self.check(repo)
         self.assertTrue(ok)
-        self.assertIn("[WARN] Source tree has untracked files; continuing because tracked files are clean.", out)
+        self.assertIn("[WARN] Source tree has untracked files; continuing", out)
         (repo / "tracked.txt").write_text("changed\n", encoding="utf-8")
         ok, out = self.check(repo)
         self.assertTrue(ok)
+        self.assertIn("[WARN] Source tree has untracked files; continuing.", out)
         self.assertIn("[WARN] Source tree has tracked local changes; continuing. External changes to installed targets remain "
                       "protected by pending-merges backup and manifest checks.", out)
+        self.assertNotIn("tracked files are clean", out)
 
 
 class GitHooksTests(SourceCase):

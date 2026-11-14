@@ -13,6 +13,7 @@ from unittest import mock
 import install_destination
 import install_hooks
 import runtime_config
+from installer_testing import destination_fixture, installer_env
 
 
 class CodexHookRemovalTrustTest(unittest.TestCase):
@@ -20,13 +21,10 @@ class CodexHookRemovalTrustTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
+        self.enterContext(mock.patch.dict(os.environ, installer_env(self.root), clear=True))
         self.native = self.root / 'native'
         self.native.mkdir()
-        binding = dict(mode='isolated', owned_root=str(self.root),
-            platform_dir=str(self.native), skills_dir=str(self.root / 'skills'),
-            ghost_root=str(self.root / 'ghost'), ledger_root=str(self.root / 'ledger'),
-            project_root=str(self.root / 'project'), core_source_root=str(Path(__file__).parents[1]),
-            runtime_shared_dir=str(self.root / 'ghost/runtime/current/_shared'))
+        binding = destination_fixture(self.root, platform_dir=str(self.native))
         context = install_destination.use(binding)
         context.__enter__()
         self.addCleanup(context.__exit__, None, None, None)
@@ -67,6 +65,36 @@ class CodexHookRemovalTrustTest(unittest.TestCase):
         self.assertEqual(json.loads(self.hooks.read_text())['hooks']['Stop'], [])
         self.assertEqual(self.state(), {})
         self.assertEqual(tomllib.loads(self.config.read_text())['user'], {'keep': 'precious'})
+
+    def test_command_start_backup_survives_later_owner_rollback(self):
+        first, a = self.addon('first')
+        second, b = self.addon('second')
+        self.seed([a, b])
+        sources = {path: path.read_bytes() for path in (self.hooks, self.config)}
+        self.assertEqual(install_hooks.remove_addon_hook(first, platform_key='codex',
+                                                       backup_sources=sources), 1)
+        committed = self.hooks.read_bytes(), self.config.read_bytes(), self.config.stat().st_mtime_ns
+        with mock.patch.object(install_hooks, '_write_settings', side_effect=OSError('second owner write failed')):
+            with self.assertRaisesRegex(OSError, 'second owner'):
+                install_hooks.remove_addon_hook(second, platform_key='codex', backup_sources=sources)
+        self.assertEqual((self.hooks.read_bytes(), self.config.read_bytes(), self.config.stat().st_mtime_ns), committed)
+        for path, original in sources.items():
+            self.assertEqual(path.with_suffix(path.suffix + '.bak').read_bytes(), original)
+        self.assertEqual(self.config.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(install_hooks.remove_addon_hook(second, platform_key='codex',
+                                                       backup_sources=sources), 1)
+        self.assertEqual(self.state(), {})
+        for path, original in sources.items():
+            self.assertEqual(path.with_suffix(path.suffix + '.bak').read_bytes(), original)
+
+    def test_text_writer_uses_the_same_command_start_toml_backup(self):
+        self.config.write_bytes(b'# command start\r\n[user]\r\nkeep = "original"\r\n')
+        original = self.config.read_bytes()
+        sources = {self.config: original}
+        install_hooks._write_text_file(self.config, '[user]\nkeep = "first"\n', backup_sources=sources)
+        install_hooks._write_text_file(self.config, '[user]\nkeep = "second"\n', backup_sources=sources)
+        self.assertEqual(self.config.with_suffix('.toml.bak').read_bytes(), original)
+        self.assertEqual(tomllib.loads(self.config.read_text()), {'user': {'keep': 'second'}})
 
     def test_addon_hook_before_core_relocates_whole_trust_table_preserving_unmanaged_metadata(self):
         marker, addon = self.addon('continue')

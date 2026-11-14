@@ -25,7 +25,7 @@
 
 | 조건 | 응답 모델이 따를 절차 |
 | --- | --- |
-| 호스트가 `user` 역할로 전달한 모든 프롬프트 | Core 코드의 입력 접수가 프롬프트를 관찰한 뒤 응답 모델이 해석합니다. 새 해석이나 변경된 해석이 있는 작업에서 응답 모델은 다음 도구 호출 전에 자신의 입력 해석을 기록하고 인간 사용자에게 `interpreted-as: ` 줄로 보이며, 판단이 저장된 입력 해석에 의존할 때 그 입력 해석을 조회합니다 |
+| 호스트가 `user` 역할로 전달한 모든 프롬프트 | 해석은 [공용 계약: Session Intent](../../../platforms/common-governance.md#session-intent), 기록은 [session-intent-analyzer](../../../session-intent-analyzer/SKILL.md) |
 | 응답 모델이 boundary-contract: required를 선택 | 의존 작업 전에 boundary-contract |
 | 개발 작업 시작 | coding-convention/using-coding-convention |
 | 버그 원인 조사 | coding-convention/systematic-debugging |
@@ -38,21 +38,21 @@
 
 응답 모델이 병합 대기 매니페스트를 확인하고 그 항목을 검토하는 시점은 [merge-companion](../../../merge-companion/SKILL.md#entry-and-activation)이 정합니다.
 
-응답 모델은 후속 질문과 상태 질문을 포함한 모든 입력을 해석하고, 공용 계약의 Work Selection 절에 따라 다음 행동을 선택합니다. task-router가 요구할 때 작업 선택 기록을 등록하며, 바로 답하기와 간단한 로컬 조회 경로에서는 등록하지 않습니다. 이전 작업 선택 기록은 Core 코드가 현재 입력으로 기록한 입력(Claude Code에서는 호스트가 대화 기록 행에 사람 입력 표지를 기록한 입력, Codex에서는 Codex의 프롬프트 제출 이벤트(`UserPromptSubmit`)가 전달한 모든 프롬프트)의 작업 선택 기록이 아닙니다. 인간 사용자가 skill-evolution 보고를 요청하거나 그 분석을 허가하면 응답 모델은 같은 세션에 skill-evolution을 별도로 적용할 수 있습니다. 이 절차는 task-router에 입력을 전달하지 않고 작업을 배정하지 않습니다.
+인간 사용자가 skill-evolution 보고를 요청하거나 그 분석을 허가하면 응답 모델은 같은 세션에 skill-evolution을 별도로 적용할 수 있습니다. 이 절차는 task-router에 입력을 전달하지 않고 작업을 배정하지 않습니다.
 
-응답 모델은 [task-router](../../../task-router/SKILL.md)를 적용하여 작업을 선택하고 작업 선택 기록 후보를 작성합니다. 응답 모델은 [boundary-contract](../../../boundary-contract/SKILL.md)를 따라 작업 범위 선언에 인간 사용자의 지시가 정한 목적을 작성하고, 그 지시가 허가한 작업 안에서 허용 대상과 행동·단계·자원 한도를 선언합니다. 인간 사용자가 금지했거나 프로젝트 지침이 금지했거나 응답 모델이 스스로 정한 더 좁은 한도로 제외한 금지 대상과 행동도 작성합니다. 이 절차들은 호스트의 실행 허용을 부여하지 않습니다.
+응답 모델은 [task-router](../../../task-router/SKILL.md)를 적용하여 작업을 선택하고 작업 선택 기록 후보를 작성하며, [boundary-contract](../../../boundary-contract/SKILL.md)를 따라 인간 사용자의 지시가 허가한 작업 안에서 범위를 선언합니다. 이 절차들은 호스트의 실행 허용을 부여하지 않습니다.
 
 ## 세션 의도 원장 계약
 
-Core 코드는 원문 없이 다이제스트, 문자 수, 순서가 정해진 의도 원장 사건을 작성해 입력을 현재 입력으로 기록합니다. Codex에서는 Core 코드의 입력 접수가 Codex의 프롬프트 제출 이벤트(`UserPromptSubmit`)가 전달한 모든 프롬프트를 보낸 주체를 확인하지 않고 기록합니다. Claude Code에서는 그 이벤트가 프롬프트의 다이제스트, 문자 수, 네이티브 연결 정보를 임시로 기록합니다. PreToolUse 또는 Stop 훅 실행기가 실행하는 Core 코드의 대조는 그 기록을 추가된 대화 기록 행과 호스트의 사람 입력 표지에 비교합니다. Claude Code가 작업하는 중에 들어온 입력을 포함해, 호스트가 대화 기록 행에 사람 입력 표지를 기록한 입력이 Core 코드가 현재 입력으로 기록한 입력이 됩니다. SDK로 시작한 턴이나 Claude Code가 작업하는 중에 앱이 전달한 이벤트는 고유한 권한이 없는 문맥 입력이 됩니다. 앱 이벤트, 작업 알림, 위임 에이전트의 회신은 호스트가 대화 기록 행에 사람 입력 표지를 기록한 마지막 입력과 그 작업 선택 기록을 유지합니다. 출처를 판정하지 못했거나 대화 기록에서 찾지 못한 관찰은 나중에 대화 기록에서 찾은, 호스트가 사람 입력 표지를 기록한 입력이 대체합니다. 그런 입력이 없으면 관찰은 대기 상태로 남고 의존 기록 작성은 계속 거부됩니다. PreToolUse 또는 Stop 훅 실행기는 그 대기를 기록하고 세션과 원인마다 인간 사용자에게 한 번 경고합니다. 훅 실행기가 대조 실패를 기록한 뒤에도 안쪽 훅은 계속 실행합니다. 응답 모델은 자신이 의도 원장에 기록한 목적(`current_goal`)·범위(`latest_scope`)·제약·결정·질문·완료 조건이 실질적으로 변경될 때만 압축된 의미 변경을 기록합니다. 항목마다 응답 모델이 기록한 출처 표지로 출처를 밝히며, 출처 표지가 없는 항목은 출처가 기록되지 않습니다.
+Core 코드는 [Canonical intake provenance](../../../session-intent-analyzer/references/ledger-schema.md#canonical-intake-provenance)에 따라 현재 입력을 기록합니다. 이 절이 호스트별 입력 선택, 대기 입력의 판정과 실패 처리를 정의합니다. 응답 모델은 [session-intent-analyzer](../../../session-intent-analyzer/SKILL.md)에 따라 변경된 입력 해석과 정정의 출처를 기록합니다.
 
 원장을 사용하는 실행 코드는 세션 식별 정보의 정확한 root·platform·session 값과 Core 코드가 의도 원장에 현재 입력으로 기록한 입력으로 공개 API를 호출합니다. 의도 원장의 SQLite 데이터베이스가 기준 저장소입니다. intent-state.json과 intent-events.jsonl은 가져오기·내보내기 형식이며 current-session.json은 참고용 포인터입니다. 어느 파일도 기록 대상 식별자를 대신하지 않습니다. 기록이 없으면 의존 작업은 미해결로 남습니다. 응답 모델은 인간 사용자의 목적이나 필수 의존 관계가 요구하고 인간 사용자의 지시가 허가한 범위 안에 있는 복구만 선택하며, 식별자를 추측하거나 없는 권한을 가정하지 않습니다.
 
-[Session-intent-analyzer](../../../session-intent-analyzer/SKILL.md)는 접수와 정정의 출처 판정을 담당합니다. [원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)는 상태 필드·트랜잭션 규칙·이관 해시·현재 작업 선택 기록을 정의합니다. 접수 이벤트와 intent-state 필드에는 원문 프롬프트·전체 대화·도구 출력·시스템/개발자 지침·비밀 값을 저장하지 않습니다. Core 코드는 응답 검토 절차에 따라 별도의 Core 검토 테이블(`core_completion_candidates`, `core_completion_assessments`, `core_completion_responses`)에 응답 모델의 답변·원본 출처 스냅샷과 응답 모델의 검토 판단을 저장합니다. 이 검토 기록은 응답 모델의 입력 해석과 구별됩니다. 훅 없는 작업도 같은 식별 계약을 따르며, 바로 답하는 답변은 도구를 사용하지 않습니다.
+[원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)는 상태 필드·트랜잭션 규칙·이관 해시·현재 작업 선택 기록을 정의합니다. 접수 이벤트와 intent-state 필드에는 원문 프롬프트·전체 대화·도구 출력·시스템/개발자 지침·비밀 값을 저장하지 않습니다. Core 코드는 응답 검토 절차에 따라 별도의 Core 검토 테이블(`core_completion_candidates`, `core_completion_assessments`, `core_completion_responses`)에 응답 모델의 답변·원본 출처 스냅샷과 응답 모델의 검토 판단을 저장합니다. 이 검토 기록은 응답 모델의 입력 해석과 구별됩니다. 훅 없는 작업도 같은 식별 계약을 따르며, 바로 답하는 답변은 도구를 사용하지 않습니다.
 
 ## 런타임 훅 그래프 계약
 
-1. session-intent-analyzer의 SessionStart 훅이 세션 식별 정보를 제공합니다. 호스트의 프롬프트 제출 이벤트(`UserPromptSubmit`)에 등록된 session-intent-analyzer 훅은 호스트가 `user` 역할로 전달한 각 프롬프트를 관찰하고, 세션 식별 정보가 전달되지 않았거나 접수가 실패했을 때만 모델 문맥을 추가합니다. Core 코드의 입력 접수는 Codex에서는 Codex의 프롬프트 제출 이벤트가 전달한 모든 프롬프트를 보낸 주체를 확인하지 않고 현재 입력으로 기록합니다. Claude Code에서는 대화 기록 행에서 호스트의 사람 입력 표지를 대조한 입력만 현재 입력으로 기록합니다. `--read-state`는 조회만 수행합니다. 응답 모델은 task-router를 적용하여 작업을 선택하며, 인간 사용자가 보고 전용 분석을 요청하거나 허가하면 skill-evolution을 별도로 적용합니다.
+1. session-intent-analyzer의 SessionStart 훅이 세션 식별 정보를 제공합니다. 호스트의 프롬프트 제출 이벤트(`UserPromptSubmit`)에 등록된 session-intent-analyzer 훅은 호스트가 `user` 역할로 전달한 각 프롬프트를 관찰하고, 세션 식별 정보가 전달되지 않았거나 접수가 실패했을 때만 모델 문맥을 추가합니다.
 2. 응답 모델은 `normal` 작업 선택 기록 후보를 Core 코드에 제출합니다. Core 코드는 Core 코드가 현재 입력으로 기록한 입력, 소유권, `selectable` 값과 선택한 완료 조건을 검증한 뒤 `ready` 상태의 작업 선택 기록을 저장합니다. 완료 조건의 `selectable` 값은 Core 코드가 출처 표지에서 정한 기본값이거나 응답 모델이 지정한 값이며, 응답 모델은 각 작업 단위의 `selectable` 값도 선언합니다. 값이 true이면 그 항목을 선택할 수 있으며, 그 값이 인간 사용자의 승인을 증명하지는 않습니다.
 3. 응답 모델은 요구되는 작업 범위 선언과 담당 절차를 따릅니다. [책임과 흐름](../../../architecture_ko.md#책임과-흐름)이 도구 실행과 권한 집행을 호스트에 배정합니다. io-trace 훅은 도구 작업을 감사 기록(`~/.ghost-alice/io-trace.jsonl`)에 계속 남깁니다. 호스트는 이 훅을 Claude Code에서는 `PostToolUse`와 `PostToolUseFailure`에서, Codex에서는 `PostToolUse`에서 실행합니다. 호스트의 권한 규칙이나 훅 실행기 밖에 등록된 훅이 거부했거나, 호스트의 권한 확인 창에 거부한다는 답이 입력되어 호스트가 실행 전에 거부한 호출은 Claude Code와 Codex 모두에서 감사 기록에 없습니다. 인간 사용자가 실행 중에 취소한 호출도 감사 기록에 없습니다. Claude Code에서 거부된 호출에는 파일에 없는 `old_string`을 지정한 `Edit`이 포함됩니다. Codex에서 종료 코드가 0이 아닌 셸 명령은 감사 기록에 있지만, 실패한 `apply_patch`나 MCP 호출, 시작하지 못한 셸 명령 같은 그 밖의 실패한 호출은 감사 기록에 없습니다. WebSearch 같은 서버 쪽 도구도 Codex에서는 감사 기록에 없습니다.
 4. 모델이 답변을 마쳐 Stop이 발생하면 Core 코드의 Stop 스크립트가 [훅 호출](../../../architecture_ko.md#훅-호출)의 설명대로 실행됩니다.

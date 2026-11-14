@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,7 @@ import install_hooks  # noqa: E402
 import hook_profile_gate  # noqa: E402
 import install_destination  # noqa: E402
 from test_addon_hooks import _make_addon  # noqa: E402
+from installer_testing import installer_env, destination_fixture  # noqa: E402
 
 
 def _with_old_adapter_binding(command: str) -> str:
@@ -38,20 +40,14 @@ def _with_old_adapter_binding(command: str) -> str:
 class AddonHookInstallCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
         self.tmp = Path(self._tmp.name)
+        self.enterContext(mock.patch.dict(os.environ, installer_env(self.tmp), clear=True))
         self.claude = self.tmp / ".claude"
         self.claude.mkdir(parents=True)
-        self._env = {k: os.environ.get(k) for k in ("HOME", "CLAUDE_CONFIG_DIR")}
-        os.environ["HOME"] = str(self.tmp)
-        os.environ["CLAUDE_CONFIG_DIR"] = str(self.claude)
-
-    def tearDown(self):
-        for k, v in self._env.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-        self._tmp.cleanup()
+        self.enterContext(install_destination.use(destination_fixture(self.tmp,
+            platform_dir=str(self.claude), skills_dir=str(self.claude / 'skills'),
+            ghost_root=str(self.tmp / '.ghost-alice'))))
 
     def _settings(self):
         return json.loads((self.claude / "settings.json").read_text(encoding="utf-8"))
@@ -62,9 +58,49 @@ class AddonHookInstallCase(unittest.TestCase):
 
 
 class AddonHookInstallTest(AddonHookInstallCase):
+    def test_core_name_collision_is_rejected_independently_of_permission_attribution(self):
+        for platform in ('codex', 'claude'):
+            with self.subTest(platform=platform):
+                root = self.tmp / platform
+                src = _make_addon(root, [{'id': 'obs', 'event': 'post_tool_use', 'script': 'hooks/obs.py'}])
+                manifest = src / 'addons/hookaddon/addon.json'
+                data = json.loads(manifest.read_text())
+                data['skills'][0]['name'] = 'task-router'
+                manifest.write_text(json.dumps(data))
+                native = root / 'native'
+                native.mkdir()
+                settings = native / ('hooks.json' if platform == 'codex' else 'settings.json')
+                original = b'{"permissions":{"allow":["Bash(custom)"]},"custom":"preserved"}'
+                settings.write_bytes(original)
+                receipt = root / 'ghost/addon-permissions/claude-v2.json'
+                receipt.parent.mkdir(parents=True)
+                receipt.write_bytes(b'{invalid attribution')
+                trust = native / 'config.toml'
+                trust.write_bytes(b'[user]\nkeep = "original"\n')
+                with install_destination.use(destination_fixture(root, platform_dir=str(native))):
+                    with self.assertRaisesRegex(install_hooks.AddonManifestError, 'collides with core'):
+                        install_hooks.install_hook(platform, addon_sources=[str(src)])
+                self.assertEqual(settings.read_bytes(), original)
+                self.assertEqual(receipt.read_bytes(), b'{invalid attribution')
+                self.assertEqual(trust.read_bytes(), b'[user]\nkeep = "original"\n')
+
+    def test_valid_addon_hook_installs_when_permission_attribution_is_unreadable(self):
+        src = _make_addon(self.tmp, [{'id': 'obs', 'event': 'post_tool_use', 'script': 'hooks/obs.py'}])
+        settings = self.claude / 'settings.json'
+        settings.write_text(json.dumps({'permissions': {'allow': ['Bash(custom)']}}))
+        receipt = self.tmp / '.ghost-alice/addon-permissions/claude-v2.json'
+        receipt.parent.mkdir(parents=True)
+        receipt.write_bytes(b'{invalid attribution')
+        result = install_hooks.install_hook('claude', addon_sources=[str(src)])
+        self.assertEqual(result.legacy_status, 'installed')
+        self.assertEqual(len(self._addon_entries('PostToolUse')), 1)
+        self.assertEqual(self._settings()['permissions']['allow'], ['Bash(custom)'])
+        self.assertEqual(receipt.read_bytes(), b'{invalid attribution')
+        self.assertTrue(any(item['action'] == 'manual-review' for item in result.details['items']))
+
     def test_addon_hook_added_after_core_io_trace(self):
         src = _make_addon(self.tmp, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])
-        self.assertEqual(install_hooks.install_hook("claude", addon_sources=[str(src)]), "installed")
+        self.assertEqual(install_hooks.install_hook("claude", addon_sources=[str(src)]).legacy_status, "installed")
         post = self._settings()["hooks"]["PostToolUse"]
         cmds = [h["command"] for e in post for h in e.get("hooks", [])]
         addon_idx = next(i for i, c in enumerate(cmds) if "[addon:hookaddon] obs" in c)
@@ -99,6 +135,7 @@ class AddonHookInstallTest(AddonHookInstallCase):
     @unittest.skipIf(os.name == "nt", "POSIX shell launcher")
     def test_observational_addon_runner_logs_the_registered_platform(self):
         src = _make_addon(self.tmp, [{"id":"obs", "event":"post_tool_use", "script":"hooks/obs.py"}])
+        install_hooks._prepare_destination_runtime(install_destination.current())
         install_hooks.install_hook("claude", addon_sources=[str(src)])
         command = self._addon_entries("PostToolUse")[0]
         env = {k:v for k,v in os.environ.items() if k not in {
@@ -115,7 +152,7 @@ class AddonHookInstallTest(AddonHookInstallCase):
         src = _make_addon(self.tmp, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])
         install_hooks.install_hook("claude", addon_sources=[str(src)])
         second = install_hooks.install_hook("claude", addon_sources=[str(src)])
-        self.assertEqual(second, "already")
+        self.assertEqual(second.legacy_status, "already")
         self.assertEqual(len(self._addon_entries("PostToolUse")), 1)  # no duplicate
 
     def test_core_only_install_has_no_addon_entries(self):

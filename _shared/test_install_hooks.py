@@ -45,7 +45,8 @@ import atomic_write
 import hook_profile_gate
 import hook_definitions
 import install_hooks
-from installer_testing import installer_env
+import install_destination
+from installer_testing import destination_fixture, installer_env
 from stop_hook_testing import assert_stop_observation, review_format_fixture
 
 
@@ -372,7 +373,7 @@ def _make_node_executable(node: Path) -> None:
 
 
 def _expected_ghost_alice_skill_names() -> list[str]:
-    names = install_hooks._ghost_alice_installed_skill_names()
+    names = install_hooks._discover_ghost_alice_skill_names_from_catalog()
     if not names:
         raise AssertionError("Ghost-ALICE skill catalog discovery returned no skills")
     return names
@@ -1137,7 +1138,7 @@ class TestInstallHook(TempHomeTestCase):
                 with patch.dict(os.environ, {install_hooks.HOOK_SHARED_DIR_ENV: '',
                                              'GHOST_ALICE_RUNTIME_SHARED_DIR': ''}), \
                      patch.object(install_hooks, 'SESSION_INTENT_INTERNAL', 'previous generated intake'):
-                    self.assertEqual(install_hooks.install_hook(platform, destination=destination), 'installed')
+                    self.assertEqual(install_hooks.install_hook(platform, destination=destination).legacy_status, 'installed')
                 config = owned / platform / ('hooks.json' if platform == 'codex' else 'settings.json')
                 before = json.loads(config.read_text())
                 before['customSetting'] = {'preserve': ['value']}
@@ -1149,7 +1150,7 @@ class TestInstallHook(TempHomeTestCase):
                 config.write_text(json.dumps(before))
                 with patch.dict(os.environ, {install_hooks.HOOK_SHARED_DIR_ENV: '',
                                              'GHOST_ALICE_RUNTIME_SHARED_DIR': ''}):
-                    self.assertEqual(install_hooks.install_hook(platform, destination=destination), 'already')
+                    self.assertEqual(install_hooks.install_hook(platform, destination=destination).legacy_status, 'already')
                 after = json.loads(config.read_text())
                 self.assertEqual(after['customSetting'], before['customSetting'])
                 custom = [row for row in after['hooks']['UserPromptSubmit']
@@ -1465,11 +1466,11 @@ class TestInstallHook(TempHomeTestCase):
         }
 
         with patch.dict(os.environ, node_env, clear=False):
-            self.assertEqual(install_hooks.install_hook("claude"), "installed")
+            self.assertEqual(install_hooks.install_hook("claude").legacy_status, "installed")
             config_path.unlink(missing_ok=True)
             result = install_hooks.install_hook("claude")
 
-        self.assertEqual(result, "already")
+        self.assertEqual(result.legacy_status, "already")
         self.assertTrue(config_path.exists())
         config = json.loads(config_path.read_text(encoding="utf-8"))
         self.assertEqual(
@@ -1692,7 +1693,7 @@ class TestInstallHook(TempHomeTestCase):
             "NODE_REPL_NODE_PATH": "",
         }
         with patch.dict(os.environ, node_env, clear=False):
-            self.assertEqual(install_hooks.install_hook("claude"), "installed")
+            self.assertEqual(install_hooks.install_hook("claude").legacy_status, "installed")
 
         original_which = shutil.which
 
@@ -1727,7 +1728,7 @@ class TestInstallHook(TempHomeTestCase):
             ),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            self.assertEqual(install_hooks.install_hook("claude"), "installed")
+            self.assertEqual(install_hooks.install_hook("claude").legacy_status, "installed")
 
         with patch.object(
             install_hooks,
@@ -2014,7 +2015,7 @@ class TestInstallHook(TempHomeTestCase):
         ):
             result = install_hooks.install_hook("claude")
 
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
         self.assertIn("hooks", self._read_settings("claude"))
         config = install_hooks.runtime_config.load_config(env={}, home=self.fake_home)
         self.assertEqual(
@@ -2104,7 +2105,7 @@ class TestInstallHook(TempHomeTestCase):
         """Install hooks into an empty settings file."""
         self._write_settings("claude", {})
         result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         settings = self._read_settings("claude")
         hooks = settings["hooks"]["UserPromptSubmit"]
@@ -2126,7 +2127,7 @@ class TestInstallHook(TempHomeTestCase):
             with self.subTest(platform=platform):
                 self._write_settings(platform, {})
                 result = install_hooks.install_hook(platform)
-                self.assertEqual(result, "installed")
+                self.assertEqual(result.legacy_status, "installed")
 
                 settings = self._read_settings(platform)
                 event = hook_definitions.resolve_hook_event("on_prompt_submit", platform)
@@ -2171,7 +2172,7 @@ class TestInstallHook(TempHomeTestCase):
 
         result = install_hooks.install_hook("codex")
 
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
         settings = self._read_settings("codex")
         commands = [
             hook.get("command", "")
@@ -2193,7 +2194,7 @@ class TestInstallHook(TempHomeTestCase):
         with patch.dict(os.environ, {"GHOST_ALICE_HOOK_SHARED_DIR": str(runtime_shared)}):
             result = install_hooks.install_hook("claude")
 
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
         settings = self._read_settings("claude")
         commands = [
             hook.get("command", "")
@@ -2416,7 +2417,7 @@ class TestInstallHook(TempHomeTestCase):
                 with self.subTest(platform=platform):
                     self._create_platform_dir(platform)
                     self.assertEqual(
-                        install_hooks.install_hook(platform, node_runtime=node),
+                        install_hooks.install_hook(platform, node_runtime=node).legacy_status,
                         "installed",
                     )
                     settings = self._read_settings(platform)
@@ -2477,7 +2478,7 @@ class TestInstallHook(TempHomeTestCase):
         """Install hooks when the settings file is absent."""
         self._create_platform_dir("claude")
         result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         settings = self._read_settings("claude")
         self.assertIn("hooks", settings)
@@ -2491,7 +2492,7 @@ class TestInstallHook(TempHomeTestCase):
             "permissions": {"allow": ["Skill(custom-local-skill)"]},
         })
         result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         settings = self._read_settings("claude")
         self.assertEqual(settings["autoUpdatesChannel"], "latest")
@@ -2510,21 +2511,29 @@ class TestInstallHook(TempHomeTestCase):
         unverified_skill.mkdir(parents=True)
         (unverified_skill / "SKILL.md").write_text("# unverified\n", encoding="utf-8")
         self._write_settings("claude", {
-            "permissions": {"allow": ["Skill(custom-local-skill)"]},
+            "permissions": {"allow": ["Skill(custom-local-skill)", "Skill(task-router)"]},
         })
 
+        with patch.object(install_hooks, "_discover_ghost_alice_skill_names_from_catalog", return_value=[]):
+            self.assertEqual(install_hooks.install_hook("claude", addon_sources=[addon_source]).legacy_status, "installed")
+        self.assertEqual(self._read_settings("claude")["permissions"]["allow"],
+                         ["Skill(custom-local-skill)", "Skill(task-router)", "Skill(demo-addon)"])
         result = install_hooks.install_hook("claude", addon_sources=[addon_source])
 
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
         allow = self._read_settings("claude")["permissions"]["allow"]
         self.assertIn("Skill(verification-before-completion)", allow)
         self.assertIn("Skill(demo-addon)", allow)
         self.assertIn("Skill(custom-local-skill)", allow)
         self.assertNotIn("Skill(unverified-addon)", allow)
         self.assertEqual(allow.count("Skill(demo-addon)"), 1)
+        receipt = json.loads((self.fake_home / '.ghost-alice/addon-permissions/claude-v2.json').read_text())
+        self.assertFalse(receipt['core']['task-router'])
+        self.assertTrue(receipt['core']['writing-plans'])
+        self.assertTrue(receipt['addons']['demo-addon']['demo-addon'])
 
         self.assertEqual(
-            install_hooks.install_hook("claude", addon_sources=[addon_source]),
+            install_hooks.install_hook("claude", addon_sources=[addon_source]).legacy_status,
             "already",
         )
         status = install_hooks.check_status_detail(
@@ -2536,24 +2545,6 @@ class TestInstallHook(TempHomeTestCase):
             "skill-permission:demo-addon",
             status.details["installed"],
         )
-
-    def test_permission_discovery_does_not_trust_unverified_installed_tree(self):
-        """An installed directory cannot become a managed permission without a manifest."""
-        addon_source = self._create_addon_source()
-        unverified_skill = self.fake_home / ".agents" / "skills" / "unverified-addon"
-        unverified_skill.mkdir(parents=True)
-        (unverified_skill / "SKILL.md").write_text("# unverified\n", encoding="utf-8")
-
-        with patch.object(
-            install_hooks,
-            "_discover_ghost_alice_skill_names_from_catalog",
-            return_value=[],
-        ):
-            permissions = install_hooks._claude_ghost_alice_skill_permissions(
-                [addon_source]
-            )
-
-        self.assertEqual(permissions, ["Skill(demo-addon)"])
 
     def test_install_preserves_non_managed_bash_permissions(self):
         """The installer does not remove unmanaged Bash allow rules."""
@@ -2568,7 +2559,7 @@ class TestInstallHook(TempHomeTestCase):
 
         result = install_hooks.install_hook("claude")
 
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
         allow = self._read_settings("claude")["permissions"]["allow"]
         self.assertIn("Skill(custom-local-skill)", allow)
         self.assertIn("Bash(rg ghost-alice README.md)", allow)
@@ -2583,7 +2574,7 @@ class TestInstallHook(TempHomeTestCase):
             "hooks": {"UserPromptSubmit": [existing_hook]},
         })
         result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         settings = self._read_settings("claude")
         hooks = settings["hooks"]["UserPromptSubmit"]
@@ -2613,7 +2604,7 @@ class TestIdempotency(TempHomeTestCase):
         install_hooks.install_hook("claude")
         # Second call returns already because all hooks exist.
         result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "already")
+        self.assertEqual(result.legacy_status, "already")
 
     def test_install_counts_replaced_stale_hooks(self):
         """Replacing stale copies of a hook counts each removed command."""
@@ -2669,8 +2660,71 @@ class TestIdempotency(TempHomeTestCase):
         ])
 
 
+class TestCommandStartBackups(TempHomeTestCase):
+    def setUp(self):
+        super().setUp()
+        self.enterContext(install_destination.use(destination_fixture(
+            self.fake_home, platform_dir=str(self.fake_home / '.claude'),
+            skills_dir=str(self.fake_home / '.claude/skills'),
+            ghost_root=str(self.fake_home / '.ghost-alice'))))
+
+    def test_originally_absent_file_does_not_backup_an_intermediate_write(self):
+        path = self._config_file('claude')
+        sources = {path: None}
+        install_hooks._write_settings(path, {'first': True}, backup_sources=sources)
+        install_hooks._write_settings(path, {'second': True}, backup_sources=sources)
+        self.assertEqual(json.loads(path.read_bytes()), {'second': True})
+        self.assertFalse(path.with_suffix('.json.bak').exists())
+
+    def test_explicit_backup_map_cannot_fall_back_to_current_bytes(self):
+        path = self._write_settings('claude', {'before': True})
+        original = path.read_bytes()
+        with self.assertRaises(KeyError):
+            install_hooks._write_settings(path, {'after': True}, backup_sources={})
+        self.assertEqual(path.read_bytes(), original)
+        self.assertFalse(path.with_suffix('.json.bak').exists())
+
+    def test_snapshot_distinguishes_missing_file_from_dangling_link(self):
+        path = self._config_file('claude')
+        self.assertEqual(install_hooks.settings_backup_sources('claude'), {path: None})
+        path.parent.mkdir(parents=True)
+        self._symlink_file_or_skip(path, self.fake_home / 'missing-target')
+        with self.assertRaises(FileNotFoundError):
+            install_hooks.settings_backup_sources('claude')
+        self.assertTrue(path.is_symlink())
+        self.assertFalse(path.with_suffix('.json.bak').exists())
+
+
 class TestUninstallHook(TempHomeTestCase):
     """Uninstall behavior tests."""
+
+    def test_uninstall_recognizes_core_and_legacy_markers_without_entry_builders(self):
+        for platform in ('claude', 'codex'):
+            with self.subTest(platform=platform):
+                markers = {
+                    'UserPromptSubmit': [install_hooks.SESSION_INTENT_MARKER, *install_hooks.LEGACY_SESSION_INTENT_MARKERS],
+                    'PreToolUse': [install_hooks.TOOL_CHECKPOINT_MARKER, *install_hooks.LEGACY_TOOL_CHECKPOINT_MARKERS],
+                    'Stop': [install_hooks.STOP_HOOK_MARKER],
+                    'SessionStart': [install_hooks.SESSION_START_MARKER, install_hooks.SESSION_RECEIPT_MARKER],
+                    'PostToolUse': [install_hooks.IO_TRACE_MARKER],
+                }
+                if platform == 'claude':
+                    markers['PostToolUseFailure'] = [install_hooks.IO_TRACE_MARKER]
+                hooks = {event: [{'hooks': [{'type': 'command', 'command': f'echo stale # {marker}'}
+                                            for marker in values]}] for event, values in markers.items()}
+                hooks['Stop'][0]['hooks'].append({'type': 'command', 'command': 'echo independent'})
+                self._write_settings(platform, {'hooks': hooks})
+                with contextlib.ExitStack() as unavailable:
+                    for name in ('_platform_session_intent_entry', '_platform_tool_checkpoint_entry',
+                                 '_platform_stop_hook_entry', '_platform_session_start_entry',
+                                 '_platform_session_receipt_entry', '_platform_io_trace_entry', '_resolve_node_runtime'):
+                        unavailable.enter_context(patch.object(install_hooks, name,
+                            side_effect=RuntimeError('entry source or runtime unavailable')))
+                    result = install_hooks.uninstall_hook(platform)
+                self.assertTrue(result.details['hooks_detached'])
+                commands = [handler['command'] for groups in self._read_settings(platform)['hooks'].values()
+                            for group in groups for handler in group['hooks']]
+                self.assertEqual(commands, ['echo independent'])
 
     def test_uninstall_removes_hook(self):
         """Remove installed hooks."""
@@ -2680,7 +2734,7 @@ class TestUninstallHook(TempHomeTestCase):
             },
         })
         result = install_hooks.uninstall_hook("claude")
-        self.assertEqual(result, "removed")
+        self.assertEqual(result.legacy_status, "removed")
 
         settings = self._read_settings("claude")
         hooks = settings["hooks"]["UserPromptSubmit"]
@@ -2694,7 +2748,7 @@ class TestUninstallHook(TempHomeTestCase):
             "UserPromptSubmit": [{"matcher": "", "hooks": [intake, dict(intake), retired]}]}})
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            self.assertEqual(install_hooks.uninstall_hook("claude"), "removed")
+            self.assertEqual(install_hooks.uninstall_hook("claude").legacy_status, "removed")
         self.assertIn("Removed 3 hook(s)", output.getvalue())
 
     def test_uninstall_preserves_other_hooks(self):
@@ -2709,7 +2763,7 @@ class TestUninstallHook(TempHomeTestCase):
             },
         })
         result = install_hooks.uninstall_hook("claude")
-        self.assertEqual(result, "removed")
+        self.assertEqual(result.legacy_status, "removed")
 
         settings = self._read_settings("claude")
         hooks = settings["hooks"]["UserPromptSubmit"]
@@ -2720,7 +2774,7 @@ class TestUninstallHook(TempHomeTestCase):
         """Return not_found when no hooks exist."""
         self._write_settings("claude", {"hooks": {"UserPromptSubmit": []}})
         result = install_hooks.uninstall_hook("claude")
-        self.assertEqual(result, "not_found")
+        self.assertEqual(result.legacy_status, "not_found")
 
     def test_uninstall_preserves_other_settings(self):
         """Preserve other settings keys during removal."""
@@ -2815,7 +2869,7 @@ class TestIoTraceFailedCallEvent(TempHomeTestCase):
         self.assertEqual(install_hooks.check_status("claude"), "missing")
 
         install_hooks.install_hook("claude")
-        self.assertEqual(install_hooks.install_hook("claude"), "already")
+        self.assertEqual(install_hooks.install_hook("claude").legacy_status, "already")
 
         self.assertEqual(install_hooks.check_status("claude"), "installed")
         self.assertEqual(self._audit_commands("claude", "PostToolUseFailure"),
@@ -2842,7 +2896,7 @@ class TestIoTraceFailedCallEvent(TempHomeTestCase):
         install_hooks.install_hook("claude")
         self.assertEqual(len(self._audit_commands("claude", "PostToolUseFailure")), 1)
 
-        self.assertEqual(install_hooks.uninstall_hook("claude"), "removed")
+        self.assertEqual(install_hooks.uninstall_hook("claude").legacy_status, "removed")
 
         self.assertEqual(self._audit_commands("claude", "PostToolUse"), [])
         self.assertEqual(self._audit_commands("claude", "PostToolUseFailure"), [])
@@ -2872,11 +2926,20 @@ class TestAddonHookRemovalWithoutHooks(TempHomeTestCase):
 class TestCheckStatus(TempHomeTestCase):
     """Status check tests."""
 
+    def test_unavailable_io_trace_source_is_optional_until_the_source_returns(self):
+        self._create_platform_dir('claude')
+        with patch.object(install_hooks, '_resolve_io_trace_script', return_value=''):
+            install_hooks.install_hook('claude')
+            self.assertEqual(install_hooks.check_status_detail('claude').legacy_status, 'installed')
+        status = install_hooks.check_status_detail('claude')
+        self.assertEqual(status.legacy_status, 'missing')
+        self.assertEqual(status.details['missing'], ['io-trace'])
+
     def test_status_installed(self):
         """Return installed when the full hook suite is installed."""
         self._write_settings("claude", {})
         result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         result = install_hooks.check_status("claude")
         self.assertEqual(result, "installed")
@@ -2886,7 +2949,7 @@ class TestCheckStatus(TempHomeTestCase):
         addon_source = self._create_addon_source()
         self._write_settings("claude", {})
         result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         status = install_hooks.check_status_detail(
             "claude",
@@ -2901,7 +2964,7 @@ class TestCheckStatus(TempHomeTestCase):
         """Marker presence with command mismatch is command drift, not absence."""
         self._write_settings("claude", {})
         result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
         settings = self._read_settings("claude")
         for entry in settings["hooks"]["UserPromptSubmit"]:
             for hook in entry.get("hooks", []):
@@ -2921,7 +2984,7 @@ class TestCheckStatus(TempHomeTestCase):
         """Codex hooks.json with feature flag off is config disabled, not missing."""
         self._create_platform_dir("codex")
         result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
         self._codex_config_toml().write_text("[features]\nhooks = false\n", encoding="utf-8")
 
         status = install_hooks.check_status_detail("codex")
@@ -2951,7 +3014,7 @@ class TestCheckStatus(TempHomeTestCase):
     def test_status_installed_for_codex_without_web_search_hook(self):
         """External evidence guidance is not a required input hook."""
         self._create_platform_dir("codex")
-        self.assertEqual(install_hooks.install_hook("codex"), "installed")
+        self.assertEqual(install_hooks.install_hook("codex").legacy_status, "installed")
         settings = self._read_settings("codex")
         settings["hooks"]["UserPromptSubmit"] = [
             entry for entry in settings["hooks"]["UserPromptSubmit"]
@@ -2964,7 +3027,7 @@ class TestCheckStatus(TempHomeTestCase):
     def test_status_installed_for_claude_without_web_search_hook(self):
         """Claude Code does not install or require the web-search-first hook."""
         self._create_platform_dir("claude")
-        self.assertEqual(install_hooks.install_hook("claude"), "installed")
+        self.assertEqual(install_hooks.install_hook("claude").legacy_status, "installed")
         settings = self._read_settings("claude")
         commands = [h["command"] for entry in settings["hooks"]["UserPromptSubmit"] for h in entry["hooks"]]
         self.assertFalse(any(install_hooks.WEB_SEARCH_FIRST_MARKER in c for c in commands))
@@ -3031,12 +3094,12 @@ class TestPlatformSkip(TempHomeTestCase):
     def test_install_skips_missing_platform(self):
         """Return skipped when the platform directory is absent."""
         result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "skipped")
+        self.assertEqual(result.legacy_status, "skipped")
 
     def test_uninstall_skips_missing_platform(self):
         """Return skipped when the platform directory is absent."""
         result = install_hooks.uninstall_hook("codex")
-        self.assertEqual(result, "skipped")
+        self.assertEqual(result.legacy_status, "skipped")
 
     def test_status_skips_missing_platform(self):
         """Return skipped when the platform directory is absent."""
@@ -3052,7 +3115,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         self._create_platform_dir("codex")
 
         result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         hooks_file = self.fake_home / ".codex" / "hooks.json"
         self.assertTrue(hooks_file.exists())
@@ -3106,7 +3169,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         self._create_platform_dir("codex")
 
         result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         settings_file = self.fake_home / ".codex" / "hooks.json"
         settings = json.loads(settings_file.read_text(encoding="utf-8"))
@@ -3185,11 +3248,11 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         config_file.write_text(re.sub(
             rf"(?ms)^{re.escape(header)}\n.*?(?=^\[|\Z)", "", config_file.read_text(),
         ))
-        self.assertEqual(install_hooks.install_hook("codex", addon_sources=[str(adapter)]), "installed")
+        self.assertEqual(install_hooks.install_hook("codex", addon_sources=[str(adapter)]).legacy_status, "installed")
         self.assertIn(key, tomllib.loads(config_file.read_text())["hooks"]["state"])
         self.assertEqual(hooks_file.read_bytes(), settings_bytes)
         config_bytes = config_file.read_bytes()
-        self.assertEqual(install_hooks.install_hook("codex", addon_sources=[str(adapter)]), "already")
+        self.assertEqual(install_hooks.install_hook("codex", addon_sources=[str(adapter)]).legacy_status, "already")
         self.assertEqual(config_file.read_bytes(), config_bytes)
 
     def test_install_codex_trusts_current_project_config_layer(self):
@@ -3203,7 +3266,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             destination = __import__('dataclasses').replace(destination,
                 core_source_root=str(Path(install_hooks.__file__).resolve().parents[1]),project_root=str(repo))
             result = install_hooks.install_hook("codex",destination=destination)
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         project_key = str(repo.resolve())
         config = tomllib.loads(self._codex_config_toml().read_text(encoding="utf-8"))
@@ -3227,7 +3290,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
 
         with patch.object(install_hooks.sys, "executable", VERSIONED_HOMEBREW_PYTHON):
             result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         settings = self._read_settings("codex")
         command_surfaces: list[str] = []
@@ -3375,7 +3438,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         )
 
         result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         config = tomllib.loads(config_toml.read_text(encoding="utf-8"))
         self.assertTrue(config["features"]["hooks"])
@@ -3419,7 +3482,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         )
 
         result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         config = tomllib.loads(config_toml.read_text(encoding="utf-8"))
         hook_state = config["hooks"]["state"]
@@ -3468,7 +3531,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         })
 
         result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         settings = self._read_settings("codex")
         prompt_cmds = [h["command"] for entry in settings["hooks"]["UserPromptSubmit"] for h in entry["hooks"]]
@@ -3523,7 +3586,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         })
 
         result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         settings = self._read_settings("codex")
         expected = {
@@ -3565,7 +3628,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         config_toml.write_text('[features]\nmulti_agent = true\n', encoding="utf-8")
 
         result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         content = config_toml.read_text(encoding="utf-8")
         self.assertIn("multi_agent = true", content)
@@ -3579,7 +3642,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         config_toml.write_text('[features]\nhooks = false\nmulti_agent = true\n', encoding="utf-8")
 
         result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         trace = self.fake_home / ".ghost-alice" / "install-state" / "codex-hook-feature-change.json"
         self.assertTrue(trace.exists())
@@ -3598,7 +3661,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         config_toml.write_text('[features]\ncodex_hooks = true\nmulti_agent = true\n', encoding="utf-8")
 
         result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         content = config_toml.read_text(encoding="utf-8")
         self.assertIn("hooks = true", content)
@@ -3617,7 +3680,7 @@ class TestCorruptJson(TempHomeTestCase):
         settings_file.write_bytes(corrupt_bytes)
 
         result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         # Confirm that the corrupt file was backed up.
         corrupt_backup = config_dir / "settings.json.corrupt-bak"
@@ -3664,7 +3727,7 @@ class TestDryRun(TempHomeTestCase):
         ):
             result = install_hooks.install_hook("claude", dry_run=True)
 
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
         self.assertEqual(_tree_snapshot(self.fake_home), before)
         self.assertFalse((config_dir / "settings.json.corrupt-bak").exists())
 
@@ -3701,7 +3764,7 @@ class TestMultiPlatform(TempHomeTestCase):
 
         for p in ("claude", "codex"):
             result = install_hooks.install_hook(p)
-            self.assertEqual(result, "installed", f"{p} install failed")
+            self.assertEqual(result.legacy_status, "installed", f"{p} install failed")
 
         for p in ("claude", "codex"):
             result = install_hooks.check_status(p)
@@ -3717,7 +3780,7 @@ class TestRoundTrip(TempHomeTestCase):
 
         # Install.
         result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
 
         # Status check.
         result = install_hooks.check_status("claude")
@@ -3725,11 +3788,11 @@ class TestRoundTrip(TempHomeTestCase):
 
         # Reinstall (idempotency).
         result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "already")
+        self.assertEqual(result.legacy_status, "already")
 
         # Remove.
         result = install_hooks.uninstall_hook("claude")
-        self.assertEqual(result, "removed")
+        self.assertEqual(result.legacy_status, "removed")
 
         # Status check.
         result = install_hooks.check_status("claude")
@@ -3741,7 +3804,7 @@ class TestRoundTrip(TempHomeTestCase):
 
         # Remove again (idempotency).
         result = install_hooks.uninstall_hook("claude")
-        self.assertEqual(result, "not_found")
+        self.assertEqual(result.legacy_status, "not_found")
 
 
 class TestEnvVarOverride(TempHomeTestCase):
@@ -3786,7 +3849,7 @@ class TestEnvVarOverride(TempHomeTestCase):
 
         with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(custom_dir)}):
             result = install_hooks.install_hook("claude")
-            self.assertEqual(result, "installed")
+            self.assertEqual(result.legacy_status, "installed")
             # Confirm installation occurred at the environment-variable path.
             data = json.loads(settings_file.read_text(encoding="utf-8"))
             self.assertIn("hooks", data)
@@ -3840,7 +3903,7 @@ class TestSessionStartHook(unittest.TestCase):
         from hook_definitions import resolve_hook_event
         Path(self.tmp.name).mkdir(parents=True, exist_ok=True)
         result = install_hook("claude")
-        self.assertEqual(result, "installed")
+        self.assertEqual(result.legacy_status, "installed")
         settings = json.loads((Path(self.tmp.name) / "settings.json").read_text(encoding="utf-8"))
         ss_key = resolve_hook_event("on_session_start", "claude")
         self.assertIn(ss_key, settings["hooks"])
@@ -3855,7 +3918,7 @@ class TestSessionStartHook(unittest.TestCase):
         )
         from hook_definitions import resolve_hook_event
         Path(self.tmp.name).mkdir(parents=True, exist_ok=True)
-        self.assertEqual(install_hook("claude"), "installed")
+        self.assertEqual(install_hook("claude").legacy_status, "installed")
         install_hook("claude")
         settings = json.loads((Path(self.tmp.name) / "settings.json").read_text(encoding="utf-8"))
         ss_key = resolve_hook_event("on_session_start", "claude")
@@ -3970,7 +4033,7 @@ class TestExternalEvidenceHookRemoval(TempHomeTestCase):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 self._create_platform_dir(platform)
-                self.assertEqual(install_hooks.install_hook(platform), "installed")
+                self.assertEqual(install_hooks.install_hook(platform).legacy_status, "installed")
                 commands = [hook["command"]
                             for entry in self._read_settings(platform)["hooks"]["UserPromptSubmit"]
                             for hook in entry["hooks"]]
@@ -3982,7 +4045,7 @@ class TestExternalEvidenceHookRemoval(TempHomeTestCase):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 self._create_platform_dir(platform)
-                self.assertEqual(install_hooks.install_hook(platform), "installed")
+                self.assertEqual(install_hooks.install_hook(platform).legacy_status, "installed")
                 settings = self._read_settings(platform)
                 settings["hooks"]["UserPromptSubmit"].append({
                     "matcher": "preserved", "custom": 7, "hooks": [
@@ -3991,14 +4054,14 @@ class TestExternalEvidenceHookRemoval(TempHomeTestCase):
                     ],
                 })
                 self._write_settings(platform, settings)
-                self.assertEqual(install_hooks.install_hook(platform), "installed")
+                self.assertEqual(install_hooks.install_hook(platform).legacy_status, "installed")
                 hooks = self._read_settings(platform)["hooks"]["UserPromptSubmit"]
                 self.assertFalse(any("[web-search-first]" in h["command"] for entry in hooks for h in entry["hooks"]))
                 preserved = next(entry for entry in hooks if entry.get("matcher") == "preserved")
                 self.assertEqual(preserved, {"matcher": "preserved", "custom": 7,
                                            "hooks": [{"type": "command", "command": "echo user-owned"}]})
                 self.assertEqual(install_hooks.check_status(platform), "installed")
-                self.assertEqual(install_hooks.install_hook(platform), "already")
+                self.assertEqual(install_hooks.install_hook(platform).legacy_status, "already")
 
 
 class TestForegroundHookPayloads(TempHomeTestCase):
@@ -4247,7 +4310,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
         settings["hooks"]["UserPromptSubmit"].append(LEGACY_WEB_SEARCH_ENTRY)  # install fixture with codex_hooks enabled
         self._write_settings("claude", settings)
         result = install_hooks.uninstall_hook("claude")
-        self.assertEqual(result, "removed")
+        self.assertEqual(result.legacy_status, "removed")
         settings = self._read_settings("claude")
         hooks = settings["hooks"].get("UserPromptSubmit", [])
         cmds = [h["command"] for entry in hooks for h in entry["hooks"]]
@@ -4257,7 +4320,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
         self._create_platform_dir("claude")
         install_hooks.install_hook("claude")
         result = install_hooks.uninstall_hook("claude")
-        self.assertEqual(result, "removed")
+        self.assertEqual(result.legacy_status, "removed")
         settings = self._read_settings("claude")
         hooks = settings["hooks"].get("UserPromptSubmit", [])
         cmds = [h["command"] for entry in hooks for h in entry["hooks"]]

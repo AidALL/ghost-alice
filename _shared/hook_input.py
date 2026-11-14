@@ -17,8 +17,17 @@ def read_stdin_utf8() -> str:
 
 
 def parse_json_object(raw: str) -> dict[str, Any]:
-    """Return an object or an empty mapping; leave malformed JSON to the caller."""
+    """Return an object or an empty mapping; report decode failures as JSONDecodeError."""
     if not raw.strip():
         return {}
-    value = json.loads(raw)
+    try:
+        value = json.loads(raw)
+    except RecursionError as error:
+        raise json.JSONDecodeError(
+            "JSON nesting exceeds the decoder's supported depth", raw, 0
+        ) from error
+    except json.JSONDecodeError:
+        raise
+    except ValueError as error:
+        raise json.JSONDecodeError(str(error), raw, 0) from error
     return value if isinstance(value, dict) else {}

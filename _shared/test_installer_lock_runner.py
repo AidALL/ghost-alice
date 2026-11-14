@@ -14,12 +14,11 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from installer import lock  # noqa: E402
+from installer import gateway_participant, lock  # noqa: E402
 from installer import report  # noqa: E402
 from installer import runner  # noqa: E402
-from installer.runner import ToolResult  # noqa: E402
-from installer_testing import FakeRunner  # noqa: E402
 import file_lock  # noqa: E402
+import install_transaction  # noqa: E402
 
 
 class LockTests(unittest.TestCase):
@@ -160,7 +159,6 @@ class UnfinishedPublishTests(unittest.TestCase):
         self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=False)
         self.env.start()
         report.configure(verbose=False, report_child=False, tty=False, progress_env="auto", home=self.home)
-        self.runner = FakeRunner()
 
     def tearDown(self):
         self.env.stop()
@@ -169,16 +167,16 @@ class UnfinishedPublishTests(unittest.TestCase):
     def journal(self, txid: str, phase: str) -> Path:
         folder = self.ghost / "rollbacks" / txid
         folder.mkdir(parents=True)
-        (folder / "journal.json").write_text(json.dumps({"schema_version": 1, "txid": txid, "phase": phase}),
+        (folder / "journal.json").write_text(json.dumps({"schema_version": 1, "txid": txid, "phase": phase,
+                                                        "targets": []}),
                                              encoding="utf-8")
         return folder
 
     def test_finished_publishes_need_no_restore(self):
         self.journal("20261020T000000Z-1-aaaaaaaa", "done")
         self.journal("20261020T000001Z-1-bbbbbbbb", "restored")
-        with self.runner.patch():
+        with mock.patch.object(install_transaction, "recover", side_effect=AssertionError("finished journal")):
             handle = lock.acquire("install", "claude")
-        self.assertEqual(self.runner.calls, [])
         self.assertTrue(handle[0].is_file())
         lock.release(handle)
 
@@ -186,32 +184,116 @@ class UnfinishedPublishTests(unittest.TestCase):
         self.journal("20261020T000000Z-1-aaaaaaaa", "prepare")
         self.journal("20261020T000002Z-1-cccccccc", "done")
         self.journal("20261020T000001Z-1-bbbbbbbb", "prepare")
-        held = []
+        held, recovered = [], []
+        original_recover = install_transaction.recover
 
-        def recover(script, args, kwargs):
+        def recover(root, txid, *, participant_factory):
             held.append((self.ghost / "install.lock").is_file())
-            return ToolResult(0)
+            recovered.append(txid)
+            self.assertIs(participant_factory, gateway_participant.recovery_participants)
+            return original_recover(root, txid, participant_factory=participant_factory)
 
-        self.runner.respond(lambda script, args: script.endswith("install_transaction.py"), recover)
-        with self.runner.patch():
+        with mock.patch.object(install_transaction, "recover", side_effect=recover):
             handle = lock.acquire("repair", "codex")
-        self.assertEqual(self.runner.tool_calls("install_transaction.py"), [
-            ["recover", "--ghost-root", str(self.ghost), "--txid", "20261020T000001Z-1-bbbbbbbb"],
-            ["recover", "--ghost-root", str(self.ghost), "--txid", "20261020T000000Z-1-aaaaaaaa"]])
+        self.assertEqual(recovered, ["20261020T000001Z-1-bbbbbbbb", "20261020T000000Z-1-aaaaaaaa"])
         self.assertEqual(held, [True, True])
+        self.assertEqual(install_transaction.unfinished(self.ghost), [])
         self.assertTrue(handle[0].is_file())
         lock.release(handle)
 
     def test_a_publish_that_cannot_be_restored_stops_the_command_and_releases_the_lock(self):
         folder = self.journal("20261020T000000Z-1-aaaaaaaa", "prepare")
-        self.runner.respond_to("install_transaction.py", ToolResult(1))
+        (folder / "journal.json").write_text("{broken", encoding="utf-8")
         out = io.StringIO()
-        with contextlib.redirect_stdout(out), self.runner.patch(), self.assertRaises(runner.InstallerExit) as stop:
+        with contextlib.redirect_stdout(out), self.assertRaises(runner.InstallerExit) as stop:
             lock.acquire("uninstall", "claude")
         self.assertEqual(stop.exception.code, 1)
-        self.assertIn(f"[ERROR] An unfinished publish could not be restored; review {folder} "
-                      "and run the installer again", out.getvalue())
+        self.assertIn("cannot be read", out.getvalue())
+        self.assertIn(f"review {folder}", out.getvalue())
+        self.assertNotIn("An unfinished publish could not be restored", out.getvalue())
         self.assertFalse((self.ghost / "install.lock").exists())
+
+    def test_target_read_error_stops_recovery_and_releases_the_lock(self):
+        folder = self.journal("20261020T000000Z-1-aaaaaaaa", "prepare")
+        journal = install_transaction.Journal.load(self.ghost, folder.name)
+        journal.data["targets"] = [{"dest": str(self.home / "runtime")}]
+        journal.save()
+        out = io.StringIO()
+        with mock.patch.object(install_transaction, "_recovery_action", side_effect=OSError("target unavailable")), \
+                contextlib.redirect_stdout(out), self.assertRaises(runner.InstallerExit) as stop:
+            lock.acquire("repair", "claude")
+        self.assertEqual(stop.exception.code, 1)
+        self.assertIn("target unavailable", out.getvalue())
+        self.assertIn(f"review {folder}", out.getvalue())
+        self.assertIn("publish recovery failed", out.getvalue())
+        self.assertNotIn("The installer restored the files, install record", out.getvalue())
+        self.assertEqual(install_transaction.unfinished(self.ghost), [folder.name])
+        self.assertFalse((self.ghost / "install.lock").exists())
+
+    def test_restore_recording_and_staged_file_errors_keep_distinct_diagnostics(self):
+        for index, point in enumerate(("inspect", "remove", "record")):
+            with self.subTest(point=point):
+                folder = self.journal(f"20261020T00000{index}Z-1-aaaaaaaa", "prepare")
+                dest = self.home / f"runtime-{point}"
+                stage = self.home / f"staged-runtime-{point}"
+                original = folder / "original"
+                dest.write_bytes(b"candidate")
+                stage.write_bytes(b"candidate")
+                original.write_bytes(b"original")
+                payload = install_transaction.installed_payload
+                prior = json.dumps({"schema_version": payload.SCHEMA_VERSION,
+                                    "targets": {}, "installer": {"commit": "prior"}}).encode()
+                saved = folder / payload.FILENAME
+                saved.write_bytes(prior)
+                payload.path(self.ghost).write_bytes(json.dumps({
+                    "schema_version": payload.SCHEMA_VERSION,
+                    "targets": {}, "installer": {"commit": "candidate"}}).encode())
+                journal = install_transaction.Journal.load(self.ghost, folder.name)
+                journal.data.update(participants={}, record_copy=saved.name, targets=[dict(
+                    dest=str(dest), stage=str(stage), rollback=str(original),
+                    before=install_transaction.content_digest.state(original),
+                    candidate=install_transaction.content_digest.state(stage))])
+                journal.save()
+                real_state = install_transaction.content_digest.state
+                real_remove = install_transaction._remove_path
+
+                def state(path):
+                    if point == "inspect" and Path(path) == stage:
+                        raise OSError("staged file inspection denied")
+                    return real_state(path)
+
+                def remove(path):
+                    if point == "remove" and Path(path) == stage:
+                        raise OSError("staged file removal denied")
+                    return real_remove(path)
+
+                recording = (mock.patch.object(install_transaction.Journal, "save",
+                             side_effect=OSError("restoration record write denied"))
+                             if point == "record" else contextlib.nullcontext())
+                out = io.StringIO()
+                with recording, mock.patch.object(install_transaction.content_digest, "state", side_effect=state), \
+                        mock.patch.object(install_transaction, "_remove_path", side_effect=remove), \
+                        contextlib.redirect_stdout(out), self.assertRaises(runner.InstallerExit) as stop:
+                    lock.acquire("repair", "claude")
+                self.assertEqual(stop.exception.code, 1)
+                self.assertEqual(dest.read_bytes(), b"original")
+                self.assertEqual(payload.path(self.ghost).read_bytes(), prior)
+                self.assertEqual(stage.read_bytes(), b"candidate")
+                self.assertEqual(install_transaction.Journal.load(self.ghost, folder.name).phase,
+                                 "prepare" if point == "record" else "restored")
+                self.assertIn(f"review {folder}", out.getvalue())
+                self.assertNotIn("An unfinished publish could not be restored", out.getvalue())
+                if point == "record":
+                    self.assertIn("restoration record write denied", out.getvalue())
+                    self.assertIn("publish recovery failed", out.getvalue())
+                    self.assertNotIn("The installer restored the files, install record", out.getvalue())
+                else:
+                    self.assertIn(f"staged file {'inspection' if point == 'inspect' else 'removal'} denied",
+                                  out.getvalue())
+                    self.assertIn("The installer restored the files, install record and required service state for this publish, "
+                                  "but could not inspect or remove staged files", out.getvalue())
+                    self.assertNotIn("publish recovery failed", out.getvalue())
+                self.assertFalse((self.ghost / "install.lock").exists())
 
 
 class RunnerTests(unittest.TestCase):

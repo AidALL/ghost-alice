@@ -31,6 +31,25 @@ ADDON = ("import json, os; path = os.environ.get('GHOST_ALICE_STOP_NOTICE_FILE')
 
 
 class StopNoticeHandoffTests(unittest.TestCase):
+    def test_unencodable_partial_answer_reaches_host_addon_and_existing_hook_log(self):
+        answer = notice_tests.PARTIAL.replace('the checker is not installed', 'pending \ud800')
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            host = self.core(home, answer=answer)
+            self.assertTrue(host['continue'])
+            self.assertIn('Ghost-ALICE Stop notice:', host['systemMessage'])
+            message = json.loads(self.notice(home).read_text(encoding='utf-8'))
+            self.assertIsNone(message['body_digest'])
+            self.assertIsNone(message['control'])
+            self.assertEqual(message['issues'][0]['code'], 'response-unbound')
+            self.assertIn('UTF-8', message['issues'][0]['detail'])
+            _, seen = self.addon(home, answer=answer)
+            self.assertEqual(json.loads(seen['body']), message)
+            rows = [json.loads(line) for line in self.notice(home).with_name('strict-hook-output.jsonl').read_text().splitlines()]
+            observed = json.loads(rows[0]['stdout'])
+            self.assertEqual(observed['stop_notice'], message)
+            self.assertNotIn('\ud800', json.dumps(observed, ensure_ascii=False))
+
     def run_hook(self, home, hook_id, command, *, event="Stop", platform="codex", answer=ANSWER, inherited=None, ledger=None):
         wrapped = base64.urlsafe_b64encode(command.encode()).decode()
         env = {key: value for key, value in os.environ.items()

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import contextlib
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -162,15 +164,11 @@ def write_sidecars(ctx: "Context", skills_dir: Path) -> bool:
 
 def migrate_state_once(ctx: "Context") -> None:
     """`addon_migration.py` when an install-state file exists; failures ignored."""
-    from installer import selection
-
     state_path = locations.install_state_path(ctx.platform)
     if not state_path.is_file():
         return
     args = ["--platform", ctx.platform, "--install-state", str(state_path),
-            "--addons-dir", str(locations.addons_dir(ctx.platform))]
-    for skill in selection.ALL_SKILLS:
-        args.extend(["--core-skill", skill])
+            "--addons-dir", str(locations.addons_dir(ctx.platform)), *_core_skill_args(ctx)]
     runner.run_tool("_shared/addon_migration.py", *args, capture=True)
 
 
@@ -197,46 +195,32 @@ def _uninstall_args(ctx: "Context") -> list[str]:
             "--skills-dir", str(locations.resources_dir(ctx.platform)), "--platform", ctx.platform, "--apply"]
 
 
-def resume_pending_uninstalls(ctx: "Context") -> None:
-    """`addon_uninstall.py --resume-pending ...` with output kept in `~/.ghost-alice/addon-resume.log`."""
+def resume_pending_uninstalls(ctx: "Context", *, backup_sources=None) -> None:
+    """Run the addon command owner in this command's backup scope; retain its resume output."""
     if not locations.addons_dir(ctx.platform).is_dir():
         return
-    result = runner.run_tool("_shared/addon_uninstall.py", "--resume-pending", *_uninstall_args(ctx), capture=True)
+    import addon_uninstall
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+        addon_uninstall.main(["--resume-pending", *_uninstall_args(ctx)], backup_sources=backup_sources)
     log = locations.ghost_root() / "addon-resume.log"
     try:
         log.parent.mkdir(parents=True, exist_ok=True)
-        log.write_text((result.stdout or "") + (result.stderr or ""), encoding="utf-8")
+        log.write_text(output.getvalue(), encoding="utf-8")
     except OSError:
         pass
 
 
-def uninstall_addon(ctx: "Context", addon_id: str) -> int:
-    """`addon_uninstall.py --addon-id ... --apply`; the child's exit code."""
-    return runner.run_tool("_shared/addon_uninstall.py", "--addon-id", addon_id, *_uninstall_args(ctx)).returncode
+def uninstall_addon(ctx: "Context", addon_id: str, *, backup_sources=None) -> int:
+    """Use the addon command owner's output and exit policy with this command's original bytes."""
+    import addon_uninstall
+    return addon_uninstall.main(["--addon-id", addon_id, *_uninstall_args(ctx)], backup_sources=backup_sources)
 
 
 def dependents_rc(ctx: "Context", skill: str) -> int:
     """`addon_uninstall.py --dependents <skill>`; 2 means an installed addon depends on it."""
     return runner.run_tool("_shared/addon_uninstall.py", "--dependents", skill,
                            "--addons-dir", str(locations.addons_dir(ctx.platform)), capture=True).returncode
-
-
-def uninstall_all_before_full(ctx: "Context") -> bool:
-    """Remove every addon with a sidecar before full cleanup; False when one is preserved."""
-    addons_dir = locations.addons_dir(ctx.platform)
-    if not addons_dir.is_dir():
-        return True
-    failed = False
-    for sidecar in sorted(addons_dir.glob("*.json")):
-        addon_id = sidecar.name[:-len(".json")]
-        if not _SAFE_ID.match(addon_id):
-            continue
-        result = runner.run_tool("_shared/addon_uninstall.py", "--addon-id", addon_id, *_uninstall_args(ctx),
-                                 capture=True)
-        if not result.ok:
-            failed = True
-            report.warn(f"Full uninstall preserved addon {addon_id}; the human user must review its preserved files before sidecar cleanup")
-    return not failed
 
 
 def installed_addon_id(addon_id: str, addons_dir: Path) -> bool:

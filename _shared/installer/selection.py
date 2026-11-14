@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,12 +25,6 @@ ALL_SKILLS = (
     "compact-handoff",
     "task-router",
 )
-
-DEPRECATED_INSTALLED_SKILLS = (
-    "harness-security-scan",
-    "session-intent-guard",
-)
-
 
 @dataclass(frozen=True)
 class Target:
@@ -118,47 +110,45 @@ def has_managed_installs(skills_root: Path, platform: str, *, excluding: tuple[P
                     and target.get("owner") != "addon" and path.parent == skills_root
                     and path not in excluded and _present(path)):
                 return True
-    # Inventory and source-name presence are independent evidence of remaining Core slots.
+    # After a host reference was released, another host's shared file must not
+    # recreate the first host's installation merely by retaining a Core name.
+    import installed_payload
+    from uninstall_cleanup import _platforms_referencing_target
+    try:
+        record = installed_payload.read(locations.record_root())
+    except (OSError, ValueError) as exc:
+        report.warn(f'Keeping shared support because the install record could not be read: {exc}')
+        return True
+
+    def remains_for_host(path: Path) -> bool:
+        if path.absolute() in excluded or not _present(path):
+            return False
+        entry = (record or {}).get('targets', {}).get(str(path))
+        if isinstance(entry, dict) and platform in entry.get('used_by', []):
+            return True
+        try:
+            return not _platforms_referencing_target(path, current_manifest=state_path, current_platform=platform)
+        except (OSError, ValueError) as exc:
+            report.warn(f'Keeping shared support because host references are unresolved for {path}: {exc}')
+            return True
+
+    # Source-name presence remains evidence when no other-host attribution excludes it.
     for skill in ALL_SKILLS:
         targets = expand_skill_targets(skill)
         if not targets:
             path = Path(skills_root) / skill
-            if path.absolute() not in excluded and _present(path):
+            if remains_for_host(path):
                 return True
             continue
         for target in targets:
             path = Path(skills_root) / target.name
-            if path.absolute() not in excluded and _present(path):
+            if remains_for_host(path):
                 return True
     return False
 
 
 def cleanup_deprecated_installed_skills(ctx: "Context", skills_root: Path) -> bool:
-    """Move each DEPRECATED_INSTALLED_SKILLS entry under `skills_root` to
-    `~/.ghost-alice/deprecated-skill-backups/<name>-<stamp>[-n]`, then run
-    `retired_assets.py`. False when a move or the
-    retirement fails."""
-    skills_root = Path(skills_root)
-    if not skills_root.is_dir():
-        return True
-    for skill in DEPRECATED_INSTALLED_SKILLS:
-        target = skills_root / skill
-        if not (target.exists() or target.is_symlink()):
-            continue
-        backup_root = locations.deprecated_skill_backup_root()
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        quarantine = backup_root / f"{skill}-{stamp}"
-        suffix = 1
-        backup_root.mkdir(parents=True, exist_ok=True)
-        while quarantine.exists() or quarantine.is_symlink():
-            quarantine = backup_root / f"{skill}-{stamp}-{suffix}"
-            suffix += 1
-        try:
-            os.rename(target, quarantine)
-        except OSError:
-            report.error(f"Failed to move deprecated installed skill: {target}")
-            return False
-        report.warn(f"Deprecated installed skill moved out of discovery path: {skill} -> {quarantine}")
+    """Let the retirement owner classify candidates and resume unfinished work."""
     result = runner.run_tool("_shared/retired_assets.py",
                              "--skills-root", str(skills_root), "--source-root", str(runner.REPO_ROOT),
                              "--ghost-root", str(locations.ghost_root()), "--platform", ctx.platform,

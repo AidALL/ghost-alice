@@ -183,7 +183,7 @@ class InstallerAssetInventoryTest(unittest.TestCase):
         self.assertEqual(by_asset["task-router"].ownership, "absent")
         self.assertEqual(by_asset["task-router"].reason, "expected-target-absent")
 
-    def test_marker_cli_writes_copy_markers_and_skips_symlink_targets(self) -> None:
+    def test_retired_marker_write_cli_rejects_without_creating_files(self) -> None:
         copied = self._skill(self.skills, "task-router")
         symlink_source = self._skill(self.repo, "linked-skill")
         symlink_dest = self.skills / "linked-skill"
@@ -215,12 +215,104 @@ class InstallerAssetInventoryTest(unittest.TestCase):
             errors="replace",
         )
 
-        self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-        self.assertTrue((copied / ".ghost-alice-install.json").exists())
+        self.assertNotEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+        self.assertFalse((copied / ".ghost-alice-install.json").exists())
         self.assertFalse((symlink_source / ".ghost-alice-install.json").exists())
 
-        copied_result = classify_skill_root(copied, expected_asset_id="task-router")
-        self.assertEqual(copied_result.ownership, "ghost-alice-managed")
+    def test_classify_clean_cli_preserves_installer_preservation_exit_contract(self):
+        import contextlib
+        import io
+        import os
+        from unittest import mock
+        import install_destination
+        import uninstall_cleanup
+        from installer import preservation, runner, selection, transaction
+        from installer_testing import destination_fixture, installer_env, make_context, quiet
+
+        copied = self._skill(self.skills, 'task-router')
+        write_ownership_marker(copied, platform='codex', asset_id='task-router', source_repo=str(self.repo),
+                               source_commit='abc', install_mode='copy')
+        command = [sys.executable, str(MARKER_CLI), 'classify-clean', '--asset-id', 'task-router',
+                   '--path', str(copied), '--repo-root', str(self.repo)]
+        clean = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(clean.returncode, 0, clean.stderr)
+        (copied / 'SKILL.md').write_text('external edit')
+        modified = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(modified.returncode, 1, modified.stderr)
+        self.assertIn('externally-modified', modified.stdout)
+
+        for operation in ('full', 'selected', 'preflight', 'cleanup-pending'):
+            for material in ('private-git', 'nested-link', 'generated-cache'):
+                with self.subTest(operation=operation, material=material):
+                    home = self.root/operation/material
+                    ghost = home/'.ghost-alice'
+                    target = self._skill(home/'.agents/skills', 'task-router')
+                    write_ownership_marker(target, platform='codex', asset_id='task-router',
+                        source_repo=str(REPO_ROOT), source_commit='fixture', install_mode='copy')
+                    outside = home/'outside-original.bin'
+                    private_bytes = b'private-only-ownership-a59f\x00\xff'
+                    outside.write_bytes(private_bytes)
+                    relative = {'private-git': '.git/user-only.bin',
+                                'nested-link': '__pycache__/personal-link',
+                                'generated-cache': '__pycache__/fixture.pyc'}[material]
+                    personal = target/relative
+                    personal.parent.mkdir()
+                    if material == 'nested-link':
+                        try:
+                            personal.symlink_to(outside)
+                        except OSError as error:
+                            self.skipTest(f'symlink capability unavailable: {error}')
+                    else:
+                        personal.write_bytes(private_bytes if material == 'private-git' else b'generated cache')
+                    state = ghost/'install-state/codex.json'
+                    state.parent.mkdir(parents=True)
+                    state.write_text(json.dumps(dict(platform='codex', source_root=str(REPO_ROOT), targets=[dict(
+                        target_name='task-router', source_path=str(REPO_ROOT/'task-router'),
+                        dest_path=str(target), install_mode='copy')])))
+                    binding = destination_fixture(home, platform_dir=str(home/'.codex'),
+                        skills_dir=str(target.parent), ghost_root=str(ghost), core_source_root=str(REPO_ROOT))
+                    with mock.patch.dict(os.environ, installer_env(home), clear=True), \
+                            install_destination.use(binding), contextlib.redirect_stdout(io.StringIO()):
+                        quiet(home)
+                        ctx = make_context(home, 'codex')
+                        if operation == 'full':
+                            report = home/'uninstall-report.json'
+                            code = uninstall_cleanup.main(['--platform', 'codex', '--apply',
+                                '--install-state-manifest', str(state), '--report-path', str(report)])
+                            self.assertEqual(code, 0, report.read_text())
+                            result = next(item for item in json.loads(report.read_text())['items']
+                                          if item.get('kind') == 'install-target')
+                        elif operation == 'selected':
+                            result = transaction.remove_installed_target(ctx, 'task-router', target,
+                                source_path=REPO_ROOT/'task-router')
+                        elif operation == 'preflight':
+                            collected = selection.Collected([selection.Target('task-router', REPO_ROOT/'task-router')], [], 1, 0)
+                            self.assertTrue(preservation.preflight(ctx, collected))
+                        else:
+                            pending = ghost/'pending-merges/codex'
+                            prepared = runner.run_tool('merge-companion/scripts/quarantine_legacy_cli.py',
+                                '--target', str(target), '--target-name', 'task-router', '--pending', str(pending),
+                                '--manifest', str(pending/'manifest.json'), '--platform', 'codex', capture=True)
+                            self.assertTrue(prepared.ok, prepared.stdout or prepared.stderr)
+                            # Quarantine moves the old copy; cleanup runs after a managed replacement exists.
+                            self._skill(target.parent, 'task-router')
+                            write_ownership_marker(target, platform='codex', asset_id='task-router',
+                                source_repo=str(REPO_ROOT), source_commit='replacement', install_mode='copy')
+                            self.assertEqual(preservation.cleanup_pending(ctx), 0)
+                    if operation in {'full', 'selected'}:
+                        self.assertFalse(target.exists())
+                        self.assertEqual(result['action'], 'removed' if material == 'generated-cache' else 'quarantined-removed')
+                    recovery = list(ghost.rglob(personal.name))
+                    if material == 'generated-cache':
+                        self.assertEqual(recovery, [])
+                    else:
+                        self.assertEqual(len(recovery), 1, recovery)
+                        if material == 'nested-link':
+                            self.assertTrue(recovery[0].is_symlink())
+                            self.assertEqual(os.readlink(recovery[0]), str(outside))
+                        else:
+                            self.assertEqual(recovery[0].read_bytes(), private_bytes)
+                    self.assertEqual(outside.read_bytes(), private_bytes)
 
 if __name__ == "__main__":
     unittest.main()

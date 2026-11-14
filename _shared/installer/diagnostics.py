@@ -153,7 +153,7 @@ def check_status(ctx: "Context") -> int:
             print_target_status(target.name, skills_dir / target.name, "    ")
     report_install_record(ctx)
     run_install_doctor(ctx, "status", skills_dir)
-    return 0 if hosts.install_hooks(ctx, "status", ctx.platform) else 1
+    return 1 if hosts.install_hooks(ctx, "status", ctx.platform).legacy_status == 'error' else 0
 
 
 def run_doctor(ctx: "Context") -> int:
@@ -170,6 +170,6 @@ def run_doctor(ctx: "Context") -> int:
     doctor_rc = run_install_doctor(ctx, "doctor", skills_dir)
     if doctor_rc != 0:
         rc = doctor_rc
-    if not hosts.install_hooks(ctx, "status", ctx.platform):
+    if hosts.install_hooks(ctx, "status", ctx.platform).legacy_status == 'error':
         rc = 1
     return rc

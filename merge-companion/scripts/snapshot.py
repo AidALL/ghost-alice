@@ -34,6 +34,8 @@ repo updates distort the baseline for detecting external changes to installed co
 """
 from __future__ import annotations
 import hashlib, json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
@@ -192,3 +194,72 @@ def snapshot_records(snapshot: dict, skills_dir: Optional[Path] = None) -> dict[
             }
 
     return records
+
+
+def prune_snapshot(snapshot_path: Path, targets: Iterable[tuple[str, str | Path]],
+                   platform: str, *, provider: Optional[str] = None) -> bool:
+    """Remove confirmed target paths from this host's baseline, returning whether it changed.
+
+    Callers supply removed or released destinations, never source paths. Directory
+    kinds include descendants; file kinds match exactly. Relative metadata and
+    filesystem symlink resolution do not establish destination ownership.
+    """
+    directory_kinds = {"skill", "support", "runtime", "directory"}
+    file_kinds = {"command", "adapter", "resource", "file"}
+    removed = []
+    for kind, target in targets:
+        if kind not in directory_kinds | file_kinds or not Path(target).is_absolute():
+            raise SnapshotError(f"invalid removed snapshot target: {kind!r} {target!r}")
+        removed.append((kind in directory_kinds, Path(os.path.normpath(target))))
+    if not removed:
+        return False
+    if not isinstance(platform, str) or not platform:
+        raise SnapshotError("snapshot pruning requires a platform")
+    try:
+        data = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SnapshotError(f"snapshot corrupt {snapshot_path}: {exc}") from exc
+    if (not isinstance(data, dict) or type(data.get("version", 1)) is not int
+            or data.get("version", 1) not in (1, 2) or data.get("platform", platform) != platform
+            or not isinstance(data.get("files"), dict)
+            or ("file_records" in data and not isinstance(data["file_records"], dict))):
+        raise SnapshotError(f"invalid pending snapshot for {platform}: {snapshot_path}")
+    files = data["files"]
+    records = data.get("file_records", {})
+    if (any(not isinstance(value, str) for value in files.values())
+            or any(not isinstance(value, dict) for value in records.values())):
+        raise SnapshotError(f"invalid pending snapshot entries: {snapshot_path}")
+
+    def matches(path: str) -> bool:
+        candidate = Path(os.path.normpath(path))
+        return any(candidate == target or (directory and target in candidate.parents)
+                   for directory, target in removed)
+
+    paths = {path for path in files.keys() | records.keys() if matches(path)}
+    if not paths:
+        return False
+    for path in paths:
+        files.pop(path, None)
+        records.pop(path, None)
+    events = data.get("maintenance_events")
+    if not isinstance(events, list):
+        events = []
+        data["maintenance_events"] = events
+    events.append({"event": "targets-uninstall-pruned", "provider": provider, "platform": platform,
+                   "pruned_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")})
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{snapshot_path.name}.", suffix=".tmp",
+                                            dir=snapshot_path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, snapshot_path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+    return True

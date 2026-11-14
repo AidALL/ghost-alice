@@ -123,6 +123,22 @@ def held_by_process_tree(lock_path: Path | str) -> bool:
     return isinstance(pid, int) and not isinstance(pid, bool) and pid in (os.getpid(), os.getppid())
 
 
+@contextmanager
+def command_lock(lock_path: Path | str, *, owner: str, enabled: bool = True):
+    """Reuse this process's or its parent's lock; release only a generation this command acquired.
+
+    A preview passes enabled=False and neither reads metadata nor creates a lock or guard.
+    """
+    generation = None
+    if enabled and not held_by_process_tree(lock_path):
+        generation = acquire_lock(lock_path, owner=owner)
+    try:
+        yield
+    finally:
+        if generation is not None:
+            release_lock(lock_path, generation)
+
+
 def main(argv=None) -> int:
     """Keep the standalone lock interface, carrying the acquired generation between processes."""
     import argparse

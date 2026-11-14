@@ -18,7 +18,7 @@ README = REPO_ROOT / "README.md"
 ADDON_FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 if str(REPO_ROOT / "_shared") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "_shared"))
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env  # noqa: E402
 
 
 def _find_test_bash() -> str | None:
@@ -65,6 +65,9 @@ def _run_pty(command: list[str], *, env: dict[str, str], cwd: Path) -> tuple[int
 
     import select
 
+    # These TTY scenarios exercise isatty(), independent of a parent test runner's progress override.
+    env = env.copy()
+    env.pop("GHOST_ALICE_INSTALL_PROGRESS", None)
     master_fd, slave_fd = os.openpty()
     try:
         proc = subprocess.Popen(
@@ -164,8 +167,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             (temp_home / ".claude").mkdir()
             (temp_home / ".codex").mkdir()
 
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home)
             env["GHOST_ALICE_LANG"] = "en"
 
             source = checkout_copy(self)
@@ -197,8 +199,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             (temp_home / ".claude").mkdir()
             (temp_home / ".codex").mkdir()
 
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home)
             env["GHOST_ALICE_LANG"] = "en"
             env.setdefault("TERM", "xterm-256color")
 
@@ -245,8 +246,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             (temp_home / ".claude").mkdir()
             (temp_home / ".codex").mkdir()
 
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home)
             env["GHOST_ALICE_LANG"] = "en"
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "0"
 
@@ -299,8 +299,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
                     errors="replace",
                 )
 
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home)
             env["GHOST_ALICE_LANG"] = "en"
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "0"
 
@@ -341,8 +340,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_home = Path(temp_dir)
             (temp_home / ".codex").mkdir()
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home)
             env["GHOST_ALICE_LANG"] = "en"
 
             source = checkout_copy(self)
@@ -361,7 +359,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertIn("Target", result.stdout)
             self.assertIn("  Platform: codex", result.stdout)
             self.assertIn(f"  Skills: [{expected_total_targets}] targets", result.stdout)
-            self.assertIn("  Hooks: enabled", result.stdout)
+            self.assertIn("  Hooks: registration requested", result.stdout)
             self.assertIn("  Visibility Level: [dynamic]", result.stdout)
             self.assertIn("Progress", result.stdout)
             self.assertIn("  [1/5] Preflight           ok", result.stdout)
@@ -370,10 +368,10 @@ class InstallerDefaultAutoTest(unittest.TestCase):
                 result.stdout,
             )
             self.assertIn(
-                "  [3/5] Hooks               session-intent, tool-checkpoint, completion, session-start, session-receipt, io-trace enabled",
+                "  [3/5] codex Hooks: installed",
                 result.stdout,
             )
-            self.assertIn("  [4/5] Runtime config      codex hooks=true, Visibility Level=[dynamic]", result.stdout)
+            self.assertIn("  [4/5] Runtime config      Visibility Level=[dynamic]", result.stdout)
             self.assertIn("  [5/5] Verification        ok", result.stdout)
             # Codex has no /visibility command; only the Claude tail names it.
             self.assertNotIn("/visibility", result.stdout)
@@ -389,6 +387,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertNotIn("→ copied (copy-only compatibility mode)", result.stdout)
 
     def test_install_sh_moves_deprecated_installed_skills_out_of_discovery_path(self) -> None:
+        from installer_assets import write_ownership_marker
         bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh integration test")
@@ -396,17 +395,18 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_home = Path(temp_dir)
             (temp_home / ".codex").mkdir()
+            source = checkout_copy(self)
             skills_root = temp_home / ".agents" / "skills"
             for name in ("harness-security-scan", "session-intent-guard"):
                 skill_dir = skills_root / name
                 skill_dir.mkdir(parents=True)
                 (skill_dir / "SKILL.md").write_text(f"# stale {name}\n", encoding="utf-8")
+                write_ownership_marker(skill_dir, platform='codex', asset_id=name, source_repo=str(source),
+                                       source_commit='fixture-before-upgrade', install_mode='copy')
 
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home)
             env["GHOST_ALICE_LANG"] = "en"
 
-            source = checkout_copy(self)
             result = subprocess.run(
                 [bash, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", "coding-convention"],
                 cwd=source,
@@ -421,8 +421,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertFalse((skills_root / "harness-security-scan").exists())
             self.assertFalse((skills_root / "session-intent-guard").exists())
             backup_root = temp_home / ".ghost-alice" / "deprecated-skill-backups"
-            self.assertTrue(any(backup_root.glob("harness-security-scan-*")))
-            self.assertTrue(any(backup_root.glob("session-intent-guard-*")))
+            self.assertFalse(backup_root.exists())
 
     def test_install_sh_tty_output_uses_one_line_skill_sync_counter(self) -> None:
         bash = _find_test_bash()
@@ -435,8 +434,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_home = Path(temp_dir)
             (temp_home / ".codex").mkdir()
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home)
             env["GHOST_ALICE_LANG"] = "en"
             env.setdefault("TERM", "xterm-256color")
 
@@ -465,8 +463,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_home = Path(temp_dir)
             (temp_home / ".codex").mkdir()
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home)
             env["GHOST_ALICE_LANG"] = "en"
             env.setdefault("TERM", "xterm-256color")
 
@@ -497,8 +494,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_home = Path(temp_dir)
             (temp_home / ".codex").mkdir()
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home)
             env["GHOST_ALICE_LANG"] = "en"
             env.setdefault("TERM", "xterm-256color")
 
@@ -547,8 +543,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
                     temp_home = Path(temp_dir)
                     (temp_home / ".codex").mkdir()
                     config_path = self._write_existing_config(temp_home, existing)
-                    env = os.environ.copy()
-                    env["HOME"] = temp_home.as_posix()
+                    env = installer_env(temp_home)
                     env["GHOST_ALICE_LANG"] = "en"
 
                     source = checkout_copy(self)
@@ -565,7 +560,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
                     self.assertIn("  Visibility Level: [dynamic]", result.stdout)
                     self.assertIn(
-                        "  [4/5] Runtime config      codex hooks=true, Visibility Level=[dynamic]",
+                        "  [4/5] Runtime config      Visibility Level=[dynamic]",
                         result.stdout,
                     )
                     saved = json.loads(config_path.read_text(encoding="utf-8"))
@@ -581,8 +576,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             temp_home = Path(temp_dir)
             (temp_home / ".codex").mkdir()
             config_path = self._write_existing_config(temp_home, "strict")
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
+            env = installer_env(temp_home)
             env["GHOST_ALICE_LANG"] = "en"
 
             source = checkout_copy(self)

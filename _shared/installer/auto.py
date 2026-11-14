@@ -131,23 +131,28 @@ def _run_compact(ctx: "Context", detected: list[str]) -> int:
             report.auto_animate_common_target_progress_line(displayed, synced, common, PROGRESS_SUFFIX)
             displayed = synced
     synced = report.read_all_common_target_progress(event_file, total)
-    notes = report.read_gateway_notes(event_file)
+    hook_statuses, notes, hook_errors = report.read_install_results(event_file)
     if rc == 0:
         if live:
             report.auto_animate_common_target_progress_line(displayed, synced, common, PROGRESS_SUFFIX)
             displayed = min(synced, common)
             report.auto_update_common_target_progress_line(displayed, common, PROGRESS_SUFFIX)
             report.emit("")
-            report.print_tail(label, visibility, notes)
+            report.print_tail(label, visibility, notes, hook_statuses=hook_statuses)
         else:
-            report.print_auto_full(label, common, visibility, synced, notes=notes)
+            report.print_auto_full(label, common, visibility, synced, notes=notes, hook_statuses=hook_statuses)
     else:
         if live:
             report.emit("")
         report.error("[auto] Some platform installs failed. Check the log above.")
         report.error(f"Details log: {log}")
+        reported = [line for platform in detected for line in hook_errors.get(platform, [])]
+        for platform in detected:
+            for line in hook_errors.get(platform, []):
+                report.error(f'[auto] {platform}: {line}')
         for line in report.failure_excerpt(log):
-            report.error(f"[auto] {line}")
+            if not any(error in line for error in reported):
+                report.error(f"[auto] {line}")
     return rc
 
 

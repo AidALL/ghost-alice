@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 from typing import TYPE_CHECKING
 
 import hook_definitions
@@ -33,31 +34,54 @@ def claude_bootstrap_source() -> Path:
     return runner.REPO_ROOT / "platforms" / "claude" / "CLAUDE.md"
 
 
-def install_hooks(ctx: "Context", action: str, platform: str) -> bool:
+def install_hooks(ctx: "Context", action: str, platform: str, *, backup_sources=None):
     """`install_hooks.py --core-source-root --platform --hook-shared-dir --skills-dir
     [--visibility] [--uninstall|--status] [--addon-source ...]`; install
     defaults visibility to `dynamic`; status and doctor pass no visibility."""
     report.emit("")
     report.info(f"Agent hook {action}... ({HOOK_ACTION_LABEL})")
+    from install_hooks import HookStatus, STATUS_LABELS
+    def failed(message):
+        report.error(message)
+        return HookStatus(platform, 'HOOK_ACTION_ERROR', STATUS_LABELS['error'], 'error',
+                          {'action': action, 'items': [], 'errors': [message]})
     hook_py = runner.REPO_ROOT / "_shared" / "install_hooks.py"
     if not hook_py.is_file():
-        report.error(f"install_hooks.py not found: {hook_py}")
-        return False
+        return failed(f"install_hooks.py not found: {hook_py}")
+    if action == "uninstall":
+        from install_hooks import uninstall_hook
+        return uninstall_hook(platform, backup_sources=backup_sources)
     args = ["--core-source-root", str(runner.REPO_ROOT), "--platform", platform,
             "--hook-shared-dir", str(locations.runtime_shared_dir()), "--skills-dir", str(ctx.skills_dir)]
     if action == "install":
         args.extend(["--visibility", ctx.options.visibility or "dynamic"])
-    elif action == "uninstall":
-        args.append("--uninstall")
     elif action == "status":
         args.append("--status")
-    if action != "uninstall":
-        for addon_source in ctx.addon_sources:
-            args.extend(["--addon-source", str(addon_source)])
-    if not runner.run_tool("_shared/install_hooks.py", *args).ok:
-        report.error(f"Hook {action} failed")
-        return False
-    return True
+    for addon_source in ctx.addon_sources:
+        args.extend(["--addon-source", str(addon_source)])
+    result = runner.run_tool('_shared/install_hooks.py', *args, '--format', 'json', capture=True)
+    if result.stderr:
+        report.emit(result.stderr.rstrip('\n'))
+    try:
+        payload = json.loads(result.stdout or '')
+        row = payload['results'][platform]
+        status = HookStatus(**row)
+        allowed = {'install': {'installed', 'already', 'skipped', 'error'},
+                   'status': {'installed', 'missing', 'skipped', 'error'}}[action]
+        if (status.platform != platform or status.legacy_status not in allowed
+                or not isinstance(status.details, dict)
+                or (action != 'status' and status.details.get('action') != action)
+                or not isinstance(status.status_token, str) or not status.status_token
+                or not isinstance(status.status_label, str)
+                or not isinstance(status.details.get('items', []), list)
+                or not isinstance(status.details.get('errors', []), list)
+                or type(payload['returncode']) is not int
+                or payload['returncode'] != result.returncode
+                or (result.returncode == 0) != (status.legacy_status != 'error')):
+            raise ValueError('inconsistent hook result')
+    except (ValueError, KeyError, TypeError) as error:
+        return failed(f'Hook {action} returned an invalid result: {error}')
+    return status
 
 
 def _merge_block(args: list[str], failure: str, proposed_prefix: str, updated: str) -> bool:

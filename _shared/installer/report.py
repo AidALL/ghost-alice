@@ -1,11 +1,24 @@
 """Installer output: messages, verbosity, the install log, progress lines,
 the installation report and the event file. Installer messages are English-only.
 
-Wording is fixed by tests (`scripts/tests/test_installer_default_auto.py`, `test_install_progress_line_width.py`,
-`test_report_hook_suite_label.py`, `test_install_tail_pending_message.py`).
+Wording and layout are fixed by `_shared/test_installer_report.py` and `scripts/tests/test_installer_default_auto.py`.
 """
 
 from __future__ import annotations
+
+
+def exception_lines(error: BaseException) -> list[str]:
+    """Describe every grouped failure and recovery note without local values."""
+    lines: list[str] = []
+    def visit(current: BaseException, label: str) -> None:
+        lines.append(f'{label}{type(current).__name__}: {current}')
+        for note in getattr(current, '__notes__', ()):
+            lines.append(f'{label}note: {note}')
+        if isinstance(current, BaseExceptionGroup):
+            for index, child in enumerate(current.exceptions, 1):
+                visit(child, f'{label}{index}. ')
+    visit(error, '')
+    return lines
 
 import contextlib
 from dataclasses import dataclass, field
@@ -292,7 +305,7 @@ def _print_header(platform_label: str, skills_line: str, visibility: str) -> Non
     emit("Target")
     emit(f"  Platform: {platform_label}")
     emit(skills_line)
-    emit("  Hooks: enabled")
+    emit("  Hooks: registration requested")
     emit(f"  Visibility Level: [{visibility}]\n")
     emit("Progress")
     emit("  [1/5] Preflight           ok")
@@ -305,15 +318,21 @@ def print_start(platform_label: str, total_targets: int, visibility: str = "dyna
     emit(skill_sync_line(0, 0, 0), newline=False)
 
 
-def print_tail(platform_label: str, visibility: str = "dynamic", notes: Sequence[str] = ()) -> None:
+def print_tail(platform_label: str, visibility: str = "dynamic", notes: Sequence[str] = (), *, hook_statuses=None) -> None:
     """`[3/5] Hooks`, `[4/5] Runtime config`, `[5/5] Verification`, Attention, Details.
 
     Attention carries the `/visibility` hint when Claude Code is among the platforms (Codex has
     no such command), then `notes`; with neither, the section is left out.
     """
     log = log_init()
-    emit(f"  [3/5] Hooks               {hook_suite_label(platform_label)} enabled")
-    emit(f"  [4/5] Runtime config      {platform_label} hooks=true, Visibility Level=[{visibility}]")
+    statuses = hook_statuses or {}
+    for platform in (name.strip() for name in platform_label.split(',')):
+        status = statuses.get(platform, 'unknown')
+        label = 'skipped (platform directory missing)' if status == 'skipped' else status
+        emit(f'  [3/5] {platform} Hooks: {label}')
+        if status in {'installed', 'already'}:
+            emit(f'        {hook_suite_label(platform)} registered')
+    emit(f"  [4/5] Runtime config      Visibility Level=[{visibility}]")
     emit("  [5/5] Verification        ok\n")
     attention = list(notes)
     if "claude" in (platform.strip() for platform in platform_label.split(",")):
@@ -329,10 +348,10 @@ def print_tail(platform_label: str, visibility: str = "dynamic", notes: Sequence
 
 
 def print_full(platform_label: str, total_targets: int, current: int, updated: int, new: int,
-               visibility: str = "dynamic", target_unit: str = "targets", notes: Sequence[str] = ()) -> None:
+               visibility: str = "dynamic", target_unit: str = "targets", notes: Sequence[str] = (), *, hook_statuses=None) -> None:
     _print_header(platform_label, f"  Skills: [{total_targets}] {target_unit}", visibility)
     emit(skill_sync_line(current, updated, new))
-    print_tail(platform_label, visibility, notes)
+    print_tail(platform_label, visibility, notes, hook_statuses=hook_statuses)
 
 
 def print_auto_start(platform_label: str, common_targets: int, visibility: str = "dynamic") -> None:
@@ -342,11 +361,11 @@ def print_auto_start(platform_label: str, common_targets: int, visibility: str =
 
 
 def print_auto_full(platform_label: str, common_targets: int, visibility: str = "dynamic",
-                    synced_targets: int = 0, notes: Sequence[str] = ()) -> None:
+                    synced_targets: int = 0, notes: Sequence[str] = (), *, hook_statuses=None) -> None:
     _print_header(platform_label, f"  Skills: [{common_targets}] common targets", visibility)
     emit(common_skill_sync_line(common_targets))
     emit(common_target_progress_line(synced_targets, common_targets, "common targets synced on all platforms"))
-    print_tail(platform_label, visibility, notes)
+    print_tail(platform_label, visibility, notes, hook_statuses=hook_statuses)
 
 
 def _append_event(line: str) -> None:
@@ -357,10 +376,17 @@ def _append_event(line: str) -> None:
         handle.write(line + "\n")
 
 
-def write_event(platform: str, total_targets: int, current: int, updated: int, new: int) -> None:
-    """Append a `platform-result` JSON line to the event file when one is set."""
-    _append_event('{"type":"platform-result","platform":"%s","total_targets":%s,"current":%s,"updated":%s,'
-                  '"new":%s,"verification":"ok","hooks":"enabled"}' % (platform, total_targets, current, updated, new))
+def write_event(platform: str, total_targets: int, current: int, updated: int, new: int, *,
+                verification: str, hook_status=None) -> list[str]:
+    """Return the hook notices for direct output and send the same notices to the auto parent."""
+    items = hook_status.details.get('items', []) if hook_status is not None else []
+    notes = ['partial: permissions retained for review'] if any(item.get('action') == 'manual-review' for item in items) else []
+    _append_event(json.dumps(dict(type='platform-result', platform=platform, total_targets=total_targets,
+        current=current, updated=updated, new=new, verification=verification,
+        hooks=hook_status.legacy_status if hook_status is not None else 'unknown',
+        hook_notes=notes,
+        hook_errors=hook_status.details.get('errors', []) if hook_status is not None else [])))
+    return notes
 
 
 def write_gateway_event(platform: str, summary: str, *, running: bool) -> None:
@@ -368,14 +394,13 @@ def write_gateway_event(platform: str, summary: str, *, running: bool) -> None:
     _append_event(json.dumps({"type": "gateway-result", "platform": platform, "summary": summary, "running": running}))
 
 
-def read_gateway_notes(event_file: Path) -> list[str]:
-    """The distinct gateway summaries the children wrote, in order; none for a missing or empty file."""
-    path = Path(event_file)
-    notes: list[str] = []
+def read_install_results(event_file: Path) -> tuple[dict[str, str], list[str], dict[str, list[str]]]:
+    """Read child hook results and distinct notes, with gateway notes first; absence stays unknown."""
+    statuses, gateway_notes, hook_notes, errors = {}, [], [], {}
     try:
-        content = path.read_bytes()
+        content = Path(event_file).read_bytes()
     except OSError:
-        return notes
+        return statuses, [], errors
     for _, _, line in committed_byte_lines(content):
         text = line.decode("utf-8")
         try:
@@ -383,10 +408,20 @@ def read_gateway_notes(event_file: Path) -> list[str]:
         except ValueError:
             continue
         for event in events:
-            if isinstance(event, dict) and event.get("type") == "gateway-result" and isinstance(event.get("summary"), str):
-                if event["summary"] not in notes:
-                    notes.append(event["summary"])
-    return notes
+            if not isinstance(event, dict):
+                continue
+            if event.get('type') == 'gateway-result' and isinstance(event.get('summary'), str):
+                if event['summary'] not in gateway_notes:
+                    gateway_notes.append(event['summary'])
+            elif event.get('type') == 'platform-result':
+                if isinstance(event.get('platform'), str) and event.get('hooks') in {'installed', 'already', 'skipped', 'error'}:
+                    statuses[event['platform']] = event['hooks']
+                    if isinstance(event.get('hook_errors'), list) and all(isinstance(line, str) for line in event['hook_errors']):
+                        errors[event['platform']] = event['hook_errors']
+                for note in event.get('hook_notes', []):
+                    if isinstance(note, str) and note not in hook_notes:
+                        hook_notes.append(note)
+    return statuses, gateway_notes + hook_notes, errors
 
 
 def write_target_event(platform: str, target_id: str, target_kind: str, status: str) -> None:

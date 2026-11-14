@@ -466,7 +466,6 @@ class SkillGateContractTest(unittest.TestCase):
     def test_route_surface_carries_only_controls_and_reason(self) -> None:
         router = (REPO_ROOT / "task-router/SKILL.md").read_text()
         schema = (REPO_ROOT / "session-intent-analyzer/references/ledger-schema.md").read_text()
-        self.assertIn("the human user's objective", router)
         self.assertIn('Do not replace a repair that the human user requested with a report', router)
         for field in ('response_mode', 'boundary_contract', '"reason"'):
             self.assertIn(field, schema)

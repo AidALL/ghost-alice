@@ -24,6 +24,7 @@ from dataclasses import dataclass, field  # noqa: E402
 import os  # noqa: E402
 from typing import Callable  # noqa: E402
 
+import install_transaction  # noqa: E402
 from installer import (addons, auto, config, diagnostics, hosts, lifecycle, locations, lock, prerequisites,  # noqa: E402
                        preservation, report, runner, selection, source, transaction)
 from installer.runner import InstallerExit  # noqa: E402
@@ -492,12 +493,18 @@ def run_install(ctx: Context) -> int:
     notes = [gateway[0]] if gateway else []
     if gateway:
         report.write_gateway_event(ctx.platform, gateway[0], running=gateway[1])
-    if not report.run_logged(hosts.install_hooks, ctx, "install", ctx.platform):
+    hook_status = report.run_logged(hosts.install_hooks, ctx, "install", ctx.platform)
+    if hook_status.legacy_status == 'error':
+        report.write_event(ctx.platform, collected.total_target_count, counts.skipped, counts.updated, counts.installed,
+                           verification='not-run', hook_status=hook_status)
         report.error("Hook install failed. Aborting skill install")
+        if report.compact_output_enabled():
+            for line in hook_status.details.get('errors', []):
+                report.error(line)
         _details_log()
         raise InstallerExit(1)
     if not report.compact_output_enabled():
-        report.info("[4/5] Hooks: install complete")
+        report.info(f'[4/5] Hooks: {hook_status.legacy_status}')
     bootstrap = hosts.ensure_claude_bootstrap if ctx.platform == "claude" else hosts.ensure_codex_bootstrap
     if not report.run_logged(bootstrap, ctx):
         raise InstallerExit(1)
@@ -513,16 +520,32 @@ def run_install(ctx: Context) -> int:
         raise InstallerExit(1)
     if not report.run_logged(transaction.write_install_state_manifest, ctx, skills_dir, copy_only, collected, ctx.hook_change):
         raise InstallerExit(1)
+    if not report.run_logged(transaction.cleanup_obsolete_copies, ctx, collected):
+        report.error('New placement is verified, but previous-original cleanup is incomplete; review the listed paths.')
+        raise InstallerExit(1)
+    try:
+        notes.extend(report.run_logged(install_transaction.cleanup_completed, locations.record_root()))
+    except install_transaction.InstallTransactionError as exc:
+        report.error(f'Code placement finished, but completed-publish cleanup failed: {exc}')
+        raise InstallerExit(1)
+    if set(skills) == set(selection.ALL_SKILLS):
+        try:
+            notes.extend(report.run_logged(source.preserve_successful_source, ctx))
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            report.error(f'Code placement finished, but preserving the successful source version failed: {exc}')
+            raise InstallerExit(1)
     # Result
-    report.write_event(ctx.platform, collected.total_target_count, counts.skipped, counts.updated, counts.installed)
+    notes.extend(report.write_event(ctx.platform, collected.total_target_count, counts.skipped, counts.updated,
+                                    counts.installed, verification='ok', hook_status=hook_status))
     if report.report_enabled():
         if report.live_counter_enabled():
             if not copy_only:
                 report.emit("\r" + report.skill_sync_line(counts.skipped, counts.updated, counts.installed))
-            report.print_tail(ctx.platform, visibility, notes)
+            report.print_tail(ctx.platform, visibility, notes, hook_statuses={ctx.platform: hook_status.legacy_status})
         else:
             report.print_full(ctx.platform, collected.total_target_count, counts.skipped, counts.updated,
-                              counts.installed, visibility, notes=notes)
+                              counts.installed, visibility, notes=notes,
+                              hook_statuses={ctx.platform: hook_status.legacy_status})
     else:
         report.ok("[5/5] Verification: install state recorded")
         report.emit("")

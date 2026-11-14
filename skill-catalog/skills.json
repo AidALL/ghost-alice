@@ -1,6 +1,6 @@
 {
   "version": "2.0.0",
-  "generated_at": "2026-11-10T05:06:46Z",
+  "generated_at": "2026-11-12T06:39:51Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -30,7 +30,7 @@
       "description": "Scans the host's settings, hooks, skills, Model Context Protocol config and credential files for exposed secrets, remote fetches and side-effecting shell commands, after any of them changes or governance rules from another project are adopted, or when the human user asks to check them.",
       "family": "domain",
       "compatibility": [
-        "Python 3.11+ standard library"
+        "Python 3.11+ standard library and bundled Tomli 2.4.0"
       ]
     },
     {
