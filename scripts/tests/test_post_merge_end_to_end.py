@@ -18,6 +18,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "_shared"))
 from installer_testing import checkout_copy  # noqa: E402
+import installed_payload  # noqa: E402
 
 BASH = shutil.which("bash")
 GIT = shutil.which("git")
@@ -41,7 +42,7 @@ class HookPathOwnershipEndToEndTests(unittest.TestCase):
         self.env.update(HOME=str(self.home), GIT_CONFIG_NOSYSTEM="1", GHOST_ALICE_INSTALL_PROGRESS="off",
                         GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
                         GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid")
-        self.record = self.home / ".ghost-alice" / "installed-payload.json"
+        self.record = installed_payload.path(self.home / '.ghost-alice')
 
     def install(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run([BASH, str(self.source / "install.sh"), *args], cwd=self.source, env=self.env,
@@ -68,9 +69,9 @@ class HookPathOwnershipEndToEndTests(unittest.TestCase):
         self.git(self.source, "config", "core.hooksPath", "hooks")
         installed = self.install("--platform", "claude", "--skip-source-health", "task-router")
         self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
-        hooks = (self.source / "hooks").as_posix()
-        self.assertEqual(self.shared_hook_path(), hooks)
         record = json.loads(self.record.read_text(encoding="utf-8"))
+        hooks = (Path(record['installer']['active_root']) / 'hooks').as_posix()
+        self.assertEqual(self.shared_hook_path(), hooks)
         self.assertEqual((record["source"]["root"], record["source"]["hooks_path"]), (str(self.source), hooks))
         state = json.loads((self.home / ".ghost-alice" / "install-state" / "claude.json").read_text(encoding="utf-8"))
         change = next(item for item in state["system_env_changes"] if item["kind"] == "source_repo_hook_path")
@@ -97,7 +98,10 @@ class HookPathOwnershipEndToEndTests(unittest.TestCase):
         self.assertEqual(self.record.read_bytes(), record_before)
 
         # A merge in the install source installs again from it.
-        self.commit_file(self.source, "topic", "topic.txt")
+        self.git(self.source, 'checkout', '-q', '-b', 'topic')
+        skill = self.source / 'task-router/SKILL.md'
+        skill.write_text(skill.read_text() + '\nLocal merge content not published to a remote.\n')
+        self.assertEqual(self.git(self.source, 'commit', '-q', '-am', 'local skill change').returncode, 0)
         self.git(self.source, "checkout", "-q", "main")
         merged = self.git(self.source, "merge", "-q", "--ff-only", "topic")
         self.assertEqual(merged.returncode, 0, merged.stderr)
@@ -105,6 +109,9 @@ class HookPathOwnershipEndToEndTests(unittest.TestCase):
         record = json.loads(self.record.read_text(encoding="utf-8"))
         self.assertEqual((record["source"]["root"], record["source"]["commit"]), (str(self.source), head),
                          merged.stdout + merged.stderr)
+        self.assertIn('Local merge content not published to a remote.',
+                      (self.home / '.claude/skills/task-router/SKILL.md').read_text())
+        self.assertEqual(self.shared_hook_path(), str(Path(record['installer']['active_root']) / 'hooks'))
 
         # The full uninstall of the last host puts back what was there before Ghost-ALICE: no value.
         removed = self.install("--uninstall")

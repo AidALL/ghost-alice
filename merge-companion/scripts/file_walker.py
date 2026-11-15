@@ -58,7 +58,6 @@ def copy_comparison_scope(skills_dir: Path, platform: str, record_root: Path | N
     if shared not in sys.path:
         sys.path.insert(0, shared)
     import installed_payload
-    from hook_definitions import SUPPORTED_PLATFORMS
     try:
         entries = (installed_payload.read(record_root) or {}).get('targets', {})
     except installed_payload.RecordError as exc:
@@ -69,7 +68,7 @@ def copy_comparison_scope(skills_dir: Path, platform: str, record_root: Path | N
     for destination, entry in entries.items():
         hosts = entry.get('used_by') if isinstance(entry, dict) else None
         if (not isinstance(hosts, list) or not hosts
-                or any(not isinstance(host, str) or host not in SUPPORTED_PLATFORMS for host in hosts)):
+                or any(not isinstance(host, str) for host in hosts)):
             continue
         if platform in hosts:
             published[destination] = entry

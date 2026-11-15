@@ -7,6 +7,7 @@ import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import io
+import os
 from pathlib import Path
 import shutil
 import ssl
@@ -763,6 +764,24 @@ class ClaudeGatewayTransportTests(unittest.TestCase):
             select.assert_called_once_with({'messages': []}, config['ledger_root'], config['claude_dir'],
                                            platform='claude', session_id=self.session)
             self.assertEqual(make.call_args.kwargs['origins']['anthropic'], 'https://api.anthropic.com')
+
+    def test_main_uses_the_registered_installation_for_ledger_retirement(self):
+        import ledger_access
+        config, path = self.configuration()
+        ghost = Path(self.tmp.name) / 'different-home/.ghost-alice'
+        ghost.mkdir(parents=True)
+        (ghost / 'config.json').write_text(json.dumps({'retired_ledger_roots': [config['ledger_root']]}))
+        path.write_text(json.dumps(dict(config, ghost_root=str(ghost))))
+        observed = []
+        def serve():
+            with self.assertRaises(ledger_access.RetiredLedgerRoot):
+                ledger_access.require_writable_root(config['ledger_root'])
+            observed.append(True)
+        with patch.dict(os.environ), patch.object(context_gateway, 'make_server',
+                return_value=SimpleNamespace(serve_forever=serve)):
+            context_gateway.main(['--config', str(path)])
+        self.assertEqual(observed, [True])
+        self.assertFalse(Path(config['ledger_root']).exists())
 
     def test_main_without_explicit_claude_home_retains_codex_only(self):
         config, path = self.configuration(claude=False)

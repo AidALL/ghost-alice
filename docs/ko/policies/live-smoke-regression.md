@@ -53,7 +53,7 @@ Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one pa
 - `boundary-contract`: 현재 routing-surface의 결정을 따릅니다. 실행한 읽기 전용 검증도 경계 계약을 요구할 수 있으며, 해당 응답 경로가 계약을 요구하지 않을 때만 `n/a`를 기록합니다.
 - `tool checkpoint`: 공통 계약의 io-trace Transparency Rule을 따릅니다. 일상적인 읽기 전용 호출에는 체크포인트가 필요하지 않습니다.
 - `skill activation permission`: Claude Code가 Core 검사 스킬만 담은 축소된 허용 목록 때문에 막히지 않습니다.
-- `verification-before-completion`: 워크플로가 각 완료 주장을 해당 근거와 연결하고, 변경 없는 근거는 [근거 재사용 규칙](../../../architecture_ko.md#근거와-네이티브-표시)대로 재사용합니다.
+- `verification-before-completion`: 워크플로가 각 완료 주장을 해당 근거와 연결하고, 변경 없는 근거는 [근거 재사용 절차](../../../coding-convention/verification-before-completion/references/verify-or-reuse.md)대로 재사용합니다.
 - `internal audit`: 화면의 `[io-trace]`를 요구하지 않고도 도구 접근 기록을 감사할 수 있습니다.
 - 병합 대기 사전 확인: 설치된 스킬을 변경하기 전에 [merge-companion](../../../merge-companion/SKILL.md#entry-and-activation)이 요구하는 확인입니다.
 
@@ -122,12 +122,12 @@ reasons:
 | `verification-before-completion` 없이 완료 주장이 나타납니다 | 완료 게이트 실패 | Stop 훅의 완료 확인 안내, Codex 훅 근거와 대체 절차 문구를 조사합니다. |
 | 스킬 활성화 권한이 Core 검사 스킬만 허용합니다 | 권한 범위 실패 | 인스톨러의 훅 권한 동기화와 플랫폼 정책 파일을 조사합니다. |
 | 점검 기록이 원문 프롬프트나 대화 기록을 저장합니다 | 감사 기록 저장 규칙 위반 | session-intent-analyzer의 저장 계약을 먼저 수정합니다. |
-| 에이전트 명령이 제한 시간을 초과합니다 | 실환경 점검 실패 | 해당 실패를 조사하고 세션 게이트 매트릭스의 한정된 복구 조건을 따릅니다. 영향받은 런타임 파일만 다시 설치하며 구별되는 가설과 남은 권한·자원이 있을 때 재시도합니다. |
+| 에이전트 명령이 제한 시간을 초과합니다 | 실환경 점검 실패 | 해당 실패를 조사하고 [systematic-debugging의 작업 계속 절차](../../../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation)를 따릅니다. 영향받은 런타임 파일만 다시 설치하며 구별되는 가설과 남은 권한·자원이 있을 때 재시도합니다. |
 | 로그에 `ERROR codex_core::tools::router`, 훅 실패, traceback, panic, 캐시 초기화 오류가 있습니다 | 실환경 점검 실패 | 나중의 다른 프롬프트가 통과해도 이 실행은 실패로 판정합니다. 실패한 사례는 근거를 갖춰 재현하거나, 근거를 기록하고 의도적으로 폐기합니다. |
 | 출력 파일이 없거나 비어 있습니다 | 실환경 점검 실패 | 부분적인 로그 활동만으로 성공을 추론하지 않습니다. 에이전트 명령이나 출력 경로를 수정한 뒤 다시 실행합니다. |
 | Windows가 PowerShell, CMD, 자동화 환경에서 `codex`를 서로 다른 shim이나 바이너리로 해석합니다 | 하네스 불일치 | `agent_command`를 기록하고, Codex 실환경 점검에서는 의도한 `codex.cmd` shim이나 명시적인 절대 경로를 우선합니다. |
 | 프롬프트가 작업에 사용할 수 있는 유일한 읽기 전용 방법을 금지합니다 | `invalid-harness` | 하네스를 수정한 뒤 다시 실행합니다. 이 실행은 제품 통과 근거가 아닙니다. |
-| 같은 루프에서 앞선 실패가 미해결인 채로 범위를 제한한 실행이 통과합니다 | 부분 상태 | 미해결 사례를 유지하고 부분 상태를 보고합니다. 세션 게이트 매트릭스의 조건을 충족하는 승인된 복구만 계속하며, 범위를 제한한 이후 통과로 앞선 기준을 충족한 것으로 판정하지 않습니다. |
+| 같은 루프에서 앞선 실패가 미해결인 채로 범위를 제한한 실행이 통과합니다 | 부분 상태 | 미해결 사례를 유지하고 부분 상태를 보고합니다. [systematic-debugging의 작업 계속 절차](../../../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation)에 따라 승인된 복구를 계속하며, 범위를 제한한 이후 통과로 앞선 기준을 충족한 것으로 판정하지 않습니다. |
 
 ## 자동 검증의 경계
 

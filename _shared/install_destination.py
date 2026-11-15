@@ -95,6 +95,16 @@ def ghost_root(home=None, env=None):
     return Path(value) if value else (Path(home) if home is not None else home_directory(source)) / '.ghost-alice'
 
 
+def default_ledger_root(env=None):
+    """Resolve explicit ledger coordinates, then the active installation, then its fixed data root."""
+    source = os.environ if env is None else env
+    configured = source.get('GHOST_ALICE_SESSION_INTENT_ROOT', '').strip()
+    if configured:
+        return Path(configured).expanduser()
+    active = current()
+    return Path(active.ledger_root) if active else ghost_root(env=source) / 'session-intent'
+
+
 def assert_mutation_path(path, *, env=None):
     active = current()
     if active:

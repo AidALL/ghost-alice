@@ -86,6 +86,36 @@ class PublishCase(unittest.TestCase):
 
 
 class PublishTests(PublishCase):
+    def test_support_publish_moves_policy_source_and_preserves_each_old_targets_owner(self):
+        import uninstall_cleanup
+        manifest = self.ghost / 'install-state/claude.json'
+        manifest.parent.mkdir()
+        old_root = self.home.parent / 'old-clone'
+        (old_root / 'alpha').mkdir(parents=True)
+        (old_root / 'alpha/SKILL.md').write_text('old skill')
+        old_link = self.claude / 'alpha'
+        old_link.symlink_to(old_root / 'alpha')
+        old_target = dict(target_name='alpha', source_path=str(old_root / 'alpha'), dest_path=str(old_link),
+                          install_mode='symlink', target_tree_hash='old-baseline')
+        manifest.write_text(json.dumps(dict(platform='claude', source_root=str(old_root), targets=[old_target])))
+        original = manifest.read_bytes()
+        request = self.request('claude', self.target('_shared', self.claude / '_shared', 'copy', kind='support'),
+                               install_state=str(manifest), asset_root=str(self.src))
+        with mock.patch.object(install_transaction.PublishBatch, 'finalize', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                install_transaction.publish(request)
+        changed = json.loads(manifest.read_text())
+        self.assertEqual(changed['source_root'], str(self.src))
+        kept = next(row for row in changed['targets'] if row['target_name'] == 'alpha')
+        self.assertEqual(kept, dict(old_target, source_root=str(old_root)))
+        removal = uninstall_cleanup._target_item(kept, manifest=changed, manifest_path=manifest, platform='claude')
+        self.assertEqual(removal['action'], 'would-remove')
+        [txid] = install_transaction.unfinished(self.ghost)
+        install_transaction.recover(self.ghost, txid)
+        self.assertEqual(manifest.read_bytes(), original)
+        self.assertFalse((self.claude / '_shared').exists())
+        self.assertTrue(old_link.is_symlink())
+
     def test_a_link_and_its_record_entry_are_published_in_one_step(self):
         dest = self.claude / "alpha"
         txid = install_transaction.publish(self.request("claude", self.target("alpha", dest, "link")))
@@ -191,9 +221,9 @@ class PublishTests(PublishCase):
         seen = {}
         real_update = installed_payload.update
 
-        def observing_update(root, patches):
+        def observing_update(root, patches, **kwargs):
             seen["phase"] = self.journal(patches["last_transaction"]["id"])["phase"]
-            return real_update(root, patches)
+            return real_update(root, patches, **kwargs)
 
         with mock.patch.object(install_transaction.installed_payload, "update", side_effect=observing_update):
             txid = install_transaction.publish(self.request("codex", self.target("alpha", dest, "copy")))
@@ -205,18 +235,33 @@ class PublishTests(PublishCase):
         self.assertEqual(target["before"], content_digest.state(Path(target["rollback"])))
         self.assertEqual(target["candidate"], content_digest.state(dest))
 
-    def test_a_record_this_installer_cannot_read_stays_as_it_is_and_the_files_still_publish(self):
-        # A newer or damaged record is never overwritten; the install goes on and says why the record did not change.
+    def test_unreadable_record_prevents_success_and_restores_published_files(self):
         record = installed_payload.path(self.ghost)
-        record.write_text(json.dumps({"schema_version": 2, "targets": {}}), encoding="utf-8")
+        record.write_text(json.dumps({"schema_version": 3, "targets": {}}), encoding="utf-8")
+        before = record.read_bytes()
         dest = self.claude / "alpha"
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
-            txid = install_transaction.publish(self.request("claude", self.target("alpha", dest, "link")))
-        self.assertEqual(os.readlink(dest), str(self.src / "alpha"))
-        self.assertEqual(json.loads(record.read_text(encoding="utf-8")), {"schema_version": 2, "targets": {}})
-        self.assertIn("[WARN] Install record left unchanged:", stderr.getvalue())
-        self.assertEqual(self.journal(txid)["phase"], "done")
+        with self.assertRaises(install_transaction.InstallTransactionError):
+            install_transaction.publish(self.request("claude", self.target("alpha", dest, "link")))
+        self.assertFalse(os.path.lexists(dest))
+        self.assertEqual(record.read_bytes(), before)
+        self.assertEqual(install_transaction.unfinished(self.ghost), [])
+
+    def test_interrupted_schema_migration_restores_both_record_files(self):
+        legacy = self.ghost / installed_payload.LEGACY_FILENAME
+        before = b'{"schema_version": 1, "targets": {}}\n'
+        legacy.write_bytes(before)
+        dest = self.claude / "alpha"
+        with mock.patch.object(install_transaction.Journal, "mark", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                install_transaction.publish(self.request("claude", self.target("alpha", dest, "link")))
+        self.assertTrue(installed_payload.path(self.ghost).exists())
+        self.assertNotEqual(legacy.read_bytes(), before)
+        pending = install_transaction.unfinished(self.ghost)
+        self.assertEqual(len(pending), 1)
+        install_transaction.recover(self.ghost, pending[0])
+        self.assertEqual(legacy.read_bytes(), before)
+        self.assertFalse(installed_payload.path(self.ghost).exists())
+        self.assertFalse(os.path.lexists(dest))
 
     def test_publish_does_not_prune_finished_originals_before_full_install_success(self):
         rollbacks = self.ghost / "rollbacks"
@@ -273,6 +318,19 @@ class CompletedCleanupTests(PublishCase):
         _, original = self.replaced_copy(kind="runtime", extra=extra)
         install_transaction.cleanup_completed(self.ghost)
         self.assertFalse(original.exists())
+
+    def test_a_folder_left_empty_by_skipped_caches_does_not_keep_a_managed_copy(self):
+        # A source folder whose files were deleted keeps only its cache; staging skips the cache but creates the folder.
+        for kind, name in (("skill", "alpha"), ("runtime", "beta")):
+            with self.subTest(kind=kind):
+                cache = self.src / name / "retired" / "__pycache__"
+                cache.mkdir(parents=True)
+                (cache / "old.cpython-311.pyc").write_bytes(b"cache")
+                txid, original = self.replaced_copy(kind=kind, name=name)
+                self.assertEqual(list((original / "retired").iterdir()), [])
+                reasons = install_transaction.cleanup_completed(self.ghost)
+                self.assertFalse(original.exists(), reasons)
+                self.assertFalse((self.ghost / "rollbacks" / txid).exists(), reasons)
 
     def test_unknown_and_edited_originals_stay_with_their_reasons(self):
         dest = self.codex / "beta"

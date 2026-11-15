@@ -90,6 +90,30 @@ def remove_targets(state_path, *, destinations=(), addon_id=None):
     return removed
 
 
+def target_record(name, source_path, dest_path, install_mode, source_root, installed_at):
+    return dict(target_name=name, source_path=as_posix(source_path), dest_path=as_posix(dest_path),
+                source_root=as_posix(source_root), install_mode=install_mode,
+                target_tree_hash=hash_target(dest_path, install_mode),
+                managed_markers=managed_markers(name, source_path, dest_path), installed_at=installed_at)
+
+
+def rebase_source(state_path, source_root, published, source):
+    """Keep old target origins while the journaled support publication changes the common execution source."""
+    previous = read_state(state_path)
+    if previous is None:
+        return
+    targets = {target['dest_path']: {**({'source_root': previous['source_root']} if previous.get('source_root') else {}), **target}
+               for target in previous['targets']}
+    now = datetime.now(timezone.utc).isoformat()
+    for target in published:
+        if target['kind'] in {'skill', 'support'} and target['provider'] == 'core':
+            targets[target['dest']] = target_record(target['name'], target['source'], target['dest'],
+                'symlink' if target['mode'] == 'link' else 'copy', source_root, now)
+    previous.update(source_root=as_posix(source_root), source_head=source['commit'], source_dirty_state=source['dirty'],
+                    source_branch=source.get('branch', 'DETACHED'), targets=list(targets.values()))
+    atomic_write.write_json(Path(state_path), previous)
+
+
 def main(argv=None):
     platform, source_root, source_branch, source_head, source_dirty_state, state_path, *raw_targets = (sys.argv[1:] if argv is None else argv)
     if len(raw_targets) % 4 != 0:
@@ -99,17 +123,7 @@ def main(argv=None):
     targets = []
     for offset in range(0, len(raw_targets), 4):
         name, source_path, dest_path, install_mode = raw_targets[offset : offset + 4]
-        targets.append(
-            {
-                "target_name": name,
-                "source_path": as_posix(source_path),
-                "dest_path": as_posix(dest_path),
-                "install_mode": install_mode,
-                "target_tree_hash": hash_target(dest_path, install_mode),
-                "managed_markers": managed_markers(name, source_path, dest_path),
-                "installed_at": installed_at,
-            }
-        )
+        targets.append(target_record(name, source_path, dest_path, install_mode, source_root, installed_at))
 
     # Keep untouched Core rows and their original baselines; this invocation replaces only its own batch.
     try:
@@ -122,7 +136,8 @@ def main(argv=None):
         previous = None
     if previous is not None and previous.get("platform", platform) != platform:
         raise ValueError(f"install-state platform mismatch: {state_path}")
-    by_destination = {as_posix(target["dest_path"]): target for target in (previous or {}).get("targets", [])
+    by_destination = {as_posix(target["dest_path"]): {**({'source_root': previous['source_root']} if previous.get('source_root') else {}), **target}
+                      for target in (previous or {}).get("targets", [])
                       if not target.get("addon_id") and target.get("owner") != "addon"}
     by_destination.update({target["dest_path"]: target for target in targets})
     targets = list(by_destination.values())
@@ -202,7 +217,7 @@ def main(argv=None):
         before_present = os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT") == "1"
         change = {
             "kind": "source_repo_hook_path",
-            "repo_root": as_posix(source_root),
+            "repo_root": as_posix(os.environ.get('GHOST_ALICE_SOURCE_REPO_HOOK_ROOT') or source_root),
             "before_present": before_present,
             "before": os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE") if before_present else None,
             "after": os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_AFTER", ""),

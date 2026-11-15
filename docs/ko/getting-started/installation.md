@@ -43,6 +43,10 @@ cd %USERPROFILE%\ghost-alice
 
 `bash install.sh`와 `.\install.cmd`는 에이전트 플랫폼을 자동 감지합니다. 아래 옵션으로 특정 플랫폼을 선택하거나 설치를 개별적으로 관리하실 수 있습니다.
 
+설치가 성공하면 `~/.ghost-alice/bin/ghost-alice`(Windows: `%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd`)로 상태 확인·갱신·제거를 실행할 수 있습니다. 이 인스톨러가 배치한 Core 스킬과 런타임·관리 명령은 개발 clone의 실행 파일에 의존하지 않습니다. 인스톨러는 Python 3.11+·Git·Node.js가 없을 때 자동 설치를 시도하며, 첫 프로그램 설치 전에 패키지 관리자의 자동 동의 인자 의미를 안내합니다.
+
+구형 설치를 업그레이드할 때는 clone을 삭제하기 전에 설치된 각 호스트의 기존 Core 스킬을 모두 갱신해 주세요. 일부 스킬만 선택하면 인스톨러는 나머지를 변경하지 않습니다. 구형 Claude 스킬의 링크는 clone을 계속 가리킬 수 있고, 구형 스킬의 지시문도 clone의 정책 파일을 계속 참조할 수 있습니다. 새 인스톨러에 기존 스킬 이름을 모두 지정하거나, 아래의 고정 `update` 명령으로 기존 설치 선택을 유지하면서 갱신해 주세요. 기존 원장도 clone 아래에 있다면 clone 삭제 전에 기록자를 중지하고 [명시적 원장 이관](../reference/installer-architecture.md#고정-명령정책원장-데이터)을 완료해 주세요.
+
 ## 애드온 설치
 
 애드온은 자체 저장소나 로컬 경로에서 `--addon-source PATH|URL`로 설치합니다. 한 플랫폼에만 설치하려면 `--platform`을 더해 주세요.
@@ -96,39 +100,23 @@ Doctor는 Core 정보 항목 `native-intake-waits`, `native-intake-failures`, `h
 
 ## 업데이트
 
-인스톨러를 통해 복제한 저장소를 갱신해 주세요. 이 경로는 소스를 fast-forward하기 전에 로컬 변경을 stash에 보관합니다.
+고정 명령은 기록된 remote/ref에서 후보 코드를 획득하고 현재 호스트별 Core 선택을 갱신합니다. 개발 clone을 이동하거나 삭제해도 실행할 수 있으며, 새로 감지한 호스트·스킬을 추가하거나 기존 애드온을 갱신하지 않습니다.
 
 ```bash
-cd ~/ghost-alice
-bash install.sh --update-source
+~/.ghost-alice/bin/ghost-alice update
+~/.ghost-alice/bin/ghost-alice --doctor
 ```
 
 ```cmd
-cd %USERPROFILE%\ghost-alice
-.\install.cmd --update-source
+%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd update
+%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd --doctor
 ```
 
-로컬 인스톨러가 업데이트 옵션을 제공하지 않으면 [부트스트랩 업데이트 복구](./troubleshooting.md#git-업데이트-복구)를 따라 주세요.
-
-소스 갱신이 충돌, 갈라진 브랜치나 fast-forward 불가 상태에서 멈추면 인스톨러를 반복 실행하지 마세요. 먼저 [문제 해결](./troubleshooting.md)을 확인해 주세요.
-
-`--update-source`는 Core 저장소의 소스를 갱신하며 애드온 패키지를 갱신하지 않습니다. Core를 다시 설치하고(설치한 애드온은 `--addon-source`를 더해) 설치 상태를 확인해 주세요. 부트스트랩 갱신기는 Core만 다시 설치할 수 있으므로 그 뒤 이 명령들을 실행해 주세요.
-
-```bash
-bash install.sh
-bash install.sh --doctor
-bash install.sh --status
-```
-
-```cmd
-.\install.cmd
-.\install.cmd --doctor
-.\install.cmd --status
-```
+remote/ref가 기록되지 않은 설치는 update 실행 시 `--remote URL --ref NAME`으로 획득 입력을 지정해 주세요. 개발 checkout 자체를 갱신하려면 기존 `bash install.sh --update-source` 또는 `.\install.cmd --update-source`를 사용합니다. 이 별도 경로는 로컬 변경을 stash한 뒤 fast-forward하며 [소스 갱신 오류](./troubleshooting.md#git-업데이트-복구)를 안내합니다. 고정 update는 개발 checkout을 변경하지 않습니다. 보관한 성공 코드의 재설치와 원장 위치는 [인스톨러 구조](../reference/installer-architecture.md#고정-명령정책원장-데이터)를 참고해 주세요.
 
 ### 설치 원본
 
-설치 기록 `~/.ghost-alice/installed-payload.json`은 설치본을 생성한 체크아웃, 즉 설치 원본을 기록합니다. 설치와 `--repair`는 무엇이든 변경하기 전에 기록된 체크아웃과 자신이 실행되는 체크아웃을 비교합니다. 기록된 체크아웃이 더는 없으면(다른 경로에 다시 복제한 경우) 인스톨러는 묻지 않고 새 체크아웃을 설치 원본으로 기록합니다. 두 번째 복제본이나 git worktree처럼 두 체크아웃이 모두 있으면 인스톨러는 두 폴더를 출력합니다. 터미널에서는 이 체크아웃으로 설치 원본을 교체할지 묻고, 인스톨러의 터미널 질문에 입력된 답(입력한 주체를 인스톨러가 확인하지 않음)이 예가 아니면 종료합니다. 터미널이 아니면 종료 코드 2로 종료합니다. 인간 사용자가 설치본을 다른 체크아웃으로 이관하기로 결정하면 그 체크아웃에서 `--adopt-source`를 붙여 인스톨러를 실행해 주세요. 인스톨러는 첫 배치에서 그 체크아웃을 설치 원본으로 기록합니다. `--repair`는 설치본을 이관하지 않습니다. 다른 체크아웃에서 실행하면 종료 코드 2로 종료하고 그 설치 명령을 안내합니다.
+설치 기록 `~/.ghost-alice/installed-payload-v2.json`은 설치본을 생성한 체크아웃, 즉 설치 원본을 기록합니다. 설치와 `--repair`는 설치 대상을 변경하기 전에 기록된 개발 원본과 요청한 입력 원본을 비교합니다. 인스톨러는 고정 패키지에서 실행되며 패키지는 입력 원본을 별도로 기록합니다. 기록된 체크아웃이 더는 없으면(다른 경로에 다시 복제한 경우) 인스톨러는 묻지 않고 새 체크아웃을 설치 원본으로 기록합니다. 두 번째 복제본이나 git worktree처럼 두 체크아웃이 모두 있으면 인스톨러는 두 폴더를 출력합니다. 터미널에서는 이 체크아웃으로 설치 원본을 교체할지 묻고, 인스톨러의 터미널 질문에 입력된 답(입력한 주체를 인스톨러가 확인하지 않음)이 예가 아니면 종료합니다. 터미널이 아니면 종료 코드 2로 종료합니다. 인간 사용자가 설치본을 다른 체크아웃으로 이관하기로 결정하면 그 체크아웃에서 `--adopt-source`를 붙여 인스톨러를 실행해 주세요. 인스톨러는 첫 배치에서 그 체크아웃을 설치 원본으로 기록합니다. `--repair`는 설치본을 이관하지 않습니다. 다른 체크아웃에서 실행하면 종료 코드 2로 종료하고 그 설치 명령을 안내합니다.
 
 ```bash
 cd /path/to/new-checkout
@@ -140,7 +128,7 @@ cd C:\path\to\new-checkout
 .\install.cmd --adopt-source
 ```
 
-인스톨러는 저장소의 git 훅 경로(`core.hooksPath`, 저장소의 모든 worktree가 공유하는 설정)를 설치 원본의 `hooks` 폴더로 작성합니다. 설치 원본에서 `git merge`나 `git pull`을 실행하면 설치 원본의 post-merge 훅이 감지한 모든 호스트에 설치를 이어서 실행합니다. 같은 저장소의 다른 worktree에서 `git merge`나 `git pull`을 실행하면 git은 그 worktree의 훅 파일이 아니라 설치 원본의 같은 훅을 실행하고, 훅은 한 줄만 출력하고 설치하지 않습니다. worktree 자신의 훅 설정(`git config --worktree core.hooksPath`)이 있으면 git은 그 설정을 먼저 조회합니다. 설치 원본을 교체하는 것은 사용자가 실행한 설치뿐이며 병합은 교체하지 않습니다. 훅 때문에 병합이 실패하지도 않습니다. 마지막 호스트의 전체 제거는 설치 전의 훅 경로를 복원하며, 설치 뒤에 경로가 변경되었으면 변경된 값을 유지합니다.
+인스톨러는 저장소의 git 훅 경로(`core.hooksPath`, 저장소의 모든 worktree가 공유하는 설정)를 고정 패키지의 `hooks` 폴더로 작성합니다. 설치 원본에서 `git merge`나 `git pull`을 실행하면 설치 원본의 post-merge 훅이 감지한 모든 호스트에 설치를 이어서 실행합니다. 같은 저장소의 다른 worktree에서 `git merge`나 `git pull`을 실행하면 git은 그 worktree의 훅 파일이 아니라 설치 원본의 같은 훅을 실행하고, 훅은 한 줄만 출력하고 설치하지 않습니다. worktree 자신의 훅 설정(`git config --worktree core.hooksPath`)이 있으면 git은 그 설정을 먼저 조회합니다. 설치 원본을 교체하는 것은 사용자가 실행한 설치뿐이며 병합은 교체하지 않습니다. 훅 때문에 병합이 실패하지도 않습니다. 관리 명령을 사용하는 마지막 대상의 제거는 설치 전의 훅 경로를 복원하며, 설치 뒤에 경로가 변경되었으면 변경된 값을 유지합니다.
 
 ## 자주 사용하는 명령
 
@@ -200,19 +188,12 @@ Claude Code와 Codex의 훅 설치에는 사용 가능한 Node.js 실행 환경�
 
 ### 플랫폼별 업데이트 동작
 
-| 플랫폼 | OS | 설치 방식 | Install path | 스킬 본문 변경 자동 적용 |
-| --- | --- | --- | --- | --- |
-| Claude Code | macOS / Linux / WSL | symlink | `~/.claude/skills/` | 예 |
-| Claude Code | Windows | junction | `~/.claude/skills/` | 예 |
-| Codex | macOS / Linux / WSL | copy | `~/.agents/skills/` | 아니오 |
-| Codex | Windows | copy | `~/.agents/skills/` | 아니오 |
-| 모든 플랫폼 | Windows의 Git Bash | copy-fallback | 플랫폼에 따라 다름 | 아니오 |
+| 호스트 | Core 배치 | 스킬 경로 |
+| --- | --- | --- |
+| Claude Code | 사본 | `~/.claude/skills/` |
+| Codex | 사본 | `~/.agents/skills/` |
 
-위 표의 자동 적용 대상은 `SKILL.md`, `references/`, `scripts/` 같은 스킬 본문입니다. 훅, 부트스트랩 파일, 권한 정책과 `_shared/`는 인스톨러가 관리하는 런타임 항목이므로, 이 항목이 변경되면 인스톨러를 다시 실행해 주세요.
-
-디스크의 설치 상태와 실행 중인 호스트의 적용은 별개입니다. 훅 명령을 변경한 뒤에는 해당 네이티브 신뢰 항목을 확인하고 다음 실제 콜백을 관측해 주세요. 호스트가 이전 등록을 유지하면 호스트의 재로드나 완전한 종료·재시작 절차를 사용합니다. 자세한 내용은 [네이티브 훅 신뢰와 재로드](./troubleshooting.md#네이티브-훅-신뢰와-재로드)를 확인해 주세요. 호스트의 적용을 확인하려고 변경 없는 업무 검증을 반복하지 말고, [근거 재사용 규칙](../../../architecture_ko.md#근거와-네이티브-표시)에 따라 기존 근거를 재사용해 주세요.
-
-코드를 구버전으로 되돌려도 의도 원장의 이전 상태는 복원되지 않습니다. 현재 Core 코드는 `session-intent-ledger.v1` 세션을 읽고, 해당 세션에 다음 기록을 저장할 때 `session-intent-ledger.v2`로 저장합니다. v1만 받는 구버전 코드는 그 뒤 해당 세션을 읽지 못합니다. 인스톨러가 관리하는 파일과 설치 기록을 복원하는 작업은 세션을 v1으로 변환하지 않습니다. 저장 상태 규칙은 [의도 원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md#primary-store-and-transactions)를, 구버전 코드의 Claude 권한 정리 제약은 [설치 제거 절차](./uninstall.md#복구-원칙)를 확인해 주세요.
+모든 지원 OS에서 Core와 `_shared`를 사본으로 배치합니다. 개발 파일 편집만으로 설치된 Core는 변경되지 않으며 update 또는 명시적 설치가 새 코드를 배치합니다. 애드온의 링크·사본 정책은 별도로 유지됩니다. 기존 Codex `untrusted`는 해당 프로젝트의 변경을 확인받지 않으면 유지합니다.
 
 ### Core와 애드온 전환
 
@@ -244,7 +225,7 @@ Claude Code에서 인스톨러는 매니페스트가 선택한 애드온의 `Ski
 - Claude Code 권한 허용 목록
 - Claude `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` 전역 부트스트랩
 - Codex `~/.codex/AGENTS.md` 로더와 관리되는 `~/.codex/ghost-alice-governance.md` 공용 계약
-- 설치 기록 `~/.ghost-alice/installed-payload.json`: 두 호스트가 함께 쓰는 파일 하나이며, 배치와 같은 단계에서 설치 위치마다 출처와 복사한 파일의 지문을 기록합니다
+- 설치 기록 `~/.ghost-alice/installed-payload-v2.json`: 두 호스트가 함께 쓰는 파일 하나이며, 배치와 같은 단계에서 설치 위치마다 출처와 복사한 파일의 지문을 기록합니다
 - `~/.ghost-alice/rollbacks/<txid>/`: 배치 한 번이 교체한 원래 파일, 배치 전의 설치 기록, 배치의 저널을 보관합니다. 설치 잠금을 획득하는 다음 인스톨러 명령이 중간에 중지된 배치를 복원하며, 완료된 폴더를 남기는 개수는 [런타임 상태 보존](../reference/repository-structure.md#런타임-상태-보존)이 정합니다
 - 설치 상태, 병합 대기 자료와 제거 보고서의 지원 상태
 

@@ -543,7 +543,7 @@ class TestMessageLanguage(unittest.TestCase):
             self.assertIn("For the human user:", result.stdout)
             self.assertIn("Tech:", result.stdout)
 
-    def test_session_intent_hook_command_uses_repo_tmp_root(self):
+    def test_session_intent_hook_command_uses_fixed_root_for_fresh_installation(self):
         with tempfile.TemporaryDirectory() as home, patch.dict(os.environ,
                 {"HOME":home,"CODEX_HOME":home+"/.codex","GHOST_ALICE_SESSION_INTENT_ROOT":""}):
             command = install_hooks._session_intent_analyzer_command(platform="codex", output_format="json")
@@ -551,7 +551,7 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertIn("--root", parts)
         root = Path(parts[parts.index("--root") + 1])
-        self.assertEqual(root, install_hooks._repo_root_from_this_file() / ".tmp" / "session-intent")
+        self.assertEqual(root, Path(home) / '.ghost-alice/session-intent')
 
     def test_default_hook_shared_dir_uses_runtime_core(self):
         with tempfile.TemporaryDirectory() as temp_home:
@@ -3281,6 +3281,19 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         self.assertEqual(data["after_state"], "trusted")
         self.assertNotIn("raw_config", data)
         self.assertNotIn("content", data)
+
+    def test_untrusted_project_changes_only_after_confirmation_for_that_project(self):
+        self._create_platform_dir('codex')
+        destination = install_hooks._default_destination('codex')
+        project = str(Path(destination.project_root).resolve())
+        config = self._codex_config_toml()
+        original = f'[projects.{json.dumps(project)}]\ntrust_level = "untrusted"\n'
+        for approval, expected in (('', 'untrusted'), ('/another-project', 'untrusted'), (project, 'trusted')):
+            with self.subTest(approval=approval), patch.dict(os.environ, {'GHOST_ALICE_CONFIRMED_PROJECT_TRUST': approval}):
+                config.write_text(original)
+                with install_hooks.install_destination.use(destination):
+                    install_hooks._ensure_codex_project_trusted()
+                self.assertEqual(tomllib.loads(config.read_text())['projects'][project]['trust_level'], expected)
 
     def test_install_codex_hook_commands_keep_discovery_before_install_python_fallback(self):
         """A captured Homebrew minor is only a fallback, not a permanent runtime pin."""

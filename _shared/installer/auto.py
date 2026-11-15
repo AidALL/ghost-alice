@@ -8,7 +8,7 @@ import sys
 import time
 from typing import TYPE_CHECKING
 
-from installer import addons, report, runner, selection
+from installer import addons, report, runner, selection, source
 
 if TYPE_CHECKING:
     from installer.cli import Context
@@ -37,17 +37,20 @@ def count_common_targets(ctx: "Context", platforms: list[str], skills: list[str]
         return 0
     common: set[str] | None = None
     for platform in platforms:
-        keys = set(platform_target_keys(ctx, platform, skills))
+        requested = selection.requested_skills(ctx, platform) if (source.install_request() or {}).get('selections') is not None else skills
+        keys = set(platform_target_keys(ctx, platform, requested))
         common = keys if common is None else common & keys
     return len(common or ())
 
 
-def child_command(ctx: "Context", platform: str, *, uninstall: bool = False) -> list[str]:
+def child_command(ctx: "Context", platform: str | None, *, uninstall: bool = False, package: Path | None = None) -> list[str]:
     """`python cli.py --platform P [--skip-source-health] [--adopt-source] [--visibility V] [--verbose]
     [--addon-source S]... [--addon-tag T]... [--addon-skip] ARGS...`; tags are
     dropped after the parent prepared git sources.
     `--adopt-source` carries the source replacement the parent installer performs: its own --adopt-source, a yes typed at its terminal question (sender unchecked), or replacement without a question when the recorded checkout is missing. A child never asks again."""
-    argv = [sys.executable, str(runner.REPO_ROOT / "_shared" / "installer" / "cli.py"), "--platform", platform]
+    argv = [sys.executable, str((package or runner.REPO_ROOT) / "_shared" / "installer" / "cli.py")]
+    if platform is not None:
+        argv.extend(["--platform", platform])
     if uninstall:
         return argv + ["--uninstall"]
     options = ctx.options
@@ -59,14 +62,15 @@ def child_command(ctx: "Context", platform: str, *, uninstall: bool = False) -> 
         argv.extend(["--visibility", options.visibility])
     if options.verbose:
         argv.append("--verbose")
-    for source in ctx.addon_sources:
-        argv.extend(["--addon-source", str(source)])
+    for addon_source in ctx.addon_sources:
+        argv.extend(["--addon-source", str(addon_source)])
     if not ctx.addon_sources_prepared:
         for tag in options.addon_tags:
             argv.extend(["--addon-tag", tag])
     if options.addon_skip:
         argv.append("--addon-skip")
-    argv.extend(options.args)
+    argv.extend(selection.requested_skills(ctx, platform) if platform and
+                (source.install_request() or {}).get('selections') is not None else options.args)
     return argv
 
 
@@ -79,7 +83,7 @@ def _run_verbose(ctx: "Context", detected: list[str]) -> int:
     for index, platform in enumerate(detected, 1):
         report.emit("")
         report.info(f"[auto] ({index}/{total}) Starting install for {platform}")
-        child_rc = runner.run_command(child_command(ctx, platform)).returncode
+        child_rc = runner.run_command(child_command(ctx, platform), env={"GHOST_ALICE_INSTALL_HOST_CHILD": "1"}).returncode
         if child_rc != 0:
             rc = 1
             report.warn(f"[auto] Install failed for {platform} (exit code {child_rc})")
@@ -105,7 +109,7 @@ def _run_compact(ctx: "Context", detected: list[str]) -> int:
     rc = 0
     if live:
         report.print_auto_start(label, common, visibility)
-    env = {"GHOST_ALICE_INSTALL_REPORT_CHILD": "1", "GHOST_ALICE_INSTALL_LOG_FILE": str(log),
+    env = {"GHOST_ALICE_INSTALL_HOST_CHILD": "1", "GHOST_ALICE_INSTALL_REPORT_CHILD": "1", "GHOST_ALICE_INSTALL_LOG_FILE": str(log),
            "GHOST_ALICE_INSTALL_EVENT_FILE": str(event_file)}
     for index, platform in enumerate(detected, 1):
         with open(log, "a", encoding="utf-8") as handle:

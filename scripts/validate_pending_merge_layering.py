@@ -166,7 +166,7 @@ CHECKS: list[LayerCheck] = [
         layer="EVAL",
         description="adversarial-verification references the evaluator artifact contract",
         file=REPO / "adversarial-verification" / "SKILL.md",
-        pattern=r"docs/policies/evaluator-artifact-contract\.md",
+        pattern=r"evaluator-artifact-contract\.md[^\n]*installed-policies\.md",
         owner=REPO / "docs/policies/evaluator-artifact-contract.md",
         owner_section="Promotion Rules",
         owner_pattern=r"During a read-only evaluation pass[\s\S]*changes installed assets[\s\S]*does not promote[\s\S]*verifier_accepted: true[\s\S]*stops installed asset changes[\s\S]*verifier_accepted: false",
@@ -179,7 +179,7 @@ CHECKS: list[LayerCheck] = [
         pattern=r"\]\(references/evaluator-artifacts\.md\)",
         owner=REPO / "coding-convention/verification-before-completion/references/evaluator-artifacts.md",
         owner_section="Evaluator Artifact Contract",
-        owner_pattern=r"docs/policies/evaluator-artifact-contract\.md[\s\S]*verifier's judgment in `verifier-result\.json`[\s\S]*`verifier_accepted`[\s\S]*Missing required evidence",
+        owner_pattern=r"evaluator-artifact-contract\.md[^\n]*installed-policies\.md[\s\S]*verifier's judgment in `verifier-result\.json`[\s\S]*`verifier_accepted`[\s\S]*Missing required evidence",
         multiline=True,
     ),
 ]

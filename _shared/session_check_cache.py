@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import install_destination
+import ledger_access
 from session_identity import host_bound_session
 import sqlite3
 from timestamps import parse_timestamp
@@ -46,6 +47,7 @@ def _content_stamp(content: str) -> list[str]:
 
 
 def _connect(root: Path, *, create: bool = True) -> sqlite3.Connection:
+    ledger_access.require_writable_root(root)
     store = install_destination.assert_mutation_path(root / "session-checks.sqlite3")
     if create:
         root.mkdir(parents=True, exist_ok=True)

@@ -38,7 +38,7 @@ class LoadLedgerTests(unittest.TestCase):
 class CoordinatesTests(unittest.TestCase):
     def test_valid_coordinates_return_the_ledger_the_resolved_root_and_the_owner(self):
         with tempfile.TemporaryDirectory() as folder:
-            for platform in ('claude', 'codex'):
+            for platform in ('claude', 'codex', 'future-host'):
                 with self.subTest(platform=platform):
                     core, root, owner = ledger_access.coordinates(ledger_access.source_environment(
                         platform, 'session-1', root=folder))
@@ -49,7 +49,7 @@ class CoordinatesTests(unittest.TestCase):
     def test_each_rejection_carries_its_reason(self):
         cases = {
             'ledger-root-unavailable': dict(GHOST_ALICE_PLATFORM='claude', GHOST_ALICE_SESSION_ID='s'),
-            'owner-mismatch': dict(GHOST_ALICE_SESSION_INTENT_ROOT='/tmp', GHOST_ALICE_PLATFORM='agent', GHOST_ALICE_SESSION_ID='s'),
+            'owner-mismatch': dict(GHOST_ALICE_SESSION_INTENT_ROOT='/tmp', GHOST_ALICE_PLATFORM='', GHOST_ALICE_SESSION_ID='s'),
         }
         cases['owner-mismatch (empty session)'] = dict(GHOST_ALICE_SESSION_INTENT_ROOT='/tmp', GHOST_ALICE_PLATFORM='codex', GHOST_ALICE_SESSION_ID='')
         cases['owner-mismatch (host conflict)'] = dict(GHOST_ALICE_SESSION_INTENT_ROOT='/tmp', GHOST_ALICE_PLATFORM='codex',
@@ -86,6 +86,8 @@ class SourceEnvironmentTests(unittest.TestCase):
                                       GHOST_ALICE_SESSION_ID='s', GHOST_ALICE_CLAUDE_DIR='/n'))
         self.assertEqual(base['GHOST_ALICE_SESSION_ID'], 'old')
         self.assertIn('GHOST_ALICE_CODEX_DIR', ledger_access.source_environment('codex', 's', root='/r', native_dir='/n'))
+        with self.assertRaisesRegex(ValueError, 'native directory adapter'):
+            ledger_access.source_environment('future-host', 's', root='/r', native_dir='/n')
 
     def test_without_a_root_the_environment_keeps_its_own(self):
         source = ledger_access.source_environment('claude', 's', environment=dict(GHOST_ALICE_SESSION_INTENT_ROOT='/kept'))

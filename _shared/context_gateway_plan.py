@@ -128,7 +128,8 @@ def install_plan(request, inventory, prior, service, *, port, scope, interpreter
     if prior:
         port, scope = prior['port'], prior['scope']
     state = dict(schema_version='context-gateway.v1', port=port, scope=scope,
-        ledger_root=str(request.ledger), codex_dir=str(request.codex), usage_log=str(state_dir / 'usage.jsonl'))
+        ledger_root=str(request.ledger), ghost_root=str(request.home / '.ghost-alice'),
+        codex_dir=str(request.codex), usage_log=str(state_dir / 'usage.jsonl'))
     if request.claude is not None:
         state['claude_dir'] = str(request.claude)
     service_log = state_dir / 'service.log'

@@ -5,7 +5,7 @@ from __future__ import annotations
 import atexit
 from dataclasses import asdict
 import json
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import os
 from pathlib import Path
 import shutil
@@ -75,10 +75,13 @@ def installer_home_effects(home: Path) -> list[str]:
     return sorted(p.name for p in Path(home).iterdir() if p.name not in POWERSHELL_HOME_STATE)
 
 
+@contextmanager
 def use_source(root: Path):
     """Run the installer from the fixture checkout `root`: patch `installer.runner.REPO_ROOT`,
     the one name of the checkout the installer runs from."""
-    return mock.patch("installer.runner.REPO_ROOT", Path(root))
+    with mock.patch("installer.runner.REPO_ROOT", Path(root)), \
+            mock.patch.dict(os.environ, {'GIT_CEILING_DIRECTORIES': os.environ.get('GIT_CEILING_DIRECTORIES') or str(Path(root).resolve().parent)}):
+        yield
 
 
 def make_context(home: Path, platform: str = "claude", **options) -> cli.Context:

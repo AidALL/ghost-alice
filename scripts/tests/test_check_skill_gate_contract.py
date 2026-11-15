@@ -448,7 +448,7 @@ class SkillGateContractTest(unittest.TestCase):
         text = (REPO_ROOT / "skill-evolution/SKILL.md").read_text()
         section = self._extract_between(text, "## Blind installed-behavior evaluation", "## Warnings")
         owner_path = "docs/policies/live-smoke-regression.md"
-        for fragment in (owner_path, "evaluator-confirmed behavioral failure",
+        for fragment in ("live-smoke-regression.md", "installed-policies.md", "evaluator-confirmed behavioral failure",
                          "report-only conduct-feedback candidate", "harness or transport failure"):
             self.assertIn(fragment, section)
         self.assertIn("must not auto-evolve, auto-promote, auto-create skills", text)

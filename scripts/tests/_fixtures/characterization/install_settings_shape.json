@@ -7,5 +7,5 @@
     "Stop": 1,
     "UserPromptSubmit": 1
   },
-  "installed_markers": []
+  "installed_markers": [".ghost-alice-install.json", ".ghost-alice-install.json"]
 }

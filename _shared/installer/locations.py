@@ -71,6 +71,12 @@ def install_state_path(platform: str) -> Path:
     return install_state_dir() / f"{platform}.json"
 
 
+def install_state_manifests(directory: Path) -> list[Path]:
+    """Existing host inventories, excluding the setting owners' sidecar filenames."""
+    sidecars = {'source-repo-hook-path.json', 'codex-hook-feature-change.json', 'codex-project-trust-change.json'}
+    return sorted(path for path in Path(directory).glob('*.json') if path.name not in sidecars)
+
+
 def events_log(platform: str) -> Path:
     """`~/.ghost-alice/install-state/<platform>-events.jsonl`."""
     return home() / ".ghost-alice" / "install-state" / f"{platform}-events.jsonl"
@@ -103,7 +109,7 @@ def install_log_root(base: Path | None = None) -> Path:
 
 def record_root() -> Path:
     """`~/.ghost-alice` under HOME: the folder of the install lock, the install record
-    (`installed-payload.json`) and the publish rollbacks (`rollbacks/<txid>/`). It does not
+    (current detail and legacy incompatibility notice) and the publish rollbacks (`rollbacks/<txid>/`). It does not
     follow `GHOST_ALICE_GHOST_ROOT`, so the record stays next to the lock its writers hold."""
     return home() / ".ghost-alice"
 

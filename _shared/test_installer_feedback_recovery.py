@@ -16,6 +16,7 @@ from unittest import mock
 import install_hooks
 import installer_assets
 import install_transaction
+import installed_payload
 import uninstall_cleanup
 from installer import report as installer_report
 from installer_testing import installer_env
@@ -29,7 +30,7 @@ class PublishedOwnershipTests(PublishCase):
         install_transaction.publish(self.request('codex', self.target('alpha', dest, 'copy')))
         recorded = self.record()
         recorded['targets'][str(dest)]['used_by'] = ['claude']
-        (self.ghost / 'installed-payload.json').write_text(json.dumps(recorded))
+        installed_payload.path(self.ghost).write_text(json.dumps(recorded))
         pending = self.ghost / 'pending-merges/codex'
         baseline, manifest = pending / 'snapshot.json', pending / 'manifest.json'
         environment = installer_env(self.home)
@@ -65,11 +66,11 @@ class PublishedOwnershipTests(PublishCase):
         recorded = self.record()
         for index, (hosts, expected_changes) in enumerate((
             (['codex'], 0), (['claude', 'codex'], 0), (['claude'], 1),
-            ('not-codex', 1), (None, 1), (['codex', None], 1), (['codex', 'not-a-host'], 1),
+            ('not-codex', 1), (None, 1), (['codex', None], 1), (['codex', 'future-host'], 0),
         )):
             with self.subTest(hosts=hosts):
                 recorded['targets'][str(dest)]['used_by'] = hosts
-                (self.ghost / 'installed-payload.json').write_text(json.dumps(recorded))
+                installed_payload.path(self.ghost).write_text(json.dumps(recorded))
                 pending = self.ghost / f'pending-{index}'
                 manifest = pending / 'manifest.json'
                 argv = ['collector', '--snapshot', str(baseline), '--pending', str(pending),

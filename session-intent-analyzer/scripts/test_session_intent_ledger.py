@@ -450,15 +450,33 @@ class SessionIntentLedgerTests(unittest.TestCase):
         rows = authority_events(self.ledger, paths["events"])
         self.assertNotEqual(rows[0]["event_id"], rows[1]["event_id"])
 
-    def test_default_root_prefers_repo_tmp_session_intent(self) -> None:
+    def test_default_root_does_not_follow_the_current_checkout(self) -> None:
         repo = self.tmpdir / "ghost-alice"
         (repo / "skill-catalog").mkdir(parents=True)
         (repo / "session-intent-analyzer").mkdir()
         (repo / "install.sh").write_text("#!/bin/sh\n", encoding="utf-8")
 
-        root = self.ledger.default_root(env={}, cwd=repo / "nested")
+        root = self.ledger.default_root(env={'HOME': str(self.tmpdir)}, cwd=repo / "nested")
 
-        self.assertEqual(root, repo.resolve() / ".tmp" / "session-intent")
+        self.assertEqual(root, self.tmpdir / '.ghost-alice/session-intent')
+
+    def test_api_default_uses_the_binding_at_call_time(self) -> None:
+        script = '''
+import os, pathlib, session_intent_ledger as ledger
+base = pathlib.Path(os.environ['HOME'])
+for name in ('first-installation', 'second-installation'):
+    root = base / name
+    os.environ['GHOST_ALICE_SESSION_INTENT_ROOT'] = str(root)
+    ledger.record_turn(platform='codex', session_id='native', raw_input=name)
+    state = ledger.read_session_state(platform='codex', session_id='native')
+    assert state['latest_input_digest'] == ledger.text_digest(name)
+    assert ledger.read_session_state(root=root, platform='codex', session_id='native') == state
+'''
+        result = subprocess.run([sys.executable, '-c', script], cwd=SCRIPT_DIR, capture_output=True, text=True,
+            env={**os.environ, 'HOME': str(self.tmpdir), 'GHOST_ALICE_GHOST_ROOT': str(self.tmpdir / '.ghost-alice'),
+                 'GHOST_ALICE_SESSION_INTENT_ROOT': str(self.tmpdir / 'import-time')})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.tmpdir / 'import-time').exists())
 
     def test_default_root_allows_explicit_env_override(self) -> None:
         configured = self.tmpdir / "custom-intent-root"

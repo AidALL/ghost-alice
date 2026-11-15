@@ -43,6 +43,10 @@ cd %USERPROFILE%\ghost-alice
 
 `bash install.sh` and `.\install.cmd` detect the agent platform. The options below select a specific platform or manage each installation separately.
 
+After a successful installation, use `~/.ghost-alice/bin/ghost-alice` (Windows: `%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd`) for status, update and removal. The Core skills this installer places, runtime and management commands execute without the development clone. The installer attempts automatic acquisition of missing Python 3.11+, Git and Node.js and explains package-manager automatic-consent flags before acquiring the first program.
+
+When upgrading an older installation, update every existing Core skill on each installed host before deleting the clone. Selecting only some skills leaves the others unchanged; older Claude skill links can still point into the clone, and older skill instructions can still refer to its policy files. Supply the existing skill names to the new installer, or use the fixed `update` command below, which retains those installed selections. If an existing ledger remains inside the clone, stop its writers and complete [explicit ledger migration](../reference/installer-architecture.md#fixed-commands-policies-and-ledger-data) before deleting the clone as well.
+
 ## Install Addons
 
 An addon is installed from its own repository or a local path with `--addon-source PATH|URL`; add `--platform` to install it to one platform.
@@ -96,39 +100,23 @@ Doctor also prints informational Core lines: `native-intake-waits`, `native-inta
 
 ## Update
 
-Update the local clone through the installer so source-local edits are stashed before a fast-forward.
+The fixed command obtains candidate code from the recorded remote/ref and updates each installed host's Core selection. It works after the development clone moves or disappears, adds no newly detected hosts or skills, and leaves existing addons unchanged.
 
 ```bash
-cd ~/ghost-alice
-bash install.sh --update-source
+~/.ghost-alice/bin/ghost-alice update
+~/.ghost-alice/bin/ghost-alice --doctor
 ```
 
 ```cmd
-cd %USERPROFILE%\ghost-alice
-.\install.cmd --update-source
+%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd update
+%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd --doctor
 ```
 
-If the local installer lacks the update option, follow [bootstrap update recovery](./troubleshooting.md#git-update-recovery).
-
-If source update stops with conflicts, divergent branches, or non-fast-forward state, do not rerun the installer repeatedly. Follow [troubleshooting](./troubleshooting.md) first.
-
-`--update-source` updates the Core source checkout; it does not update an addon package. Reinstall Core (with `--addon-source` for an installed addon), then check the installed state. The bootstrap updater may reinstall Core only, so follow it with these commands.
-
-```bash
-bash install.sh
-bash install.sh --doctor
-bash install.sh --status
-```
-
-```cmd
-.\install.cmd
-.\install.cmd --doctor
-.\install.cmd --status
-```
+If acquisition coordinates are missing, supply `--remote URL --ref NAME` when running update. To update the developer checkout itself, use the existing `bash install.sh --update-source` or `.\install.cmd --update-source`; that separate path stashes local changes before a fast-forward and follows [source update recovery](./troubleshooting.md#git-update-recovery). Fixed update leaves the checkout unchanged. See [installer architecture](../reference/installer-architecture.md#fixed-commands-policies-and-ledger-data) for saved-code reinstallation and ledger locations.
 
 ### Install Source
 
-The install record `~/.ghost-alice/installed-payload.json` names the checkout the installation came from, the install source. Install and `--repair` compare that checkout with the one they run from before they change anything. When the recorded checkout no longer exists, for example after a fresh clone at another path, the installer records the new checkout as the install source without asking. When both checkouts exist, such as a second clone or a git worktree, the installer shows both folders. At a terminal it asks whether this checkout replaces the install source and stops unless the answer typed at the installer's terminal question is yes (the installer does not check who typed it); elsewhere it stops with exit code 2. When the human user decides to move the installation to another checkout, run the installer there with `--adopt-source`; its first placement records that checkout as the install source. `--repair` never moves the installation: from another checkout it stops with exit code 2 and names that install command.
+The install record `~/.ghost-alice/installed-payload-v2.json` names the checkout the installation came from, the install source. Install and `--repair` compare that developer origin with the requested input origin before changing installation targets. Execution uses a fixed package; the package records its input origin separately. When the recorded checkout no longer exists, for example after a fresh clone at another path, the installer records the new checkout as the install source without asking. When both checkouts exist, such as a second clone or a git worktree, the installer shows both folders. At a terminal it asks whether this checkout replaces the install source and stops unless the answer typed at the installer's terminal question is yes (the installer does not check who typed it); elsewhere it stops with exit code 2. When the human user decides to move the installation to another checkout, run the installer there with `--adopt-source`; its first placement records that checkout as the install source. `--repair` never moves the installation: from another checkout it stops with exit code 2 and names that install command.
 
 ```bash
 cd /path/to/new-checkout
@@ -140,7 +128,7 @@ cd C:\path\to\new-checkout
 .\install.cmd --adopt-source
 ```
 
-The installer sets the repository's git hook path (`core.hooksPath`, which every worktree of the repository shares) to the install source's `hooks` folder. After a merge or pull in the install source, its post-merge hook goes on with the install for every detected host. A merge or pull in another worktree of the same repository runs the same hook from the install source, never that worktree's own hook file; the hook prints one line and installs nothing. A worktree's own hook setting (`git config --worktree core.hooksPath`) still comes first. Only an install you run replaces the install source; a merge never does, and a merge never fails because of the hook. The full uninstall of the last host puts back the hook path from before the install, unless the path changed since.
+The installer sets the repository's git hook path (`core.hooksPath`, which every worktree of the repository shares) to the fixed package's `hooks` folder. After a merge or pull in the install source, its post-merge hook goes on with the install for every detected host. A merge or pull in another worktree of the same repository runs the same hook from the install source, never that worktree's own hook file; the hook prints one line and installs nothing. A worktree's own hook setting (`git config --worktree core.hooksPath`) still comes first. Only an install you run replaces the install source; a merge never does, and a merge never fails because of the hook. Removal of the last consumer of the management commands puts back the hook path from before the install, unless the path changed since.
 
 ## Common Commands
 
@@ -200,19 +188,13 @@ Claude Code and Codex hook-enabled installs require a resolvable Node.js runtime
 
 ### Platform Update Behavior
 
-| Platform | OS | Install mode | Install path | Skill body updates auto-reflect |
-| --- | --- | --- | --- | --- |
-| Claude Code | macOS / Linux / WSL | symlink | `~/.claude/skills/` | yes |
-| Claude Code | Windows | junction | `~/.claude/skills/` | yes |
-| Codex | macOS / Linux / WSL | copy | `~/.agents/skills/` | no |
-| Codex | Windows | copy | `~/.agents/skills/` | no |
-| All platforms | Git Bash on Windows | copy fallback | varies | no |
+| Host | Core placement | Skill path |
+| --- | --- | --- |
+| Claude Code | Copy | `~/.claude/skills/` |
+| Codex | Copy | `~/.agents/skills/` |
 
-Auto-reflection applies to skill bodies such as `SKILL.md`, `references/`, and `scripts/`. Hooks, bootstrap files, permission policy, and `_shared/` are installer-managed runtime surfaces, so rerun the installer when they change.
+Every supported OS receives Core and `_shared` as copies. Editing development files does not alter installed Core; update or an explicit install publishes new code. Addon link/copy policy remains separate. An existing Codex `untrusted` setting stays unless the installer obtains confirmation for that exact project.
 
-Installation on disk and adoption by a running host are separate. After a hook command changes, confirm its native trust entry and observe a subsequent native callback; use the host's reload or full restart controls if it retains the previous registration. See [native hook trust and reload](./troubleshooting.md#native-hook-trust-and-reload). Reuse unchanged business verification under the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery) instead of repeating it to check host adoption.
-
-Returning to older code does not restore the intent ledger's earlier state. Current Core code reads `session-intent-ledger.v1` sessions and saves a session as `session-intent-ledger.v2` on its next write. Older code that accepts only v1 cannot read that session after the write. Restoring installer-managed files and the installation record does not convert the session back to v1. See the [intent ledger schema](../../session-intent-analyzer/references/ledger-schema.md#primary-store-and-transactions) for the stored-state rules and [uninstall cleanup](./uninstall.md#recovery-principles) for the separate limits on Claude permission cleanup with older code.
 
 ### Core and addon transitions
 
@@ -244,7 +226,7 @@ A full install deploys:
 - Claude Code permission allowlist
 - Claude `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` global bootstrap
 - Codex `~/.codex/AGENTS.md` loader and managed `~/.codex/ghost-alice-governance.md` common contract
-- the install record `~/.ghost-alice/installed-payload.json`: one file for both hosts that names every install location, its source and the fingerprints of copied files, written in the same step as each placement
+- the install record `~/.ghost-alice/installed-payload-v2.json`: one file for both hosts that names every install location, its source and the fingerprints of copied files, written in the same step as each placement
 - `~/.ghost-alice/rollbacks/<txid>/`: the files one placement replaced, the install record as it was before, and the placement's journal; the next locked installer command restores a placement that stopped halfway, and [runtime state retention](../reference/repository-structure.md#runtime-state-retention) sets how many finished folders stay
 - support state for install-state, pending merges, and uninstall reports
 

@@ -164,6 +164,12 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
     elif ctx.platform == "codex":
         if hosts.remove_codex_bootstrap_if_unused(ctx, skills_dir):
             removed += 1
+    if not failed and not selection.has_managed_installs(skills_dir, ctx.platform):
+        from uninstall_cleanup import retire_unused_management
+        for item in retire_unused_management(ctx.platform, locations.install_state_path(ctx.platform)):
+            if item.get('removal_incomplete'):
+                failed += 1
+                report.warn(f"Removal incomplete for {item['path']}: {item['reason']}; {item.get('detail', '')}")
     if removed == 0:
         report.info("No skills to remove.")
     else:
@@ -191,7 +197,7 @@ def run_repair(ctx: "Context") -> int:
     repaired = kept = 0
     shared = skills_dir / "_shared"
     if not shared.exists():
-        code = transaction.install_shared(ctx, skills_dir, copy_only)
+        code = transaction.install_shared(ctx, skills_dir, True)
         if code != 0:
             report.error("repair: _shared could not be re-provisioned")
             return code
@@ -204,7 +210,7 @@ def run_repair(ctx: "Context") -> int:
     for target in selection.iter_install_targets(list(selection.ALL_SKILLS)):
         dest = skills_dir / target.name
         if not dest.exists() and not dest.is_symlink():
-            if copy_only:
+            if copy_only or target.provider == 'core':
                 if not transaction.copy_target(ctx, target, dest):
                     return 1
             else:

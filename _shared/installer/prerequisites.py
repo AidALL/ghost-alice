@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import shutil
 
 from installer import report, runner
@@ -105,6 +106,9 @@ def try_install_unix_prerequisite(tool: str) -> bool:
 
 def install_prerequisites() -> bool:
     """git then node; a miss is a warning and the install continues."""
+    if os.environ.get('GHOST_ALICE_PREREQUISITES_SHOWN') != '1' and any(not command_exists(tool) for tool in PACKAGES):
+        report.info(Path(__file__).with_suffix('.txt').read_text(encoding='utf-8').strip())
+        os.environ['GHOST_ALICE_PREREQUISITES_SHOWN'] = '1'
     missing = False
     for tool in ("git", "node"):
         if not try_install_unix_prerequisite(tool):

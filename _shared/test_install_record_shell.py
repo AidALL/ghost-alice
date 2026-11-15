@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -57,6 +58,7 @@ class InstallRecordShellTest(unittest.TestCase):
         self.codex = self.home / ".agents" / "skills"
         self.runtime = self.ghost / "runtime" / "current" / "_shared"
         self.companion = self.ghost / "runtime" / "current" / COMPANION
+        self.commands = {str(self.ghost / 'bin' / name) for name in ('ghost-alice', 'ghost-alice.ps1', 'ghost-alice.cmd')}
 
     def tearDown(self):
         self.temp.cleanup()
@@ -93,23 +95,25 @@ class InstallRecordShellTest(unittest.TestCase):
         names = _target_names()
         expected = {**{(self.claude / name).as_posix(): ["claude"] for name in names},
                     **{(self.codex / name).as_posix(): ["codex"] for name in names},
-                    self.runtime.as_posix(): ["claude", "codex"], self.companion.as_posix(): ["claude", "codex"]}
+                    self.runtime.as_posix(): ["claude", "codex"], self.companion.as_posix(): ["claude", "codex"],
+                    **{path: ['claude', 'codex'] for path in self.commands}}
         targets = record["targets"]
         self.assertEqual({dest: entry["used_by"] for dest, entry in targets.items()}, expected)
         for dest, entry in targets.items():
             with self.subTest(dest=dest):
-                host_mode = "link" if dest.startswith(self.claude.as_posix()) else "copy"
-                self.assertEqual((entry["mode"], entry["baseline"], entry["provider"]), (host_mode, "recorded", "core"))
+                self.assertEqual((entry["mode"], entry["baseline"], entry["provider"]), ("copy", "recorded", "core"))
         self.assertEqual(targets[self.runtime.as_posix()]["kind"], "runtime")
         # The service's companion script is published with the runtime, by the same publish.
         companion = targets[self.companion.as_posix()]
         self.assertEqual((companion["kind"], companion["name"]), ("runtime", COMPANION))
-        self.assertEqual(companion["source"], str(self.source / COMPANION))
+        active = Path(record['installer']['active_root'])
+        self.assertEqual(companion["source"], str(active / COMPANION))
         self.assertEqual(companion["files"], {".": content_digest.file_digest(self.companion)})
         self.assertEqual(targets[(self.codex / "_shared").as_posix()]["kind"], "support")
         self.assert_matches_the_disk(targets)
         head = self.head()
-        self.assertEqual(record["installer"], {"commit": head, "schema_version": 1})
+        self.assertEqual(record["installer"], {"commit": head, "schema_version": installed_payload.SCHEMA_VERSION,
+                                               "active_root": str(active)})
         self.assertEqual((record["source"]["root"], record["source"]["commit"]), (str(self.source), head))
         journal = Path(record["last_transaction"]["rollback_dir"]) / "journal.json"
         self.assertFalse(journal.exists(), 'completed managed originals must not accumulate after success')
@@ -119,23 +123,231 @@ class InstallRecordShellTest(unittest.TestCase):
         self.assertNotIn("service", record)
         self.assertFalse((self.ghost / "context-gateway-binding.json").exists())
         status = self.run_installer("--platform", "claude", "--status")
-        self.assertIn(f"{len(names) + 2} claude targets (link {len(names)}, copy 2", status)
+        self.assertIn(f"{len(names) + 5} claude targets (link 0, copy {len(names) + 5}", status)
         self.assertIn("[OK] Installed targets match the install record", status)
+        changed = self.source / 'task-router/SKILL.md'
+        changed.write_text(changed.read_text() + '\nSelected host update.\n')
+        self.run_installer('--platform', 'codex', '--skip-source-health', 'task-router')
+        doctor = self.run_installer('--platform', 'claude', '--doctor')
+        self.assertIn('golden-hook-test/session-intent: golden-pass', doctor)
 
-    def test_links_already_in_place_are_recorded_without_being_replaced(self):
-        # No install record and no earlier record name these links, and placement skips them as current.
+    def test_fixed_command_uses_the_successful_package_after_the_input_checkout_is_removed(self):
+        import ledger_access
+        ledger = ledger_access.load_ledger()
+        legacy_state = ledger.default_state('future-host', 'legacy-session')
+        legacy_path = ledger.session_paths(self.ghost / 'session-intent', 'future-host', 'legacy-session')['state']
+        legacy_path.parent.mkdir(parents=True)
+        legacy_path.write_text(json.dumps(legacy_state))
+        legacy_bytes = legacy_path.read_bytes()
+        (self.home / '.claude').mkdir()
+        self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router')
+        active = Path(self.record()['installer']['active_root'])
+        self.assertNotEqual(active, self.source)
+        self.assertFalse((self.claude / 'task-router').is_symlink())
+        self.assertEqual(legacy_path.read_bytes(), legacy_bytes)
+        self.assertEqual(ledger.read_session_state(root=self.ghost / 'session-intent', platform='future-host',
+                                                  session_id='legacy-session'), legacy_state)
+        config = json.loads((self.ghost / 'config.json').read_text())
+        self.assertEqual(Path(config['install_locations']['claude']['ledger_root']), self.ghost / 'session-intent')
+        shutil.rmtree(self.source)
+        from installer_testing import installer_env
+        result = subprocess.run([self.bash, str(self.ghost / 'bin/ghost-alice'), '--status'],
+                                env=installer_env(self.home), cwd=self.home, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('[OK] Installed targets match the install record', result.stdout)
+        self.assertTrue((self.claude / 'task-router/SKILL.md').is_file())
+
+    def custom_runtime_removal(self, *, full=False):
+        from installer_testing import installer_env
+        runtime = self.home / "user's runtime" / '_shared'
+        sibling = runtime.parent / 'user.txt'
+        sibling.parent.mkdir()
+        sibling.write_text('user data')
+        (self.home / '.claude').mkdir()
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_RUNTIME_SHARED_DIR': str(runtime)}):
+            self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router')
+            env = installer_env(self.home)
+            env['GHOST_ALICE_RUNTIME_SHARED_DIR'] = str(runtime)
+            shutil.rmtree(self.source)
+            command = [self.bash, str(self.ghost / 'bin/ghost-alice')]
+            removal = ['--platform', 'claude', '--uninstall', *([] if full else ['task-router'])]
+            for args in (['--status'], removal):
+                result = subprocess.run([*command, *args], env=env, cwd=self.home,
+                                        capture_output=True, text=True, timeout=180)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(runtime.exists())
+        self.assertFalse((runtime.parent / COMPANION).exists())
+        self.assertEqual(sibling.read_text(), 'user data')
+        if full:
+            self.assertIsNone(installed_payload.read(self.ghost))
+        else:
+            self.assertEqual(self.record()['targets'], {})
+            self.assertIsNone(self.record()['installer']['active_root'])
+
+    def test_custom_runtime_selected_removal_uses_recorded_destinations(self):
+        self.custom_runtime_removal()
+
+    def test_custom_runtime_full_removal_uses_recorded_destinations(self):
+        self.custom_runtime_removal(full=True)
+
+    def test_one_host_failure_keeps_previous_active_cli_and_retry_activates_the_candidate(self):
+        from installer_testing import installer_env
+        (self.home / '.claude').mkdir()
+        (self.home / '.codex').mkdir()
+        self.run_installer('--skip-source-health', 'task-router', 'adversarial-verification',
+                           'coding-convention/verification-before-completion', 'skill-evolution')
+        active = self.record()['installer']['active_root']
+        policy_names = ('evaluator-artifact-contract.md', 'live-smoke-regression.md')
+        original_policies = {name: (self.source / 'docs/policies' / name).read_bytes() for name in policy_names}
+        for name, raw in original_policies.items():
+            (self.source / 'docs/policies' / name).write_bytes(raw + b'\nCandidate policy revision.\n')
+        skill = self.source / 'task-router/SKILL.md'
+        skill.write_text(skill.read_text() + '\nCandidate bytes.\n')
+        config = self.home / '.codex/config.toml'
+        before = config.read_bytes()
+        # Inject the second host's failure after the parent's trust preflight;
+        # malformed TOML present at entry correctly stops the whole request earlier.
+        entry = '''
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv.pop(1))
+from installer import cli
+config = Path(sys.argv.pop(1))
+prepare = cli.source.prepare_source
+def fail_second_host(ctx, **kwargs):
+    candidate = prepare(ctx, **kwargs)
+    config.write_text('[invalid TOML')
+    return candidate
+cli.source.prepare_source = fail_second_host
+raise SystemExit(cli.main(sys.argv[1:]))
+'''
+        result = subprocess.run([sys.executable, '-c', entry, str(self.source / '_shared'), str(config),
+                                 '--skip-source-health', 'task-router'],
+                                env=installer_env(self.home), cwd=self.home, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        record = self.record()
+        self.assertEqual(record['installer']['active_root'], active)
+        installed_source = Path(record['targets'][str(self.claude / 'task-router')]['source'])
+        candidate = installed_source.parent.parent
+        self.assertNotEqual(str(installed_source.parent), active)
+        self.assertIn('Candidate bytes.', (self.claude / 'task-router/SKILL.md').read_text())
+        self.assertEqual(json.loads((candidate / 'version.json').read_text())['status'], 'candidate')
+        config.write_bytes(before)
+        shutil.rmtree(self.source)
+        # The old installed consumer skills read each host's actual support placement,
+        # independently of which package remains the active management CLI.
+        for host, skills in (('claude', self.claude), ('codex', self.codex)):
+            support = record['targets'][str(skills / '_shared')]
+            self.assertIn(host, support['used_by'])
+            package = Path(support['source']).parent
+            for consumer, policy in (('adversarial-verification/SKILL.md', policy_names[0]),
+                    ('verification-before-completion/references/evaluator-artifacts.md', policy_names[0]),
+                    ('skill-evolution/SKILL.md', policy_names[1])):
+                instruction = (skills / consumer).read_text()
+                self.assertIn('installed-policies.md', instruction)
+                self.assertIn(policy, instruction)
+                expected_policy = original_policies[policy] + b'\nCandidate policy revision.\n'
+                self.assertEqual((package / 'docs/policies' / policy).read_bytes(), expected_policy)
+                self.assertIn('## Decision Flow',
+                    (package / 'coding-convention/verification-before-completion/references/verify-or-reuse.md').read_text())
+            for language in ('', 'ko/'):
+                for name in policy_names:
+                    policy_file = package / f'docs/{language}policies' / name
+                    for reference in re.findall(r'\]\(([^)]+)\)', policy_file.read_text()):
+                        path = reference.split('#', 1)[0]
+                        if path and '://' not in path:
+                            self.assertTrue((policy_file.parent / path).resolve().is_file(), reference)
+        previous_manager = subprocess.run([self.bash, str(self.ghost / 'bin/ghost-alice'), '--platform', 'claude',
+                                          '--uninstall', 'task-router'], cwd=self.home, env=installer_env(self.home),
+                                          capture_output=True, text=True, timeout=180)
+        self.assertEqual(previous_manager.returncode, 0, previous_manager.stdout + previous_manager.stderr)
+        self.assertFalse((self.claude / 'task-router').exists())
+        retry = subprocess.run([self.bash, str(candidate / 'core/install.sh'), '--skip-source-health'],
+                               cwd=self.home, env=installer_env(self.home), capture_output=True, text=True, timeout=180)
+        self.assertEqual(retry.returncode, 0, retry.stdout + retry.stderr)
+        self.assertEqual(self.record()['installer']['active_root'], str(candidate / 'core'))
+        self.assertEqual(json.loads((candidate / 'version.json').read_text())['status'], 'successful')
+
+    def test_legacy_core_links_become_copies_even_when_their_content_is_current(self):
         (self.home / ".claude").mkdir()
         self.run_installer("--platform", "claude", "--skip-source-health")
-        installed_payload.path(self.ghost).unlink()
+        record = self.record()
+        active = Path(record['installer']['active_root'])
+        names = _target_names()
+        for name in names:
+            target = self.claude / name
+            relative = Path(record['targets'][str(target)]['source']).relative_to(active)
+            shutil.rmtree(target)
+            target.symlink_to(self.source / relative)
+        for name in installed_payload.RECORD_FILENAMES:
+            (self.ghost / name).unlink()
         (self.ghost / "install-state" / "claude.json").unlink()
-        links = {name: os.lstat(self.claude / name).st_ino for name in _target_names()}
         self.run_installer("--platform", "claude", "--skip-source-health")
         targets = self.record()["targets"]
-        self.assertEqual(set(targets), {(self.claude / name).as_posix() for name in links}
-                         | {self.runtime.as_posix(), self.companion.as_posix()})
-        self.assertEqual({name: os.lstat(self.claude / name).st_ino for name in links}, links)
+        self.assertEqual(set(targets), {(self.claude / name).as_posix() for name in names}
+                         | {self.runtime.as_posix(), self.companion.as_posix()} | self.commands)
+        self.assertFalse(any((self.claude / name).is_symlink() for name in names))
         self.assertEqual({entry["baseline"] for entry in targets.values()}, {"recorded"})
         self.assert_matches_the_disk(targets)
+
+    def test_saved_code_reinstall_keeps_current_selection_and_ledger_binding(self):
+        from installer_testing import installer_env
+        (self.home / '.claude').mkdir()
+        self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router')
+        first = Path(self.record()['installer']['active_root'])
+        skill = self.source / 'task-router/SKILL.md'
+        original = skill.read_bytes()
+        skill.write_bytes(original + b'\nLater source revision.\n')
+        self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router', 'compact-handoff')
+        expected = {path for path, entry in self.record()['targets'].items() if entry['kind'] == 'skill'}
+        config_path = self.ghost / 'config.json'
+        config = json.loads(config_path.read_text())
+        config['retired_ledger_roots'] = [str(self.source / '.tmp/session-intent')]
+        config_path.write_text(json.dumps(config))
+        ledger = self.ghost / 'session-intent/retained.txt'
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text('current history')
+        shutil.rmtree(self.source)
+        (self.home / '.codex').mkdir()  # A newly detected host is not an installed selection.
+        result = subprocess.run([self.bash, str(first / 'install.sh'), '--adopt-source', '--skip-source-health'],
+                                cwd=self.home, env=installer_env(self.home), capture_output=True, text=True, timeout=180)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual({path for path, entry in self.record()['targets'].items() if entry['kind'] == 'skill'}, expected)
+        self.assertEqual((self.claude / 'task-router/SKILL.md').read_bytes(), original)
+        self.assertEqual(ledger.read_text(), 'current history')
+        after = json.loads(config_path.read_text())
+        self.assertEqual(after['retired_ledger_roots'], config['retired_ledger_roots'])
+        self.assertEqual(after['install_locations']['claude']['ledger_root'], str(ledger.parent))
+
+    def test_fixed_update_uses_remote_after_clone_removal_and_keeps_each_host_selection(self):
+        from installer_testing import installer_env
+        (self.home / '.claude').mkdir()
+        (self.home / '.codex').mkdir()
+        remote = self.home / 'remote.git'
+        subprocess.run(['git', 'clone', '--bare', str(self.source), str(remote)], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.source), 'remote', 'add', 'origin', str(remote)], check=True)
+        branch = subprocess.run(['git', '-C', str(self.source), 'branch', '--show-current'],
+                                check=True, capture_output=True, text=True).stdout.strip()
+        self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router')
+        self.run_installer('--platform', 'codex', '--skip-source-health', 'coding-convention/verification-before-completion')
+        before = self.record()
+        expected = {path: (entry['name'], entry['used_by']) for path, entry in before['targets'].items() if entry['kind'] == 'skill'}
+        skill = self.source / 'task-router/SKILL.md'
+        skill.write_text(skill.read_text() + '\nUpdated from the recorded remote.\n')
+        subprocess.run(['git', '-C', str(self.source), '-c', 'core.hooksPath=/dev/null', 'add', '.'], check=True)
+        subprocess.run(['git', '-C', str(self.source), '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'new candidate'], check=True)
+        commit = self.head()
+        subprocess.run(['git', '-C', str(self.source), '-c', 'core.hooksPath=/dev/null', 'push', '-q', 'origin', branch], check=True)
+        shutil.rmtree(self.source)
+        result = subprocess.run([self.bash, str(self.ghost / 'bin/ghost-alice'), 'update'],
+                                cwd=self.home, env=installer_env(self.home), capture_output=True, text=True, timeout=180)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        record = self.record()
+        self.assertEqual({path: (entry['name'], entry['used_by']) for path, entry in record['targets'].items() if entry['kind'] == 'skill'}, expected)
+        self.assertEqual(record['source']['root'], str(self.source))
+        self.assertEqual(record['source']['commit'], commit)
+        self.assertIn('Updated from the recorded remote.', (self.claude / 'task-router/SKILL.md').read_text())
+        self.assertNotEqual(record['installer']['active_root'], before['installer']['active_root'])
 
     def test_the_last_host_removal_takes_the_record_and_the_publish_rollbacks(self):
         (self.home / ".claude").mkdir()
@@ -151,22 +363,66 @@ class InstallRecordShellTest(unittest.TestCase):
         self.assertTrue((self.ghost / "install-state" / "codex.json").is_file())
         self.run_installer("--platform", "codex", "--uninstall")
         self.assertFalse(record.exists())
+        self.assertFalse((self.ghost / installed_payload.LEGACY_FILENAME).exists())
         self.assertFalse(rollbacks.exists())
+        self.assertFalse(any(Path(path).exists() for path in self.commands))
+        self.assertTrue(any((self.ghost / 'versions').iterdir()))
         archived = list((self.ghost / "uninstall-backup" / "codex" / "support-state").glob("publish-rollbacks-*"))
         self.assertEqual(archived, [], 'an empty placement folder needs no recovery copy')
+
+    def test_removal_preserves_common_assets_owned_by_another_recorded_host(self):
+        (self.home / '.claude').mkdir()
+        self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router')
+        shared = {path: dict(entry, used_by=['fixture-host']) for path, entry in self.record()['targets'].items()
+                  if entry['kind'] in {'runtime', 'command'}}
+        with install_lock.command_lock(self.ghost / 'install.lock', owner='test:other-host'):
+            installed_payload.update(self.ghost, {'targets': shared})
+        self.run_installer('--platform', 'claude', '--uninstall')
+        record = self.record()
+        self.assertEqual({tuple(entry['used_by']) for entry in record['targets'].values()}, {('fixture-host',)})
+        self.assertTrue(all(Path(path).exists() for path in record['targets']))
+        self.assertTrue(Path(record['installer']['active_root']).is_dir())
+
+    def test_selected_last_core_removal_retires_management_after_clone_is_deleted(self):
+        from installer_testing import installer_env
+        (self.home / '.claude').mkdir()
+        self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router')
+        saved = Path(self.record()['installer']['active_root'])
+        ledger = self.ghost / 'session-intent/retained.txt'
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text('history')
+        shutil.rmtree(self.source)
+        result = subprocess.run([self.bash, str(self.ghost / 'bin/ghost-alice'), '--platform', 'claude',
+                                 '--uninstall', 'task-router'], cwd=self.home, env=installer_env(self.home),
+                                capture_output=True, text=True, timeout=180)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.claude / 'task-router').exists())
+        self.assertFalse(self.runtime.exists())
+        self.assertFalse(any(Path(path).exists() for path in self.commands))
+        self.assertFalse((installed_payload.read(self.ghost) or {}).get('installer', {}).get('active_root'))
+        self.assertEqual(ledger.read_text(), 'history')
+        self.assertTrue(any((self.ghost / 'versions').iterdir()))
+        (self.home / '.codex').mkdir()
+        restored = subprocess.run([self.bash, str(saved / 'install.sh'), '--skip-source-health'],
+                                 cwd=self.home, env=installer_env(self.home), capture_output=True, text=True, timeout=180)
+        self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
+        self.assertEqual([(row['name'], row['used_by']) for row in self.record()['targets'].values()
+                          if row['kind'] == 'skill'], [('task-router', ['claude'])])
+        self.assertEqual(ledger.read_text(), 'history')
 
     def test_the_first_install_over_earlier_records_creates_the_record_from_them(self):
         (self.home / ".codex").mkdir()
         self.run_installer("--platform", "codex", "--skip-source-health")
-        installed_payload.path(self.ghost).unlink()
+        for name in installed_payload.RECORD_FILENAMES:
+            (self.ghost / name).unlink()
         shutil.rmtree(install_transaction.rollbacks_root(self.ghost))
         names = _target_names()
         out = self.run_installer("--platform", "codex", "--skip-source-health", "--verbose", "task-router")
-        self.assertIn(f"Install record created from earlier install records: {len(names)} targets "
-                      f"(migrated {len(names)}, unknown 0)", out)
+        self.assertIn(f"Install record created from earlier install records: {len(names) + 2} targets "
+                      f"(migrated {len(names)}, unknown 2)", out)
         targets = self.record()["targets"]
         republished = {(self.codex / "_shared").as_posix(), (self.codex / "task-router").as_posix(),
-                       self.runtime.as_posix(), self.companion.as_posix()}
+                       self.runtime.as_posix(), self.companion.as_posix()} | self.commands
         self.assertEqual(set(targets), {(self.codex / name).as_posix() for name in names} | republished)
         for dest, entry in targets.items():
             with self.subTest(dest=dest):

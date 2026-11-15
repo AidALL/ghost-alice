@@ -33,6 +33,29 @@ def receipt_from(message: str) -> dict:
 
 
 class SessionIntentAnalyzerHookTests(unittest.TestCase):
+    def test_parser_resolves_default_root_after_the_installation_binding_changes(self):
+        import session_intent_analyzer_hook as analyzer
+        from installer_testing import destination_fixture
+        import install_destination
+        destination = install_destination.InstallDestination.parse(destination_fixture(self.tmp_home))
+        with patch.dict(os.environ, {'GHOST_ALICE_SESSION_INTENT_ROOT': ''}), install_destination.use(destination):
+            self.assertEqual(analyzer.build_parser().parse_args([]).root, destination.ledger_root)
+
+    def test_retired_root_never_issues_receipts_or_creates_intake_cache_or_error_marker(self):
+        ghost = self.tmp_home / 'custom-installation'
+        ghost.mkdir()
+        (ghost / 'config.json').write_text(json.dumps({'retired_ledger_roots': [str(self.ledger_root)]}))
+        for platform in ('claude', 'codex'):
+            for event in ('session_start', 'prompt_submit'):
+                with self.subTest(platform=platform, event=event):
+                    result = self.run_hook({'session_id': 'still-same-native-session', 'prompt': 'later input'},
+                        '--platform', platform, '--context', event,
+                        env_update={'GHOST_ALICE_GHOST_ROOT': str(ghost)})
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertTrue(json.loads(result.stdout)['continue'])
+                    self.assertNotIn(RECEIPT_START, result.stdout)
+                    self.assertFalse(self.ledger_root.exists())
+
     def test_managed_commands_register_executor_without_procedure_snapshot(self):
         sys.path.insert(0, str(SCRIPT.parent))
         import install_hooks
@@ -812,14 +835,9 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         self.base = pathlib.Path(tempfile.mkdtemp(prefix="sia-degrade-"))
         self.addCleanup(lambda: shutil.rmtree(self.base, ignore_errors=True))
         shared = self.base / "_shared"
-        shared.mkdir(parents=True)
+        shutil.copytree(SCRIPT.parent, shared, ignore=shutil.ignore_patterns('test_*', 'tests', '__pycache__'))
         # Copy the hook into a deployment whose sibling ledger this fixture controls.
         self.hook = shared / "session_intent_analyzer_hook.py"
-        shutil.copy2(SCRIPT, self.hook)
-        shutil.copy2(SCRIPT.with_name("install_destination.py"),shared/"install_destination.py")
-        for dependency in ('reminder_texts.py', 'reminder_texts.json', 'atomic_write.py', 'source_reference.py', 'timestamps.py',
-                           'ledger_access.py', 'hook_definitions.py', 'session_identity.py', 'hook_input.py'):
-            shutil.copy2(SCRIPT.with_name(dependency), shared / dependency)
         self.home = self.base / "home"
         self.home.mkdir()
         self.root = self.base / "root"

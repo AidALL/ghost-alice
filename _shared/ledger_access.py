@@ -8,7 +8,6 @@ import hashlib
 import importlib.util
 from pathlib import Path
 import sys
-from hook_definitions import SUPPORTED_PLATFORMS
 
 LEDGER_PATH = Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
 MODULE_NAME = "session_intent_ledger"
@@ -27,6 +26,22 @@ class CoordinateError(ValueError):
     def __init__(self, reason, detail):
         super().__init__(detail)
         self.reason = reason
+
+
+class RetiredLedgerRoot(ValueError):
+    """This installation ended writes to the requested ledger root."""
+
+
+def require_writable_root(root, *, env=None):
+    """Check the installation's retirement fact; never redirect the requested root."""
+    import runtime_config
+    config = runtime_config.load_config(env=env, strict=True)
+    retired = config.get('retired_ledger_roots', [])
+    if (not isinstance(retired, list) or any(not isinstance(path, str) or not Path(path).is_absolute()
+                                            for path in retired)):
+        raise ValueError('Installation config has invalid retired ledger roots')
+    if Path(root).expanduser().resolve() in {Path(path).resolve() for path in retired}:
+        raise RetiredLedgerRoot(f'This installation retired ledger root {root}; use the next host session receipt')
 
 
 def _module_name(path):
@@ -66,7 +81,7 @@ def coordinates(source):
     owner = {key: source.get("GHOST_ALICE_" + key.upper()) for key in ("platform", "session_id")}
     if not (isinstance(root, str) and Path(root).is_absolute()):
         raise CoordinateError("ledger-root-unavailable", "Exact ledger root is required")
-    if owner["platform"] not in SUPPORTED_PLATFORMS or not isinstance(owner["session_id"], str) or not owner["session_id"]:
+    if any(not isinstance(value, str) or not value for value in owner.values()):
         raise CoordinateError("owner-mismatch", "Exact native owner is required")
     if owner["platform"] == "codex" and source.get("CODEX_THREAD_ID") not in (None, "", owner["session_id"]):
         raise CoordinateError("owner-mismatch", "Native owner conflicts with the host")
@@ -82,5 +97,8 @@ def source_environment(platform, session_id, *, root=None, native_dir=None, envi
     if root is not None:
         source["GHOST_ALICE_SESSION_INTENT_ROOT"] = str(root)
     if native_dir is not None:
-        source["GHOST_ALICE_CODEX_DIR" if platform == "codex" else "GHOST_ALICE_CLAUDE_DIR"] = str(native_dir)
+        native_key = {'codex': 'GHOST_ALICE_CODEX_DIR', 'claude': 'GHOST_ALICE_CLAUDE_DIR'}.get(platform)
+        if native_key is None:
+            raise ValueError(f'No native directory adapter is installed for host {platform}')
+        source[native_key] = str(native_dir)
     return source

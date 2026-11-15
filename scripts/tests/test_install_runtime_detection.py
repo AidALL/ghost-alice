@@ -252,6 +252,7 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
                     #!/bin/sh
                     [ "${{1:-}}" = "install" ] || exit 2
                     [ "${{2:-}}" = "python3" ] || exit 3
+                    printf 'PACKAGE_MANAGER_STARTED\\n'
                     : > "{bash_marker}"
                     "{chmod_exe}" +x "{bash_fake_python}"
                     exit 0
@@ -269,8 +270,10 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
                     set -euo pipefail
                     PATH="{bash_bin_dir}"
                     GHOST_ALICE_TEST_SKIP_COMMON_PYTHON_PATHS=1
+                    SCRIPT_DIR="{_bash_path(REPO_ROOT)}"
+                    unset GHOST_ALICE_PREREQUISITES_SHOWN
                     t() {{ printf '%s' "$1"; }}
-                    info() {{ :; }}
+                    info() {{ printf '%s\\n' "$1"; }}
                     warn() {{ :; }}
                     ok() {{ :; }}
                     error() {{ :; }}
@@ -292,7 +295,11 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-        self.assertEqual(result.stdout.strip(), "python3")
+        self.assertIn('Python 3.11+, Git and Node.js', result.stdout)
+        self.assertIn('automatic consent', result.stdout)
+        self.assertLess(result.stdout.index('automatic consent'), result.stdout.index('PACKAGE_MANAGER_STARTED'))
+        self.assertEqual(result.stdout.count('automatic consent'), 1)
+        self.assertEqual(result.stdout.splitlines()[-1], 'python3')
 
     def test_install_sh_reuses_verified_python_detection(self) -> None:
         install_sh = installer_bash_source()

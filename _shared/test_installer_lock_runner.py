@@ -249,7 +249,7 @@ class UnfinishedPublishTests(unittest.TestCase):
                     "schema_version": payload.SCHEMA_VERSION,
                     "targets": {}, "installer": {"commit": "candidate"}}).encode())
                 journal = install_transaction.Journal.load(self.ghost, folder.name)
-                journal.data.update(participants={}, record_copy=saved.name, targets=[dict(
+                journal.data.update(participants={}, record_copy=saved.name, record_files=[saved.name], targets=[dict(
                     dest=str(dest), stage=str(stage), rollback=str(original),
                     before=install_transaction.content_digest.state(original),
                     candidate=install_transaction.content_digest.state(stage))])
@@ -257,10 +257,10 @@ class UnfinishedPublishTests(unittest.TestCase):
                 real_state = install_transaction.content_digest.state
                 real_remove = install_transaction._remove_path
 
-                def state(path):
+                def state(path, **kwargs):
                     if point == "inspect" and Path(path) == stage:
                         raise OSError("staged file inspection denied")
-                    return real_state(path)
+                    return real_state(path, **kwargs)
 
                 def remove(path):
                     if point == "remove" and Path(path) == stage:

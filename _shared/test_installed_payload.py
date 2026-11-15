@@ -33,7 +33,7 @@ class RecordCase(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.ghost = self.home / ".ghost-alice"
         self.ghost.mkdir()
-        self.record = self.ghost / "installed-payload.json"
+        self.record = installed_payload.path(self.ghost)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -44,11 +44,46 @@ class RecordCase(unittest.TestCase):
 
 
 class SchemaAndWriteTests(RecordCase):
+    def test_legacy_record_is_migrated_without_leaving_new_targets_writable_by_old_installer(self):
+        self.hold_lock()
+        old = {"schema_version": 1, "targets": {"/old": _entry()},
+               "source": {"root": "/development", "commit": "old"}}
+        legacy = self.ghost / installed_payload.LEGACY_FILENAME
+        legacy.write_text(json.dumps(old), encoding="utf-8")
+        installed_payload.update(self.ghost, {"targets": {"/new": _entry(name="new")}})
+        self.assertTrue((self.ghost / "installed-payload-v2.json").is_file())
+        detail = json.loads((self.ghost / "installed-payload-v2.json").read_text())
+        self.assertEqual(detail["schema_version"], 2)
+        self.assertEqual(set(detail["targets"]), {"/old", "/new"})
+        self.assertEqual(detail["source"], old["source"])
+        marker = json.loads(legacy.read_text())
+        self.assertEqual(marker["schema_version"], 2)
+        self.assertNotIn("targets", marker)
+        # The old writer rejects this schema; the new reader follows only its own detailed record.
+        legacy.write_text(json.dumps(old), encoding="utf-8")
+        self.assertEqual(installed_payload.read(self.ghost), detail)
+
+    def test_ordinary_publish_keeps_active_cli_and_update_input(self):
+        self.hold_lock()
+        installed_payload.update(self.ghost, {
+            "installer": {"active_root": "/versions/first/core", "commit": "first"},
+            "source": {"root": "/development", "remote": "/origin", "ref": "main"},
+        })
+        installed_payload.update(self.ghost, {
+            "installer": {"commit": "candidate", "schema_version": 2},
+            "source": {"commit": "candidate"},
+            "targets": {"/new": _entry()},
+        })
+        record = installed_payload.read(self.ghost)
+        self.assertEqual(record["installer"].get("active_root"), "/versions/first/core")
+        self.assertEqual(record["source"]["root"], "/development")
+        self.assertEqual(record["source"]["remote"], "/origin")
+
     def test_the_record_lives_in_the_ghost_root_and_reads_none_when_absent(self):
         self.assertEqual(installed_payload.path(self.ghost), self.record)
         self.assertIsNone(installed_payload.read(self.ghost))
 
-    def test_update_writes_a_version_one_record_with_only_the_sections_it_was_given(self):
+    def test_update_writes_the_current_record_with_only_the_sections_it_was_given(self):
         self.hold_lock()
         target = str(self.home / ".claude" / "skills" / "alpha")
         written = installed_payload.update(self.ghost, {
@@ -58,7 +93,7 @@ class SchemaAndWriteTests(RecordCase):
         on_disk = json.loads(self.record.read_text(encoding="utf-8"))
         self.assertEqual(on_disk, written)
         self.assertEqual(installed_payload.read(self.ghost), on_disk)
-        self.assertEqual(on_disk["schema_version"], 1)
+        self.assertEqual(on_disk["schema_version"], 2)
         self.assertEqual(on_disk["targets"], {target: _entry()})
         self.assertEqual(on_disk["source"]["hooks_path"], "hooks")
         for absent in ("installer", "last_transaction", "addons", "adapters", "host_changes", "service"):
@@ -97,13 +132,14 @@ class SchemaAndWriteTests(RecordCase):
 
         with mock.patch.object(installed_payload.os, "replace", side_effect=recording_replace):
             installed_payload.update(self.ghost, {"targets": {"/a": _entry()}})
-        self.assertEqual(len(renames), 1)
-        temporary, final = renames[0]
-        self.assertEqual(final, self.record)
-        self.assertEqual(temporary.parent, self.ghost)
-        self.assertNotEqual(temporary, final)
+        record_renames = [(temporary, final) for temporary, final in renames if final.parent == self.ghost]
+        self.assertEqual({final for _, final in record_renames},
+                         {self.record, self.ghost / installed_payload.LEGACY_FILENAME})
+        for temporary, final in record_renames:
+            self.assertEqual(temporary.parent, self.ghost)
+            self.assertNotEqual(temporary, final)
         self.assertEqual(sorted(p.name for p in self.ghost.iterdir()),
-                         ["install.lock", "install.lock.guard", "installed-payload.json"])
+                         ["install.lock", "install.lock.guard", "installed-payload-v2.json", "installed-payload.json", "rollbacks"])
 
     def test_a_failed_write_keeps_the_previous_record_and_leaves_no_temporary_file(self):
         self.hold_lock()
@@ -114,7 +150,7 @@ class SchemaAndWriteTests(RecordCase):
                 installed_payload.update(self.ghost, {"targets": {"/b": _entry()}})
         self.assertEqual(self.record.read_bytes(), before)
         self.assertEqual(sorted(p.name for p in self.ghost.iterdir()),
-                         ["install.lock", "install.lock.guard", "installed-payload.json"])
+                         ["install.lock", "install.lock.guard", "installed-payload-v2.json", "installed-payload.json", "rollbacks"])
 
     def test_an_unknown_section_is_refused(self):
         self.hold_lock()
@@ -124,12 +160,12 @@ class SchemaAndWriteTests(RecordCase):
 
     def test_an_unknown_schema_version_is_refused_by_read_and_update(self):
         self.hold_lock()
-        self.record.write_text(json.dumps({"schema_version": 2, "targets": {}}), encoding="utf-8")
+        self.record.write_text(json.dumps({"schema_version": 3, "targets": {}}), encoding="utf-8")
         with self.assertRaisesRegex(installed_payload.RecordError, "schema_version"):
             installed_payload.read(self.ghost)
         with self.assertRaises(installed_payload.RecordError):
             installed_payload.update(self.ghost, {"targets": {"/a": _entry()}})
-        self.assertEqual(json.loads(self.record.read_text(encoding="utf-8"))["schema_version"], 2)
+        self.assertEqual(json.loads(self.record.read_text(encoding="utf-8"))["schema_version"], 3)
         self.record.write_text("{broken", encoding="utf-8")
         with self.assertRaises(installed_payload.RecordError):
             installed_payload.read(self.ghost)
@@ -145,7 +181,7 @@ class ReleaseTargetTests(RecordCase):
     def test_releasing_one_host_preserves_other_hosts_targets_and_sections(self):
         self.hold_lock()
         record = {
-            "schema_version": 1,
+            "schema_version": 2,
             "targets": {
                 "/a": _entry(used_by=["claude", "codex"]),
                 "/alphabet": _entry(),
@@ -199,7 +235,7 @@ class ReleaseTargetTests(RecordCase):
 
     def test_malformed_records_and_selected_entries_are_preserved_and_reported(self):
         self.hold_lock()
-        values = ["{broken", "[]", '{"schema_version": 2, "targets": {}}',
+        values = ["{broken", "[]", '{"schema_version": 3, "targets": {}}',
                   '{"schema_version": 1, "targets": []}']
         for entry in (None, {}, _entry(used_by="codex"), _entry(used_by=[42]), _entry(provider=None)):
             values.append(json.dumps({"schema_version": 1, "targets": {"/a": entry}}))
@@ -367,8 +403,8 @@ class MigrationTests(RecordCase):
         self.assertEqual(summary, {"targets": 8, "migrated": 5, "unknown": 3})
         # The earlier records stay byte-for-byte as they were.
         self.assertEqual(self.old_records(), before)
-        self.assertEqual(record["schema_version"], 1)
-        self.assertEqual(record["installer"], {"commit": "ccc333", "schema_version": 1})
+        self.assertEqual(record["schema_version"], 2)
+        self.assertEqual(record["installer"], {"commit": "ccc333", "schema_version": 2})
         # The latest install-state names the source.
         self.assertEqual(record["source"], {"root": self.source.as_posix(), "commit": "bbb222", "dirty": "clean",
                                             "hooks_path": None})
@@ -436,6 +472,7 @@ class MigrationTests(RecordCase):
         self.assertIsNone(self.migrate())
         self.assertEqual(self.record.read_bytes(), written)
         self.record.unlink()
+        (self.ghost / installed_payload.LEGACY_FILENAME).unlink()
         for state in (self.ghost / "install-state").glob("*.json"):
             state.unlink()
         self.assertIsNone(self.migrate())
@@ -448,7 +485,8 @@ class MigrationTests(RecordCase):
                                         ("not a time", "2026-10-03T00:00:00+00:00"),
                                         ("2026-10-01T00:00:00+09:00", "2026-10-03T00:00:00")):
             with self.subTest(claude=claude_time, codex=codex_time):
-                self.record.unlink(missing_ok=True)
+                for name in installed_payload.RECORD_FILENAMES:
+                    (self.ghost / name).unlink(missing_ok=True)
                 for host, installed_at in (("claude", claude_time), ("codex", codex_time)):
                     state_file = self.ghost / "install-state" / f"{host}.json"
                     state = json.loads(state_file.read_text(encoding="utf-8"))
@@ -615,6 +653,31 @@ class ServiceMigrationTests(RecordCase):
     def old_files(self) -> dict[Path, bytes]:
         return {path: path.read_bytes() for path in (self.receipt, self.binding)}
 
+    def test_service_migration_interrupted_between_record_files_recovers_original_schema(self):
+        import install_transaction
+        self.hold_lock()
+        legacy = self.ghost / installed_payload.LEGACY_FILENAME
+        original = json.dumps({"schema_version": 1, "targets": {str(self.shared): self.runtime_entry}}).encode()
+        legacy.write_bytes(original)
+        write = installed_payload._write
+
+        def interrupt_notice(path, data):
+            if path == legacy:
+                raise KeyboardInterrupt
+            return write(path, data)
+
+        with mock.patch.object(installed_payload, "_write", side_effect=interrupt_notice):
+            with self.assertRaises(KeyboardInterrupt):
+                installed_payload.migrate_service(self.ghost)
+        self.assertTrue(self.record.exists())
+        pending = install_transaction.unfinished(self.ghost)
+        self.assertEqual(len(pending), 1)
+        install_transaction.recover(self.ghost, pending[0])
+        self.assertFalse(self.record.exists())
+        self.assertEqual(legacy.read_bytes(), original)
+        installed_payload.migrate_service(self.ghost)
+        self.assertEqual(installed_payload.read(self.ghost)["service"], self.expected_service())
+
     def test_the_receipt_becomes_the_service_section_once_and_stays_as_it_is(self):
         self.hold_lock()
         installed_payload.update(self.ghost, {"targets": {str(self.shared): self.runtime_entry}})
@@ -627,6 +690,47 @@ class ServiceMigrationTests(RecordCase):
         written = self.record.read_bytes()
         self.assertIsNone(installed_payload.migrate_service(self.ghost))
         self.assertEqual(self.record.read_bytes(), written)
+
+    def test_failed_schema_restore_stops_the_install_command(self):
+        import install_transaction
+        self.hold_lock()
+        legacy = self.ghost / installed_payload.LEGACY_FILENAME
+        legacy.write_text(json.dumps({"schema_version": 1, "targets": {str(self.shared): self.runtime_entry}}))
+        write = installed_payload._write
+
+        def fail_notice(path, data):
+            if path == legacy:
+                raise OSError("notice is read-only")
+            return write(path, data)
+
+        with mock.patch.object(installed_payload, "_write", side_effect=fail_notice), \
+                mock.patch.object(install_transaction.Journal, "restore_record", side_effect=OSError("restore failed")):
+            with self.assertRaisesRegex(install_transaction.InstallTransactionError, "restore failed"):
+                installed_payload.migrate_service(self.ghost)
+        self.assertEqual(len(install_transaction.unfinished(self.ghost)), 1)
+
+    def test_direct_gateway_lock_restores_interrupted_record_before_a_new_write(self):
+        import context_gateway_platform
+        import install_transaction
+        legacy = self.ghost / installed_payload.LEGACY_FILENAME
+        legacy.write_text(json.dumps({"schema_version": 1, "targets": {str(self.shared): self.runtime_entry}}))
+        write = installed_payload._write
+
+        def interrupt_notice(path, data):
+            if path == legacy:
+                raise KeyboardInterrupt
+            return write(path, data)
+
+        with context_gateway_platform.operation_lock(self.home):
+            with mock.patch.object(installed_payload, "_write", side_effect=interrupt_notice):
+                with self.assertRaises(KeyboardInterrupt):
+                    installed_payload.migrate_service(self.ghost)
+        with context_gateway_platform.operation_lock(self.home):
+            self.assertEqual(install_transaction.unfinished(self.ghost), [])
+            self.assertNotIn("service", installed_payload.read(self.ghost))
+            installed_payload.update(self.ghost, {"source": {"root": "/new-success"}})
+        self.assertEqual(install_transaction.unfinished(self.ghost), [])
+        self.assertEqual(installed_payload.read(self.ghost)["source"]["root"], "/new-success")
 
     def test_the_companion_the_receipt_lists_becomes_a_runtime_target(self):
         self.hold_lock()

@@ -1110,6 +1110,7 @@ def _runtime_core_audit(
     runtime_shared: Path | None,
     hook_config: Path | None,
     platform: str,
+    *, record_root: Path | None = None,
 ) -> tuple[str, list[dict[str, str]]]:
     if runtime_shared is None:
         return STATUS_OK, [{
@@ -1120,6 +1121,23 @@ def _runtime_core_audit(
         }]
 
     runtime_shared = runtime_shared.expanduser()
+    hook_source_root = source_shared.parent
+    if record_root is not None:
+        import installed_payload
+        import install_destination
+        import runtime_config
+        try:
+            target = (installed_payload.read(record_root) or {}).get('targets', {}).get(str(runtime_shared))
+            if target is not None:
+                if target.get('kind') != 'runtime' or not isinstance(target.get('source'), str):
+                    raise installed_payload.RecordError('Runtime target does not name its source')
+                source_shared = Path(target['source'])
+            location = runtime_config.load_config(env={'GHOST_ALICE_GHOST_ROOT': str(record_root)}, strict=True).get(
+                'install_locations', {}).get(platform)
+            if location is not None:
+                hook_source_root = Path(install_destination.InstallDestination.parse(location).core_source_root)
+        except ValueError as exc:
+            return STATUS_ERROR, [dict(status=STATUS_ERROR, name='install-record', kind='runtime-core', reason=str(exc))]
     findings = _runtime_shared_file_audit(source_shared, runtime_shared)
     config_status, commands = _hook_config_commands(hook_config)
     if config_status != STATUS_OK:
@@ -1142,7 +1160,7 @@ def _runtime_core_audit(
     session_status, session_detail = _runtime_session_intent_golden_status(
         runtime_shared,
         platform,
-        repo_root=source_shared.parent,
+        repo_root=hook_source_root,
         hook_commands=commands,
     )
     findings.append({
@@ -1296,6 +1314,7 @@ def run(args: argparse.Namespace) -> int:
         args.runtime_shared,
         args.hook_config,
         args.platform,
+        record_root=ghost_alice_root,
     )
     statuses.append(runtime_status)
     print(f"runtime-core: {runtime_status}")

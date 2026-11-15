@@ -174,8 +174,9 @@ class PlacementTests(TransactionCase):
     def setUp(self):
         super().setUp()
         self.info = SourceInfo(root=self.source, branch="main", head="abc123def", dirty="clean")
-        self.resolve = self.enterContext(mock.patch("installer.source.resolve_source", return_value=self.info))
-        self.enterContext(mock.patch("installer.source.configured_hooks_path", return_value="hooks"))
+        self.origin = {"root": str(self.source), "commit": "abc123def", "dirty": "clean",
+                       "branch": "main", "hooks_path": "hooks", "remote": None, "ref": "main"}
+        self.enterContext(mock.patch("installer.source.input_record", return_value=self.origin))
         self.requests: list[dict] = []
         self.participants: list[list] = []
         self.codes: list[int] = []
@@ -197,8 +198,10 @@ class PlacementTests(TransactionCase):
     def expected_request(self, host, *targets, **extra):
         return {"schema_version": 1, "host": host, "ghost_root": str(self.ghost),
                 "event_log": str(self.ghost / "install-state" / f"{host}-events.jsonl"),
-                "installer": {"commit": "abc123def", "schema_version": 1},
-                "source": {"root": str(self.source), "commit": "abc123def", "dirty": "clean", "hooks_path": "hooks"},
+                "installer": {"commit": "abc123def", "schema_version": installed_payload.SCHEMA_VERSION},
+                "source": self.origin, "asset_root": str(self.source),
+                **({"install_state": str(self.ghost / "install-state" / f"{host}.json")}
+                   if any(t["kind"] == "support" for t in targets) else {}),
                 "targets": list(targets), **extra}
 
     def expected_target(self, name, source, dest, mode, *, kind="skill", provider="core", commit="abc123def",
@@ -366,13 +369,13 @@ class PlacementTests(TransactionCase):
             _, out = self.captured(transaction.record_current_links, ctx, links)
         self.assertIn("[WARN] The install record could not record the targets that were already installed", out)
 
-    def test_the_source_is_read_once_per_command(self):
+    def test_one_command_keeps_its_original_source_between_placements(self):
         ctx = self.context("claude")
         with self.runner.patch():
             transaction.sync_runtime_shared(ctx)
-            transaction.link_or_copy(ctx, Target("alpha", self.source / "alpha"), ctx.skills_dir / "alpha")
-        self.assertEqual(self.resolve.call_count, 1)
-        self.assertEqual(len(self.requests), 2)
+            with mock.patch("installer.source.input_record", side_effect=AssertionError("source changed")):
+                transaction.link_or_copy(ctx, Target("alpha", self.source / "alpha"), ctx.skills_dir / "alpha")
+        self.assertEqual([request["source"] for request in self.requests], [self.origin, self.origin])
 
     def test_placement_runs_no_child_tool(self):
         ctx = self.context("codex")
@@ -553,18 +556,59 @@ class RecordMigrationTests(TransactionCase):
 
     def setUp(self):
         super().setUp()
-        info = SourceInfo(root=self.source, branch="main", head="abc123def", dirty="clean")
-        self.enterContext(mock.patch("installer.source.resolve_source", return_value=info))
-        self.enterContext(mock.patch("installer.source.configured_hooks_path", return_value="hooks"))
+        self.enterContext(mock.patch("installer.source.input_record", return_value={
+            "root": str(self.source), "branch": "main", "commit": "abc123def", "dirty": "clean", "hooks_path": "hooks"}))
 
     def test_migration_reads_every_host_and_reports_what_it_created(self):
         ctx = self.context("claude")
-        with mock.patch("installed_payload.migrate", return_value={"targets": 8, "migrated": 5, "unknown": 3}) as migrate, \
-             mock.patch("installed_payload.migrate_service", return_value=None):
+        state_dir = self.ghost / 'install-state'
+        state_dir.mkdir(parents=True, exist_ok=True)
+        for host in ('claude', 'future-host'):
+            dest = self.home / host / 'task-router'
+            dest.mkdir(parents=True)
+            (dest / 'SKILL.md').write_text('installed bytes')
+            (state_dir / f'{host}.json').write_text(json.dumps({
+                'platform': host, 'source_root': str(self.source), 'targets': [{
+                    'target_name': 'task-router', 'source_path': str(self.source / 'task-router'),
+                    'dest_path': str(dest), 'install_mode': 'copy'}]}))
+        runtime = self.ghost / 'runtime/current/_shared'
+        runtime.mkdir(parents=True)
+        (runtime / 'module.py').write_text('legacy runtime without recorded fingerprint')
+        import install_lock
+        with install_lock.command_lock(self.ghost / 'install.lock', owner='test'), \
+                mock.patch("installed_payload.migrate_service", return_value=None):
             _, out = self.captured(transaction.migrate_record, ctx)
-        migrate.assert_called_once_with(self.ghost, ("claude", "codex"), installer_commit="abc123def")
-        self.assertIn("[INFO] Install record created from earlier install records: 8 targets (migrated 5, unknown 3)",
-                      out)
+        record = installed_payload.read(self.ghost)
+        self.assertEqual({tuple(row['used_by']) for row in record['targets'].values()},
+                         {('claude',), ('future-host',), ('claude', 'future-host')})
+        self.assertEqual(record['targets'][str(runtime)]['kind'], 'runtime')
+        self.assertEqual(record['targets'][str(runtime)]['baseline'], 'unknown')
+        self.assertNotIn('files', record['targets'][str(runtime)])
+        import uninstall_cleanup
+        from unittest.mock import patch
+        # A legacy runtime is visible to removal, but present bytes are not historical proof.
+        with patch.object(installed_payload, 'read', return_value={
+                'targets': {str(runtime): dict(record['targets'][str(runtime)], used_by=['claude'])}}):
+            item, = uninstall_cleanup._runtime_artifact_items('claude', [])
+        self.assertEqual((item['action'], item['reason']), ('manual-review', 'no-installed-baseline'))
+        self.assertIn('3 targets', out)
+
+    def test_v1_record_with_removed_skills_still_inventories_remaining_runtime(self):
+        state_dir = self.ghost / 'install-state'
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / 'claude.json').write_text(json.dumps(dict(platform='claude', targets=[], source_root=str(self.source))))
+        (self.ghost / installed_payload.LEGACY_FILENAME).write_text(json.dumps(dict(schema_version=1, targets={})))
+        runtime = self.ghost / 'runtime/current/_shared'
+        runtime.mkdir(parents=True)
+        (runtime / 'module.py').write_text('old runtime')
+        import install_lock
+        with install_lock.command_lock(self.ghost / 'install.lock', owner='test'):
+            self.captured(transaction.migrate_record, self.context('claude'))
+        record = installed_payload.read(self.ghost)
+        self.assertEqual(record['schema_version'], installed_payload.SCHEMA_VERSION)
+        self.assertEqual(record['targets'][str(runtime)]['baseline'], 'unknown')
+        self.assertEqual(record['targets'][str(runtime)]['used_by'], ['claude'])
+        self.assertNotIn('files', record['targets'][str(runtime)])
 
     def test_the_service_section_is_migrated_after_the_targets_and_reported(self):
         ctx = self.context("claude")
@@ -757,7 +801,8 @@ class RecordTests(TransactionCase):
         self.assertEqual(args[:6], ["claude", str(self.source), "main", "abc123def", "clean", str(state)])
         self.assertEqual(args[6:10], ["_shared", str(self.source / "_shared"), str(ctx.skills_dir / "_shared"), "symlink"])
         self.assertEqual(args[10:14], ["alpha", str(self.source / "alpha"), str(ctx.skills_dir / "alpha"), "missing"])
-        self.assertEqual(kwargs["env"], {"GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED": "1",
+        self.assertEqual(kwargs["env"], {"GHOST_ALICE_SOURCE_REPO_HOOK_ROOT": str(self.source),
+                                         "GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED": "1",
                                          "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT": "1",
                                          "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE": "old-hooks",
                                          "GHOST_ALICE_SOURCE_REPO_HOOK_AFTER": hooks,
@@ -770,7 +815,8 @@ class RecordTests(TransactionCase):
         with again.patch():
             transaction.write_install_state_manifest(ctx, ctx.skills_dir, False, collected, carried)
         _, _, kwargs = next(c for c in again.calls if c[0].endswith("install_state_writer.py"))
-        self.assertEqual(kwargs["env"], {"GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED": "1",
+        self.assertEqual(kwargs["env"], {"GHOST_ALICE_SOURCE_REPO_HOOK_ROOT": str(self.source),
+                                         "GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED": "1",
                                          "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT": "0",
                                          "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE": "",
                                          "GHOST_ALICE_SOURCE_REPO_HOOK_AFTER": hooks,

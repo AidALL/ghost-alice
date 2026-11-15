@@ -5,6 +5,8 @@ Dependencies: Python standard library only.
 import importlib.util
 from contextlib import closing
 import json
+import os
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -18,6 +20,168 @@ spec.loader.exec_module(ledger)
 
 
 class SQLiteAuthorityTests(unittest.TestCase):
+    def test_snapshot_keeps_selection_when_discovery_pointer_bytes_differ(self):
+        host, session = 'future-host', 'same-session'
+        origin = self.root / 'origin'
+        ledger.record_turn(root=origin, platform=host, session_id=session, raw_input='retained input')
+        state = ledger.read_session_state(root=origin, platform=host, session_id=session)
+        events = ledger.read_session_events(root=origin, platform=host, session_id=session)
+        for storage in ('legacy', 'sqlite'):
+            with self.subTest(storage=storage):
+                source, existing, staged = (self.root / storage / name for name in ('A', 'B', 'stage'))
+                for root in (source, existing):
+                    if storage == 'legacy':
+                        ledger.export_session(root=origin, platform=host, session_id=session, destination=root)
+                    else:
+                        ledger.snapshot_roots(origin, self.root / 'absent', root, writers_stopped=True)
+                    # DB discovery shadows these different stale JSON selections.
+                    pointer_session = session if storage == 'legacy' else 'stale-' + root.name
+                    ledger.write_current_session_pointer(root, host, pointer_session)
+                    self.assertEqual(ledger.read_current_session_pointer(root, host), session)
+                before = [ledger._snapshot_files(root) for root in (source, existing)]
+                pointer = ledger.current_session_pointer_path(source, host).read_bytes()
+                ledger.snapshot_roots(source, existing, staged, writers_stopped=True)
+                self.assertEqual(ledger.read_current_session_pointer(staged, host), session)
+                # Import preserves history without promoting an exported intake to a current binding.
+                expected = dict(state, canonical_input_event_id='') if storage == 'legacy' else state
+                self.assertEqual(ledger.read_session_state(root=staged, platform=host, session_id=session), expected)
+                self.assertEqual(ledger.read_session_events(root=staged, platform=host, session_id=session), events)
+                self.assertEqual(ledger.current_session_pointer_path(staged, host).read_bytes(), pointer)
+                self.assertEqual([ledger._snapshot_files(root) for root in (source, existing)], before)
+
+    def test_snapshot_keeps_conflicts_outside_equivalent_discovery_files(self):
+        for case in ('different-session', 'invalid-schema', 'nested-evidence', 'noncanonical-host', 'symlink'):
+            with self.subTest(case=case):
+                source, existing, staged = (self.root / case / name for name in ('A', 'B', 'stage'))
+                relative = Path('future-host/current-session.json')
+                if case == 'nested-evidence':
+                    relative = Path('future-host/evidence/current-session.json')
+                elif case == 'noncanonical-host':
+                    relative = Path('future host/current-session.json')
+                for root in (source, existing):
+                    path = root / relative
+                    path.parent.mkdir(parents=True)
+                    data = dict(schema_version=ledger.CURRENT_SESSION_SCHEMA,
+                                session_id=root.name if case == 'different-session' else 'same-session',
+                                state_path=str(root / 'state.json'))
+                    if case == 'invalid-schema':
+                        data['schema_version'] = 'unsupported'
+                    if case == 'symlink':
+                        target = root.parent / (root.name + '-pointer.json')
+                        target.write_text(json.dumps(data))
+                        path.symlink_to(target)
+                    else:
+                        path.write_text(json.dumps(data))
+                before = [ledger._snapshot_files(root) for root in (source, existing)]
+                with self.assertRaisesRegex(ValueError, 'Ledger migration conflict:'):
+                    ledger.snapshot_roots(source, existing, staged, writers_stopped=True)
+                self.assertEqual([ledger._snapshot_files(root) for root in (source, existing)], before)
+                self.assertFalse(staged.exists())
+
+    def test_snapshot_detects_pointer_mutation_after_equivalent_selection_check(self):
+        source, existing, staged = (self.root / name for name in ('A', 'B', 'stage'))
+        for root in (source, existing):
+            ledger.write_current_session_pointer(root, 'future-host', 'same-session')
+        pointer = ledger.current_session_pointer_path(source, 'future-host')
+        other = ledger.current_session_pointer_path(existing, 'future-host')
+        original = pointer.read_bytes()
+        other_original = other.read_bytes()
+        copy = shutil.copy2
+        def copy_then_change_input(src, dest, *args, **kwargs):
+            result = copy(src, dest, *args, **kwargs)
+            if src == pointer.resolve():
+                other.write_bytes(other.read_bytes() + b' ')
+            return result
+        with mock.patch.object(ledger.shutil, 'copy2', side_effect=copy_then_change_input):
+            with self.assertRaisesRegex(ValueError, 'Ledger input changed during snapshot'):
+                ledger.snapshot_roots(source, existing, staged, writers_stopped=True)
+        self.assertEqual(pointer.read_bytes(), original)
+        self.assertEqual(other.read_bytes(), other_original + b' ')
+        self.assertEqual(ledger.read_current_session_pointer(existing, 'future-host'), 'same-session')
+
+    def test_snapshot_rejects_link_directory_collision_before_changing_either_input(self):
+        source, existing, staged = self.root / 'A', self.root / 'B', self.root / 'stage'
+        (source / 'target').mkdir(parents=True)
+        (source / 'target/original.txt').write_text('original')
+        (source / 'nested').symlink_to(source / 'target', target_is_directory=True)
+        (existing / 'nested').mkdir(parents=True)
+        (existing / 'nested/new.txt').write_text('from B')
+        before = [ledger._snapshot_files(path) for path in (source, existing)]
+        with self.assertRaises(ValueError):
+            ledger.snapshot_roots(source, existing, staged, writers_stopped=True)
+        self.assertEqual([ledger._snapshot_files(path) for path in (source, existing)], before)
+        self.assertFalse((source / 'target/new.txt').exists())
+        self.assertFalse(staged.exists())
+
+    def test_migration_snapshot_preserves_full_databases_and_disjoint_legacy_sources(self):
+        source, existing, staged = self.root / 'A', self.root / 'B', self.root / 'stage'
+        ledger.record_turn(root=source, platform='codex', session_id='native-a', raw_input='original')
+        with ledger.storage_transaction(source) as db:
+            db.execute('CREATE TABLE retained_originals (body BLOB)')
+            db.execute('INSERT INTO retained_originals VALUES (?)', (b'original body\x00',))
+        with sqlite3.connect(source / 'session-checks.sqlite3') as db:
+            db.execute('CREATE TABLE checks (stamp TEXT)')
+            db.execute("INSERT INTO checks VALUES ('original receipt stamp')")
+        state = ledger.default_state('claude', 'native-b')
+        paths = ledger.session_paths(existing, 'claude', 'native-b')
+        paths['dir'].mkdir(parents=True)
+        paths['state'].write_text(json.dumps(state))
+        raw = paths['state'].read_bytes()
+        with self.assertRaisesRegex(ValueError, 'stopped'):
+            ledger.snapshot_roots(source, existing, staged, writers_stopped=False)
+        self.assertFalse(staged.exists())
+        ledger.snapshot_roots(source, existing, staged, writers_stopped=True)
+        self.assertEqual(ledger.read_session_state(root=staged, platform='codex', session_id='native-a'),
+                         ledger.read_session_state(root=source, platform='codex', session_id='native-a'))
+        self.assertEqual(ledger.read_session_state(root=staged, platform='claude', session_id='native-b'), state)
+        self.assertEqual(ledger.session_paths(staged, 'claude', 'native-b')['state'].read_bytes(), raw)
+        self.assertEqual(paths['state'].read_bytes(), raw)
+        with sqlite3.connect(staged / 'ghost-state.sqlite3') as db:
+            self.assertEqual(db.execute('SELECT body FROM retained_originals').fetchone()[0], b'original body\x00')
+            self.assertEqual(db.execute('SELECT count(*) FROM legacy_migrations').fetchone()[0], 1)
+        with sqlite3.connect(staged / 'session-checks.sqlite3') as db:
+            self.assertEqual(db.execute('SELECT stamp FROM checks').fetchone()[0], 'original receipt stamp')
+
+    def test_migration_snapshot_deduplicates_identical_databases_but_never_merges_distinct_ones(self):
+        source, existing = self.root / 'A', self.root / 'B'
+        ledger.record_turn(root=source, platform='codex', session_id='native', raw_input='original')
+        ledger.snapshot_roots(source, existing, self.root / 'initial', writers_stopped=True)
+        (self.root / 'initial').rename(existing)
+        ledger.snapshot_roots(source, existing, self.root / 'same', writers_stopped=True)
+        ledger.record_turn(root=existing, platform='codex', session_id='native', raw_input='different history')
+        before = ledger.read_session_state(root=existing, platform='codex', session_id='native')
+        with self.assertRaisesRegex(ValueError, 'conflict'):
+            ledger.snapshot_roots(source, existing, self.root / 'conflicting', writers_stopped=True)
+        self.assertEqual(ledger.read_session_state(root=existing, platform='codex', session_id='native'), before)
+
+    def test_retired_root_rejects_writes_without_recreation_and_other_roots_remain_writable(self):
+        original = self.seed()
+        ghost = self.root.parent / (self.root.name + '-installation')
+        self.addCleanup(lambda: shutil.rmtree(ghost, ignore_errors=True))
+        ghost.mkdir()
+        (ghost / 'config.json').write_text(json.dumps({'retired_ledger_roots': [str(self.root)]}))
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_GHOST_ROOT': str(ghost)}):
+            for present in (True, False):
+                with self.subTest(present=present):
+                    if not present:
+                        shutil.rmtree(self.root)
+                    with self.assertRaisesRegex(ValueError, 'retired'):
+                        ledger.record_turn(**self.args, intent_delta={'current_goal': 'must not write'},
+                                           expected_input_event_id=original['latest_input_event_id'])
+                    self.assertEqual(self.root.exists(), present)
+            for path in (ghost / 'session-intent', ghost / 'independent-development'):
+                ledger.record_turn(root=path, platform='codex', session_id='session-a', raw_input='new request')
+                self.assertEqual(ledger.read_session_state(root=path, platform='codex', session_id='session-a')['ledger_revision'], 1)
+
+    def test_retirement_also_rejects_a_previously_opened_transaction(self):
+        ghost = self.root / 'installation'
+        ghost.mkdir()
+        with ledger.storage_transaction(self.root) as connection:
+            (ghost / 'config.json').write_text(json.dumps({'retired_ledger_roots': [str(self.root)]}))
+            with mock.patch.dict(os.environ, {'GHOST_ALICE_GHOST_ROOT': str(ghost)}):
+                with self.assertRaisesRegex(ValueError, 'retired'):
+                    ledger.record_turn(**self.args, raw_input='must not write', transaction=connection)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

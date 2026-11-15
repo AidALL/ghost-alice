@@ -191,7 +191,7 @@ gateway._ready = lambda *args: True
         # The registered runtime belongs to Codex; removing Claude's discovery
         # files must preserve that other host's gateway and service record.
         self.assertFalse(stopped.exists())
-        payload = json.loads((self.home/'.ghost-alice/installed-payload.json').read_text())
+        payload = json.loads((self.home/'.ghost-alice/installed-payload-v2.json').read_text())
         self.assertIn('service', payload)
         self.assertTrue(registered.agent.exists())
         self.assertTrue((self.home / '.ghost-alice/runtime').exists())

@@ -17,7 +17,7 @@ This document is the contract for the install-state manifest that the Ghost-ALIC
 
 The install-state manifest is the baseline used to decide which artifacts the next install preflight and uninstall can treat as installer-owned.
 
-The pending merge manifest is the quarantine for external changes and the queue for the human user's merge decisions. An external change is a change that the installer finds in an installed target after install and that its records do not hold; the installer does not record who made the change. The install-state manifest is the SSOT for ownership and the install baseline. The two manifests do not mix their paths or purposes.
+The pending merge manifest is the quarantine for external changes and the queue for the human user's merge decisions. An external change is a change that the installer finds in an installed target after install and that its records do not hold; the installer does not record who made the change. This per-host inventory retains target baselines and environment rollback facts; the shared `installed-payload-v2.json` additionally records each publication and current host references. [Installer architecture](../docs/reference/installer-architecture.md#install-record) defines those distinct owners. The two manifests do not mix their paths or purposes.
 
 ## File location
 
@@ -31,9 +31,9 @@ The installer writes one manifest for the selected platform at the corresponding
 | field | type | meaning |
 | --- | --- | --- |
 | `schema_version` | integer | The current schema version is `1`. |
-| `platform` | string | One of `claude`, `codex`. |
+| `platform` | string | Host adapter identifier; the supplied adapters currently use `claude` and `codex`. |
 | `installed_at` | string | The UTC ISO-8601 timestamp of when the manifest was recorded. |
-| `source_root` | string | The normalized path of the install source repository root. |
+| `source_root` | string | The normalized execution package root for the latest support publication. |
 | `source_branch` | string | The source branch at install time. A detached state is recorded as `DETACHED`. |
 | `source_head` | string | The source HEAD commit at install time. When it cannot be determined, it is `unknown`. |
 | `source_dirty_state` | string | One of `clean`, `dirty`, `unknown`. |
@@ -46,7 +46,8 @@ The installer writes one manifest for the selected platform at the corresponding
 | field | type | meaning |
 | --- | --- | --- |
 | `target_name` | string | The name of the managed target. For example: `_shared`, `task-router`. |
-| `source_path` | string | The source path that created the target. |
+| `source_path` | string | The source path that supplied this target. Newly published Core targets use fixed packages; addons retain their own source paths. |
+| `source_root` | string, optional | The source root that supplied this row. Unselected Core rows retain their earlier root when common support moves. Legacy and addon rows can omit it. |
 | `dest_path` | string | The installed destination path. |
 | `install_mode` | string | One of `copy`, `copy-fallback`, `symlink`, `junction`, `wrapper`, `missing`. |
 | `target_tree_hash` | string | The destination content baseline hash. Directory records use `tree-v2:<sha256>`; readers compare historical unprefixed hashes with the original algorithm. A missing target is `missing`. |
@@ -91,7 +92,7 @@ Each entry is distinguished by the `kind` field. The installer records the follo
 
 | kind | meaning |
 | --- | --- |
-| `source_repo_hook_path` | The install source repository's shared `core.hooksPath` that the install owns. `after` is the absolute path of the install source's `hooks` folder; `before_present` and `before` give the value from before Ghost-ALICE wrote one (the relative `hooks` an earlier installer wrote counts as none, unless that installer recorded for this repository the value it replaced), and `repo_root` names the install source. Every install that knows the earlier value writes the entry, so a reinstall that finds its own value in place carries the recorded `before` and `applied_at`; an install that finds a value no record names writes no entry. The git hook step also writes the same fields to `source-repo-hook-path.json` next to the manifests in the same step as the git write, so an install that stops before its manifest leaves the earlier value for the next install; the last host's full uninstall removes that file. Only the full uninstall of the last host acts on it: when the current value equals `after`, it restores `before`, or unsets the value when there was none. Without this entry the value stays. |
+| `source_repo_hook_path` | The install source repository's shared `core.hooksPath` that the install owns. `after` is the absolute path of the fixed package's `hooks` folder; `before_present` and `before` give the value from before Ghost-ALICE wrote one (the relative `hooks` an earlier installer wrote counts as none, unless that installer recorded for this repository the value it replaced), and `repo_root` names the install source. Every install that knows the earlier value writes the entry, so a reinstall that finds its own value in place carries the recorded `before` and `applied_at`; an install that finds a value no record names writes no entry. The git hook step also writes the same fields to `source-repo-hook-path.json` next to the manifests in the same step as the git write, so an install that stops before its manifest leaves the earlier value for the next install; the last host's full uninstall removes that file. Retirement of the final management consumer acts on it: when the current value equals `after`, it restores `before`, or unsets the value when there was none. Without this entry the value stays. |
 | `codex_hooks_feature_flag` | A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[features] hooks` to `true`. Records `path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores `before_state` only from this record. |
 | `codex_project_trust` | A trace-backed record that the installer changed `~/.codex/config.toml` `[projects."<repo>"] trust_level` to `trusted` for the Ghost-ALICE project. Records `path`, `project_path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores or removes that trust entry only from this record. |
 

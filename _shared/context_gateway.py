@@ -15,6 +15,7 @@ import gzip
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import sys
 import urllib.error
@@ -499,6 +500,10 @@ def main(argv=None):
     for key in ('ledger_root', 'codex_dir', 'usage_log'):
         if not isinstance(config.get(key), str) or not Path(config[key]).is_absolute():
             raise ValueError('Absolute installed coordinates are required')
+    if 'ghost_root' in config:
+        if not isinstance(config['ghost_root'], str) or not Path(config['ghost_root']).is_absolute():
+            raise ValueError('An explicit absolute installation root is required')
+        os.environ['GHOST_ALICE_GHOST_ROOT'] = config['ghost_root']
     if 'claude_dir' in config and (not isinstance(config['claude_dir'], str)
                                   or not Path(config['claude_dir']).is_absolute()):
         raise ValueError('An explicit absolute Claude native home is required')

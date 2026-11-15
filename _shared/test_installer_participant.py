@@ -75,9 +75,9 @@ class PublishOrderTests(PublishCase):
         new = self.claude / "beta"
         seen = {}
 
-        def observing_update(root, patches):
+        def observing_update(root, patches, **kwargs):
             seen["names"] = list(recorder.names)
-            return real_update(root, patches)
+            return real_update(root, patches, **kwargs)
 
         real_update = installed_payload.update
         with mock.patch.object(install_transaction.installed_payload, "update", side_effect=observing_update):

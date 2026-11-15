@@ -86,14 +86,14 @@ def report_install_record(ctx: "Context") -> None:
     that differs from it. Targets without a baseline are counted, not compared, and a match is
     reported only for the targets that were compared. Read-only."""
     root = locations.record_root()
-    record_path = installed_payload.path(root)
+    record_path = installed_payload.read_path(root)
     try:
         record = installed_payload.read(root)
     except installed_payload.RecordError as exc:
         report.warn(f"Install record unreadable ({record_path}): {exc}")
         return
     if record is None:
-        report.info(f"Install record: none yet; the next install writes {record_path}")
+        report.info(f"Install record: none yet; the next install writes {installed_payload.path(root)}")
         return
     entries = {dest: entry for dest, entry in sorted(record.get("targets", {}).items())
                if isinstance(entry, dict) and ctx.platform in (entry.get("used_by") or [])}

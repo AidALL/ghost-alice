@@ -27,6 +27,7 @@ from typing import Callable, Iterable, Mapping, NamedTuple
 import atomic_write
 import file_lock
 import install_destination
+import installed_payload
 from text_lines import committed_length, split_lines
 
 MB = 1024 * 1024
@@ -77,7 +78,8 @@ _TABLE = (
     Policy("uninstall-reports", "keep-newest", ("{record}/uninstall-reports/*.json",), target="uninstall-reports",
            limit=30, order="mtime", members="*.json", files_only=True),
     Policy("install-record", "overwrite",
-           ("{record}/installed-payload.json", "{record}/install.lock", "{record}/install.lock.guard",
+           (*("{record}/" + name for name in installed_payload.RECORD_FILENAMES),
+            "{record}/install.lock", "{record}/install.lock.guard",
             "{record}/install-state/*.json", "{record}/install-state/source-repo-hook-path.json.guard")),
     Policy("install-state-events", "size-rotation",
            ("{record}/install-state/*-events.jsonl", "{record}/install-state/*-events.jsonl.1"),
@@ -87,6 +89,7 @@ _TABLE = (
            keep=5_000),
     Policy("publish-rollbacks", "owner-completed", ("{record}/rollbacks/*", "{record}/rollbacks/*/**")),
     Policy("install-versions", "owner-completed", ("{record}/versions/*", "{record}/versions/*/**")),
+    Policy("intent-ledger", "user-kept", ("{ghost}/session-intent/**",)),
     Policy("hook-settings-backups", "keep-newest", ("{claude}/settings.json.bak*", "{codex}/hooks.json.bak*"),
            target="*.json", limit=3, order="mtime", members="{name}.bak*", siblings=True, files_only=True,
            skip_links=True),
@@ -96,7 +99,8 @@ _TABLE = (
     Policy("runtime-config", "overwrite", ("{ghost}/config.json",)),
     Policy("hook-assets", "overwrite", ("{ghost}/hooks/*",)),
     Policy("runtime-code", "overwrite",
-           ("{record}/runtime/current/_shared/**",
+           ("{record}/bin/ghost-alice", "{record}/bin/ghost-alice.ps1", "{record}/bin/ghost-alice.cmd",
+            "{record}/runtime/current/_shared/**",
             "{record}/runtime/current/session-intent-analyzer/scripts/[!.]*",
             "{record}/runtime/current/session-intent-analyzer/scripts/[!.]*/**")),
     Policy("installed-skills", "overwrite",

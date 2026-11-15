@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from install_state_writer import read_state
-from installer import addons, locations, report, runner
+from installer import addons, locations, report, runner, source
 from installer.runner import InstallerExit
 
 if TYPE_CHECKING:
@@ -56,15 +56,37 @@ class Collected:
         return self.skill_target_total + self.support_target_total
 
 
+def installed_core_selection(record: dict) -> dict[str, list[str]]:
+    """The recorded Core leaf names per host, independent of current adapter availability."""
+    selected: dict[str, set[str]] = {}
+    for entry in record.get('targets', {}).values():
+        if entry.get('kind') == 'skill' and entry.get('provider') == 'core':
+            for host in entry.get('used_by', []):
+                selected.setdefault(host, set()).add(entry['name'])
+    return {host: sorted(names) for host, names in sorted(selected.items())}
+
+
+def requested_skills(ctx: 'Context', platform: str) -> list[str]:
+    """An update carries exact host selections; an ordinary install keeps its existing default."""
+    from installer import source
+    selected = (source.install_request() or {}).get('selections')
+    if selected is not None:
+        if not selected.get(platform):
+            raise ValueError(f'Update has no selected Core skills for {platform}')
+        return list(selected[platform])
+    return list(ctx.options.args) or list(ALL_SKILLS)
+
+
 def expand_skill_targets(skill: str) -> list[Target]:
     """A skill with `SKILL.md` in the checkout is one target; a family dir yields
     one target per direct sub-directory with `SKILL.md`; a missing dir yields
     none."""
     root = runner.REPO_ROOT / skill
     if not root.is_dir():
-        return []
+        return [target for family in ALL_SKILLS if (runner.REPO_ROOT / family).is_dir()
+                for target in expand_skill_targets(family) if target.name == skill]
     if (root / "SKILL.md").is_file():
-        return [Target(skill, root)]
+        return [Target(root.name, root)]
     return [Target(sub.name, sub) for sub in sorted(root.iterdir())
             if sub.is_dir() and not sub.name.startswith(".") and (sub / "SKILL.md").is_file()]
 
@@ -150,7 +172,7 @@ def has_managed_installs(skills_root: Path, platform: str, *, excluding: tuple[P
 def cleanup_deprecated_installed_skills(ctx: "Context", skills_root: Path) -> bool:
     """Let the retirement owner classify candidates and resume unfinished work."""
     result = runner.run_tool("_shared/retired_assets.py",
-                             "--skills-root", str(skills_root), "--source-root", str(runner.REPO_ROOT),
+                             "--skills-root", str(skills_root), "--source-root", source.input_record()['root'],
                              "--ghost-root", str(locations.ghost_root()), "--platform", ctx.platform,
                              "--commands-root", str(locations.claude_commands_dir()), no_bytecode=True)
     return result.ok

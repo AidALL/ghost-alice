@@ -87,7 +87,7 @@ def install(codex_dir, ledger_root, state_dir, launch_agent, claude_dir=None, *,
         raise GatewayBlocked('macOS and explicit absolute installation coordinates are required')
     home = Path.home()
     io = _effects(home)
-    with platform.operation_lock(home):
+    with platform.operation_lock(home, apply_changes=apply_changes):
         record = _read_record(home)
         service = record.get('service') if isinstance(record.get('service'), dict) else None
         request = Request('install', home, sys.platform, _runtime_root(record), Path(codex_dir), Path(ledger_root),
@@ -128,7 +128,7 @@ def detach(*, apply_changes=APPLY_UNSET, confirm=APPLY_UNSET, home=None, io=None
     home = Path.home() if home is None else Path(home)
     io = _effects(home) if io is None else io
     host_platform = sys.platform if host_platform is None else host_platform
-    with platform.operation_lock(home):
+    with platform.operation_lock(home, apply_changes=apply_changes):
         record = _read_record(home)
         service = record.get('service')
         if not isinstance(service, dict):

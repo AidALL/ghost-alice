@@ -42,6 +42,8 @@ Common commands:
   --agent-visibility strict|dynamic|minimal
                           Alias for --visibility
   --doctor               Run install diagnostics
+  update [--remote URL --ref NAME]
+                          Update installed Core skills from the recorded remote/ref
   --repair               Re-provision missing managed targets (never overwrites an occupied slot that is not a clean managed target)
   --verbose, -v          Show per-target install details
 
@@ -68,6 +70,8 @@ Advanced commands:
   --sync-commands        Sync workspace commands
   --check-commands       Check workspace commands only
   gateway ARGS...        Run the context gateway installer once with ARGS
+  migrate-ledger --from-root PATH --writers-stopped
+                          Move a stopped installation ledger to its fixed data root
   --help, -h             Show this help
 """
 
@@ -300,6 +304,7 @@ class OptionTests(CliCase):
         self.assertEqual(rows, {
             "--status, -s": (None, True, None, False, False, False),
             "--doctor": (None, True, None, False, False, False),
+            "update [--remote URL --ref NAME]": (None, False, None, False, False, False),
             "--repair": ("repair", True, None, False, True, False),
             "--uninstall, -u": ("uninstall", True, None, False, False, False),
             "SKILL_NAMES": ("install", True, None, True, True, True),
@@ -311,6 +316,7 @@ class OptionTests(CliCase):
             "--sync-commands": (None, True, None, False, False, False),
             "--check-commands": (None, True, None, False, False, False),
             "gateway ARGS...": ("gateway", False, None, False, False, False),
+            "migrate-ledger --from-root PATH --writers-stopped": ("migrate-ledger", False, None, False, False, False),
             "--help, -h": (None, False, None, False, False, False),
         })
         self.assertEqual(cli.INSTALL.names, ())
@@ -347,7 +353,7 @@ class OptionTests(CliCase):
 
 
 class DispatchCase(CliCase):
-    """`cli.main` with every command handler and the install machinery stubbed."""
+    """Command routing within a prepared installer; package execution is covered by shell installation tests."""
 
     def setUp(self):
         super().setUp()
@@ -365,9 +371,15 @@ class DispatchCase(CliCase):
         self.stub("installer.auto.run_uninstall_children", 0)
         self.stub("installer.cli.prepare_install")
         self.stub("installer.cli.run_install", 0)
+        self.stub("installer.cli.run_ledger_migration", 0)
         self.stub("installer.lock.acquire", (self.home / "lock", "generation"))
         self.stub("installer.lock.release")
         self.stub("installer.runner.run_tool", mock.Mock(returncode=5))
+        self.dispatched_inputs = []
+        def dispatch_without_candidate_process(options, **kwargs):
+            self.dispatched_inputs.append(kwargs)
+            return cli._dispatch(options)
+        self.patches.enter_context(mock.patch("installer.cli.dispatch", side_effect=dispatch_without_candidate_process))
 
     def dispatch(self, argv, present=("claude", "codex")):
         with mock.patch("installer.locations.detect_present_platforms", return_value=list(present)), \
@@ -698,6 +710,8 @@ class PostMergeTests(DispatchCase):
         _, args, _ = next(call for call in self.calls if call[0] == "run_install_children")
         self.assertFalse(args[0].options.platform_explicit)
         self.assertEqual(args[1], ["claude", "codex"])
+        self.assertEqual(self.dispatched_inputs[-1]['input_root'], self.source.resolve())
+        self.assertEqual(self.dispatched_inputs[-1]['provenance']['root'], str(self.source.resolve()))
         # The step itself takes no lock: each platform's install takes it, and refuses while another install holds it.
         self.assertNotIn("acquire", self.names())
 
@@ -769,7 +783,7 @@ class UnfinishedPublishTests(CliCase):
         runner = FakeRunner()
         locked = [command for command in cli.COMMANDS if command.lock]
         self.assertEqual(sorted(command.lock for command in locked),
-                         ["cleanup-pending", "gateway", "install", "repair", "uninstall"])
+                         ["cleanup-pending", "gateway", "install", "migrate-ledger", "repair", "uninstall"])
         for command in locked:
             with self.subTest(lock=command.lock):
                 self.calls.clear()
@@ -822,7 +836,6 @@ class InstallOrderTests(CliCase):
         self.stub("installer.addons.migrate_state_once")
         self.stub("installer.addons.write_sidecars", True)
         self.stub("installer.transaction.write_install_state_manifest", True)
-        self.stub("installer.source.preserve_successful_source", ["Saved source version"])
         self.stub("install_transaction.cleanup_completed", ())
         self.stub("installer.report.write_event", side_effect=report.write_event)
 
@@ -866,17 +879,16 @@ class InstallOrderTests(CliCase):
                 names.append(name)
         return names
 
-    def test_claude_link_mode_order(self):
-        # S1–S19 with placement S12 as install_shared then link_or_copy per target
+    def test_claude_core_copy_finishes_before_hooks_and_verification(self):
         ctx = make_context(self.home, "claude", args=["task-router", "alpha"])
         rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
         self.assertEqual(rc, 0)
         self.assertEqual(self.order(), list(self.STEPS))
         placement = [n for n, _, _ in self.calls if n in ("install_shared", "link_or_copy", "copy_targets_batch")]
-        self.assertEqual(placement, ["install_shared", "link_or_copy", "link_or_copy"])
+        self.assertEqual(placement, ["copy_targets_batch"])
         names = [n for n, _, _ in self.calls]
         self.assertLess(names.index("check_source_health"), names.index("collect_targets"))
-        self.assertLess(names.index("check_addon_collisions"), names.index("install_shared"))
+        self.assertLess(names.index("check_addon_collisions"), names.index("copy_targets_batch"))
         self.assertLess(names.index("install_hooks"), names.index("ensure_claude_bootstrap"))
         self.assertLess(names.index("sync_runtime_shared"), names.index("install_hooks"))
         for name, args, _ in self.calls:
@@ -885,21 +897,6 @@ class InstallOrderTests(CliCase):
             if name in ("verify_after_copy", "write_install_state_manifest"):
                 self.assertIs(args[3], self.collected)
         self.assertIn("[OK] [5/5] Verification: install state recorded", out) if report.state().report_child else None
-
-    def test_links_that_already_point_at_their_source_are_recorded_not_replaced(self):
-        claude_skills = self.home / ".claude" / "skills"
-        claude_skills.mkdir(parents=True)
-        (claude_skills / "_shared").symlink_to(self.source / "_shared")
-        (claude_skills / "task-router").symlink_to(self.source / "task-router")
-        ctx = make_context(self.home, "claude", args=["task-router", "alpha"])
-        rc, _ = self.captured(cli.run_command, cli.INSTALL, ctx)
-        self.assertEqual(rc, 0)
-        _, args, _ = next(c for c in self.calls if c[0] == "record_current_links")
-        self.assertEqual([(target.name, dest, kind) for target, dest, kind in args[1]],
-                         [("_shared", claude_skills / "_shared", "support"),
-                          ("task-router", claude_skills / "task-router", "skill")])
-        replaced = [args[1].name for name, args, _ in self.calls if name == "link_or_copy"]
-        self.assertEqual(replaced, ["alpha"])
 
     def test_the_gateway_line_reaches_the_terminal_in_every_output_mode(self):
         runtime = str(self.home / "gateway-output-fixture" / "runtime")
@@ -985,9 +982,7 @@ class InstallOrderTests(CliCase):
             ("claude", "installer.selection.cleanup_deprecated_installed_skills", False, 1, None, "encoding_guard"),
             ("claude", "installer.preservation.encoding_guard", False, 1, "[ERROR] encoding guard failed", "preflight"),
             ("claude", "installer.preservation.preflight", False, 1, None, "resume_pending_uninstalls"),
-            ("claude", "installer.transaction.install_shared", 3, 3, None, "link_or_copy"),
-            ("claude", "installer.transaction.link_or_copy", 2, 1, "[ERROR] Managed target replacement failed",
-             "sync_runtime_shared"),
+            ("claude", "installer.transaction.copy_targets_batch", False, 1, None, "sync_runtime_shared"),
             ("codex", "installer.transaction.copy_targets_batch", False, 1, None, "sync_runtime_shared"),
             ("claude", "installer.transaction.sync_runtime_shared", False, 1,
              "[ERROR] Runtime shared core sync failed. Aborting hook install", "report_gateway"),
@@ -1025,48 +1020,21 @@ class InstallOrderTests(CliCase):
                     self.assertEqual(events, [])
                 self.assertEqual(names[-1], "release")
 
-    def test_update_hint_names_the_reported_install_command(self):
+    def test_update_hint_names_the_fixed_command_on_each_host(self):
         quiet(self.home, verbose=True)
-        for platform, command, expected in (
-                ("claude", None, "&& bash install.sh --update-source\n"),
-                ("codex", ".\\install.cmd", "&& .\\install.cmd --update-source, then re-run .\\install.cmd\n")):
+        for platform in ('claude', 'codex'):
             with self.subTest(platform=platform):
-                env = {"GHOST_ALICE_INSTALL_COMMAND": command} if command else {}
-                with mock.patch.dict(os.environ, env):
-                    if not command:
-                        os.environ.pop("GHOST_ALICE_INSTALL_COMMAND", None)
-                    ctx = make_context(self.home, platform, args=["task-router"])
-                    rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
+                ctx = make_context(self.home, platform, args=["task-router"])
+                rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
                 self.assertEqual(rc, 0)
-                self.assertIn(f"[INFO] To update skills safely: cd {self.source} {expected}", out)
+                command = self.home / '.ghost-alice/bin' / ('ghost-alice.cmd' if os.name == 'nt' else 'ghost-alice')
+                self.assertIn(f'To update the installed Core selection: {command} update', out)
 
     def test_default_skills_are_all_skills(self):
         ctx = make_context(self.home, "claude")
         self.captured(cli.run_command, cli.INSTALL, ctx)
         _, args, _ = next(c for c in self.calls if c[0] == "collect_targets")
         self.assertEqual(args[1], list(ALL_SKILLS))
-
-    def test_only_a_full_core_success_preserves_a_source_version_before_success_output(self):
-        for requested in ([], list(ALL_SKILLS), ['task-router']):
-            with self.subTest(requested=requested):
-                self.calls.clear()
-                self.captured(cli.run_command, cli.INSTALL, make_context(self.home, 'codex', args=requested))
-                names = self.names()
-                self.assertLess(names.index('write_install_state_manifest'), names.index('cleanup_completed'))
-                self.assertLess(names.index('cleanup_completed'), names.index('write_event'))
-                if requested == ['task-router']:
-                    self.assertNotIn('preserve_successful_source', names)
-                else:
-                    self.assertLess(names.index('write_install_state_manifest'), names.index('preserve_successful_source'))
-                    self.assertLess(names.index('cleanup_completed'), names.index('preserve_successful_source'))
-                    self.assertLess(names.index('preserve_successful_source'), names.index('write_event'))
-
-    def test_source_version_failure_reports_placed_code_without_final_success(self):
-        with mock.patch('installer.source.preserve_successful_source', side_effect=OSError('archive disk full')):
-            output = self.expect_exit(1, cli.run_command, cli.INSTALL, make_context(self.home, 'codex'))
-        self.assertIn('Code placement finished, but preserving the successful source version failed', output)
-        self.assertNotIn('write_event', self.names())
-        self.assertEqual(self.names()[-1], 'release')
 
     def test_completed_publish_cleanup_failure_prevents_version_and_success_reporting(self):
         for requested in ([], ['task-router']):
@@ -1075,7 +1043,6 @@ class InstallOrderTests(CliCase):
                 with mock.patch('install_transaction.cleanup_completed', side_effect=cli.install_transaction.InstallTransactionError('old copy is locked')):
                     output = self.expect_exit(1, cli.run_command, cli.INSTALL, make_context(self.home, 'codex', args=requested))
                 self.assertIn('Code placement finished, but completed-publish cleanup failed', output)
-                self.assertNotIn('preserve_successful_source', self.names())
                 self.assertNotIn('write_event', self.names())
 
 

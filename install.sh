@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Ghost-ALICE OS Installer (Mac / Linux / WSL / Git Bash)
-# Supports: Claude Code, Codex
+# Host adapters currently supplied: Claude Code, Codex
 # Usage:
 #   bash install.sh              # Install to all detected platforms (~/.claude, ~/.codex)
 #   bash install.sh --prompt-platform  # Select AI tool interactively before installing
@@ -179,6 +179,11 @@ _ensure_python_runtime_for_install() {
     return 0
   fi
 
+  if [ "${GHOST_ALICE_PREREQUISITES_SHOWN:-}" != "1" ]; then
+    local notice="${SCRIPT_DIR}/_shared/installer/prerequisites.txt"
+    info "$(< "$notice")"
+    export GHOST_ALICE_PREREQUISITES_SHOWN=1
+  fi
   if _try_install_python_runtime; then
     py="$(_find_python_runtime || true)"
     if [ -n "$py" ]; then

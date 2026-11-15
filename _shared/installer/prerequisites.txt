@@ -1,0 +1,1 @@
+The installer may install missing Python 3.11+, Git and Node.js through the system package manager. These commands use automatic consent flags, including package and source agreement acceptance where supported. Existing programs are reused; a package manager may request administrator credentials.
