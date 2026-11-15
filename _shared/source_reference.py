@@ -101,12 +101,13 @@ def core_source_reference(source, root, owner, candidate_reference):
         **{k: source[k] for k in ('source_id', 'locator', 'digest')})
 
 
-def _core_source(reference):
+def _core_source(reference, *, storage_root=None):
     root = Path(reference['intent_root'])
-    if not root.is_absolute():
+    location = root if storage_root is None else Path(storage_root)
+    if not root.is_absolute() or not location.is_absolute():
         raise SourceReferenceError('Original source needs its absolute owning root')
     try:
-        with closing(sqlite3.connect((root / 'ghost-state.sqlite3').as_uri() + '?mode=ro', uri=True)) as connection:
+        with closing(sqlite3.connect((location / 'ghost-state.sqlite3').as_uri() + '?mode=ro', uri=True)) as connection:
             row = connection.execute('SELECT payload_json FROM core_completion_candidates WHERE reference=?',
                                      (reference['candidate_reference'],)).fetchone()
     except sqlite3.Error as exc:
@@ -125,9 +126,9 @@ def _core_source(reference):
     return matches[0]
 
 
-def verify_source(reference):
+def verify_source(reference, *, storage_root=None):
     if reference.get('storage') == CORE_FORMAT:
-        source_text(_core_source(reference))
+        source_text(_core_source(reference, storage_root=storage_root))
         return
     validate_source_reference(reference)
     digest, length, more = _scan(reference['locator'], reference['byte_length'])
@@ -153,9 +154,10 @@ def source_bytes(reference, *, identity=None):
 
 
 
-def source_text(reference):
+def source_text(reference, *, storage_root=None):
+    """Read original bytes from an explicit physical ledger without rewriting their binding."""
     if reference.get('storage') == CORE_FORMAT:
-        return source_text(_core_source(reference))
+        return source_text(_core_source(reference, storage_root=storage_root))
     if reference.get('storage') != FORMAT:
         # Authenticated existing records can contain their original inline proof.
         if 'bytes_base64' in reference:

@@ -28,11 +28,13 @@ def owner(command: str, platform: str, pid: int | None = None) -> str:
     return f"installer:{command}:{platform}:{os.getpid() if pid is None else pid}"
 
 
-def acquire(command: str, platform: str, lock_path: Path | None = None) -> tuple[Path, str]:
+def acquire(command: str, platform: str, lock_path: Path | None = None, *, inherit: bool = False) -> tuple[Path, str] | None:
     """Acquire `~/.ghost-alice/install.lock`, then restore unfinished publishes; on failure print
     `Another install is already running; aborting <command>: <path>` and raise `InstallerExit(1)`."""
     path = Path(lock_path) if lock_path is not None else locations.install_lock_path()
     try:
+        if inherit and install_lock.held_by_process_tree(path):
+            return None
         generation = install_lock.acquire_lock(path, stale_seconds=stale_seconds(), owner=owner(command, platform))
     except install_lock.InstallLockError:
         report.error(f"Another install is already running; aborting {command}: {path}")
@@ -45,12 +47,12 @@ def acquire(command: str, platform: str, lock_path: Path | None = None) -> tuple
     return path, generation
 
 
-def restore_unfinished_publishes() -> None:
+def restore_unfinished_publishes(root: Path | None = None) -> None:
     """Restore unfinished publishes under the lock, newest first, using the gateway recovery factory.
     If recovery or staged-file cleanup raises an error, print the transaction's diagnostic
     and stop the command with exit 1; acquire() releases the lock before propagating that exit.
     """
-    root = locations.record_root()
+    root = locations.record_root() if root is None else Path(root)
     for txid in install_transaction.unfinished(root):
         try:
             for line in install_transaction.recover(root, txid,

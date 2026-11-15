@@ -716,12 +716,9 @@ class ResponseRouteTests(unittest.TestCase):
         self.event = self.setup_owned()
         install = Path(self.tmp.name) / "isolated-skills"
         (install / "session-intent-analyzer" / "scripts").mkdir(parents=True)
-        (install / "_shared").mkdir()
+        shutil.copytree(ROOT / '_shared', install / '_shared', ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
         shutil.copy2(ROOT / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py",
                      install / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py")
-        for helper in ("response_route.py", "install_destination.py", "source_reference.py", "timestamps.py",
-                       "ledger_access.py", "hook_definitions.py", "session_identity.py"):
-            shutil.copy2(ROOT / "_shared" / helper, install / "_shared" / helper)
         script = install / "_shared" / "response_route.py"
         import os
         env = dict(os.environ, CODEX_THREAD_ID="current", GHOST_ALICE_SESSION_ID="")

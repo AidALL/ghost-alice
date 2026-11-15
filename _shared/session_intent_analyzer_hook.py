@@ -13,12 +13,12 @@ from typing import Any
 
 
 import ledger_access
+import install_destination
 from hook_input import parse_json_object, read_stdin_utf8
 from session_identity import bound_session, is_exact
 
 try:
     _LEDGER = ledger_access.load_ledger()
-    DEFAULT_ROOT = _LEDGER.DEFAULT_ROOT
     build_input_observation = _LEDGER.build_input_observation
     record_turn = _LEDGER.record_turn
     stage_native_input = _LEDGER.stage_native_input
@@ -27,7 +27,6 @@ try:
     _LEDGER_IMPORT_BROKEN = False
 except ledger_access.LedgerUnavailable:
     # The sibling ledger is absent (skill uninstalled, mid-reinstall, or relocated): degrade as "unavailable".
-    DEFAULT_ROOT = ".tmp/session-intent"
     build_input_observation = None
     record_turn = None
     stage_native_input = None
@@ -36,7 +35,6 @@ except ledger_access.LedgerUnavailable:
     _LEDGER_IMPORT_BROKEN = False
 except Exception:
     # Present but broken at import (syntax error, a failing transitive dependency): degrade non-blockingly, flagged as broken so a real defect is not labelled "unavailable".
-    DEFAULT_ROOT = ".tmp/session-intent"
     build_input_observation = None
     record_turn = None
     stage_native_input = None
@@ -67,6 +65,7 @@ def _degrade_marker_path(root: Path, platform: str, payload: dict[str, Any]) -> 
 def _write_degrade_marker(root: Path, platform: str, payload: dict[str, Any], reason: str) -> None:
     # The hook records an intake failure independently of the ledger; receipt creation can fail after input storage. Doctor reads this marker. A marker write failure must never break the hook.
     try:
+        ledger_access.require_writable_root(root)
         path = _degrade_marker_path(root, platform, payload)
         if path is None:
             return
@@ -227,6 +226,7 @@ def input_receipt(root: Path, platform: str, session_id: str, paths: dict[str, P
 
     The record rules are in session-intent-analyzer/references/ledger-schema.md#session-metadata-from-the-hooks.
     """
+    ledger_access.require_writable_root(root)
     receipt = session_receipt(paths)
     try:
         from session_check_cache import delivered, record_delivery
@@ -241,6 +241,7 @@ def input_receipt(root: Path, platform: str, session_id: str, paths: dict[str, P
 
 def session_start(args: argparse.Namespace, payload: dict[str, Any], ledger_root: Path) -> str:
     try:
+        ledger_access.require_writable_root(ledger_root)
         session_id = resolve_session_id(root=ledger_root, platform=args.platform, payload=payload,
                                         env=os.environ, for_write=True)
         message = session_receipt(session_paths(ledger_root, args.platform, session_id))
@@ -281,7 +282,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--platform", default="codex")
     parser.add_argument("--context", default="prompt_submit", choices=["prompt_submit", "session_start"])
     parser.add_argument("--format", choices=["text", "json"], default="text")
-    parser.add_argument("--root", default=str(DEFAULT_ROOT), help="session intent ledger root")
+    parser.add_argument("--root", default=str(install_destination.default_ledger_root()), help="session intent ledger root")
     return parser
 
 

@@ -52,7 +52,7 @@ Each smoke record captures whether these signals were observed:
 - `boundary-contract`: follows the current routing-surface decision; executed read-only verification may require a boundary contract. Record n/a only when that route does not require one.
 - `tool checkpoint`: follows the common contract's io-trace Transparency Rule; a routine read-only call needs no checkpoint.
 - `skill activation permission`: Claude Code is not blocked by a shortened allowlist that covers only core gates.
-- `verification-before-completion`: the workflow connects each closure claim to applicable evidence and reuses unchanged proof under the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery).
+- `verification-before-completion`: the workflow connects each closure claim to applicable evidence and reuses unchanged proof under the [evidence reuse procedure](../../coding-convention/verification-before-completion/references/verify-or-reuse.md).
 - `internal audit`: tool access remains auditable without requiring printed `[io-trace]`.
 - pending merge precheck: the check that [merge-companion](../../merge-companion/SKILL.md#entry-and-activation) requires before an installed skill changes.
 
@@ -121,12 +121,12 @@ Subject or evaluator timeout, non-zero exit, empty subject response, malformed e
 | Completion claim appears without `verification-before-completion` | completion gate failure | Inspect completion reminder and Codex hook evidence/fallback wording. |
 | skill activation permission allows only core gates | permission scope failure | Inspect installer hook permission sync and platform policy files. |
 | smoke record stores raw prompt or transcript | audit hygiene failure | Fix the session-intent-analyzer storage contract first. |
-| agent command times out | runtime smoke failure | Inspect the affected failure and follow the bounded repair conditions in the session gate matrix. Reinstall only affected runtime assets; retry with a distinct hypothesis and remaining authority/resources. |
+| agent command times out | runtime smoke failure | Inspect the affected failure and follow [systematic-debugging's continuation procedure](../../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation). Reinstall only affected runtime assets; retry with a distinct hypothesis and remaining authority/resources. |
 | log contains `ERROR codex_core::tools::router`, hook failure, traceback, panic, or cache initialization error | runtime smoke failure | Treat the run as failed even if a later, different prompt passes. Reproduce or intentionally retire the failing case with evidence. |
 | output file is missing or empty | runtime smoke failure | Do not infer success from partial log activity. Rerun after fixing the agent command or output path. |
 | Windows resolves `codex` to different shim or binary across PowerShell, CMD, and automation | harness drift | Record `agent_command` and prefer the intended `codex.cmd` shim or an explicit absolute path for Codex smoke. |
 | prompt forbids the only available read-only method needed by the task | invalid harness | Fix the harness and rerun. This is not product pass evidence. |
-| a later bounded pass follows an earlier unresolved failure in the same loop | partial status | Retain the unresolved case and report partial status. Continue only eligible authorized repair under the session gate matrix; a bounded later pass does not close the earlier criterion. |
+| a later bounded pass follows an earlier unresolved failure in the same loop | partial status | Retain the unresolved case and report partial status. Continue only eligible authorized repair under [systematic-debugging's continuation procedure](../../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation); a bounded later pass does not close the earlier criterion. |
 
 ## Automated Verification Boundary
 

@@ -17,7 +17,7 @@ class InstallCmdWrapperTest(unittest.TestCase):
     def test_cmd_wrapper_delegates_to_install_ps1_without_native_hook_logic(self) -> None:
         install_cmd = INSTALL_CMD.read_text(encoding="utf-8")
 
-        self.assertIn('set "PS1=%SCRIPT_DIR%install.ps1"', install_cmd)
+        self.assertIn('set "PS1=%~dpn0.ps1"', install_cmd)
         self.assertIn('pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*', install_cmd)
         self.assertIn('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*', install_cmd)
         self.assertNotIn("Set-ExecutionPolicy", install_cmd)

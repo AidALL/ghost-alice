@@ -7,7 +7,7 @@ import json
 from typing import TYPE_CHECKING
 
 import hook_definitions
-from installer import locations, report, runner
+from installer import locations, report, runner, source
 
 if TYPE_CHECKING:
     from installer.cli import Context
@@ -20,6 +20,26 @@ CLAUDE_MANAGED_BLOCK_BEGIN = "<!-- Ghost-ALICE managed block begin: claude-boots
 CLAUDE_MANAGED_BLOCK_END = "<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
 HOOK_ACTION_LABEL = " + ".join(hook_definitions.CORE_HOOK_IDS)
 GLOBAL_RULE_BLOCKS = "_shared/global_rule_blocks.py"
+
+
+def confirm_project_trust(platforms: list[str]) -> str:
+    """Ask once in the interactive parent before changing an existing Codex untrusted project."""
+    if 'codex' not in platforms:
+        return ''
+    from install_hooks import _default_destination, _codex_project_trust_state_in_content, _read_text_file
+    project = str(Path(_default_destination('codex', project_root=source.resolve_source().root).project_root).resolve())
+    config = locations.codex_home() / 'config.toml'
+    if _codex_project_trust_state_in_content(_read_text_file(config), project) != 'untrusted':
+        return ''
+    report.info(f'Codex project {project} is untrusted in {config}.')
+    if source.interactive():
+        try:
+            if input('Change this project to trusted? [y/N]: ').strip().lower() in ('y', 'yes'):
+                return project
+        except EOFError:
+            pass
+    report.info('The installer will keep the untrusted project setting.')
+    return ''
 
 
 def codex_bootstrap_source() -> Path:
@@ -51,15 +71,16 @@ def install_hooks(ctx: "Context", action: str, platform: str, *, backup_sources=
     if action == "uninstall":
         from install_hooks import uninstall_hook
         return uninstall_hook(platform, backup_sources=backup_sources)
-    args = ["--core-source-root", str(runner.REPO_ROOT), "--platform", platform,
+    args = ["--platform", platform,
             "--hook-shared-dir", str(locations.runtime_shared_dir()), "--skills-dir", str(ctx.skills_dir)]
     if action == "install":
-        args.extend(["--visibility", ctx.options.visibility or "dynamic"])
+        args.extend(["--core-source-root", str(runner.REPO_ROOT), "--visibility", ctx.options.visibility or "dynamic"])
     elif action == "status":
         args.append("--status")
     for addon_source in ctx.addon_sources:
         args.extend(["--addon-source", str(addon_source)])
-    result = runner.run_tool('_shared/install_hooks.py', *args, '--format', 'json', capture=True)
+    result = runner.run_tool('_shared/install_hooks.py', *args, '--format', 'json', capture=True,
+                             env={'GHOST_ALICE_PROJECT_ROOT': str(source.resolve_source().root)})
     if result.stderr:
         report.emit(result.stderr.rstrip('\n'))
     try:

@@ -132,6 +132,11 @@ function Install-PythonRuntime {
 function Initialize-PythonRuntimeForInstall {
     $py = Find-PythonExe
     if ($py) { return $py }
+    if ($env:GHOST_ALICE_PREREQUISITES_SHOWN -ne '1') {
+        $notice = Join-Path $PSScriptRoot '_shared/installer/prerequisites.txt'
+        Write-Info (Get-Content -LiteralPath $notice -Raw -Encoding UTF8).Trim()
+        $env:GHOST_ALICE_PREREQUISITES_SHOWN = '1'
+    }
     if (Install-PythonRuntime) {
         $py = Find-PythonExe
         if ($py) {

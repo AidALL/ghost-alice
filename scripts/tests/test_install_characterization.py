@@ -7,15 +7,8 @@ Determinism notes (read before editing the golden fixture):
 - The installer writes <HOME>/.claude/settings.json hooks for every install,
   regardless of how individual skills are materialized, so the per-event hook
   entry counts are environment-independent.
-- ``.ghost-alice-install.json`` ownership markers are written by
-  ``_shared/install_transaction.py``: ``PublishBatch.stage`` for copied skill
-  and support targets. On a
-  filesystem that supports symlinks (the default for macOS dev hosts and Linux
-  CI) skills are symlinked and therefore carry no markers, so
-  ``installed_markers`` is the empty list. The snapshot helper still discovers
-  real markers structurally, so the golden master stays correct if a future
-  environment falls back to copy mode -- but the committed fixture reflects the
-  symlink-capable baseline.
+- ``.ghost-alice-install.json`` ownership markers identify the copied skill
+  and support targets on every supported host.
 - The snapshot deliberately records STRUCTURE ONLY: never absolute paths,
   command strings, timestamps, PIDs, or session ids (all of which vary per run).
 """
@@ -162,19 +155,13 @@ class InstallCharacterizationTest(unittest.TestCase):
             self.assertNotIn("web-search-first", prompts)
             snapshot = _snapshot_settings(home)
             expected = json.loads(SETTINGS_SHAPE_FIXTURE.read_text(encoding="utf-8"))
-            if os.name == "nt" and snapshot["installed_markers"] and not expected["installed_markers"]:
-                self.assertEqual(snapshot["hook_events"], expected["hook_events"])
-                self.assertTrue(
-                    all(marker == ".ghost-alice-install.json" for marker in snapshot["installed_markers"])
-                )
-                return
             self.assertEqual(snapshot, expected)
 
     def test_uninstall_preserves_unmanaged_file_and_source_and_removes_managed_skill(self) -> None:
         """Assert install/uninstall cleanup behavior.
 
         Non-managed files and source bytes survive full uninstall; the
-        installed skill itself is removed, including when it has no copy marker.
+        installed skill copy itself is removed.
         """
 
         source = checkout_copy(self)
@@ -197,9 +184,8 @@ class InstallCharacterizationTest(unittest.TestCase):
             source_skill = source / "task-router" / "SKILL.md"
             source_bytes = source_skill.read_bytes()
             self.assertTrue((installed_skill / "SKILL.md").is_file())
-            if os.name != "nt":
-                self.assertTrue(installed_skill.is_symlink(), "Claude install must create the managed link")
-                self.assertEqual(installed_skill.resolve(), source_skill.parent)
+            self.assertFalse(installed_skill.is_symlink())
+            self.assertEqual((installed_skill / "SKILL.md").read_bytes(), source_bytes)
 
             uninstall_result = _run_uninstall(source, home, "--platform", "claude")
             self.assertEqual(

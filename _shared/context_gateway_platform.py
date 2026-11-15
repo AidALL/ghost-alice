@@ -151,7 +151,7 @@ class Platform:
 
 
 @contextmanager
-def operation_lock(home):
+def operation_lock(home, *, apply_changes=True):
     """Use the installer's existing lock; never adopt an unrelated holder."""
     import install_lock
     from install_lock import InstallLockError, acquire_lock, release_lock
@@ -170,6 +170,15 @@ def operation_lock(home):
     except InstallLockError as exc:
         raise GatewayBlocked('Another installer holds the operation lock') from exc
     try:
+        import install_transaction
+        from installer.lock import restore_unfinished_publishes
+        from installer.runner import InstallerExit
+        if not apply_changes and install_transaction.unfinished(path.parent):
+            raise GatewayBlocked('Unfinished install publication; run the installer to restore it before previewing the gateway')
+        try:
+            restore_unfinished_publishes(path.parent)
+        except InstallerExit as exc:
+            raise GatewayBlocked('The installer could not restore its unfinished publication') from exc
         yield
     finally:
         release_lock(path, generation)

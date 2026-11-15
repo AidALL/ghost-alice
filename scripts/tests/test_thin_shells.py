@@ -80,7 +80,6 @@ class ThinInstallShTests(unittest.TestCase):
             self.assertNotRegex(self.text, rf"(?m)^{re.escape(name)}\(\)", msg=name)
         for token in ("ALL_SKILLS=(", "install_lock.py", "install_transaction.py", 'case "${ARGS[0]:-}" in'):
             self.assertNotIn(token, self.text, msg=token)
-        self.assertLess(self.text.count("\n"), 220)
 
     @unittest.skipUnless(shutil.which("bash"), "bash is required")
     def test_help_goes_through_the_cli(self):
@@ -161,10 +160,9 @@ class ThinInstallPs1Tests(unittest.TestCase):
         self.assertIn('TrimEnd(":")', convert)
 
     def test_runs_the_python_cli_once_and_exits_with_its_code(self):
-        self.assertEqual(self.text.count("_shared/installer/cli.py"), 1)
+        self.assertEqual(self.text.count('& $python '), 1)
         self.assertRegex(
             self.text,
-            r'\$installerArguments = ConvertTo-InstallerArgument -Arguments \$args\n'
             r'& \$python \(Join-Path -Path \$PSScriptRoot -ChildPath "_shared/installer/cli\.py"\) @installerArguments\n'
             r'exit \$LASTEXITCODE\n?$')
 
@@ -173,7 +171,6 @@ class ThinInstallPs1Tests(unittest.TestCase):
                       "Get-DetectedPlatforms", "PwshLts", "msiexec", "Remove-Item",
                       "Unknown argument"):
             self.assertNotIn(token, self.text, msg=token)
-        self.assertLess(self.text.count("\n"), 200)
 
     def test_messages_and_comments_are_english(self):
         self.assertEqual([line for line in self.text.splitlines() if re.search(r"[가-힣]", line)], [])

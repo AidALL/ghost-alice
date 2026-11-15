@@ -20,8 +20,9 @@ if __name__ == "__main__" and not __package__:
 
     raise SystemExit(_main())
 
-from dataclasses import dataclass, field  # noqa: E402
+from dataclasses import dataclass, field, replace  # noqa: E402
 import os  # noqa: E402
+import json  # noqa: E402
 from typing import Callable  # noqa: E402
 
 import install_transaction  # noqa: E402
@@ -136,6 +137,8 @@ COMMAND_LINE: tuple[HelpRow, ...] = (
     HelpRow(COMMON, "--agent-visibility strict|dynamic|minimal", "Alias for --visibility"),
     Command(COMMON, "--doctor", "Run install diagnostics", names=("--doctor",),
             run=lambda ctx: diagnostics.run_doctor(ctx)),
+    Command(COMMON, "update [--remote URL --ref NAME]", "Update installed Core skills from the recorded remote/ref",
+            names=('update',), run=lambda ctx: run_update(ctx), platform=False),
     Command(COMMON, "--repair", "Re-provision missing managed targets (never overwrites an occupied slot that is not a clean managed target)",
             names=("--repair",), run=lambda ctx: lifecycle.run_repair(ctx), lock="repair", checks_source=True),
     HelpRow(COMMON, "--verbose, -v", "Show per-target install details"),
@@ -168,6 +171,9 @@ COMMAND_LINE: tuple[HelpRow, ...] = (
     Command(ADVANCED, "gateway ARGS...", "Run the context gateway installer once with ARGS", names=("gateway",),
             run=lambda ctx: runner.run_tool("_shared/context_gateway_install.py", *ctx.options.args[1:]).returncode,
             lock="gateway", platform=False),
+    Command(ADVANCED, "migrate-ledger --from-root PATH --writers-stopped",
+            "Move a stopped installation ledger to its fixed data root",
+            names=("migrate-ledger",), run=lambda ctx: run_ledger_migration(ctx), lock="migrate-ledger", platform=False),
     Command(ADVANCED, "--help, -h", "Show this help", names=("--help", "-h"), run=lambda ctx: print_help(),
             platform=False),
 )
@@ -177,6 +183,41 @@ COMMANDS: tuple[Command, ...] = tuple(row for row in COMMAND_LINE if isinstance(
 def _fail(message: str, code: int = 1) -> None:
     report.error(message)
     raise InstallerExit(code)
+
+
+def run_ledger_migration(ctx: Context) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(prog='ghost-alice migrate-ledger')
+    parser.add_argument('--from-root', required=True, type=Path)
+    parser.add_argument('--writers-stopped', action='store_true',
+                        help='Confirm that host and CLI writers have stopped; the installer stops its registered service')
+    args = parser.parse_args(ctx.options.args[1:])
+    try:
+        root = transaction.migrate_ledger(args.from_root, writers_stopped=args.writers_stopped)
+    except RuntimeError as exc:
+        report.error(str(exc))
+        return 1
+    report.info(f'Ledger data and installed bindings now use {root}')
+    return 0
+
+
+def run_update(ctx: Context) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(prog='ghost-alice update')
+    parser.add_argument('--remote')
+    parser.add_argument('--ref')
+    args = parser.parse_args(ctx.options.args[1:])
+    record = install_transaction.record_after_recovery(locations.record_root()) or {}
+    selected = selection.installed_core_selection(record)
+    if ctx.options.platform_explicit:
+        selected = {host: names for host, names in selected.items() if host == ctx.platform}
+    if not selected:
+        raise ValueError('Update found no installed Core skills to update')
+    origin = dict(record.get('source', {}))
+    origin.update({key: value for key, value in vars(args).items() if value is not None})
+    with source.acquire_update(origin) as (root, provenance):
+        return dispatch(replace(ctx.options, args=[], addon_skip=True), input_root=root,
+                        provenance=provenance, selections=selected)
 
 
 def parse_options(argv: list[str]) -> Options:
@@ -346,75 +387,39 @@ def _details_log() -> None:
 
 
 def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool) -> tuple[transaction.SyncCounts, int, int]:
-    """`_shared` and every target, as links (claude) or one copy batch (codex)."""
+    """Publish Core as host-owned copies; retain each host's existing add-on placement mode."""
     skills_dir = Path(ctx.skills_dir)
-    shared_src = runner.REPO_ROOT / "_shared"
-    shared_dest = skills_dir / "_shared"
     counts = transaction.SyncCounts()
     batch = transaction.CopyBatch()
-    current_links: list[tuple[selection.Target, Path, str]] = []
+    current_links = []
     installed = skipped = 0
-    if copy_only:
-        if collected.support_target_total:
-            if shared_dest.exists() or shared_dest.is_symlink():
-                counts.updated += 1
-                status = "updated"
-                report.detail_warn("_shared. Overwriting existing copy")
-            else:
-                counts.installed += 1
-                status = "new"
-            batch.add(shared_src, shared_dest, "_shared", "support", status)
-    elif collected.support_target_total:
-        if shared_dest.is_symlink() and os.readlink(shared_dest) == str(shared_src):
-            counts.skipped += 1
-            status = "current"
-            current_links.append((selection.Target("_shared", shared_src), shared_dest, "support"))
-        elif shared_dest.exists() or shared_dest.is_symlink():
-            counts.updated += 1
-            status = "updated"
-        else:
-            counts.installed += 1
-            status = "new"
-        rc = transaction.install_shared(ctx, skills_dir, False)
-        if rc != 0:
-            raise InstallerExit(rc)
-        report.write_target_event(ctx.platform, "_shared", "support", status)
-    for target in collected.all_targets:
+    targets = [(target, "skill") for target in collected.all_targets]
+    if collected.support_target_total:
+        targets.insert(0, (selection.Target("_shared", runner.REPO_ROOT / "_shared"), "support"))
+    for target, kind in targets:
         dest = skills_dir / target.name
-        if copy_only:
-            if dest.exists() or dest.is_symlink():
-                counts.updated += 1
-                status = "updated"
-                report.detail_warn(f"{target.name}. Overwriting existing install")
-            else:
-                counts.installed += 1
-                status = "new"
-            batch.add(target.path, dest, target.name, "skill", status, target.provider)
-            installed += 1
-            continue
-        if dest.is_symlink() and os.readlink(dest) == str(target.path):
+        copies = copy_only or target.provider == "core"
+        if not copies and dest.is_symlink() and os.readlink(dest) == str(target.path):
             counts.skipped += 1
-            report.detail_warn(f"{target.name}. Already installed (skipped)")
-            report.write_target_event(ctx.platform, target.name, "skill", "current")
-            current_links.append((target, dest, "skill"))
-            skipped += 1
+            skipped += kind == "skill"
+            current_links.append((target, dest, kind))
+            report.write_target_event(ctx.platform, target.name, kind, "current")
             continue
-        if dest.exists() or dest.is_symlink():
+        status = "updated" if dest.exists() or dest.is_symlink() else "new"
+        if status == "updated":
             counts.updated += 1
-            status = "updated"
-            report.detail_warn(f"{target.name}. Overwriting existing install")
         else:
             counts.installed += 1
-            status = "new"
-        if transaction.link_or_copy(ctx, target, dest) != 0:
-            report.error(f"Managed target replacement failed: {dest}")
-            raise InstallerExit(1)
-        report.detail_ok(f"{target.name} -> installed")
-        report.write_target_event(ctx.platform, target.name, "skill", status)
-        installed += 1
-    # Links already pointing at their source are not replaced, but the install record still names them.
+        if copies:
+            batch.add(target.path, dest, target.name, kind, status, target.provider)
+        else:
+            if transaction.link_or_copy(ctx, target, dest, kind) != 0:
+                report.error(f"Managed target replacement failed: {dest}")
+                raise InstallerExit(1)
+            report.write_target_event(ctx.platform, target.name, kind, status)
+        installed += kind == "skill"
     transaction.record_current_links(ctx, current_links)
-    if copy_only and batch.pairs:
+    if batch.pairs:
         label = "  [2/5] Skill sync         " if report.report_enabled() and report.live_counter_enabled() else None
         events_during_batch = report.state().event_file is not None
         if not transaction.copy_targets_batch(ctx, batch, progress_label=label):
@@ -423,10 +428,7 @@ def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool
             for name, kind, status in zip(batch.labels, batch.kinds, batch.statuses):
                 report.write_target_event(ctx.platform, name, kind, status)
         for name in batch.labels:
-            if name == "_shared":
-                report.detail_ok("_shared → copied")
-            else:
-                report.detail_ok(f"{name} → copied (copy-only compatibility mode)")
+            report.detail_ok(f"{name} → copied")
     return counts, installed, skipped
 
 
@@ -434,19 +436,21 @@ def prepare_install(ctx: Context) -> None:
     """Prerequisites and the git hook path, before the install lock."""
     prerequisites.install_prerequisites()
     ctx.hook_change = source.setup_git_hooks()
+    if ctx.hook_change.recorded:
+        ctx.record_source = dict(source.input_record(), hooks_path=ctx.hook_change.after)
 
 
 def run_install(ctx: Context) -> int:
     """For the skills in `args` (every skill when none), under the install
     lock that `run_command` takes and releases (`docs/reference/installer-architecture.md`)."""
     options = ctx.options
-    skills = list(options.args) or list(selection.ALL_SKILLS)
+    skills = selection.requested_skills(ctx, ctx.platform)
     skills_dir = Path(ctx.skills_dir)
     visibility = ctx.visibility
     # The first install over an earlier installer's records creates the install record before anything is placed.
     report.run_logged(transaction.migrate_record, ctx)
     # Source, selection (the source check comes first)
-    if not report.run_logged(source.check_source_health, skip=options.skip_source_health):
+    if not source.install_request() and not report.run_logged(source.check_source_health, skip=options.skip_source_health):
         raise InstallerExit(1)
     collected = selection.collect_targets(ctx, skills)
     skills_dir.mkdir(parents=True, exist_ok=True)
@@ -477,13 +481,7 @@ def run_install(ctx: Context) -> int:
         report.ok(f"Done: {installed} installed, {skipped} skipped")
         report.emit("")
         report.info(f"Install path: {skills_dir}")
-        if ctx.platform == "codex" and copy_only:
-            report.info(f"To update skills safely: cd {runner.REPO_ROOT} && {report.install_command()} --update-source, "
-                        f"then re-run {report.install_command()}")
-        else:
-            report.info(f"To update skills safely: cd {runner.REPO_ROOT} && {report.install_command()} --update-source")
-        if installed > 0 and not copy_only:
-            report.info("With symlink install, safe source updates refresh linked skills after the checkout fast-forwards.")
+        report.info(f"To update the installed Core selection: {locations.record_root() / 'bin' / ('ghost-alice.cmd' if os.name == 'nt' else 'ghost-alice')} update")
     # Runtime, hooks, managed blocks, commands (blocks after the runtime and hooks)
     if not report.run_logged(transaction.sync_runtime_shared, ctx):
         report.error("Runtime shared core sync failed. Aborting hook install")
@@ -528,12 +526,6 @@ def run_install(ctx: Context) -> int:
     except install_transaction.InstallTransactionError as exc:
         report.error(f'Code placement finished, but completed-publish cleanup failed: {exc}')
         raise InstallerExit(1)
-    if set(skills) == set(selection.ALL_SKILLS):
-        try:
-            notes.extend(report.run_logged(source.preserve_successful_source, ctx))
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            report.error(f'Code placement finished, but preserving the successful source version failed: {exc}')
-            raise InstallerExit(1)
     # Result
     notes.extend(report.write_event(ctx.platform, collected.total_target_count, counts.skipped, counts.updated,
                                     counts.installed, verification='ok', hook_status=hook_status))
@@ -570,7 +562,7 @@ def run_post_merge(ctx: Context) -> int:
     merged = Path(ctx.options.merged_checkout) if ctx.options.merged_checkout else None
     match = source.match_install_source(merged)
     if match.state == "same":
-        return dispatch(Options())
+        return dispatch(Options(), input_root=match.here, provenance=source.input_record(match.here))
     if match.state == "other":
         report.info(f"Post-merge: the merged checkout {match.here} is not the install source ({match.recorded}); "
                     "nothing was installed.")
@@ -588,7 +580,8 @@ def run_command(command: Command, ctx: Context) -> int:
         command.before_lock(ctx)
     if command.lock is None:
         return command.run(ctx)
-    lock_handle = lock.acquire(command.lock, ctx.platform)
+    lock_handle = (lock.acquire(command.lock, ctx.platform, inherit=True) if source.install_request()
+                   else lock.acquire(command.lock, ctx.platform))
     try:
         if command.checks_source:
             source.recheck_install_source(ctx, can_adopt=command.adopts_source)
@@ -597,7 +590,7 @@ def run_command(command: Command, ctx: Context) -> int:
         lock.release(lock_handle)
 
 
-def dispatch(options: Options) -> int:
+def _dispatch(options: Options) -> int:
     """`--addon` shortcuts, then the table's command (`find_command`): an unknown
     option ends with exit 1, the full uninstall and auto mode run once per
     detected platform, every other command runs once through `run_command`.
@@ -616,7 +609,8 @@ def dispatch(options: Options) -> int:
             return 0
         return auto.run_uninstall_children(build_context(options), detected)
     if auto_detect_requested(options):
-        detected = locations.detect_present_platforms()
+        requested = (source.install_request() or {}).get('selections')
+        detected = list(requested) if requested is not None else locations.detect_present_platforms()
         if not detected:
             report.warn("No AI platform home directories detected. At least one of ~/.claude, ~/.codex is required.")
             return 0
@@ -639,11 +633,87 @@ def dispatch(options: Options) -> int:
     return run_command(command, ctx)
 
 
+def dispatch(options: Options, *, input_root: Path | None = None, provenance: dict | None = None,
+             selections: dict[str, list[str]] | None = None) -> int:
+    """Run an install from a fixed candidate; activate it only after the whole request succeeds."""
+    if find_command(options) is not INSTALL:
+        return _dispatch(options)
+    if options.prompt_platform and not options.platform_explicit:
+        options.platform = prompt_platform()
+        options.platform_explicit = True
+        options.prompt_platform = False
+    request = source.install_request()
+    selected = selections if selections is not None else (request or {}).get('selections')
+    if selected is None and request is None and input_root is None and not options.args:
+        selected = source.reinstall_selection()
+        if selected is not None and options.platform_explicit:
+            selected = {host: names for host, names in selected.items() if host == options.platform}
+    platforms = list(selected) if selected is not None else (
+        locations.detect_present_platforms() if auto_detect_requested(options) else [options.platform])
+    if not platforms:
+        report.warn('No AI platform home directories detected. At least one of ~/.claude, ~/.codex is required.')
+        return 0
+    ctx = build_context(options)
+    if any(host not in locations.PLATFORMS for host in platforms):
+        raise ValueError('Update requires adapters for installed hosts: ' + ', '.join(host for host in platforms if host not in locations.PLATFORMS))
+    if request is None:
+        source.check_install_source(ctx, match=source.match_install_source(Path(provenance['root'])) if provenance else None)
+        confirmed_project = hosts.confirm_project_trust(platforms)
+        if not source.check_source_health(skip=options.skip_source_health, **({'input_root': input_root} if input_root else {})):
+            return 1
+        if not options.addon_skip and ctx.addon_sources:
+            addons.prepare_sources(ctx)
+        input_source = provenance if provenance is not None else source.input_record()
+        handle = lock.acquire('prepare', ctx.platform)
+        try:
+            folder, addon_commits = source.prepare_source(ctx, input_root=input_root, provenance=input_source,
+                selections=selected if selected is not None else {host: options.args or list(selection.ALL_SKILLS) for host in platforms})
+            source.check_record_reader(folder / 'core', locations.record_root())
+        finally:
+            lock.release(handle)
+        ctx.addon_sources = list(addon_commits)
+        ctx.addon_sources_prepared = True
+        request = dict(package_root=str(folder / 'core'), source=input_source, addon_commits=addon_commits)
+        if selected is not None:
+            request['selections'] = selected
+        command = auto.child_command(ctx, options.platform if options.platform_explicit else None, package=folder / 'core')
+        result = runner.run_command(command, env={source.REQUEST_ENV: json.dumps(request), 'GHOST_ALICE_INSTALL_HOST_CHILD': '0',
+                                                   'GHOST_ALICE_CONFIRMED_PROJECT_TRUST': confirmed_project})
+        if not result.ok:
+            active = (install_transaction.record_after_recovery(locations.record_root()) or {}).get('installer', {}).get('active_root')
+            report.error(f'Candidate install did not finish; retry with {folder / "core/install.sh"}. Active installer: {active or "none"}')
+        return result.returncode
+    if os.environ.get('GHOST_ALICE_INSTALL_HOST_CHILD') == '1':
+        return _dispatch(options)
+    handle = lock.acquire('install', ctx.platform)
+    try:
+        source.check_previous_manager()
+        result = _dispatch(options)
+        if result == 0:
+            for line in source.finalize_source(ctx, runner.REPO_ROOT.parent, platforms):
+                report.info(line)
+        return result
+    finally:
+        lock.release(handle)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the thin shells: returns the exit code; an early stop
     (`_fail`, the isolated rejection) becomes its code here."""
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
+        if argv[:1] == ['--management-entry']:
+            record = install_transaction.record_after_recovery(locations.record_root()) or {}
+            active = record.get('installer', {}).get('active_root')
+            if not active:
+                report.error('No successful installer package is active. Retry the candidate install from its reported path.')
+                return 1
+            entry = Path(active) / '_shared/installer/cli.py'
+            if not entry.is_file():
+                report.error(f'The active installer is missing: {entry}')
+                return 1
+            return runner.run_command([sys.executable, str(entry), *argv[1:]],
+                                      env={source.REQUEST_ENV: '', 'GHOST_ALICE_INSTALL_HOST_CHILD': '0'}).returncode
         reject_isolated_destination(argv)
         options = parse_options(argv)
         report.configure(verbose=options.verbose,
@@ -651,3 +721,6 @@ def main(argv: list[str] | None = None) -> int:
         return dispatch(options)
     except InstallerExit as stop:
         return stop.code
+    except (OSError, ValueError, install_transaction.InstallTransactionError) as error:
+        report.error(str(error))
+        return 1

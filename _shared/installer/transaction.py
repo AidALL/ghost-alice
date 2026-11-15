@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
+import shlex
 import sys
 from typing import TYPE_CHECKING
 
@@ -29,6 +30,135 @@ if TYPE_CHECKING:
 # The runtime companion scripts the context gateway runs beside the runtime `_shared`, relative to the
 # checkout and to the runtime root; the runtime publish carries them with `_shared`.
 RUNTIME_COMPANIONS = ("session-intent-analyzer/scripts/session_intent_ledger.py",)
+
+
+def migrate_ledger(old_root: Path, *, writers_stopped: bool) -> Path:
+    """Move a stopped installation's ledger to its fixed root with existing journal/service owners.
+
+    The caller confirms host and CLI writers have stopped. The gateway participant confirms
+    service absence. Commit data and every binding before allowing that service to resume.
+    """
+    from dataclasses import asdict, replace
+    import shutil
+    import install_destination
+    import install_hooks
+    import ledger_access
+    import runtime_config
+    from installer.participant import PublishContext
+
+    if not writers_stopped:
+        raise ValueError('Host and CLI ledger writers must be stopped before migration')
+    ghost = locations.record_root().resolve()
+    install_transaction._require_lock(ghost)
+    old_root, new_root = Path(old_root).expanduser().resolve(), ghost / 'session-intent'
+    if old_root == new_root or old_root.is_relative_to(new_root) or new_root.is_relative_to(old_root):
+        raise ValueError('Ledger migration requires separate source and fixed destination roots')
+    if not old_root.is_dir() or new_root.is_symlink():
+        raise ValueError('Ledger migration requires an existing source directory and an unlinked destination')
+    ledger_access.require_writable_root(old_root, env={'GHOST_ALICE_GHOST_ROOT': str(ghost)})
+    config_path = ghost / 'config.json'
+    config = runtime_config.load_config(env={'GHOST_ALICE_GHOST_ROOT': str(ghost)}, strict=True)
+    prepared, bindings = {}, {}
+    for host, value in config.get('install_locations', {}).items():
+        destination = install_destination.InstallDestination.parse(value)
+        if Path(destination.ledger_root).resolve() != old_root:
+            continue
+        if Path(destination.ghost_root).resolve() != ghost:
+            raise ValueError(f'Ledger binding for {host} belongs to another installation')
+        if host not in install_hooks.PLATFORMS:
+            raise ValueError(f'The installed {host} adapter is required to retarget its ledger hooks')
+        prepared.update(install_hooks.prepare_ledger_retarget(host, destination=destination, ledger_root=new_root))
+        bindings[host] = asdict(replace(destination, ledger_root=str(new_root)))
+    participants = gateway_participant.participants(ghost)
+    service_after = None
+    for participant in participants:
+        changes, section = participant.prepare_ledger_retarget(old_root, new_root)
+        if changes:
+            prepared.update(changes)
+            service_after = section
+    if not bindings and service_after is None:
+        raise ValueError('No installed host or registered gateway uses the selected ledger root')
+    retired = list(dict.fromkeys([*config.get('retired_ledger_roots', []), str(old_root)]))
+    revised = runtime_config.prepare_config(dict(install_locations=bindings, retired_ledger_roots=retired), config_path)
+    prepared[config_path] = (json.dumps(revised, ensure_ascii=False, indent=2) + '\n').encode()
+    # Resolve only configuration files, so publication and restoration preserve user-owned symlinks.
+    physical = {path.resolve(): raw for path, raw in prepared.items()}
+    before = {path: install_transaction.ReplacementBatch.identity(path) for path in physical}
+    journal = install_transaction.Journal.begin(dict(ghost_root=str(ghost), host='installer'), [])
+    temporary = journal.folder / 'input'
+    journal.data['preparation_dir'] = temporary.name
+    journal.save()
+    temporary.mkdir()
+    snapshot = temporary / 'ledger'
+    targets = [dict(name='ledger', kind='data', source=str(snapshot), dest=str(new_root), mode='data')]
+    for index, (logical, raw) in enumerate(prepared.items()):
+        path = logical.resolve()
+        staged = temporary / f'config-{index}'
+        staged.write_bytes(raw)
+        if path.exists():
+            shutil.copymode(path, staged)
+        else:
+            staged.chmod(0o600)
+        targets.append(dict(name=path.name, kind='configuration', source=str(staged), dest=str(path),
+                            logical_dest=str(logical), mode='copy'))
+    journal.data['targets'] = targets
+    journal.save()
+    context = PublishContext(ghost, 'installer', journal.txid,
+                             tuple(Path(target['dest']) for target in targets) + tuple(prepared), journal.checkpoint)
+    batch = install_transaction.ReplacementBatch(
+        [(target['source'], target['dest'], target['mode']) for target in targets], rollback_root=journal.folder)
+    ledger = ledger_access.load_ledger()
+    committed = False
+    try:
+        for participant in participants:
+            participant.before_publish(context)
+        ledger.snapshot_roots(old_root, new_root, snapshot, writers_stopped=True)
+        if any(install_transaction.ReplacementBatch.identity(path) != original for path, original in before.items()):
+            raise ValueError('Installed configuration changed during ledger migration')
+        batch.stage()
+        if (any(Path(target.get('logical_dest', target['dest'])).resolve() != Path(target['dest']) for target in targets)
+                or any(item['before'] != before[item['dest']] for item in batch.prepared[1:])):
+            raise ValueError('Installed configuration path or content changed during ledger migration')
+        journal.record_staged(batch)
+        batch.publish()
+        import content_digest
+        if content_digest.state(new_root, include_generated=True) != journal.data['targets'][0]['candidate']:
+            raise ValueError('Published ledger differs from its verified snapshot')
+        if any(path.read_bytes() != raw for path, raw in physical.items()):
+            raise ValueError('Published ledger bindings differ from the prepared configuration')
+        if service_after is not None:
+            installed_payload.update(ghost, {'service': service_after}, journal=journal)
+            if 'gateway' in journal.data['participants']:
+                journal.data['participants']['gateway']['service'] = dict(service_after)
+        # Persist the new service identity with the data-commit boundary before any writer resumes.
+        journal.mark('committed')
+        committed = True
+        for participant in participants:
+            if service_after is not None:
+                participant.service = service_after
+            participant.after_publish(context)
+        journal.mark('done')
+    except Exception as exc:
+        if committed:
+            raise RuntimeError(f'Ledger migration committed to {new_root}; service resume failed ({exc}); '
+                               'current data and bindings remain in place') from exc
+        try:
+            for participant in participants:
+                participant.before_restore(context)
+            batch.restore()
+            journal.restore_record(ghost)
+            for participant in participants:
+                participant.after_restore(context)
+            journal.mark('restored')
+        except Exception as recovery:
+            raise install_transaction.InstallTransactionError(
+                f'Ledger migration failed ({exc}); restoration failed ({recovery}); review {journal.folder}') from recovery
+        raise
+    finally:
+        batch.cleanup()
+    for line in install_transaction.cleanup_completed(ghost):
+        report.info(line)
+    return new_root
 
 
 @dataclass
@@ -60,9 +190,7 @@ def record_source(ctx: "Context") -> dict:
     """The `source` section every publish of this command records: the checkout's root,
     commit, dirty state and git hook path, read once per command."""
     if ctx.record_source is None:
-        info = source.resolve_source()
-        ctx.record_source = {"root": str(info.root), "commit": info.head, "dirty": info.dirty,
-                             "hooks_path": source.configured_hooks_path()}
+        ctx.record_source = source.input_record()
     return ctx.record_source
 
 
@@ -89,7 +217,9 @@ def publish(ctx: "Context", targets: list[dict], progress: dict | None = None) -
     request = {"schema_version": install_transaction.REQUEST_SCHEMA_VERSION, "host": ctx.platform,
                "ghost_root": str(locations.record_root()), "event_log": str(locations.events_log(ctx.platform)),
                "installer": {"commit": checkout["commit"], "schema_version": installed_payload.SCHEMA_VERSION},
-               "source": dict(checkout), "targets": targets}
+               "source": dict(checkout), "asset_root": str(runner.REPO_ROOT), "targets": targets}
+    if any(target['kind'] == 'support' and target['name'] == '_shared' for target in targets):
+        request['install_state'] = str(locations.install_state_path(ctx.platform))
     if progress:
         request["progress"] = progress
     participants = gateway_participant.participants(locations.record_root())
@@ -191,6 +321,16 @@ def sync_runtime_shared(ctx: "Context") -> bool:
         companion = runner.REPO_ROOT / relative
         if companion.is_file():
             targets.append(_request_target(ctx, relative, companion, runtime_root / relative, kind="runtime", mode="copy"))
+    for original, name in (("install.sh", "ghost-alice"), ("install.ps1", "ghost-alice.ps1"), ("install.cmd", "ghost-alice.cmd")):
+        entry = runner.REPO_ROOT / original
+        if entry.is_file():
+            target = _request_target(ctx, name, entry, locations.record_root() / 'bin' / name,
+                                     kind='command', mode='copy')
+            if original == 'install.sh':
+                target['command_text'] = '#!/usr/bin/env bash\nexec bash ' + shlex.quote(str(entry)) + ' --management-entry "$@"\n'
+            elif original == 'install.ps1':
+                target['command_text'] = "& '" + str(entry).replace("'", "''") + "' --management-entry @args\nexit $LASTEXITCODE\n"
+            targets.append(target)
     if not publish(ctx, targets).ok:
         report.error(f"Staged copy replace failed: {runtime_root / '_shared'}")
         return False
@@ -263,7 +403,22 @@ def migrate_record(ctx: "Context") -> None:
     that cannot finish is reported and the command goes on."""
     root = locations.record_root()
     try:
-        summary = installed_payload.migrate(root, locations.PLATFORMS, installer_commit=record_source(ctx)["commit"])
+        hosts = [path.stem for path in locations.install_state_manifests(root / 'install-state')]
+        runtime_targets = {}
+        existing = installed_payload.read(root)
+        if existing is None or existing['schema_version'] == 1:
+            import runtime_config
+            config = runtime_config.load_config(env={'GHOST_ALICE_GHOST_ROOT': str(root)}, strict=True)
+            for host in hosts:
+                binding = config.get('install_locations', {}).get(host, {})
+                shared = Path(binding.get('runtime_shared_dir') or locations.runtime_shared_dir())
+                for relative in ('_shared', *RUNTIME_COMPANIONS):
+                    origin = binding.get('core_source_root')
+                    runtime_targets.setdefault(host, []).append(dict(target_name=relative,
+                        dest_path=str(shared if relative == '_shared' else shared.parent / relative),
+                        source_path=str(Path(origin) / relative) if origin else '', install_mode='copy'))
+        summary = installed_payload.migrate(root, hosts, installer_commit=record_source(ctx)["commit"],
+                                            runtime_targets=runtime_targets)
     except (installed_payload.RecordError, installed_payload.NotLockHolder, OSError) as exc:
         report.warn(f"Install record migration skipped: {exc}")
     else:
@@ -448,8 +603,9 @@ def write_install_state_manifest(ctx: "Context", skills_dir: Path, copy_only: bo
         "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE": recorded.before if recorded else "",
         "GHOST_ALICE_SOURCE_REPO_HOOK_AFTER": recorded.after if recorded else "",
         "GHOST_ALICE_SOURCE_REPO_HOOK_APPLIED_AT": (recorded.applied_at or "") if recorded else "",
+        "GHOST_ALICE_SOURCE_REPO_HOOK_ROOT": str(info.root),
     }
-    result = runner.run_tool("_shared/install_state_writer.py", ctx.platform, str(info.root), info.branch, info.head,
+    result = runner.run_tool("_shared/install_state_writer.py", ctx.platform, str(runner.REPO_ROOT), info.branch, info.head,
                              info.dirty, str(state_path), *targets, env=env)
     if not result.ok:
         report.error(f"Install-state manifest write failed; aborting install: {state_path}")

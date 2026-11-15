@@ -80,7 +80,7 @@ For `reject`, include the rejection reasons and the retracted claims. For `escal
 
 For a material claim about an external tool, the response model loads verification-before-completion's `references/external-tool-evidence.md` from the installed skill and supplies its evidence requirements and the exact claim scope in each delegate's assignment.
 
-For a claim reviewed at level-3-high-stakes, external governance absorption or evaluator-candidate promotion, follow `docs/policies/evaluator-artifact-contract.md` for its required artifacts and accepted result. The response model retains the returned verifier result and its supported scope; this skill does not redefine the evaluation protocol.
+For a claim reviewed at level-3-high-stakes, external governance absorption or evaluator-candidate promotion, locate `evaluator-artifact-contract.md` through `installed-policies.md` in the `_shared` directory beside the host's installed skills, then follow that policy for its required artifacts and accepted result. The response model retains the returned verifier result and its supported scope; this skill does not redefine the evaluation protocol.
 
 ## Gotchas
 

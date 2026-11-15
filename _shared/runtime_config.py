@@ -26,8 +26,8 @@ DEFAULT_CONFIG = {
 }
 
 
-def config_path(home: Path | None = None) -> Path:
-    return install_destination.ghost_root(home) / "config.json"
+def config_path(home: Path | None = None, *, env=None) -> Path:
+    return install_destination.ghost_root(home, env=env) / "config.json"
 
 
 def canonical_agent_visibility_profile(value: str | None) -> str:
@@ -153,9 +153,9 @@ def _apply_env_overrides(config: dict[str, Any], env: dict[str, str]) -> None:
         config["agent_visibility"]["profile"] = canonical_agent_visibility_profile(profile)
 
 
-def load_config(env: dict[str, str] | None = None, home: Path | None = None) -> dict[str, Any]:
+def load_config(env: dict[str, str] | None = None, home: Path | None = None, *, strict: bool = False) -> dict[str, Any]:
     source_env = env if env is not None else os.environ
-    path = config_path(home)
+    path = config_path(home, env=source_env)
     if not path.exists():
         config = _default_config()
         _apply_env_overrides(config, source_env)
@@ -163,8 +163,12 @@ def load_config(env: dict[str, str] | None = None, home: Path | None = None) -> 
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        if strict:
+            raise
         loaded = {}
     if not isinstance(loaded, dict):
+        if strict:
+            raise ValueError(f'Installation config is not an object: {path}')
         loaded = {}
     config = _default_config()
     agent_visibility = loaded.get("agent_visibility")
@@ -180,6 +184,8 @@ def load_config(env: dict[str, str] | None = None, home: Path | None = None) -> 
         )
     if isinstance(loaded.get("install_locations"), dict):
         config["install_locations"] = loaded["install_locations"]
+    if 'retired_ledger_roots' in loaded:
+        config['retired_ledger_roots'] = loaded['retired_ledger_roots']
     config["schema_version"] = "ghost-alice-config.v1"
     config["agent_visibility"]["profile"] = canonical_agent_visibility_profile(
         config["agent_visibility"].get("profile")
@@ -207,13 +213,13 @@ def _atomic_write_json(path: Path, data: Any) -> None:
     atomic_write.write_json(path, data)
 
 
-def save_config(config: dict[str, Any], home: Path | None = None) -> Path:
-    path = config_path(home)
-    install_destination.assert_mutation_path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    normalized = load_config(env={}, home=home)
+def prepare_config(config: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Merge and normalize settings for this exact file without writing it."""
+    normalized = load_config(env={'GHOST_ALICE_GHOST_ROOT': str(path.parent)}, strict=True)
     if isinstance(config.get("install_locations"),dict):
         normalized.setdefault("install_locations",{}).update(config["install_locations"])
+    if 'retired_ledger_roots' in config:
+        normalized['retired_ledger_roots'] = config['retired_ledger_roots']
     agent_visibility = config.get("agent_visibility")
     if isinstance(agent_visibility, dict):
         normalized["agent_visibility"].update(agent_visibility)
@@ -230,5 +236,12 @@ def save_config(config: dict[str, Any], home: Path | None = None) -> Path:
     )
     normalized["agent_visibility"].pop("enabled", None)
     normalized["strict_session_log"] = {"mode": "always"}
+    return normalized
+
+
+def save_config(config: dict[str, Any], home: Path | None = None) -> Path:
+    path = config_path(home)
+    install_destination.assert_mutation_path(path)
+    normalized = prepare_config(config, path)
     atomic_write.write_json(path, normalized)
     return path

@@ -61,6 +61,27 @@ class HostCase(unittest.TestCase):
 
 
 class HookRegistrationTests(HostCase):
+    def test_trust_confirmation_targets_original_project_during_candidate_retry(self):
+        from installer import source
+        config = self.home / '.codex/config.toml'
+        config.parent.mkdir()
+        project = str(self.source.resolve())
+        config.write_text(f'[projects.{json.dumps(project)}]\ntrust_level = "untrusted"\n')
+        ctx = self.context('codex')
+        with install_lock.command_lock(self.ghost / 'install.lock', owner='test'):
+            folder, _ = source.prepare_source(ctx)
+        for interactive, answer, expected in ((True, 'yes', project), (True, 'no', ''),
+                                                (True, EOFError(), ''), (False, 'yes', '')):
+            with self.subTest(interactive=interactive, answer=answer), use_source(folder / 'core'), \
+                    mock.patch.dict(os.environ, {'GHOST_ALICE_CORE_ROOT': str(folder / 'core')}), \
+                    mock.patch.object(source, 'interactive', return_value=interactive), \
+                    mock.patch('builtins.input', side_effect=answer if isinstance(answer, Exception) else None,
+                               return_value=answer):
+                approved, output = self.captured(hosts.confirm_project_trust, ['claude', 'codex'])
+                self.assertEqual(approved, expected)
+                self.assertIn(project, output)
+                self.assertIn('untrusted', config.read_text())
+
     def test_child_registration_states_remain_distinct_and_invalid_evidence_is_error(self):
         ctx = self.context('claude')
         for status in ('installed', 'already', 'skipped', 'error'):
@@ -91,9 +112,9 @@ class HookRegistrationTests(HostCase):
         self.assertEqual(ok.legacy_status, 'installed')
         self.assertIn("[INFO] Agent hook install... (session-intent + tool-checkpoint + completion + "
                       "session-start + session-receipt + io-trace)", out)
-        base = ["--core-source-root", str(self.source), "--platform", "claude",
+        base = ["--platform", "claude",
                 "--hook-shared-dir", str(self.ghost / "runtime" / "current" / "_shared"), "--skills-dir", str(ctx.skills_dir)]
-        self.assertEqual(self.runner.tool_calls("install_hooks.py")[0], base + ["--visibility", "dynamic", "--addon-source", "/a", '--format', 'json'])
+        self.assertEqual(self.runner.tool_calls("install_hooks.py")[0], base + ["--core-source-root", str(self.source), "--visibility", "dynamic", "--addon-source", "/a", '--format', 'json'])
         strict = FakeRunner()
         with strict.patch():
             hosts.install_hooks(self.context("codex", visibility="strict", addon_sources=["/a"]), "install", "codex")
@@ -444,7 +465,7 @@ class InstallRecordReportTests(HostCase):
             yield run.__name__, rc, out
 
     def test_no_install_record_yet(self):
-        record = self.ghost / "installed-payload.json"
+        record = installed_payload.path(self.ghost)
         for name, rc, out in self.run_both(self.context("claude")):
             with self.subTest(command=name):
                 self.assertEqual(rc, 0)
@@ -473,7 +494,7 @@ class InstallRecordReportTests(HostCase):
             str(codex_copy): self.entry("copy", ["codex"], files={"SKILL.md": "sha256:" + "0" * 64}),
         }, last_transaction={"id": "20261020T000000Z-1-aaaaaaaa", "updated_at": "2026-10-20T00:00:00+00:00",
                              "rollback_dir": str(self.ghost / "rollbacks" / "20261020T000000Z-1-aaaaaaaa")})
-        record = self.ghost / "installed-payload.json"
+        record = installed_payload.path(self.ghost)
         for name, rc, out in self.run_both(ctx):
             with self.subTest(command=name):
                 self.assertEqual(rc, 0)

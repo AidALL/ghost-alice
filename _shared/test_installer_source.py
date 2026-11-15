@@ -19,6 +19,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import installed_payload  # noqa: E402
+import install_lock  # noqa: E402
+import install_transaction  # noqa: E402
 from installer import report  # noqa: E402
 from installer import runner  # noqa: E402
 from installer import source  # noqa: E402
@@ -73,33 +75,135 @@ class SuccessfulSourceVersionsTests(SourceCase):
     def setUp(self):
         super().setUp()
         self.repo = init_repo(self.root / 'repo')
+        (self.repo / '_shared').mkdir()
+        (self.repo / 'tracked.txt').rename(self.repo / '_shared/tracked.txt')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-qm', 'product files')
         self.ctx = make_context(self.root / 'home', 'claude')
         self.versions = self.root / 'home/.ghost-alice/versions'
+
+    def test_git_and_plain_inputs_include_policies_and_exclude_unrelated_files(self):
+        policies = ('docs/policies/evaluator-artifact-contract.md', 'docs/policies/live-smoke-regression.md')
+        for name in policies:
+            path = self.repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(name)
+        (self.repo / 'secret.env').write_text('unrelated input')
+        from_git = source._version_source_files(self.repo)
+        shutil.rmtree(self.repo / '.git')
+        from_plain = source._version_source_files(self.repo)
+        self.assertEqual(from_git, from_plain)
+        self.assertTrue(set(policies).issubset(from_plain))
+        self.assertNotIn('secret.env', from_plain)
+
+    def test_activation_failures_restore_metadata_and_record_without_erasing_prior_placements(self):
+        from installer import lock
+        modes = ['exception'] + (['process-exit'] if hasattr(os, 'fork') else [])
+        root = self.versions.parent
+        for prior in (None, '/previous/core'):
+            for mode in modes:
+                for point in ('metadata-before', 'metadata-after', 'record-before', 'record-after', 'done'):
+                    with self.subTest(prior=prior, mode=mode, point=point), use_source(self.repo):
+                        (self.repo / '_shared/tracked.txt').write_text(f'{prior}:{mode}:{point}')
+                        with install_lock.command_lock(root / 'install.lock', owner='test'):
+                            placed = dict(name='earlier', kind='skill', mode='copy', provider='core', baseline='recorded',
+                                          used_by=['claude'], source='/earlier-placement', files={})
+                            installed_payload.update(root, {'installer': {'active_root': prior}, 'targets': {'/placed': placed}})
+                            folder, _ = source.prepare_source(self.ctx)
+                            version = folder / 'version.json'
+                            original = version.read_bytes(), installed_payload.path(root).read_bytes()
+                            original_mtime = version.stat().st_mtime_ns
+                            fired = False
+                            def fail():
+                                nonlocal fired
+                                if fired:
+                                    return
+                                fired = True
+                                if mode == 'process-exit':
+                                    os._exit(75)
+                                raise OSError('injected activation failure')
+                            write_json, write, mark = install_transaction._write_json, installed_payload._write, install_transaction.Journal.mark
+                            def metadata(path, data):
+                                if path == version and point == 'metadata-before':
+                                    fail()
+                                write_json(path, data)
+                                if path == version and point == 'metadata-after':
+                                    fail()
+                            def record(path, data):
+                                if path == installed_payload.path(root) and point == 'record-before':
+                                    fail()
+                                write(path, data)
+                                if path == installed_payload.path(root) and point == 'record-after':
+                                    fail()
+                            def finish(journal, phase):
+                                if phase == 'done' and point == 'done':
+                                    fail()
+                                mark(journal, phase)
+                            with mock.patch.object(install_transaction, '_write_json', metadata), \
+                                    mock.patch.object(installed_payload, '_write', record), \
+                                    mock.patch.object(install_transaction.Journal, 'mark', finish):
+                                if mode == 'process-exit':
+                                    pid = os.fork()
+                                    if pid == 0:
+                                        source.finalize_source(self.ctx, folder, ['claude'])
+                                        os._exit(76)
+                                    _, status = os.waitpid(pid, 0)
+                                    self.assertEqual(os.waitstatus_to_exitcode(status), 75)
+                                else:
+                                    with self.assertRaisesRegex(OSError, 'injected activation'):
+                                        source.finalize_source(self.ctx, folder, ['claude'])
+                                    self.assertEqual((version.read_bytes(), installed_payload.path(root).read_bytes()), original)
+                        # The next locked command restores a killed activation before doing new work.
+                        handle = lock.acquire('install', 'claude')
+                        try:
+                            self.assertEqual((version.read_bytes(), installed_payload.path(root).read_bytes()), original)
+                            self.assertEqual(version.stat().st_mtime_ns, original_mtime)
+                            self.assertEqual(installed_payload.read(root)['targets']['/placed'], placed)
+                            self.assertEqual(installed_payload.read(root)['installer'].get('active_root'), prior)
+                            source.finalize_source(self.ctx, folder, ['claude'])
+                        finally:
+                            lock.release(handle)
+                        self.assertEqual(json.loads(version.read_bytes())['status'], 'successful')
+                        self.assertEqual(installed_payload.read(root)['installer']['active_root'], str(folder / 'core'))
 
     def save(self, platform='claude', root=None, addons=()):
         self.ctx.platform = platform
         self.ctx.addon_sources = list(map(str, addons))
-        with use_source(root or self.repo):
-            lines = source.preserve_successful_source(self.ctx)
+        with use_source(root or self.repo), install_lock.command_lock(self.versions.parent / 'install.lock', owner='test'):
+            folder, _ = source.prepare_source(self.ctx)
+            lines = source.finalize_source(self.ctx, folder, [platform])
         folders = sorted(self.versions.iterdir()) if self.versions.exists() else []
         return folders, lines
 
     def test_saved_bytes_include_local_changes_and_repeat_hosts_share_one_version(self):
         (self.repo / '.gitignore').write_text('private.txt\n')
         (self.repo / 'private.txt').write_text('private')
-        (self.repo / 'tracked.txt').write_text('local change')
-        (self.repo / 'new.txt').write_text('untracked code')
+        (self.repo / '_shared/tracked.txt').write_text('local change')
+        (self.repo / '_shared/new.txt').write_text('untracked code')
         before = (self.repo / '.git/index').read_bytes()
         folders, lines = self.save()
         self.assertEqual(len(folders), 1)
         kept = folders[0] / 'core'
-        self.assertEqual((kept / 'tracked.txt').read_text(), 'local change')
-        self.assertEqual((kept / 'new.txt').read_text(), 'untracked code')
+        self.assertEqual((kept / '_shared/tracked.txt').read_text(), 'local change')
+        self.assertEqual((kept / '_shared/new.txt').read_text(), 'untracked code')
         self.assertFalse((kept / 'private.txt').exists())
         self.assertFalse((kept / '.git').exists())
         self.assertIn('--adopt-source', '\n'.join(lines))
         self.assertEqual(self.save('codex')[0], folders)
         self.assertEqual((self.repo / '.git/index').read_bytes(), before)
+
+    def test_previous_manager_must_read_candidate_records_before_placement(self):
+        package = checkout_copy(self)
+        root = self.versions.parent
+        with install_lock.command_lock(root / 'install.lock', owner='test'):
+            installed_payload.update(root, {'installer': {'active_root': str(package)}})
+            original = installed_payload.path(root).read_bytes()
+            source.check_previous_manager()
+            reader = package / '_shared/installed_payload.py'
+            reader.write_text(reader.read_text().replace('SCHEMA_VERSION = 2', 'SCHEMA_VERSION = 99'))
+            with self.assertRaisesRegex(ValueError, 'cannot read'):
+                source.check_previous_manager()
+            self.assertEqual(installed_payload.path(root).read_bytes(), original)
 
     def test_latest_three_versions_remain_beside_an_older_live_version(self):
         folders, _ = self.save()
@@ -114,23 +218,41 @@ class SuccessfulSourceVersionsTests(SourceCase):
                                                          'source': str(self.versions / 'absent/core')}}}
         with mock.patch.object(source.installed_payload, 'read', return_value=record):
             for number in range(1, 5):
-                (self.repo / 'tracked.txt').write_text(str(number))
+                (self.repo / '_shared/tracked.txt').write_text(str(number))
                 folders, _ = self.save()
         self.assertEqual(len(folders), 4)
         self.assertIn(first, folders)
         self.assertTrue(link.exists())
-        self.assertEqual(sorted((folder / 'core/tracked.txt').read_text() for folder in folders), ['2', '3', '4', 'one\n'])
+        self.assertEqual(sorted((folder / 'core/_shared/tracked.txt').read_text() for folder in folders), ['2', '3', '4', 'one\n'])
 
     def test_source_changed_after_placement_does_not_become_a_successful_version(self):
         installed = self.root / 'installed.py'
         installed.write_text('placed bytes')
-        (self.repo / 'tracked.txt').write_text('changed after placement')
-        record = {'targets': {str(installed): {'source': str(self.repo / 'tracked.txt'),
+        (self.repo / '_shared/tracked.txt').write_text('changed after placement')
+        with use_source(self.repo):
+            folder, _ = source.prepare_source(self.ctx)
+        record = {'targets': {str(installed): {'source': str(folder / 'core/_shared/tracked.txt'),
                                               'used_by': ['claude'], 'mode': 'copy'}}}
         with mock.patch.object(source.installed_payload, 'read', return_value=record):
             with self.assertRaisesRegex(ValueError, 'Preserved source differs from installed code'):
-                self.save()
-        self.assertEqual(list(self.versions.iterdir()), [])
+                source.finalize_source(self.ctx, folder, ['claude'])
+        self.assertEqual(json.loads((folder / 'version.json').read_text())['status'], 'candidate')
+
+    def test_inventory_only_future_host_keeps_its_older_source_version(self):
+        folders, _ = self.save()
+        first = folders[0]
+        installed = self.root / 'future-host/alpha'
+        installed.parent.mkdir()
+        installed.symlink_to(first / 'core/_shared', target_is_directory=True)
+        inventory = self.versions.parent / 'install-state/future-host.json'
+        inventory.parent.mkdir()
+        inventory.write_text(json.dumps(dict(platform='future-host', source_root=str(first / 'core'), targets=[
+            dict(target_name='alpha', dest_path=str(installed), source_path=str(first / 'core/_shared'), install_mode='symlink')])) )
+        for number in range(4):
+            (self.repo / '_shared/tracked.txt').write_text(str(number))
+            folders, _ = self.save()
+        self.assertIn(first, folders)
+        self.assertTrue(installed.exists())
 
     def test_plain_package_uses_catalog_and_saved_source_reuses_its_file_list(self):
         plain = self.root / 'package'
@@ -169,21 +291,21 @@ class SuccessfulSourceVersionsTests(SourceCase):
         record = {'targets': {}}
         with mock.patch.object(source.installed_payload, 'read', return_value=record):
             for number in range(4):
-                (self.repo / 'tracked.txt').write_text(str(number))
+                (self.repo / '_shared/tracked.txt').write_text(str(number))
                 folders, lines = self.save()
-                latest = next(folder for folder in folders if (folder / 'core/tracked.txt').read_text() == str(number))
+                latest = next(folder for folder in folders if (folder / 'core/_shared/tracked.txt').read_text() == str(number))
                 record['targets'][str(number)] = {'source': str(latest / 'core'), 'used_by': ['claude']}
         self.assertEqual(len(folders), 4)
-        extra = next(folder for folder in folders if (folder / 'core/tracked.txt').read_text() == '0')
+        extra = next(folder for folder in folders if (folder / 'core/_shared/tracked.txt').read_text() == '0')
         self.assertIn(str(extra), '\n'.join(lines))
         self.assertIn('claude', '\n'.join(lines))
 
     def test_a_changed_archive_and_old_successes_survive_a_failed_new_copy(self):
         folders, _ = self.save()
         first = folders[0]
-        (first / 'core/tracked.txt').write_text('user edit to preserved source')
+        (first / 'core/_shared/tracked.txt').write_text('user edit to preserved source')
         for number in range(4):
-            (self.repo / 'tracked.txt').write_text(str(number))
+            (self.repo / '_shared/tracked.txt').write_text(str(number))
             folders, _ = self.save()
         self.assertIn(first, folders)
         before = set(folders)
@@ -195,9 +317,9 @@ class SuccessfulSourceVersionsTests(SourceCase):
     def test_failed_old_version_deletion_reports_the_saved_new_version(self):
         oldest = self.save()[0][0]
         for number in range(1, 3):
-            (self.repo / 'tracked.txt').write_text(str(number))
+            (self.repo / '_shared/tracked.txt').write_text(str(number))
             self.save()
-        (self.repo / 'tracked.txt').write_text('latest')
+        (self.repo / '_shared/tracked.txt').write_text('latest')
         remove = shutil.rmtree
         def fail_old_version(path, *args, **kwargs):
             if Path(path).resolve() == oldest.resolve():
@@ -209,10 +331,10 @@ class SuccessfulSourceVersionsTests(SourceCase):
         self.assertEqual(len(list(self.versions.iterdir())), 4)
 
     def test_a_directory_link_cannot_be_silently_omitted_from_the_saved_source(self):
-        (self.repo / 'code').mkdir()
-        (self.repo / 'code/file.py').write_text('source')
-        (self.repo / 'linked-code').symlink_to(self.repo / 'code', target_is_directory=True)
-        git(self.repo, 'add', 'linked-code')
+        (self.repo / '_shared/code').mkdir()
+        (self.repo / '_shared/code/file.py').write_text('source')
+        (self.repo / '_shared/linked-code').symlink_to(self.repo / '_shared/code', target_is_directory=True)
+        git(self.repo, 'add', '_shared/linked-code')
         with self.assertRaisesRegex(ValueError, 'Source directory link cannot be preserved'):
             self.save()
         self.assertEqual(list(self.versions.iterdir()), [])
@@ -241,32 +363,32 @@ class SuccessfulSourceVersionsTests(SourceCase):
         (cache / 'generated.pyc').write_bytes(b'generated cache')
         self.assertTrue(source._unchanged_version(folder))
         link = cache / 'user-link'
-        link.symlink_to(self.repo / 'tracked.txt')
+        link.symlink_to(self.repo / '_shared/tracked.txt')
         self.assertFalse(source._unchanged_version(folder))
         link.unlink()
         extra = folder / 'personal.txt'
         extra.write_text('user content')
         self.assertFalse(source._unchanged_version(folder))
         extra.unlink()
-        (folder / 'core/tracked.txt').unlink()
+        (folder / 'core/_shared/tracked.txt').unlink()
         self.assertFalse(source._unchanged_version(folder))
 
     def test_service_and_pending_merge_consumers_keep_their_source_versions(self):
         service_version = self.save()[0][0]
-        (self.repo / 'tracked.txt').write_text('pending version')
+        (self.repo / '_shared/tracked.txt').write_text('pending version')
         pending_version = next(folder for folder in self.save()[0] if folder != service_version)
         pending = self.versions.parent / 'pending-merges/claude/manifest.json'
         pending.parent.mkdir(parents=True)
-        pending.write_text(json.dumps({'entries': [{'backup_path': str(pending_version / 'core/tracked.txt'), 'decided': False}]}))
-        record = {'service': {'program': str(service_version / 'core/tracked.txt')}}
+        pending.write_text(json.dumps({'entries': [{'backup_path': str(pending_version / 'core/_shared/tracked.txt'), 'decided': False}]}))
+        record = {'service': {'program': str(service_version / 'core/_shared/tracked.txt')}}
         with mock.patch.object(source.installed_payload, 'read', return_value=record):
             for number in range(4):
-                (self.repo / 'tracked.txt').write_text(str(number))
+                (self.repo / '_shared/tracked.txt').write_text(str(number))
                 folders, _ = self.save()
         self.assertEqual(len(folders), 5)
         self.assertIn(service_version, folders)
         self.assertIn(pending_version, folders)
-        self.assertEqual(sorted((folder / 'core/tracked.txt').read_text() for folder in folders),
+        self.assertEqual(sorted((folder / 'core/_shared/tracked.txt').read_text() for folder in folders),
                          ['1', '2', '3', 'one\n', 'pending version'])
 
 
@@ -310,7 +432,7 @@ class SuccessfulSourceReinstallTests(unittest.TestCase):
             self.assertEqual(len(list(versions.iterdir())), 2)
             output = install(first / 'core', 'claude')
             target = home / '.claude/skills/task-router'
-            self.assertEqual(target.resolve(), first / 'core/task-router')
+            self.assertFalse(target.is_symlink())
             self.assertEqual((target / 'SKILL.md').read_bytes(), original)
             self.assertIn('keep-me', settings.read_text())
             self.assertEqual(len(list(versions.iterdir())), 2)
@@ -330,6 +452,18 @@ class SuccessfulSourceReinstallTests(unittest.TestCase):
 
 
 class SourceHealthTests(SourceCase):
+    def test_update_acquisition_failure_keeps_development_checkout_unchanged(self):
+        repo = init_repo(self.root / 'development')
+        (repo / 'tracked.txt').write_text('uncommitted user change')
+        before = git(repo, 'status', '--porcelain=v1')
+        for remote, ref in ((None, 'main'), (str(repo), None), (str(repo), 'missing-ref'),
+                            (str(self.root / 'missing-remote'), 'main')):
+            with self.subTest(remote=remote, ref=ref), self.assertRaisesRegex(ValueError, 'Update'):
+                with source.acquire_update(dict(root=str(repo), remote=remote, ref=ref)):
+                    self.fail('failed acquisition must not yield an install input')
+        self.assertEqual((repo / 'tracked.txt').read_text(), 'uncommitted user change')
+        self.assertEqual(git(repo, 'status', '--porcelain=v1'), before)
+
     def test_skip_flag_warns_and_passes(self):
         # source_health.sh:6-9
         ok, out = self.check(self.root / "nowhere", skip=True)

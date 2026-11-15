@@ -414,6 +414,22 @@ class SessionCheckReuseTest(unittest.TestCase):
 
 
 class DeliveryRecordTest(unittest.TestCase):
+    def test_retired_root_never_creates_cache_and_checks_still_run(self):
+        import session_check_cache as cache
+        with tempfile.TemporaryDirectory() as temp:
+            ghost, retired = Path(temp) / 'installation', Path(temp) / 'deleted-clone/ledger'
+            ghost.mkdir()
+            (ghost / 'config.json').write_text(json.dumps({'retired_ledger_roots': [str(retired)]}))
+            target = Path(temp) / 'evidence.txt'
+            target.write_text('actual evidence')
+            with mock.patch.dict(os.environ, {'GHOST_ALICE_GHOST_ROOT': str(ghost)}):
+                result = cache.observe_check(retired, 'fixture-host', 'native-session', 'check', target,
+                                             lambda: {'actual': target.read_text()})
+                self.assertEqual(result['status'], 'uncached')
+                self.assertEqual(result['value'], {'actual': 'actual evidence'})
+                self.assertFalse(cache.record_delivery(retired, 'fixture-host', 'native-session', 'receipt', 'old', create=True))
+            self.assertFalse(retired.exists())
+
     def test_delivery_follows_the_content_of_one_session(self):
         from session_check_cache import delivered, record_delivery
         with tempfile.TemporaryDirectory() as directory:

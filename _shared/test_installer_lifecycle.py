@@ -531,13 +531,13 @@ class RepairTests(LifecycleCase):
     def test_repair_migrates_earlier_records_before_its_first_publish(self):
         # Repair publishes like install, so the first command that writes the install record migrates first.
         self.stub("installer.transaction.install_shared", 0)
-        self.stub("installer.transaction.link_or_copy", 0)
+        self.stub("installer.transaction.copy_target", True)
         self.stub("installer.addons.repair_missing", True)
         (self.source / "task-router").mkdir()
         (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
         rc, _ = self.captured(lifecycle.run_repair, self.ctx)
         self.assertEqual(rc, 0)
-        self.assertEqual(self.calls[:3], ["migrate_record", "install_shared", "link_or_copy"])
+        self.assertEqual(self.calls[:3], ["migrate_record", "install_shared", "copy_target"])
 
     def test_repair_reprovisions_missing_and_keeps_occupied_targets(self):
         # install.sh:677-726
@@ -561,8 +561,8 @@ class RepairTests(LifecycleCase):
         self.assertIn("[WARN] repair: writing-plans is occupied and not cleanly managed; left untouched", out)
         self.assertIn("[OK] Repair complete: 1 re-provisioned, 1 left untouched", out)
         self.assertNotIn("install_shared", self.calls)
-        self.assertEqual(self.calls.count("link_or_copy"), 1)
-        self.assertNotIn("copy_target", self.calls)
+        self.assertEqual(self.calls.count("copy_target"), 1)
+        self.assertNotIn("link_or_copy", self.calls)
 
     def test_repair_restores_missing_shared_and_uses_copies_for_codex(self):
         ctx = make_context(self.home, "codex")
@@ -626,9 +626,9 @@ class RepairTests(LifecycleCase):
         self.assertIn("[ERROR] repair: addon target repair failed; see addon registry sidecars", out)
         (self.source / "task-router").mkdir()
         (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
-        self.patches.enter_context(mock.patch("installer.transaction.link_or_copy", return_value=4))
+        self.patches.enter_context(mock.patch("installer.transaction.copy_target", return_value=False))
         rc, _ = self.captured(lifecycle.run_repair, self.ctx)
-        self.assertEqual(rc, 4)
+        self.assertEqual(rc, 1)
 
 
 if __name__ == "__main__":

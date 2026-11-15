@@ -1,14 +1,7 @@
-"""installer: the checkout the installer runs from has one name, `runner.REPO_ROOT`.
-
-Every module reads `runner.REPO_ROOT` when it runs, so patching that one name
-(`installer_testing.use_source`) moves the whole installer to another checkout.
-"""
+"""Installer assets stay in the executing package; source provenance names the input."""
 from __future__ import annotations
 
-import ast
-import dataclasses
-import importlib
-import inspect
+import json
 import os
 from pathlib import Path
 import sys
@@ -17,38 +10,32 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import installer  # noqa: E402
-from installer import auto, cli, hosts, runner, selection  # noqa: E402
+from installer import auto, hosts, runner, selection, source  # noqa: E402
 from installer_testing import make_context, make_source, quiet, use_source  # noqa: E402
 
-PACKAGE = Path(installer.__file__).resolve().parent
-
-
 class CheckoutNameTests(unittest.TestCase):
-    def test_context_has_no_second_name_for_the_checkout(self):
-        self.assertNotIn("source_root", [f.name for f in dataclasses.fields(cli.Context)])
-        with self.assertRaises(TypeError):
-            cli.Context(options=cli.Options(), source_root=Path("/elsewhere"))
-
-    def test_no_installer_function_takes_a_source_root(self):
-        # Addon sources are the only second root, and they travel in `ctx.addon_sources`.
-        for path in sorted(PACKAGE.glob("*.py")):
-            module = importlib.import_module(f"installer.{path.stem}")
-            for name, function in inspect.getmembers(module, inspect.isfunction):
-                if function.__module__ == module.__name__:
-                    with self.subTest(function=f"{path.stem}.{name}"):
-                        self.assertNotIn("source_root", inspect.signature(function).parameters)
-
-    def test_only_runner_names_the_checkout_and_everyone_reads_it_at_run_time(self):
-        for path in sorted(PACKAGE.glob("*.py")):
-            if path.name == "runner.py":
-                continue
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                with self.subTest(module=path.name, line=getattr(node, "lineno", 0)):
-                    if isinstance(node, ast.ImportFrom) and node.module == "installer.runner":
-                        self.assertNotIn("REPO_ROOT", [alias.name for alias in node.names])
-                    self.assertFalse(isinstance(node, ast.Name) and node.id == "REPO_ROOT")
-                    self.assertFalse(isinstance(node, ast.Attribute) and node.attr == "source_root")
+    def test_saved_package_uses_input_provenance_without_using_origin_as_assets(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp) / 'home'
+            package = make_source(home / '.ghost-alice/versions/fixed/core')
+            origin = Path(temp) / 'removed-clone'
+            provenance = dict(root=str(origin), branch='main', commit='merged-commit', dirty='clean',
+                              remote='local-test-remote', ref='refs/heads/main')
+            (package.parent / 'version.json').write_text(json.dumps({'source': provenance}))
+            with use_source(package), mock.patch.dict(os.environ, {'HOME': str(home)}):
+                self.assertEqual(source.input_record(), provenance)
+                self.assertEqual(source.resolve_source(), source.SourceInfo(origin, 'main', 'merged-commit', 'clean'))
+                self.assertEqual(selection.expand_skill_targets('alpha')[0].path, package / 'alpha')
+                self.assertEqual(hosts.claude_bootstrap_source(), package / 'platforms/claude/CLAUDE.md')
+                self.assertFalse(origin.exists())
+                current = dict(provenance, root=str(Path(temp) / 'new-developer-clone'),
+                               commit='newer-commit', dirty='dirty', remote='new-remote')
+                (home / '.ghost-alice/installed-payload.json').write_text(json.dumps(
+                    {'schema_version': 1, 'targets': {}, 'source': current}))
+                actual = source.input_record()
+                self.assertEqual(actual['root'], current['root'])
+                self.assertEqual(actual['remote'], current['remote'])
+                self.assertEqual((actual['commit'], actual['dirty']), ('merged-commit', 'clean'))
 
     def test_one_patch_moves_every_reader_to_the_fixture_checkout(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -1,9 +1,11 @@
 """The install record: what the installer installed where, for every host, in one file.
 
-`~/.ghost-alice/installed-payload.json` holds schema version 1:
+`~/.ghost-alice/installed-payload-v2.json` holds schema version 2. The former
+`installed-payload.json` holds only an incompatible-schema notice after migration.
 
-- `installer`: `{commit, schema_version}` of the installer that last wrote the record.
-- `source`: `{root, commit, dirty, hooks_path}` of the source checkout.
+- `installer`: `{commit, schema_version}` of the last writer and optional
+  `active_root` selecting the package the installed management command executes.
+- `source`: `{root, commit, dirty, hooks_path, remote, ref}` of the development input.
 - `last_transaction`: `{id, updated_at, rollback_dir}` of the last publish.
 - `targets`: one entry per install location path, used by one or more hosts:
   `name`, `kind`, `mode`, `provider`, `source`, `source_commit`, `used_by`,
@@ -31,6 +33,7 @@ Dependencies: Python standard library, `content_digest`, `install_lock`.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -41,8 +44,10 @@ import uuid
 import content_digest
 import install_lock
 
-SCHEMA_VERSION = 1
-FILENAME = "installed-payload.json"
+SCHEMA_VERSION = 2
+FILENAME = "installed-payload-v2.json"
+LEGACY_FILENAME = "installed-payload.json"
+RECORD_FILENAMES = (FILENAME, LEGACY_FILENAME)
 LOCK_FILENAME = "install.lock"
 SECTIONS = ("installer", "source", "last_transaction", "targets", "service")
 KINDS = ("skill", "support", "runtime", "command", "resource")
@@ -61,7 +66,7 @@ _EARLIER_MODES = {"symlink": "link", "junction": "link", "copy": "copy", "copy-f
 
 
 class RecordError(ValueError):
-    """The install record, or a section given to write into it, is not schema version 1."""
+    """The install record or a supplied section cannot be read by this installer."""
 
 
 class NotLockHolder(RuntimeError):
@@ -69,13 +74,19 @@ class NotLockHolder(RuntimeError):
 
 
 def path(ghost_root: Path | str) -> Path:
-    """`<ghost_root>/installed-payload.json`."""
+    """The current detailed install record under `ghost_root`."""
     return Path(ghost_root) / FILENAME
+
+
+def read_path(ghost_root: Path | str) -> Path:
+    """The current detail when present, otherwise the legacy record; diagnostics name this input."""
+    file = path(ghost_root)
+    return file if file.exists() else Path(ghost_root) / LEGACY_FILENAME
 
 
 def read(ghost_root: Path | str) -> dict | None:
     """The record, or None when there is none; RecordError when it is unreadable or another schema version."""
-    file = path(ghost_root)
+    file = read_path(ghost_root)
     try:
         raw = file.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -88,9 +99,11 @@ def read(ghost_root: Path | str) -> dict | None:
         raise RecordError(f"{file} is not JSON: {exc}") from exc
     if not isinstance(record, dict):
         raise RecordError(f"{file} is not a JSON object")
-    if record.get("schema_version") != SCHEMA_VERSION:
+    if record.get("schema_version") not in (1, SCHEMA_VERSION):
         raise RecordError(f"{file} has schema_version {record.get('schema_version')!r}; this installer reads "
-                          f"{SCHEMA_VERSION}")
+                          f"1 and {SCHEMA_VERSION}")
+    if record.get("record_file") == FILENAME:
+        raise RecordError(f"{path(ghost_root)} is missing; restore the detailed install record")
     if not isinstance(record.get("targets", {}), dict):
         raise RecordError(f"{file} has targets that are not an object")
     return record
@@ -124,6 +137,23 @@ def _write(file: Path, data: bytes) -> None:
 
 def _encode(record: dict) -> bytes:
     return (json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _save(ghost_root: Path | str, record: dict, *, journal=None) -> None:
+    record["schema_version"] = SCHEMA_VERSION
+    notice = Path(ghost_root) / LEGACY_FILENAME
+    expected = _encode({"schema_version": SCHEMA_VERSION, "record_file": FILENAME})
+    change_notice = not notice.exists() or notice.read_bytes() != expected
+    # A normal update replaces one file. The first promotion changes two files;
+    # service migration and other direct writers need the same journal as publish.
+    operation = nullcontext()
+    if change_notice and journal is None:
+        from install_transaction import record_update
+        operation = record_update(ghost_root)
+    with operation:
+        _write(path(ghost_root), _encode(record))
+        if change_notice:
+            _write(notice, expected)
 
 
 def _check_entry(key: str, entry: object) -> dict:
@@ -167,13 +197,13 @@ def _check_service(section: object) -> dict:
     return dict(section)
 
 
-def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None]) -> dict:
+def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None], *, journal=None) -> dict:
     """Write the given sections in one replacement of the record and return the record.
 
     `targets` changes only the entries it names, and an entry keeps every host its
-    path already had in `used_by`; `installer`, `source`, `last_transaction` and
-    `service` replace their section, and `service` None deletes it. Sections that
-    are not given stay as they are.
+    path already had in `used_by`; `installer` and `source` change only named
+    fields so ordinary placement preserves the active CLI and acquisition input.
+    `last_transaction` and `service` replace their section; `service` None deletes it.
     """
     _require_lock(ghost_root)
     unknown = sorted(set(patches) - set(SECTIONS))
@@ -191,7 +221,10 @@ def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None]) -> dic
         if not isinstance(patch, Mapping):
             raise RecordError(f"section {section} is not an object")
         if section != "targets":
-            record[section] = dict(patch)
+            if section in ("installer", "source"):
+                record.setdefault(section, {}).update(patch)
+            else:
+                record[section] = dict(patch)
             continue
         for key, entry in patch.items():
             merged = _check_entry(key, entry)
@@ -199,7 +232,7 @@ def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None]) -> dic
             if isinstance(previous, Mapping) and isinstance(previous.get("used_by"), list):
                 merged["used_by"] = sorted(set(previous["used_by"]) | set(merged["used_by"]))
             targets[key] = merged
-    _write(path(ghost_root), _encode(record))
+    _save(ghost_root, record, journal=journal)
     return record
 
 
@@ -230,28 +263,30 @@ def release_target(ghost_root: Path | str, *, destination: Path | str,
         targets[key] = entry
     else:
         del targets[key]
-    _write(path(ghost_root), _encode(record))
+    _save(ghost_root, record)
     return record
 
 
-def restore(ghost_root: Path | str, saved: Path | str | None) -> None:
+def restore(ghost_root: Path | str, saved: Path | str | None, *,
+            legacy_saved: Path | str | None = None) -> None:
     """Put back the record bytes a publish saved, or remove a record that did not exist before it (`saved` None).
 
     A record that already equals what it should be is left alone.
     """
-    file = path(ghost_root)
-    wanted = Path(saved).read_bytes() if saved is not None else None
-    try:
-        current = file.read_bytes()
-    except FileNotFoundError:
-        current = None
-    if current == wanted:
-        return
-    _require_lock(ghost_root)
-    if wanted is None:
-        file.unlink()
-    else:
-        _write(file, wanted)
+    for name, original in ((FILENAME, saved), (LEGACY_FILENAME, legacy_saved)):
+        file = Path(ghost_root) / name
+        wanted = Path(original).read_bytes() if original is not None else None
+        try:
+            current = file.read_bytes()
+        except FileNotFoundError:
+            current = None
+        if current == wanted:
+            continue
+        _require_lock(ghost_root)
+        if wanted is None:
+            file.unlink()
+        else:
+            _write(file, wanted)
 
 
 def latest_target(record: Mapping, *, kind: str, name: str) -> tuple[str, dict] | None:
@@ -401,8 +436,9 @@ def _source(states: list[dict]) -> dict | None:
             "dirty": latest.get("source_dirty_state"), "hooks_path": hooks_path}
 
 
-def migrate(ghost_root: Path | str, hosts: Sequence[str], *, installer_commit: str) -> dict | None:
-    """Create the record from an earlier installer's records; None when there is a record or nothing to migrate.
+def migrate(ghost_root: Path | str, hosts: Sequence[str], *, installer_commit: str,
+            runtime_targets: dict[str, list[dict]] | None = None) -> dict | None:
+    """Carry earlier inventories and v1 records into v2; None for v2 or no legacy inventory.
 
     Every host's `install-state/<host>.json` target becomes an entry: a link keeps the
     path it points to now; a copy takes its file fingerprints from its ownership marker,
@@ -411,13 +447,14 @@ def migrate(ghost_root: Path | str, hosts: Sequence[str], *, installer_commit: s
     target makes its provider `addon:<id>`. Returns `{targets, migrated, unknown}`.
     """
     root = Path(ghost_root)
-    if path(root).exists():
+    existing = read(root)
+    if existing is not None and existing['schema_version'] == SCHEMA_VERSION:
         return None
     state_files = [(host, root / "install-state" / f"{host}.json") for host in hosts]
     state_files = [(host, file) for host, file in state_files if file.is_file()]
     if not state_files:
         return None
-    entries: dict[str, dict] = {}
+    entries: dict[str, dict] = dict((existing or {}).get('targets', {}))
     states: list[dict] = []
     for host, file in state_files:
         state = _load_json(file)
@@ -432,10 +469,17 @@ def migrate(ghost_root: Path | str, hosts: Sequence[str], *, installer_commit: s
                 continue
             key, entry = migrated
             entries[key] = _merge(entries[key], entry) if key in entries else entry
+        for raw in (runtime_targets or {}).get(host, []):
+            if not os.path.lexists(raw['dest_path']):
+                continue
+            original = raw.get('source_path') or str(Path(state.get('source_root') or '') / raw['target_name'])
+            key, entry = _migrated_entry(host, state, dict(raw, source_path=original), {}, {}, snapshot)
+            entry.update(kind='runtime', provider='core')
+            entries[key] = _merge(entries[key], entry) if key in entries else entry
     patches: dict[str, Mapping] = {"targets": entries,
                                    "installer": {"commit": installer_commit, "schema_version": SCHEMA_VERSION}}
     source = _source(states)
-    if source is not None:
+    if source is not None and not (existing or {}).get('source'):
         patches["source"] = source
     update(root, patches)
     baselines = [entry["baseline"] for entry in entries.values()]

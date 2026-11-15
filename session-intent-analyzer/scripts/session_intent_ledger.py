@@ -12,12 +12,13 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,6 @@ _UNSET = object()
 SCHEMA_VERSION = "session-intent-ledger.v2"
 CURRENT_SESSION_SCHEMA = "session-intent-current.v1"
 SESSION_INTENT_ROOT_ENV = "GHOST_ALICE_SESSION_INTENT_ROOT"
-LEGACY_DEFAULT_ROOT = Path("~/.ghost-alice/session-intent")
 TEXT_FIELDS = ("current_goal", "routing_summary")
 LIST_FIELDS = ("constraints", "non_goals", "open_questions")
 # Source labels are the response model's claims; Core code validates their spelling without checking the sender.
@@ -61,40 +61,29 @@ MAX_SHARED_INTEGER = (1 << 53) - 1
 INPUT_ANCHOR_FIELDS = ("ledger_revision", "latest_input_event_id", "latest_input_digest", "latest_input_char_count")
 
 
-def is_ghost_alice_repo_root(path: Path) -> bool:
-    return (
-        (path / "install.sh").exists()
-        and (path / "skill-catalog").is_dir()
-        and (path / "session-intent-analyzer").is_dir()
-    )
-
-
-def discover_repo_root(cwd: Path | None = None) -> Path | None:
-    start = Path(cwd) if cwd is not None else Path.cwd()
-    start = start.expanduser().resolve()
-    candidates = [start, *start.parents]
-    for candidate in candidates:
-        if is_ghost_alice_repo_root(candidate):
-            return candidate
-    script_root = Path(__file__).resolve()
-    for candidate in script_root.parents:
-        if is_ghost_alice_repo_root(candidate):
-            return candidate
-    return None
+def _shared_module(name):
+    """Load the sibling Core helper; installation preserves this shared layout."""
+    path = Path(__file__).resolve().parents[2] / "_shared" / (name + ".py")
+    with _SHARED_MODULE_LOAD:  # one thread loads a helper; the others wait for the loaded module
+        if str(path.parent) not in sys.path:
+            sys.path.insert(0, str(path.parent))
+        retained = sys.modules.get(name)
+        if retained is not None and Path(retained.__file__).resolve() == path:
+            return retained
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Core code helper {name} is unavailable")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        return module
 
 
 def default_root(
     env: dict[str, str] | None = None,
     cwd: Path | None = None,
 ) -> Path:
-    source_env = os.environ if env is None else env
-    configured = source_env.get(SESSION_INTENT_ROOT_ENV, "").strip()
-    if configured:
-        return Path(configured).expanduser()
-    repo = discover_repo_root(cwd)
-    if repo is not None:
-        return repo / ".tmp" / "session-intent"
-    return LEGACY_DEFAULT_ROOT.expanduser()
+    return _shared_module('install_destination').default_ledger_root(env=env)
 
 
 DEFAULT_ROOT = default_root()
@@ -161,6 +150,7 @@ def current_session_pointer_path(root: Path, platform: str) -> Path:
 
 
 def write_current_session_pointer(root: Path, platform: str, session_id: str) -> Path:
+    _shared_module('ledger_access').require_writable_root(root)
     paths = session_paths(root, platform, session_id)
     pointer = current_session_pointer_path(root, platform)
     payload = {
@@ -194,13 +184,14 @@ def read_current_session_pointer(root: Path, platform: str, *, transaction: sqli
 
 def resolve_session_id(
     *,
-    root: Path = DEFAULT_ROOT,
+    root: Path | None = None,
     platform: str,
     explicit: str | None = None,
     payload: dict[str, Any] | None = None,
     env: dict[str, str] | None = None,
     for_write: bool = False,
 ) -> str:
+    root = default_root() if root is None else root
     identity = _shared_module("session_identity")
     for candidate in (
         explicit,
@@ -426,6 +417,7 @@ def storage_transaction(root: Path):
     Connections are operation-local and must be passed explicitly to nested
     writers; this also works when adapters load the module under another name.
     """
+    _shared_module('ledger_access').require_writable_root(root)
     database = storage_database_path(root)
     _require_database_if_initialized(root)
     _shared_module("install_destination").assert_mutation_path(database)
@@ -471,6 +463,7 @@ def _validate_transaction(root: Path, transaction: sqlite3.Connection) -> None:
 @contextmanager
 def _transaction(root: Path, transaction: sqlite3.Connection | None = None):
     if transaction is not None:
+        _shared_module('ledger_access').require_writable_root(root)
         _validate_transaction(root, transaction)
         # A failed nested operation cannot leave half its changes in an outer
         # transaction whose caller catches the exception and continues.
@@ -612,8 +605,9 @@ def _load_state_for_update(connection, paths, platform, session_id):
     return state
 
 
-def migrate_session(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+def migrate_session(*, root: Path | None = None, platform: str, session_id: str,
                     transaction: sqlite3.Connection | None = None) -> dict[str, Any]:
+    root = default_root() if root is None else root
     validate_identity(platform, session_id)
     with _transaction(root, transaction) as connection:
         return _load_state_for_update(connection, session_paths(root, platform, session_id), platform, session_id)
@@ -632,9 +626,10 @@ def _commit(connection, state: dict[str, Any], event: dict[str, Any]) -> None:
             ON CONFLICT(platform) DO UPDATE SET session_id=excluded.session_id""", (state["platform"], state["session_id"]))
 
 
-def read_session_state(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+def read_session_state(*, root: Path | None = None, platform: str, session_id: str,
                        recover_audit: bool = False, transaction: sqlite3.Connection | None = None) -> dict[str, Any]:
     """Read authority without creating files. JSON recovery requires explicit import."""
+    root = default_root() if root is None else root
     validate_identity(platform, session_id)
     if recover_audit:
         return migrate_session(root=root, platform=platform, session_id=session_id, transaction=transaction)
@@ -654,8 +649,9 @@ def read_session_state(*, root: Path = DEFAULT_ROOT, platform: str, session_id: 
         return raw
 
 
-def read_session_events(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+def read_session_events(*, root: Path | None = None, platform: str, session_id: str,
                         transaction: sqlite3.Connection | None = None) -> list[dict[str, Any]]:
+    root = default_root() if root is None else root
     validate_identity(platform, session_id)
     with _read_connection(root, transaction) as connection:
         if _stored_state(connection, platform, session_id) is not None:
@@ -674,9 +670,91 @@ def list_session_states(root: Path) -> list[dict[str, Any]]:
     return [read_session_state(root=root, platform=p, session_id=s) for p, s in sorted(identities)]
 
 
-def export_session(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str, destination: Path) -> dict[str, Path]:
+def _snapshot_files(root: Path) -> dict[str, tuple[str, str]]:
+    """Compare whole databases logically and companion files by bytes, without retaining bodies."""
+    result = {}
+    _require_database_if_initialized(root)
+    for path in sorted(root.rglob('*')):
+        relative = path.relative_to(root).as_posix()
+        if relative in {name + suffix for name in ('ghost-state.sqlite3', 'session-checks.sqlite3')
+                        for suffix in ('-wal', '-shm', '-journal')}:
+            continue
+        if relative in ('ghost-state.sqlite3', 'session-checks.sqlite3'):
+            digest = hashlib.sha256()
+            with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
+                for statement in db.iterdump():
+                    digest.update(statement.encode('utf-8'))
+                    digest.update(b'\n')
+            result[relative] = ('sqlite', digest.hexdigest())
+        elif path.is_symlink():
+            result[relative] = ('link', os.readlink(path))
+        elif path.is_file():
+            result[relative] = ('file', _shared_module('content_digest').file_digest(path))
+        elif path.is_dir():
+            result[relative] = ('directory', '')
+        else:
+            raise ValueError(f'Ledger snapshot cannot preserve special file {path}')
+    return result
+
+
+def snapshot_roots(source: Path, existing: Path, destination: Path, *, writers_stopped: bool) -> None:
+    """Stage A and existing B after their writers stop; never merge distinct SQLite histories."""
+    if not writers_stopped:
+        raise ValueError('Ledger writers must be stopped before taking the migration snapshot')
+    source, existing, destination = (Path(path).resolve() for path in (source, existing, destination))
+    if destination.exists() or any(destination.is_relative_to(root) for root in (source, existing)):
+        raise ValueError('Ledger snapshot needs an absent staging path outside both input roots')
+    roots = (source, existing)
+    snapshots = [_snapshot_files(root) for root in roots]
+    for name in snapshots[0].keys() & snapshots[1].keys():
+        if snapshots[0][name] != snapshots[1][name]:
+            parts = Path(name).parts
+            if (len(parts) == 2 and Path(name) == current_session_pointer_path(Path(), parts[0])
+                    and all(snapshot[name][0] == 'file' for snapshot in snapshots)):
+                selected = read_current_session_pointer(source, parts[0])
+                if selected and selected == read_current_session_pointer(existing, parts[0]):
+                    # The existing reader owns discovery meaning; raw fingerprints still guard input stability.
+                    continue
+            raise ValueError(f'Ledger migration conflict: {name}')
+    # Compare matching sessions through the current reader before copying or importing.
+    states = [{(row['platform'], row['session_id']): row for row in list_session_states(root)} for root in roots]
+    for identity in states[0].keys() & states[1].keys():
+        platform, session = identity
+        if (states[0][identity] != states[1][identity] or
+                read_session_events(root=source, platform=platform, session_id=session) !=
+                read_session_events(root=existing, platform=platform, session_id=session)):
+            raise ValueError(f'Ledger migration conflict: session {platform}/{session}')
+    destination.mkdir(parents=True)
+    for root, files in zip(roots, snapshots):
+        for relative, (kind, _) in files.items():
+            path, target = root / relative, destination / relative
+            if os.path.lexists(target):
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if kind == 'sqlite':
+                with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as old, closing(sqlite3.connect(target)) as new:
+                    old.backup(new)
+            elif kind == 'link':
+                target.symlink_to(os.readlink(path))
+            elif kind == 'directory':
+                target.mkdir()
+            else:
+                shutil.copy2(path, target)
+    # Copying above keeps A's bytes when both inputs supply the same destination.
+    if _snapshot_files(destination) != snapshots[1] | snapshots[0]:
+        raise ValueError('Ledger snapshot does not preserve the input files and database contents')
+    # Import only legacy sessions absent from the copied DB, using the existing authentication path.
+    for state in list_session_states(destination):
+        migrate_session(root=destination, platform=state['platform'], session_id=state['session_id'])
+    if any(_snapshot_files(root) != before for root, before in zip(roots, snapshots)):
+        raise ValueError('Ledger input changed during snapshot; stop its writers before retrying')
+
+
+def export_session(*, root: Path | None = None, platform: str, session_id: str, destination: Path) -> dict[str, Path]:
     """Explicit portable projection. Never export over the authority/import root."""
+    root = default_root() if root is None else root
     destination = Path(destination).expanduser().resolve()
+    _shared_module('ledger_access').require_writable_root(destination)
     if destination == Path(root).expanduser().resolve():
         raise ValueError("export destination must differ from authority root")
     with _read_connection(root) as connection:
@@ -1132,7 +1210,7 @@ def _commit_turn(connection, state, observation, *, has_input, intent_delta, rec
 
 def record_turn(
     *,
-    root: Path = DEFAULT_ROOT,
+    root: Path | None = None,
     platform: str,
     session_id: str,
     raw_input=_UNSET,
@@ -1145,6 +1223,7 @@ def record_turn(
     raw_user_input=_UNSET,
     source=_UNSET,
 ) -> dict[str, Path]:
+    root = default_root() if root is None else root
     if raw_user_input is not _UNSET:
         if raw_input is not _UNSET and raw_input != raw_user_input:
             raise ValueError("raw_input and legacy raw_user_input conflict")
@@ -1183,22 +1262,6 @@ def record_turn(
     return paths
 
 
-def _shared_module(name):
-    """Load the sibling Core helper; installation preserves this shared layout."""
-    path = Path(__file__).resolve().parents[2] / "_shared" / (name + ".py")
-    with _SHARED_MODULE_LOAD:  # one thread loads a helper; the others wait for the loaded module
-        retained = sys.modules.get(name)
-        if retained is not None and Path(retained.__file__).resolve() == path:
-            return retained
-        spec = importlib.util.spec_from_file_location(name, path)
-        if spec is None or spec.loader is None:
-            raise RuntimeError(f"Core code helper {name} is unavailable")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-        return module
-
-
 def _response_route_module():
     return _shared_module('response_route')
 
@@ -1221,10 +1284,11 @@ def _pending_native_inputs(state):
     return pending
 
 
-def stage_native_input(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+def stage_native_input(*, root: Path | None = None, platform: str, session_id: str,
                        raw_input: str, prompt_id: str | None, transcript_path: str | None,
                        transaction: sqlite3.Connection | None = None) -> dict[str, Path]:
     """Record reception without making it the current input that Core code records or assigning a response route."""
+    root = default_root() if root is None else root
     validate_identity(platform, session_id)
     if platform != 'claude' or session_id == 'unknown' or not isinstance(raw_input, str):
         raise ValueError('native transport requires an exact Claude session and input')
@@ -1306,7 +1370,7 @@ def _record_native_wait(connection, state, observation, cause):
         pending_count=len(_pending_native_inputs(state)), input_event_id=state['latest_input_event_id']))
 
 
-def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+def reconcile_native_inputs(*, root: Path | None = None, platform: str, session_id: str,
                             transaction: sqlite3.Connection | None = None,
                             record_wait: bool = False) -> dict[str, Any]:
     """Resolve committed native origin in queue order, before native consumers run.
@@ -1322,6 +1386,7 @@ def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session
     the host appends the turn's input, so a wait there is recorded once per
     blocking input and cause. A generation-boundary call can precede the append.
     """
+    root = default_root() if root is None else root
     validate_identity(platform, session_id)
     current = read_session_state(root=root, platform=platform, session_id=session_id, transaction=transaction)
     if platform != 'claude' or not current or not _pending_native_inputs(current):
@@ -1413,7 +1478,7 @@ def _due_native_notice(state):
     return None if waiting.get('cause') in notified else (waiting, pending, notified)
 
 
-def claim_native_input_notice(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+def claim_native_input_notice(*, root: Path | None = None, platform: str, session_id: str,
                               transaction: sqlite3.Connection | None = None) -> dict[str, Any] | None:
     """Claim the current wait's notice once per session and cause.
 
@@ -1423,6 +1488,7 @@ def claim_native_input_notice(*, root: Path = DEFAULT_ROOT, platform: str, sessi
     checks again because another hook may have claimed it in between. The
     result holds host-neutral values.
     """
+    root = default_root() if root is None else root
     validate_identity(platform, session_id)
     if transaction is None and not storage_is_initialized(root):
         return None
@@ -1442,7 +1508,7 @@ def claim_native_input_notice(*, root: Path = DEFAULT_ROOT, platform: str, sessi
         return dict(cause=waiting['cause'], since=waiting.get('since', ''), pending_count=len(pending))
 
 
-def record_native_intake_failure(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+def record_native_intake_failure(*, root: Path | None = None, platform: str, session_id: str,
                                  error: BaseException, transaction: sqlite3.Connection | None = None) -> dict[str, Any]:
     """Record one failed native intake step for this session; the hook that caught it continues.
 
@@ -1451,6 +1517,7 @@ def record_native_intake_failure(*, root: Path = DEFAULT_ROOT, platform: str, se
     first failure and each change of error type; a repeat of the same type
     updates the entry without an event or a revision step.
     """
+    root = default_root() if root is None else root
     validate_identity(platform, session_id)
     now = utc_now()
     name = type(error).__name__
@@ -1681,7 +1748,7 @@ def _persist_canonical_intake(connection: sqlite3.Connection, state: dict[str, A
 
 
 def bind_legacy_acceptance_criteria(
-    *, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+    *, root: Path | None = None, platform: str, session_id: str,
     work_unit_id: str, contract_revision: int, expected_input_event_id: str,
     expected_revision: int, expected_criteria: list[dict[str, Any]],
     transaction: sqlite3.Connection | None = None,
@@ -1692,6 +1759,7 @@ def bind_legacy_acceptance_criteria(
     Core code preserves the criterion's meaning and selection flag; binding does not
     accept evidence or establish a response route.
     """
+    root = default_root() if root is None else root
     routes = _response_route_module()
     validate_identity(platform, session_id)
     routes._unit_key(dict(work_unit_id=work_unit_id, contract_revision=contract_revision))
@@ -1756,11 +1824,12 @@ def bind_legacy_acceptance_criteria(
         return deepcopy(state)
 
 
-def record_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+def record_response_route(*, root: Path | None = None, platform: str, session_id: str,
                           expected_input_event_id: str, candidate: dict[str, Any],
                           boundary_ref: str | None,
                           transaction: sqlite3.Connection | None = None) -> dict[str, Any]:
     """Official atomic projection writer. Core validates before committing."""
+    root = default_root() if root is None else root
     routes = _response_route_module()
     try:
         validate_identity(platform, session_id)
@@ -1793,10 +1862,11 @@ def record_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_i
         return deepcopy(projection)
 
 
-def read_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+def read_response_route(*, root: Path | None = None, platform: str, session_id: str,
                         expected_input_event_id: str | None = None,
                         transaction: sqlite3.Connection | None = None) -> dict[str, Any] | None:
     """Read route and input anchor from one authoritative snapshot."""
+    root = default_root() if root is None else root
     routes = _response_route_module()
     try:
         validate_identity(platform, session_id)

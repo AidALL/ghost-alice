@@ -216,7 +216,7 @@ class JournalTests(ParticipantCase):
         start = effects.start
 
         def observing_start(domain, agent):
-            [txid] = [p.name for p in (self.reg.ghost / "rollbacks").iterdir()]
+            [txid] = install_transaction.unfinished(self.reg.ghost)
             phases.append(json.loads((self.reg.ghost / "rollbacks" / txid / "journal.json").read_text())["phase"])
             start(domain, agent)
 

@@ -169,7 +169,7 @@ def _binding_comparison(binding):
     return view
 
 
-def _source_issues(candidate, source_ids=None):
+def _source_issues(candidate, source_ids=None, *, storage_root):
     from source_reference import FORMAT, CORE_FORMAT, verify_source
     issues = {}
     for source in candidate['sources']:
@@ -178,7 +178,7 @@ def _source_issues(candidate, source_ids=None):
         reference = source.get('storage') in (FORMAT, CORE_FORMAT)
         try:
             if reference:
-                verify_source(source)
+                verify_source(source, storage_root=storage_root)
             elif text_digest(Path(source['locator']).read_bytes()) != source['digest']:
                 issues[source['source_id']] = 'source-changed'
         except OSError:
@@ -188,13 +188,13 @@ def _source_issues(candidate, source_ids=None):
     return issues
 
 
-def _require_record_sources(candidate, judgments):
+def _require_record_sources(candidate, judgments, *, storage_root):
     """A new supported judgment needs its original bytes; existing records remain historical facts."""
     from source_reference import FORMAT, CORE_FORMAT
     selected = {sid for judgment in judgments if judgment.get('verdict') == 'supported'
                 for sid in judgment['source_ids']}
     references = dict(candidate, sources=[s for s in candidate['sources'] if s.get('storage') in (FORMAT, CORE_FORMAT)])
-    issues = _source_issues(references, selected)
+    issues = _source_issues(references, selected, storage_root=storage_root)
     _require(not issues, next(iter(issues.values()), 'source-unavailable'),
              'Original bytes for a new supported judgment are unavailable or changed')
 
@@ -438,7 +438,7 @@ def record_response_review(source, candidate_reference, review, *, context_use_j
         _require(not previous or (len(previous) == 1 and previous[0] == reference),
             'assessment-conflict', 'This explanation candidate already has an immutable review')
         if not previous:
-            _require_record_sources(candidate, review['claims'] + [judgment])
+            _require_record_sources(candidate, review['claims'] + [judgment], storage_root=root)
         connection.execute('INSERT OR IGNORE INTO core_completion_responses VALUES (?,?,?)',
             (reference, key, canonical_json(payload)))
     supported = all(j['verdict'] == 'supported' for j in review['claims'] + [judgment])
@@ -462,7 +462,7 @@ def _lookup_source_response(core, root, owner, connection, text):
                 {s['source_id'] for s in candidate['sources']}), 'response-unsupported',
             'The recorded review must bind the exact explanation')
         issues = _source_issues(candidate,
-            {sid for j in reviewed['judgments'] + [reviewed['judgment']] for sid in j['source_ids']})
+            {sid for j in reviewed['judgments'] + [reviewed['judgment']] for sid in j['source_ids']}, storage_root=root)
         if issues:
             source_issues.update(issues)
         else:
@@ -625,7 +625,8 @@ def record_assessment(source, candidate_reference, judgments, *, response_judgme
                     'assessment-conflict', 'Response review cannot replace original observations or proof judgments')
             reference = previous[0][0]
         else:
-            _require_record_sources(candidate, judgments + ([response_judgment] if response_judgment else []))
+            _require_record_sources(candidate, judgments + ([response_judgment] if response_judgment else []),
+                                    storage_root=root)
             original = {k: v for k, v in candidate.items() if k != 'response_binding'}
             original_reference = json_digest(original)
             connection.execute('INSERT OR IGNORE INTO core_completion_candidates VALUES (?,?,?)',
@@ -671,7 +672,7 @@ def lookup_assessment(source, contract, proof, verified_at, *, transaction=None)
         candidate = _stored(connection, 'core_completion_candidates', payload['candidate_reference'])
         _require(('candidate' not in payload or candidate == payload['candidate']) and candidate['intent_root'] == str(root),
                  'assessment-invalid', 'Review candidate differs from its stored record or the intent ledger root')
-        issues = _source_issues(candidate, {sid for j in payload['judgments'] for sid in j['source_ids']})
+        issues = _source_issues(candidate, {sid for j in payload['judgments'] for sid in j['source_ids']}, storage_root=root)
         result = VerifiedAssessment(payload, _SEAL, issues, candidate=candidate)
         coverage = assessment_coverage(result, contract, proof, verified_at)
         _require(not issues or bool(coverage), next(iter(issues.values()), 'source-changed'),
@@ -773,7 +774,7 @@ def lookup_current_response(source, text, *, transaction=None):
             'response-unbound', 'Reviewed response differs from its original proof and observations')
         _require(reviewed['judgment']['verdict'] == 'supported', 'response-unsupported',
                  'The recorded response review does not support this complete response')
-        issues = _source_issues(candidate, set(reviewed['judgment']['source_ids']))
+        issues = _source_issues(candidate, set(reviewed['judgment']['source_ids']), storage_root=root)
         _require(not issues, next(iter(issues.values()), 'source-changed'), 'Response observations changed or are unavailable')
     return assessment
 

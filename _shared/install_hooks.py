@@ -207,19 +207,22 @@ def _session_intent_root(platform: str | None = None) -> Path:
             raise ValueError("session intent root must be absolute")
         return Path(configured)
     if "PLATFORMS" not in globals():
-        return _repo_root_from_this_file()/".tmp/session-intent"
+        return install_destination.ghost_root() / 'session-intent'
     return Path(_default_destination(platform or "codex").ledger_root)
 
 
-def _default_destination(platform_key: str) -> install_destination.InstallDestination:
-    source = Path(os.environ.get("GHOST_ALICE_CORE_ROOT") or _repo_root_from_this_file())
+def _default_destination(platform_key: str, *, project_root: Path | str | None = None,
+                         installed: bool = False) -> install_destination.InstallDestination:
     ghost = install_destination.ghost_root(_home())
     retained = runtime_config.load_config(home=_home()).get("install_locations", {}).get(platform_key, {})
-    ledger = os.environ.get("GHOST_ALICE_SESSION_INTENT_ROOT") or retained.get("ledger_root") or _retained_installed_ledger(platform_key) or str(source / ".tmp/session-intent")
+    source = Path(os.environ.get("GHOST_ALICE_CORE_ROOT")
+                  or (retained.get('core_source_root') if installed else None) or _repo_root_from_this_file())
+    ledger = os.environ.get("GHOST_ALICE_SESSION_INTENT_ROOT") or retained.get("ledger_root") or _retained_installed_ledger(platform_key) or str(ghost / 'session-intent')
+    project = retained.get('project_root') or project_root or os.environ.get('GHOST_ALICE_PROJECT_ROOT') or str(source)
     return install_destination.InstallDestination.parse(dict(mode="normal", owned_root=str(_home()),
         platform_dir=str(_resolve_codex_dir() if platform_key == "codex" else _resolve_claude_dir()),
         skills_dir=str(_home()/".agents/skills" if platform_key == "codex" else _resolve_claude_dir()/"skills"),
-        ghost_root=str(ghost), ledger_root=str(ledger), project_root=str(source), core_source_root=str(source),
+        ghost_root=str(ghost), ledger_root=str(ledger), project_root=str(project), core_source_root=str(source),
         runtime_shared_dir=str(os.environ.get(HOOK_SHARED_DIR_ENV) or os.environ.get("GHOST_ALICE_RUNTIME_SHARED_DIR") or ghost/"runtime/current/_shared")))
 
 
@@ -846,6 +849,78 @@ def _platform_session_start_entry(platform_key: str, event: str) -> dict[str, An
     else:
         command = _session_start_command(platform="claude", output_format="json", payload_mode=True)
     return _hook_runner_command_entry("session-start", command, SESSION_START_MARKER, platform_key=platform_key)
+
+
+def prepare_ledger_retarget(platform_key: str, *, destination, ledger_root: Path) -> dict[Path, bytes]:
+    """Prepare only existing ledger bindings and their matching trust hashes; write no files."""
+    from dataclasses import replace
+    destination = install_destination.InstallDestination.parse(destination)
+    ledger_root = Path(ledger_root).resolve()
+    builders = {'session-intent': _platform_session_intent_entry,
+                'session-start': _platform_session_start_entry,
+                'session-receipt': _platform_session_receipt_entry}
+    with install_destination.use(destination):
+        settings_file = PLATFORMS[platform_key]['hook_file']()
+        settings = _read_settings(settings_file, strict=True)
+        _validate_hook_settings(settings)
+        config_file = _resolve_codex_config_toml() if platform_key == 'codex' else None
+        content = _read_text_file(config_file) if config_file else ''
+        trust = tomllib.loads(content).get('hooks', {}).get('state', {}) if config_file else {}
+        changed, moves = False, {}
+        for event, groups in settings.get('hooks', {}).items():
+            for group_index, group in enumerate(groups):
+                for handler_index, handler in enumerate(group['hooks']):
+                    old_hash = _codex_command_hook_hash(event, group, handler) if config_file else None
+                    replaced = False
+                    for key in ('command', 'commandWindows', 'command_windows'):
+                        command = handler.get(key)
+                        parsed = hook_definitions.parse_hook_runner_command(command) if isinstance(command, str) else None
+                        if parsed is None:
+                            if isinstance(command, str) and (_is_ghost_alice_hook_command(command)
+                                    or install_destination.encode_binding(destination.binding()) in command):
+                                raise ValueError('Installed ledger hook has a customized launcher; preserve it before migration')
+                            continue
+                        if parsed['binding'] is None:
+                            if Path(parsed['script']) == Path(destination.runtime_shared_dir) / 'hook_profile_gate.py':
+                                raise ValueError('Installed ledger hook has no binding; install current hooks before migration')
+                            continue
+                        bound = install_destination.InstallDestination.parse(
+                            install_destination.decode_binding(parsed['binding'])['destination'])
+                        if Path(bound.ledger_root).resolve() != Path(destination.ledger_root).resolve():
+                            continue
+                        if (bound.ghost_root != destination.ghost_root or bound.platform_dir != destination.platform_dir
+                                or Path(parsed['script']) != Path(bound.runtime_shared_dir) / 'hook_profile_gate.py'
+                                or parsed['platform'] not in (None, platform_key)):
+                            raise ValueError('Installed ledger hook differs from its installation binding')
+                        hook_id = parsed['hook_id']
+                        is_addon = _is_managed_addon_command(command)
+                        if hook_id not in hook_definitions.CORE_HOOK_IDS and not is_addon:
+                            raise ValueError(f'Cannot retarget unknown ledger hook {hook_id}')
+                        updated = replace(bound, ledger_root=str(ledger_root))
+                        payload = parsed['command']
+                        if hook_id in builders and not is_addon:
+                            with install_destination.use(bound):
+                                expected = hook_definitions.parse_hook_runner_command(
+                                    _entry_command(builders[hook_id](platform_key, event)))['command']
+                            if payload != expected:
+                                raise ValueError(f'Installed {hook_id} payload differs from the ledger command owner')
+                            with install_destination.use(updated):
+                                payload = hook_definitions.parse_hook_runner_command(
+                                    _entry_command(builders[hook_id](platform_key, event)))['command']
+                        handler[key] = hook_definitions.rewrite_hook_runner_command(command,
+                            binding=install_destination.encode_binding(updated.binding()), payload=payload)
+                        replaced |= handler[key] != command
+                    if replaced and config_file:
+                        trust_key = _codex_hook_state_key(settings_file, event, group_index, handler_index)
+                        if trust.get(trust_key, {}).get('trusted_hash') == old_hash:
+                            moves[trust_key] = _codex_command_hook_hash(event, group, handler)
+                    changed |= replaced
+        prepared = {settings_file: (json.dumps(settings, ensure_ascii=False, indent=2) + '\n').encode()} if changed else {}
+        if moves:
+            revised, changed = _merge_codex_hook_trust_state(content, moves)
+            if changed:
+                prepared[config_file] = revised.encode()
+        return prepared
 
 
 def _addon_hooks(targets) -> list[tuple[str, str, str, str]]:
@@ -1620,6 +1695,10 @@ def _ensure_codex_project_trusted(dry_run: bool = False) -> bool:
     project_path = str(Path(install_destination.current().project_root).resolve() if install_destination.current() else _repo_root_from_this_file().resolve())
     current_content = _read_text_file(config_file)
     updated_content, changed, before_state = _merge_codex_project_trust(current_content, project_path)
+
+    if before_state == 'untrusted' and os.environ.get('GHOST_ALICE_CONFIRMED_PROJECT_TRUST') != project_path:
+        _log(f'  Kept the existing untrusted project setting: {project_path}')
+        return False
 
     if not changed:
         _log("  Codex project trust already current")
@@ -2582,7 +2661,7 @@ def check_status_detail(
 ) -> HookStatus:
     """Return structured hook installation status for a single framework."""
     if destination is not None or install_destination.current() is None:
-        destination = _default_destination(platform_key) if destination is None else destination
+        destination = _default_destination(platform_key, installed=True) if destination is None else destination
         resolved = _destination_action(platform_key,destination,"status")
         with install_destination.use(resolved):
             return check_status_detail(platform_key,node_runtime=node_runtime,addon_sources=addon_sources)
@@ -2855,7 +2934,7 @@ def main() -> int:
 
     if destination is None and not args.list_addons:
         for target in ([args.platform] if args.platform else PLATFORMS):
-            _destination_action(target, _default_destination(target),
+            _destination_action(target, _default_destination(target, installed=args.status),
                 "status" if args.status else "uninstall" if args.uninstall else "install", dry_run=args.dry_run)
     results = {}
     with ExitStack() as stack:

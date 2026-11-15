@@ -1,3 +1,4 @@
+import argparse
 import hashlib
 import contextlib
 import io
@@ -168,6 +169,129 @@ def _write_manifest(
     return manifest
 
 
+class SelectedManagementRetirementTest(unittest.TestCase):
+    def setUp(self):
+        import content_digest
+        import install_lock
+        import installed_payload
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.home = Path(self.temporary.name)
+        self.ghost = self.home / '.ghost-alice'
+        self.manifest = _write_manifest(self.home, [])
+        self.runtime = self.ghost / 'runtime/current/_shared'
+        self.runtime.mkdir(parents=True)
+        (self.runtime / 'module.py').write_text('runtime')
+        self.command = self.ghost / 'bin/ghost-alice'
+        self.command.parent.mkdir()
+        self.command.write_text('management')
+        self.active = self.ghost / 'versions/active/core'
+        self.active.mkdir(parents=True)
+        self.enterContext(mock.patch.dict(os.environ, installer_env(self.home), clear=True))
+        self.enterContext(install_lock.command_lock(self.ghost / 'install.lock', owner='test'))
+        installed_payload.update(self.ghost, {'installer': {'active_root': str(self.active)}, 'targets': {
+            str(path): dict(kind=kind, name=path.name, provider='core', used_by=['codex'],
+                            mode='copy', baseline='recorded', source=str(self.active), files=content_digest.tree(path))
+            for path, kind in ((self.runtime, 'runtime'), (self.command, 'command'))}})
+
+    def test_addon_command_keeps_runtime_and_management(self):
+        import content_digest
+        import installed_payload
+        command = self.home / 'addon-command'
+        command.write_text('addon')
+        installed_payload.update(self.ghost, {'targets': {str(command): dict(
+            kind='command', name='addon', provider='addon:fixture', used_by=['codex'], mode='copy',
+            baseline='recorded', source=str(self.home), files=content_digest.tree(command))}})
+        cleanup.retire_unused_management('codex', self.manifest)
+        self.assertTrue(self.command.exists())
+        self.assertTrue(self.runtime.exists())
+        self.assertTrue(command.exists())
+
+    def test_inventory_only_other_host_keeps_management_and_activation(self):
+        import installed_payload
+        self.manifest.with_name('future-host.json').write_text(json.dumps(dict(platform='future-host', targets=[])))
+        cleanup.retire_unused_management('codex', self.manifest)
+        self.assertTrue(self.command.exists())
+        self.assertTrue(self.runtime.exists())
+        self.assertEqual(installed_payload.read(self.ghost)['installer']['active_root'], str(self.active))
+
+    def test_addon_sidecar_remnant_keeps_runtime_without_payload_entry(self):
+        import addon_registry
+        from hash_utils import hash_target
+        command = self.home / 'remaining-addon-command'
+        command.write_text('addon')
+        addon_registry.write_record(dict(schema_version='1.0', addon_id='fixture', addon_version='1',
+            source=str(self.home), platform='codex', owner='addon', origin='addon:fixture',
+            depends_on_core=[], min_core_version='1', installed_at='2026-11-15T00:00:00Z', provided=[dict(
+                kind='command', name='remaining', target=str(command), ownership='managed', install_mode='copy',
+                content_hash=hash_target(command, 'copy'), marker='', metadata={})]), addons_dir=self.ghost / 'addons/codex')
+        cleanup.retire_unused_management('codex', self.manifest)
+        self.assertTrue(self.runtime.exists())
+        self.assertTrue(self.command.exists())
+
+    def test_failed_shared_reference_release_keeps_retry_inventory(self):
+        import installed_payload
+        installed_payload.update(self.ghost, {'targets': {
+            str(path): dict(entry, used_by=['future-host'])
+            for path, entry in installed_payload.read(self.ghost)['targets'].items()}})
+        with mock.patch.object(installed_payload, 'release_target', side_effect=OSError('record write denied')):
+            items = cleanup.retire_unused_management('codex', self.manifest)
+        self.assertTrue(any(item.get('removal_incomplete') for item in items), items)
+        self.assertTrue(self.manifest.exists())
+        self.assertTrue(self.command.exists())
+        self.assertTrue(self.runtime.exists())
+
+    def test_changed_runtime_preserves_its_record_and_retry_inventory(self):
+        import installed_payload
+        (self.runtime / 'foreign-link').symlink_to(self.home / 'user-file')
+        items = cleanup.retire_unused_management('codex', self.manifest)
+        self.assertTrue(any(item.get('removal_incomplete') for item in items), items)
+        self.assertTrue(self.manifest.exists())
+        self.assertIn(str(self.runtime), installed_payload.read(self.ghost)['targets'])
+        self.assertTrue(self.runtime.exists())
+
+    def test_missing_runtime_that_reappears_is_rechecked_before_record_release(self):
+        import installed_payload
+        shutil.rmtree(self.runtime)
+        item = cleanup._runtime_artifact_items('codex', [])[0]
+        self.assertEqual(item['action'], 'missing')
+        self.runtime.mkdir()
+        (self.runtime / 'foreign.txt').write_text('new content')
+        cleanup._apply_managed_support(item, 'codex', self.manifest)
+        self.assertEqual(item['action'], 'manual-review')
+        self.assertEqual((self.runtime / 'foreign.txt').read_text(), 'new content')
+        self.assertIn(str(self.runtime), installed_payload.read(self.ghost)['targets'])
+
+    def test_runtime_failure_holds_full_removal_records(self):
+        (self.runtime / 'module.py').write_text('user changes')
+        args = argparse.Namespace(platform='codex', install_state_manifest=self.manifest)
+        items = cleanup._support_artifact_items(args)
+        from install_hooks import HookStatus
+        hooks = HookStatus('codex', 'ready', 'Ready', 'installed', details={'would_detach': True})
+        cleanup._retain_dependencies(items, [], [], hooks, applied=False, manifest_available=True)
+        for item in items:
+            if item['target_name'] in {'runtime-core', 'install-record', 'install-state-manifest'}:
+                self.assertEqual(item['action'], 'manual-review', item)
+
+    def test_retry_after_command_deletion_failure_preserves_unrecorded_runtime_sibling(self):
+        import installed_payload
+        sibling = self.runtime.parent / 'personal.txt'
+        sibling.write_text('user data')
+        remove = cleanup._remove_path
+        def denied(path):
+            if path == self.command:
+                raise PermissionError('command deletion denied')
+            return remove(path)
+        with mock.patch.object(cleanup, '_remove_path', side_effect=denied):
+            items = cleanup.retire_unused_management('codex', self.manifest)
+        self.assertTrue(any(item.get('removal_incomplete') for item in items), items)
+        self.assertFalse(self.runtime.exists())
+        self.assertIn(str(self.command), installed_payload.read(self.ghost)['targets'])
+        cleanup.retire_unused_management('codex', self.manifest)
+        self.assertEqual(sibling.read_text(), 'user data')
+        self.assertEqual(installed_payload.read(self.ghost)['targets'], {})
+
+
 class ConfigurationRecoveryTest(unittest.TestCase):
     def exercise(self, kind, *, failure=None, before_state=None, current_config=None):
         with tempfile.TemporaryDirectory() as directory, contextlib.ExitStack() as stack:
@@ -194,6 +318,7 @@ class ConfigurationRecoveryTest(unittest.TestCase):
                 change = dict(kind='source_repo_hook_path', repo_root=str(root / 'repo'),
                               before='prior/hooks', before_present=True, after='managed/hooks')
                 record_name, owner_kind = 'source-repo-hook-path.json', 'source-repo-hook-config'
+                (root / 'repo').mkdir()
                 query_rc = 128 if failure == 'query' else 1 if failure == 'absent' else 0
                 replies = [subprocess.CompletedProcess([], query_rc, 'managed/hooks\n', 'query denied' if query_rc == 128 else '')]
                 if query_rc == 0:

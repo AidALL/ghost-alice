@@ -89,14 +89,6 @@ def test_malformed_supplied_destination_never_selects_normal_default(tmp_path,in
     assert list(tmp_path.iterdir())==[]
 
 
-@pytest.mark.parametrize('action',(install_hooks.install_hook,install_hooks.check_status_detail,install_hooks.check_status))
-def test_none_destination_preserves_default_dispatch(action):
-    class DefaultSelected(Exception):pass
-    with patch.object(install_hooks,'_default_destination',side_effect=DefaultSelected) as default:
-        with pytest.raises(DefaultSelected):action('codex',destination=None)
-        default.assert_called_once_with('codex')
-
-
 @pytest.mark.parametrize('representation',('dict','instance','asdict'))
 def test_valid_destination_representations_do_not_select_normal_default(tmp_path,representation):
     from dataclasses import asdict
@@ -248,16 +240,84 @@ def test_managed_outer_parser_does_not_accept_lookalike_runner():
     assert not install_hooks._hook_runner_id_match('python3 /tmp/not_hook_profile_gate.py run lookalike-hook "eA=="','lookalike-hook')
 
 
-def test_normal_upgrade_retains_ledger_after_source_relocation(tmp_path):
+@pytest.mark.parametrize('installed', (False, True))
+def test_default_destination_selects_source_and_retains_installed_ledger(tmp_path, installed):
     import runtime_config
     import install_destination
     root=tmp_path/'owned';root.mkdir()
     value=destination_fixture(root); value['mode']='normal'
     with install_destination.use(value):
-        runtime_config.save_config({'install_locations':{'codex':{'ledger_root':str(root/'authority')}}})
+        retained_source = str(root/'installed-package')
+        runtime_config.save_config({'install_locations':{'codex':{
+            'ledger_root':str(root/'authority'), 'core_source_root':retained_source}}})
         os.environ.pop('GHOST_ALICE_SESSION_INTENT_ROOT',None)
-        resolved=install_hooks._default_destination('codex')
+        os.environ.pop('GHOST_ALICE_CORE_ROOT',None)
+        resolved=install_hooks._default_destination('codex', installed=installed)
+        expected_source = retained_source if installed else str(Path(install_hooks.__file__).resolve().parents[1])
+        assert resolved.core_source_root == expected_source
         assert resolved.ledger_root==str(root/'authority')
+
+
+@pytest.mark.parametrize('platform', ('claude', 'codex'))
+def test_ledger_retarget_prepares_existing_hooks_without_changing_other_settings(tmp_path, platform):
+    from dataclasses import asdict, replace
+    import install_destination
+    import hook_definitions
+    root = tmp_path / 'owned'
+    root.mkdir()
+    value = destination_fixture(root)
+    value.update(platform_dir=str(root / ('.claude' if platform == 'claude' else '.codex')),
+                 ledger_root=str(root / 'old ledger'))
+    Path(value['platform_dir']).mkdir()
+    install_hooks.install_hook(platform, destination=value)
+    with install_destination.use(value):
+        settings_path = install_hooks.PLATFORMS[platform]['hook_file']()
+        settings = json.loads(settings_path.read_text())
+        settings['user-preference'] = 'preserve'
+        addon = install_hooks._hook_runner_command('addon:fixture:observe', 'printf addon-original',
+            '[addon:fixture] observe', platform_key=platform)
+        settings['hooks']['Stop'].append({'matcher': '', 'hooks': [{'type': 'command', 'command': addon, 'timeout': 9}]})
+        settings_path.write_text(json.dumps(settings))
+        original = settings_path.read_bytes()
+        config_path = Path(value['platform_dir']) / 'config.toml'
+        config_before = config_path.read_bytes() if config_path.exists() else None
+        prepared = install_hooks.prepare_ledger_retarget(platform, destination=value, ledger_root=root / 'new ledger')
+        assert settings_path.read_bytes() == original
+        assert (config_path.read_bytes() if config_path.exists() else None) == config_before
+        revised = json.loads(prepared[settings_path])
+        assert revised['user-preference'] == 'preserve'
+        for event, groups in revised['hooks'].items():
+            for group in groups:
+                for handler in group['hooks']:
+                    parsed = hook_definitions.parse_hook_runner_command(handler['command'])
+                    if parsed is None:
+                        continue
+                    binding = install_destination.decode_binding(parsed['binding'])['destination']
+                    assert binding == asdict(replace(install_destination.InstallDestination.parse(value),
+                                                    ledger_root=str(root / 'new ledger')))
+                    if parsed['hook_id'] in {'session-intent', 'session-start', 'session-receipt'}:
+                        assert str(root / 'old ledger') not in parsed['command']
+                        assert str(root / 'new ledger') in parsed['command']
+                    if '[addon:fixture]' in handler['command']:
+                        assert parsed['command'] == 'printf addon-original'
+                        assert handler['timeout'] == 9
+
+
+def test_ledger_retarget_holds_a_custom_environment_wrapper_without_writing(tmp_path):
+    import install_destination
+    value = destination_fixture(tmp_path / 'owned')
+    Path(value['platform_dir']).mkdir(parents=True)
+    install_hooks.install_hook('claude', destination=value)
+    with install_destination.use(value):
+        path = install_hooks.PLATFORMS['claude']['hook_file']()
+        settings = json.loads(path.read_bytes())
+        handler = settings['hooks']['UserPromptSubmit'][0]['hooks'][0]
+        handler['command'] = 'env CUSTOM_FLAG=1 ' + handler['command']
+        path.write_text(json.dumps(settings))
+        before = path.read_bytes()
+        with pytest.raises(ValueError, match='customized'):
+            install_hooks.prepare_ledger_retarget('claude', destination=value, ledger_root=tmp_path / 'owned/new ledger')
+        assert path.read_bytes() == before
 
 
 def test_normal_generated_chain_keeps_authority_across_source_and_runtime_relocation(tmp_path):

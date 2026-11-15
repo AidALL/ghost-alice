@@ -201,6 +201,28 @@ class CompletionAssessmentTests(unittest.TestCase):
             with self.assertRaises(sqlite3.ProgrammingError):
                 connection.execute('SELECT 1')
 
+        # Physical relocation does not change the authenticated original root,
+        # owner, candidate hash or source locator.
+        relocated = root.parent / 'relocated-ledger'
+        relocated.mkdir()
+        with core._read_connection(root) as old, sqlite3.connect(relocated / 'ghost-state.sqlite3') as new:
+            old.backup(new)
+        root.rename(root.with_name(root.name + '-retired'))
+        self.assertEqual(source_text(refs[0], storage_root=relocated), raw.decode())
+        from source_reference import verify_source
+        verify_source(refs[0], storage_root=relocated)
+        for changed in (dict(refs[0], intent_root=str(relocated)), foreign,
+                        dict(refs[0], digest='sha256:altered'),
+                        dict(refs[0], locator='different-original'),
+                        dict(refs[0], candidate_reference='sha256:altered')):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                source_text(changed, storage_root=relocated)
+        with self.assertRaises(OSError):
+            source_text(refs[0])
+        with self.assertRaises(OSError):
+            source_text(refs[0], storage_root=relocated.parent / 'wrong-ledger')
+        self.assertFalse((relocated.parent / 'wrong-ledger').exists())
+
     def test_assessment_stores_candidate_reference_without_duplicate_candidate(self):
         api = completion_assessment
         candidate = self.prepare()

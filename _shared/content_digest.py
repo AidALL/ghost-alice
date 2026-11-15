@@ -75,7 +75,7 @@ def _is_generated(name: str, is_dir: bool) -> bool:
     return name in EXCLUDED_FILE_NAMES or Path(name).suffix in EXCLUDED_FILE_SUFFIXES
 
 
-def state(path: Path | str) -> dict | None:
+def state(path: Path | str, *, include_generated: bool = False) -> dict | None:
     """Everything at a path except generated files, so a restore can tell whether the path still holds
     exactly what it saw.
 
@@ -99,7 +99,7 @@ def state(path: Path | str) -> dict | None:
         kept = []
         for name in sorted(dirnames):
             child = folder / name
-            if _is_generated(name, True):
+            if not include_generated and _is_generated(name, True):
                 continue
             rel = child.relative_to(root).as_posix()
             if _is_link(child):
@@ -110,7 +110,7 @@ def state(path: Path | str) -> dict | None:
         dirnames[:] = kept
         for name in sorted(filenames):
             child = folder / name
-            if _is_generated(name, False):
+            if not include_generated and _is_generated(name, False):
                 continue
             rel = child.relative_to(root).as_posix()
             if _is_link(child):

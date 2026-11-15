@@ -5,7 +5,7 @@ set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 
 set "SCRIPT_DIR=%~dp0"
-set "PS1=%SCRIPT_DIR%install.ps1"
+set "PS1=%~dpn0.ps1"
 
 where pwsh.exe >nul 2>nul
 if %ERRORLEVEL% NEQ 0 goto powershell

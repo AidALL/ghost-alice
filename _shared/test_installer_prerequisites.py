@@ -24,6 +24,7 @@ class PrerequisiteCase(unittest.TestCase):
         self.runner = FakeRunner()
         self.available: set[str] = set()
         self.patches = contextlib.ExitStack()
+        self.patches.enter_context(mock.patch.dict(os.environ, {'GHOST_ALICE_PREREQUISITES_SHOWN': ''}))
         self.patches.enter_context(mock.patch("installer.prerequisites.shutil.which",
                                               side_effect=lambda name: f"/usr/bin/{name}" if name in self.available else None))
         self.patches.enter_context(mock.patch("installer.prerequisites.os.geteuid", return_value=1000, create=True))
@@ -59,6 +60,10 @@ class PrerequisiteTests(PrerequisiteCase):
         self.assertIn("[INFO] node not found; trying automatic prerequisite setup.", out)
         self.assertIn("[INFO] brew install node", out)
         self.assertNotIn("[WARN]", out)
+        self.assertIn('automatic consent', out)
+        self.assertLess(out.index('automatic consent'), out.index('brew install git'))
+        os.environ['GHOST_ALICE_PREREQUISITES_SHOWN'] = '1'
+        self.assertNotIn('automatic consent', self.run_install()[1])
 
     def test_apt_get_without_sudo_runs_directly(self):
         # prerequisites.sh:9-17, 91-98; test_install_runtime_detection.py:350-352

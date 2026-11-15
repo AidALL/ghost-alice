@@ -66,7 +66,7 @@ The response model names the skill or document whose rules could prevent the beh
 
 ## Blind installed-behavior evaluation
 
-When an evaluation that the human user's instructions authorize concerns installed behavior, follow the source-tree `docs/policies/live-smoke-regression.md` procedure. That procedure defines how the subject and the evaluator are isolated, how the runtime executes and how results are classified. Only its evaluator-confirmed behavioral failure supplies a report-only conduct-feedback candidate; a harness or transport failure does not establish misconduct by the response model.
+When an evaluation that the human user's instructions authorize concerns installed behavior, locate `live-smoke-regression.md` through `installed-policies.md` in the `_shared` directory beside the host's installed skills, then follow that policy. The policy defines how the subject and the evaluator are isolated, how the runtime executes and how results are classified. Only its evaluator-confirmed behavioral failure supplies a report-only conduct-feedback candidate; a harness or transport failure does not establish misconduct by the response model.
 
 ## Warnings
 

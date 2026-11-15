@@ -60,10 +60,14 @@ def decode_hook_payload(payload: str) -> str:
     return base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8")
 
 
-def parse_hook_runner_command(command: str) -> dict[str, str | None] | None:
+def parse_hook_runner_command(command: str, *, inspect_environment: bool = False) -> dict[str, str | None] | None:
     """Read the current or legacy runner argv; callers separately validate binding authority."""
     try:
         argv = shlex.split(command, comments=True)
+        if inspect_environment and argv and argv[0] in ('env', '/usr/bin/env'):
+            argv = argv[1:]
+            while argv and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', argv[0], re.DOTALL):
+                argv = argv[1:]
         if argv[:2] == ["/bin/sh", "-c"]:
             if len(argv) < 7 or argv[3] != "ghost-alice-python":
                 return None
@@ -93,6 +97,26 @@ def parse_hook_runner_command(command: str) -> dict[str, str | None] | None:
                 "command": decode_hook_payload(args[-1]), "binding": binding}
     except (ValueError, UnicodeError, IndexError):
         return None
+
+
+def rewrite_hook_runner_command(command: str, *, binding: str, payload: str) -> str:
+    """Replace parsed transport tokens while preserving the launcher's spelling and comment."""
+    parsed = parse_hook_runner_command(command)
+    if parsed is None or parsed['binding'] is None:
+        raise ValueError('Ledger relocation requires a parsed bound hook runner')
+    changes = ((parsed['binding'], binding),
+               (base64.urlsafe_b64encode(parsed['command'].encode()).decode(),
+                base64.urlsafe_b64encode(payload.encode()).decode()))
+    for original, replacement in changes:
+        if original == replacement:
+            continue
+        if command.count(original) != 1:
+            raise ValueError('Hook runner transport token is not unique')
+        command = command.replace(original, replacement, 1)
+    revised = parse_hook_runner_command(command)
+    if revised is None or revised['binding'] != binding or revised['command'] != payload:
+        raise ValueError('Rewritten hook runner does not preserve its transport')
+    return command
 
 # The Codex model provider name the context gateway registers and the hooks look for.
 PROVIDER = 'ghost_alice_context'

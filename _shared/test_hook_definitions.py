@@ -35,13 +35,15 @@ INSTALLER_MODULES = (
 GATEWAY_MODULES = ("context_gateway_install", "context_gateway_plan", "context_gateway_inventory",
                    "context_gateway_transaction", "context_gateway_platform", "context_gateway_model")
 # Shared modules belong to neither layer: the installer, the runtime and the skills may all import them, so a
-# shared module imports only the standard library and the shared modules this table names for it.
+# shared module imports only the standard library and the owners this table names for it.
+# The install-record writer uses the existing publication journal for format promotion;
+# reading the record does not import or invoke that installation transaction.
 SHARED_MODULES = {
     "codex_config_toml": {"_vendor"},
     "hook_definitions": set(),
     "install_lock": {"file_lock"},
     "content_digest": set(),
-    "installed_payload": {"content_digest", "install_lock"},
+    "installed_payload": {"content_digest", "install_lock", "install_transaction"},
     "install_destination": set(),
     "atomic_write": {"install_destination"},
     "file_lock": set(),

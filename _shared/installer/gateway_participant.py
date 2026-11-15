@@ -95,8 +95,12 @@ def recovery_participants(ctx: PublishContext, states: dict | None, original_rec
     if "gateway" not in states:
         return []
     saved = states["gateway"]
+    # Readiness telemetry can be saved just before an interrupted journal reaches done.
+    telemetry = {'restarted_at', 'listener_ready'}
     if (not isinstance(saved, dict) or type(saved.get("was_running")) is not bool
-            or not isinstance(service, dict) or saved.get("service") != service
+            or not isinstance(service, dict) or not isinstance(saved.get('service'), dict)
+            or {key: value for key, value in saved['service'].items() if key not in telemetry}
+               != {key: value for key, value in service.items() if key not in telemetry}
             or not affects(service, ctx.destinations)):
         raise GatewayFailure("The journal cannot establish the gateway's prior running state and ownership",
                              phase="rollback")
@@ -117,6 +121,9 @@ class UnreadableRecordParticipant:
         if _touches(self.runtime_root, ctx.destinations):
             raise GatewayBlocked(f"The install record cannot be read ({self.reason}); whether a gateway runs from "
                                  f"{self.runtime_root} is unknown, so its publish waits for the record to be reviewed")
+
+    def prepare_ledger_retarget(self, old_root: Path, new_root: Path):
+        raise GatewayBlocked(f'The install record cannot be read ({self.reason}); ledger migration cannot identify its service')
 
     def after_publish(self, ctx: PublishContext) -> None:
         return None
@@ -142,6 +149,21 @@ class GatewayParticipant:
 
     def _listener(self) -> dict:
         return json.loads(Path(self.service["state_path"]).read_bytes())
+
+    def prepare_ledger_retarget(self, old_root: Path, new_root: Path) -> tuple[dict[Path, bytes], dict]:
+        """Prepare this registered listener's new ledger binding without service effects."""
+        from context_gateway_model import digest, encoded
+        from context_gateway_plan import valid_state
+        path = Path(self.service['state_path'])
+        raw = path.read_bytes()
+        if digest(raw) != self.service['state_digest']:
+            raise GatewayBlocked('Gateway state changed outside the installer; preserve it before ledger migration')
+        state = valid_state(json.loads(raw))
+        if Path(state['ledger_root']).resolve() not in (old_root, new_root):
+            return {}, dict(self.service)
+        state.update(ledger_root=str(new_root), ghost_root=str(self.ghost_root))
+        raw = encoded(state)
+        return {path: raw}, dict(self.service, state_digest=digest(raw))
 
     def before_publish(self, ctx: PublishContext) -> None:
         self.affected = affects(self.service, ctx.destinations)
@@ -177,12 +199,17 @@ class GatewayParticipant:
             return
         self.started = True
         try:
-            self.effects.start(self.domain, self.agent)
+            if self.recovering and self.platform != 'darwin':
+                raise RuntimeError('Gateway recovery needs its macOS launchctl owner')
+            if not self.recovering or owned_service_state(self.effects, self.domain, self.agent) == 'absent':
+                self.effects.start(self.domain, self.agent)
             ready = self.effects.ready(self._listener())
         except Exception as exc:
-            raise GatewayFailure(f"Service start failed after the publish: {exc}", phase="bootstrap", restored=True) from exc
+            raise GatewayFailure(f"Service start failed after the publish: {exc}", phase="bootstrap",
+                                 restored=not self.recovering) from exc
         if not ready:
-            raise GatewayFailure("Candidate service is not ready after the publish", phase="readiness", restored=True)
+            raise GatewayFailure("Candidate service is not ready after the publish", phase="readiness",
+                                 restored=not self.recovering)
         section = dict(self.service, restarted_at=_now(), listener_ready=True)
         installed_payload.update(self.ghost_root, {"service": section})
         self.service = section

@@ -20,6 +20,30 @@ from test_atomic_write import _FailAfterPartialWrite  # noqa: E402
 
 
 class TestRuntimeConfigDefaults(unittest.TestCase):
+    def test_partial_save_uses_the_same_custom_installation_for_reading_and_writing(self):
+        import ledger_access
+        ghost = self.home / 'custom-installation'
+        ghost.mkdir()
+        retired = self.home / 'removed-clone/ledger'
+        (ghost / 'config.json').write_text(json.dumps({'retired_ledger_roots': [str(retired)]}))
+        ordinary = runtime_config.config_path(self.home, env={})
+        ordinary.parent.mkdir()
+        ordinary.write_text('{"agent_visibility":{"profile":"strict"}}')
+        untouched = ordinary.read_bytes()
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_GHOST_ROOT': str(ghost)}):
+            self.assertEqual(runtime_config.save_config({'agent_visibility': {'profile': 'minimal'}}, home=self.home),
+                             ghost / 'config.json')
+            with self.assertRaises(ledger_access.RetiredLedgerRoot):
+                ledger_access.require_writable_root(retired)
+        self.assertEqual(ordinary.read_bytes(), untouched)
+
+    def test_ordinary_save_preserves_retired_ledger_roots(self):
+        retired = str(self.home / 'removed-clone/ledger')
+        runtime_config.save_config({'retired_ledger_roots': [retired]}, home=self.home)
+        runtime_config.save_config({'install_locations': {'fixture-host': {'ledger_root': str(self.home / 'ledger')}},
+                                    'agent_visibility': {'profile': 'minimal'}}, home=self.home)
+        self.assertEqual(runtime_config.load_config(env={}, home=self.home)['retired_ledger_roots'], [retired])
+
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)

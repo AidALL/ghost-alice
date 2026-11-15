@@ -65,7 +65,8 @@ class RepairTest(unittest.TestCase):
             install = self._run(env, "--platform", "claude", "task-router")
             self.assertEqual(install.returncode, 0, msg=install.stderr + install.stdout)
             skill = Path(home) / ".claude" / "skills" / "task-router"
-            self.assertTrue(skill.is_symlink() or _is_reparse_point(skill))
+            self.assertTrue(skill.is_dir())
+            self.assertFalse(skill.is_symlink() or _is_reparse_point(skill))
 
             # 1) target went missing -> repair must re-provision it
             _symlink_safe_remove(skill)

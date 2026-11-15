@@ -195,7 +195,11 @@ def write_ownership_marker(
 
 
 def unrecorded_copy_content(path: Path, expected_files: Iterable[str]) -> Optional[str]:
-    """Reject whole-copy deletion when a baseline omits user content or links; allow ordinary generated caches."""
+    """Reject whole-copy deletion when a baseline omits user files or links; allow ordinary generated caches.
+
+    A real folder holds no bytes of its own, so an empty folder or one holding only caches is not user content;
+    the walk still checks every file and link below it.
+    """
     if path.is_symlink() or _is_windows_junction(path) or not (path.is_dir() or path.is_file()):
         return "unrecorded-copy-content"
     expected_files = set(expected_files)
@@ -215,9 +219,8 @@ def unrecorded_copy_content(path: Path, expected_files: Iterable[str]) -> Option
                          or child.suffix == '.pyc')
             if (child.is_symlink() or _is_windows_junction(child)
                     or not (child.is_dir() or child.is_file())
-                    or (not generated and rel != GHOST_ALICE_MARKER_FILENAME
-                        and rel not in expected_files
-                        and not (child.is_dir() and any(key.startswith(rel + '/') for key in expected_files)))):
+                    or (child.is_file() and not generated and rel != GHOST_ALICE_MARKER_FILENAME
+                        and rel not in expected_files)):
                 return "unrecorded-copy-content"
     return None
 

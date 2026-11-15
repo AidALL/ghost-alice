@@ -244,7 +244,8 @@ class ParticipantSelectionTests(unittest.TestCase):
             self.assertEqual([type(p).__name__ for p in chosen], ["GatewayParticipant"])
             installed_payload.update(reg.ghost, {"service": None})
             self.assertEqual(gateway_participant.participants(reg.ghost), [])
-            installed_payload.path(reg.ghost).unlink()
+            for name in installed_payload.RECORD_FILENAMES:
+                (reg.ghost / name).unlink(missing_ok=True)
             self.assertEqual(gateway_participant.participants(reg.ghost), [])
 
     def test_an_unreadable_record_holds_a_runtime_publish_and_lets_the_others_go_on(self):
@@ -255,7 +256,7 @@ class ParticipantSelectionTests(unittest.TestCase):
             root = Path(temporary)
             reg = gateway_testing.registered_home(self, root)
             record = installed_payload.path(reg.ghost)
-            for broken in (json.dumps({"schema_version": 2, "targets": {}}), "{broken"):
+            for broken in (json.dumps({"schema_version": 999, "targets": {}}), "{broken"):
                 with self.subTest(record=broken[:12]):
                     record.write_text(broken, encoding="utf-8")
                     [chosen] = gateway_participant.participants(reg.ghost, runtime_root=reg.runtime_root)
