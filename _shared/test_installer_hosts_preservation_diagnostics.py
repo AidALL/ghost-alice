@@ -63,8 +63,8 @@ class HostCase(unittest.TestCase):
 
 class WriterObservationTests(unittest.TestCase):
     def test_posix_native_identity_and_surviving_ledger_cli_are_distinct_from_argument_mentions(self):
-        processes = ('10 1 /Applications/Codex.app/Contents/MacOS/Codex\n'
-                     '11 1 /usr/bin/python3\n12 1 /bin/echo\n')
+        processes = ('10 /Applications/Codex.app/Contents/MacOS/Codex\n'
+                     '11 /usr/bin/python3\n12 /bin/echo\n')
         argv = ['/usr/bin/python3', '/tmp/path with spaces/session_intent_ledger.py', '--platform', 'claude']
         for platform in ('darwin', 'linux'):
             with self.subTest(platform=platform), mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, processes)), \
@@ -72,7 +72,7 @@ class WriterObservationTests(unittest.TestCase):
                 seen = hosts.observe_writers(['claude', 'codex'], platform=platform)
                 self.assertEqual((seen['codex'].state, seen['codex'].pids), ('running', (10,)))
                 self.assertEqual((seen['claude'].state, seen['claude'].pids), ('running', (11,)))
-        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '12 1 /bin/echo\n')):
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '12 /bin/echo\n')):
             self.assertEqual(hosts.observe_writers(['codex'], platform='darwin')['codex'].state, 'absent')
 
     def test_windows_native_executable_and_python_script_arguments(self):
@@ -87,7 +87,7 @@ class WriterObservationTests(unittest.TestCase):
 
     def test_node_host_launcher_and_bound_hook_runner_survive_without_native_host_parent(self):
         command = 'python3 /runtime/_shared/hook_profile_gate.py run session-intent claude eA=='
-        rows = '10 1 /usr/bin/node\n11 1 /usr/bin/python3\n'
+        rows = '10 /usr/bin/node\n11 /usr/bin/python3\n'
         argv = {10: ['node', '/usr/local/bin/codex'], 11: command.split()}
         with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, rows)), \
                 mock.patch.object(hosts, '_process_argv', side_effect=lambda pid, platform: argv[pid]):
@@ -96,9 +96,15 @@ class WriterObservationTests(unittest.TestCase):
         self.assertEqual(seen['claude'].pids, (11,))
 
     def test_unbound_writer_is_unknown_and_unrelated_python_argument_mentions_are_absent(self):
-        rows = '11 1 /usr/bin/python3\n'
+        rows = '11 /usr/bin/python3\n'
         cases = [(['python3', '/tmp/session_intent_ledger.py'], 'unknown'),
+                 (['python3', '/runtime/response_route.py', '--platform', 'codex', '--candidate-json', '{}'], 'running'),
+                 (['python3', '/runtime/context_lifecycle.py', '--platform=codex', '--selection-json', '[]'], 'running'),
+                 (['python3', '/runtime/source_lookup.py', '/tmp/source', '--platform', 'codex', '--purpose', 'review'], 'running'),
+                 (['python3', '/runtime/completion_assessment.py', 'record-response'], 'unknown'),
+                 (['python3', '/runtime/context_lifecycle.py', '--selection-json', '[]'], 'unknown'),
                  (['python3', '/tmp/other.py', 'session_intent_ledger.py', '--platform', 'codex'], 'absent'),
+                 (['python3', '/tmp/other.py', 'response_route.py', '--platform', 'codex'], 'absent'),
                  (['python3', '-W', 'session_intent_ledger.py', '/tmp/other.py'], 'absent'),
                  (['python3', '-c', 'print("session_intent_ledger.py")'], 'absent')]
         for options in (['-X', 'utf8'], ['-W', 'ignore'], ['-Xutf8'], ['-IBu'], ['--'],
@@ -110,21 +116,22 @@ class WriterObservationTests(unittest.TestCase):
                     mock.patch.object(hosts, '_process_argv', return_value=argv):
                 self.assertEqual(hosts.observe_writers(['codex'], platform='darwin')['codex'].state, expected)
 
-    def test_unbound_ledger_cli_inherits_its_native_ancestor_host(self):
-        rows = ('10 1 /Applications/Codex.app/Contents/MacOS/Codex\n'
-                '11 10 /bin/sh\n12 11 /usr/bin/python3\n')
-        argv = ['python3', '/runtime/session_intent_ledger.py']
-        for platform in ('darwin', 'linux'):
-            with self.subTest(platform=platform), \
+    def test_unbound_record_cli_is_not_attributed_to_its_native_ancestor_host(self):
+        rows = ('10 /Applications/Codex.app/Contents/MacOS/Codex\n'
+                '11 /bin/sh\n12 /usr/bin/python3\n')
+        for platform, script in ((platform, script) for platform in ('darwin', 'linux')
+                                for script in ('session_intent_ledger.py', 'completion_assessment.py')):
+            argv = ['python3', '/runtime/' + script]
+            with self.subTest(platform=platform, script=script), \
                     mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, rows)), \
                     mock.patch.object(hosts, '_process_argv', return_value=argv):
                 seen = hosts.observe_writers(['claude', 'codex'], platform=platform)
-                self.assertEqual((seen['codex'].state, seen['codex'].pids), ('running', (10, 12)))
-                self.assertEqual(seen['claude'].state, 'absent')
-                self.assertEqual(hosts.observe_writers(['claude'], platform=platform)['claude'].state, 'absent')
+                self.assertEqual((seen['codex'].state, seen['codex'].pids), ('running', (10,)))
+                self.assertEqual(seen['claude'].state, 'unknown')
+                self.assertEqual(hosts.observe_writers(['claude'], platform=platform)['claude'].state, 'unknown')
 
     def test_unavailable_process_table_or_interpreter_arguments_is_unknown(self):
-        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '12 1 /bin/echo\n')):
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '12 /bin/echo\n')):
             unsupported = hosts.observe_writers(['future-host'], platform='darwin')['future-host']
         self.assertEqual(unsupported.state, 'unknown')
         self.assertIn('adapter', unsupported.detail.lower())
@@ -133,7 +140,7 @@ class WriterObservationTests(unittest.TestCase):
                 seen = hosts.observe_writers(['codex'], platform='darwin')['codex']
                 self.assertEqual(seen.state, 'unknown')
                 self.assertTrue(seen.detail)
-        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '11 1 /usr/bin/python3\n')), \
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '11 /usr/bin/python3\n')), \
                 mock.patch.object(hosts, '_process_argv', side_effect=PermissionError('denied')):
             seen = hosts.observe_writers(['codex'], platform='darwin')['codex']
         self.assertEqual(seen.state, 'unknown')
@@ -141,7 +148,7 @@ class WriterObservationTests(unittest.TestCase):
         for platform in ('darwin', 'linux'):
             for exited in (FileNotFoundError('exited'), ProcessLookupError('exited')):
                 with self.subTest(platform=platform, exited=type(exited).__name__), \
-                        mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '11 1 /usr/bin/python3\n')), \
+                        mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '11 /usr/bin/python3\n')), \
                         mock.patch.object(hosts, '_process_argv', side_effect=exited):
                     seen = hosts.observe_writers(['codex'], platform=platform)['codex']
                     self.assertEqual((seen.state, seen.pids), ('absent', ()))

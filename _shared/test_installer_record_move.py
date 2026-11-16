@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 
 from installer import record_move, report, transaction
+from installer.runner import ToolResult
 from installer_testing import installer_env, run_pty
 
 
@@ -26,6 +27,7 @@ class RecordMoveTests(unittest.TestCase):
             side_effect=lambda: transaction.LedgerLocations(self.bindings, self.unavailable)))
         self.interactive = self.enterContext(mock.patch.object(record_move.source, 'interactive', return_value=True))
         self.writers = self.enterContext(mock.patch.object(record_move.hosts, 'observe_writers',
+            wraps=record_move.hosts.observe_writers,
             return_value={'claude': mock.Mock(state='absent'), 'codex': mock.Mock(state='absent')}))
         self.enterContext(mock.patch.object(record_move.gateway_participant, 'participants', return_value=[]))
         self.enterContext(mock.patch.object(record_move.gateway_participant, 'loaded_service'))
@@ -129,6 +131,27 @@ class RecordMoveTests(unittest.TestCase):
         self.assertNotIn('close it', output)
         self.acquire.assert_not_called()
         self.migrate.assert_not_called()
+
+    def test_surviving_record_cli_prevents_migration_after_native_host_exits(self):
+        self.writers.return_value = mock.DEFAULT
+        self.bindings[self.b]['hosts'] = {}
+        for argv, notice in (
+                (['python3', '/runtime/response_route.py', '--platform', 'claude'], 'Claude Code'),
+                (['python3', '/runtime/context_lifecycle.py', '--platform', 'claude'], 'Claude Code'),
+                (['python3', '/runtime/source_lookup.py', '--platform', 'claude', '--purpose', 'review'], 'Claude Code'),
+                (['python3', '/runtime/completion_assessment.py', 'record-response'], 'could not check')):
+            with self.subTest(argv=argv), \
+                    mock.patch.object(record_move.hosts.sys, 'platform', 'darwin'), \
+                    mock.patch.object(record_move.hosts.runner, 'run_command', return_value=ToolResult(0,
+                        '10 /Applications/Codex.app/Contents/MacOS/Codex\n11 /usr/bin/python3\n')), \
+                    mock.patch.object(record_move.hosts, '_process_argv', return_value=argv):
+                code, output = self.run_flow(['', 'n'])
+                self.assertEqual(code, 0)
+                self.assertIn(f'records remain at {self.a}', output)
+                self.assertIn(notice, output)
+                self.assertNotIn('are now at', output)
+                self.acquire.assert_not_called()
+                self.migrate.assert_not_called()
 
     def test_preparation_exception_preserves_failure_and_processes_next_path(self):
         c = self.ghost / 'other/records'
