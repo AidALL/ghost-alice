@@ -28,7 +28,7 @@ import state_retention
 from hook_definitions import SUPPORTED_PLATFORMS
 
 HOP = {'host', 'connection', 'transfer-encoding', 'content-length', 'proxy-connection', 'keep-alive'}
-INTERNAL_HEADERS = {'x-ghost-context-scope', 'x-ghost-context-session'}
+INTERNAL_HEADERS = {'x-ghost-context-scope', 'x-ghost-context-session', 'x-ghost-context-inspect'}
 ORIGINS = {'codex': 'https://chatgpt.com/backend-api/codex', 'anthropic': 'https://api.anthropic.com'}
 PLATFORMS = {'codex': 'codex', 'anthropic': 'claude'}
 SELECTION_ENDPOINTS = {'codex': {'responses'}, 'anthropic': {'v1/messages', 'v1/messages/count_tokens'}}
@@ -291,7 +291,7 @@ def request_shape(raw, encoding):
         return {'shape_unavailable': 'content-not-decoded'}
 
 
-def make_server(scope, output, origins=None, port=0, selectors=None, server_selectors=None):
+def make_server(scope, output, origins=None, port=0, selectors=None, server_selectors=None, ledger_root=None):
     """Dispatch explicit platform callbacks with (request, declared_session).
 
     Explicit selectors use the native platform keys codex and claude; no signature is inferred.
@@ -359,6 +359,8 @@ def make_server(scope, output, origins=None, port=0, selectors=None, server_sele
             in_scope = self.headers.get_all('X-Ghost-Context-Scope') == [scope]
             if self.path == '/health' and self.command == 'GET' and in_scope:
                 body = b'{"status":"ready"}'
+                if ledger_root is not None and self.headers.get_all('X-Ghost-Context-Inspect') == ['binding']:
+                    body = json.dumps(dict(ledger_root=ledger_root, status='ready', pid=os.getpid())).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(body)))
@@ -520,7 +522,8 @@ def main(argv=None):
             request, config['ledger_root'], config['claude_dir'], platform='claude', session_id=session,
             native_betas=betas)
     server = make_server(config['scope'], config['usage_log'], port=config['port'],
-                         origins=origins, selectors=selectors, server_selectors=server_selectors)
+                         origins=origins, selectors=selectors, server_selectors=server_selectors,
+                         ledger_root=config['ledger_root'])
     server.serve_forever()
 
 

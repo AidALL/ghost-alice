@@ -5,6 +5,7 @@ This document is the contract for the install-state manifest that the Ghost-ALIC
 
 - [Purpose](#purpose)
 - [File location](#file-location)
+- [Installed ledger source relationships](#installed-ledger-source-relationships)
 - [top-level fields](#top-level-fields)
 - [target fields](#target-fields)
 - [install_mode semantics](#install_mode-semantics)
@@ -25,6 +26,25 @@ The installer writes one manifest for the selected platform at the corresponding
 
 - `~/.ghost-alice/install-state/claude.json`
 - `~/.ghost-alice/install-state/codex.json`
+
+## Installed ledger source relationships
+
+The shared `~/.ghost-alice/installed-payload-v2.json` record has an optional `source.ledger_source_roots` object. This field belongs to the shared record, not the per-host manifest fields below. Each key is a normalized absolute installed ledger path; its value is the normalized absolute path of the source folder associated with that ledger. Both must be strings. A source folder need not still exist. `_shared/installed_payload.py` validates the map when reading or updating the shared record.
+
+```json
+{
+  "source": {
+    "root": "/work/current-source",
+    "ledger_source_roots": {
+      "/work/previous-source/session-intent": "/work/previous-source"
+    }
+  }
+}
+```
+
+`source.root` identifies the current acquisition input; the map retains only the source relationships needed by current installed ledger bindings. It is neither a complete source history nor an instruction to select a ledger. `config.install_locations` and existing managed hooks supply the installed locations; source metadata transported by a request or saved package does not supply this map. The [installer architecture](../docs/reference/installer-architecture.md#fixed-commands-policies-and-ledger-data) owns relationship calculation and publication order.
+
+The existing source writer merges fields by name. An omitted `ledger_source_roots` keeps the previous map; an explicit `{}` replaces it with an empty map. A valid map is stored with the new source fields in the same record replacement and journal. Records without the optional field remain readable.
 
 ## top-level fields
 

@@ -18,6 +18,7 @@ The Windows installer needs PowerShell 7.6 or newer. Windows PowerShell 5.1 is n
 - [Install One Platform](#install-one-platform)
 - [Check Status](#check-status)
 - [Update](#update)
+- [Move Existing Work Records](#move-existing-work-records)
 - [Common Commands](#common-commands)
 - [Runtime And Platform Reference](#runtime-and-platform-reference)
 - [Uninstall](#uninstall)
@@ -45,7 +46,7 @@ cd %USERPROFILE%\ghost-alice
 
 After a successful installation, use `~/.ghost-alice/bin/ghost-alice` (Windows: `%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd`) for status, update and removal. The Core skills this installer places, runtime and management commands execute without the development clone. The installer attempts automatic acquisition of missing Python 3.11+, Git and Node.js and explains package-manager automatic-consent flags before acquiring the first program.
 
-When upgrading an older installation, update every existing Core skill on each installed host before deleting the clone. Selecting only some skills leaves the others unchanged; older Claude skill links can still point into the clone, and older skill instructions can still refer to its policy files. Supply the existing skill names to the new installer, or use the fixed `update` command below, which retains those installed selections. If an existing ledger remains inside the clone, stop its writers and complete [explicit ledger migration](../reference/installer-architecture.md#fixed-commands-policies-and-ledger-data) before deleting the clone as well.
+When upgrading an older installation, update every existing Core skill on each installed host before deleting the clone. Selecting only some skills leaves the others unchanged; older Claude skill links can still point into the clone, and older skill instructions can still refer to its policy files. Supply the existing skill names to the new installer, or use the fixed `update` command below, which retains those installed selections. If existing work records remain inside that folder, complete [moving existing work records](#move-existing-work-records) before moving or deleting the folder.
 
 ## Install Addons
 
@@ -113,6 +114,23 @@ The fixed command obtains candidate code from the recorded remote/ref and update
 ```
 
 If acquisition coordinates are missing, supply `--remote URL --ref NAME` when running update. To update the developer checkout itself, use the existing `bash install.sh --update-source` or `.\install.cmd --update-source`; that separate path stashes local changes before a fast-forward and follows [source update recovery](./troubleshooting.md#git-update-recovery). Fixed update leaves the checkout unchanged. See [installer architecture](../reference/installer-architecture.md#fixed-commands-policies-and-ledger-data) for saved-code reinstallation and ledger locations.
+
+### Move Existing Work Records
+
+After a successful installation or update, the installer checks whether existing work records remain inside a folder used to install Ghost-ALICE. It shows that folder, the current record location and the new location at `~/.ghost-alice/session-intent`, then asks whether to move the records. The default is Yes; no separate command or migration flag is needed. Enter pressed before this question does not request a move. When several hosts share one location, the installer lists that location once.
+
+| Answer | Installer action |
+| --- | --- |
+| Enter, `y` or `yes` | Request the move, then check that the affected record writers have stopped. |
+| `n` or `no` | Keep the current location. |
+| End of input (EOF) | Keep the current location. |
+| Other input | Ask again. |
+
+Close the hosts and other CLI work that use the displayed records before continuing. If the installer finds a writer still running, press Enter after stopping it to recheck, or `n` to keep the current location. If observation fails, inspect the reported setting or process-query error before rechecking; an unknown state does not establish that a program is running. Noninteractive runs and automatic post-merge installations do not ask or move records. Run `~/.ghost-alice/bin/ghost-alice` (Windows: `%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd`) from a terminal later to enter the same follow-up after installation succeeds. Doctor reports the current locations without moving them. The follow-up uses Korean or English according to the terminal language; other installation progress messages can remain in English.
+
+The installer reports installation and record movement separately. A deferred or declined move leaves the current location in use. A move error returns a nonzero exit even when the installer restores the previous location; follow the reported recovery condition before retrying. If the records and settings were already committed at the new location, the installer preserves that location and reports any unfinished recovery or cleanup. A successful code installation alone does not establish that records moved. The [architecture reference](../reference/installer-architecture.md#fixed-commands-policies-and-ledger-data) describes the commit and recovery conditions.
+
+When installing an older version that does not support this follow-up, the installer completes the requested code installation without sending a record-move request to that version. On the first update from a version whose parent installer has no follow-up support, the old parent installs the new code but cannot ask this question. The next normal fixed-command installation or update uses the new parent and can ask. Running `bash install.sh` or `.\install.cmd` directly from a folder containing the new code can ask on that first installation. Until the move completes, moving the old source folder does not change the configured record path: a later request can recreate the old path and split old and new records. The installer does not search moved folders or merge those histories automatically. If it cannot confirm which source folder an installed record location belongs to, it reports that relationship as unknown and does not offer an inferred move.
 
 ### Install Source
 

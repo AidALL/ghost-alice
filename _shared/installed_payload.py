@@ -5,7 +5,8 @@
 
 - `installer`: `{commit, schema_version}` of the last writer and optional
   `active_root` selecting the package the installed management command executes.
-- `source`: `{root, commit, dirty, hooks_path, remote, ref}` of the development input.
+- `source`: `{root, commit, dirty, hooks_path, remote, ref}` of the development input,
+  with optional `ledger_source_roots` mapping installed ledger paths to their source roots.
 - `last_transaction`: `{id, updated_at, rollback_dir}` of the last publish.
 - `targets`: one entry per install location path, used by one or more hosts:
   `name`, `kind`, `mode`, `provider`, `source`, `source_commit`, `used_by`,
@@ -106,6 +107,8 @@ def read(ghost_root: Path | str) -> dict | None:
         raise RecordError(f"{path(ghost_root)} is missing; restore the detailed install record")
     if not isinstance(record.get("targets", {}), dict):
         raise RecordError(f"{file} has targets that are not an object")
+    if "source" in record:
+        _check_source(record["source"])
     return record
 
 
@@ -171,6 +174,18 @@ def _absolute(value: object) -> bool:
     return isinstance(value, str) and Path(value).is_absolute()
 
 
+def _check_source(section: object) -> dict:
+    if not isinstance(section, Mapping):
+        raise RecordError("section source is not an object")
+    if "ledger_source_roots" in section:
+        roots = section["ledger_source_roots"]
+        if not isinstance(roots, dict) or any(
+                not _absolute(value) or os.path.normpath(value) != value
+                for pair in roots.items() for value in pair):
+            raise RecordError("source ledger_source_roots must map normalized absolute ledger paths to source paths")
+    return dict(section)
+
+
 def _check_service(section: object) -> dict:
     if not isinstance(section, Mapping):
         raise RecordError("section service is not an object")
@@ -221,6 +236,8 @@ def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None], *, jou
         if not isinstance(patch, Mapping):
             raise RecordError(f"section {section} is not an object")
         if section != "targets":
+            if section == "source":
+                patch = _check_source(patch)
             if section in ("installer", "source"):
                 record.setdefault(section, {}).update(patch)
             else:

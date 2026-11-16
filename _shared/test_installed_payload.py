@@ -65,9 +65,11 @@ class SchemaAndWriteTests(RecordCase):
 
     def test_ordinary_publish_keeps_active_cli_and_update_input(self):
         self.hold_lock()
+        relationships = {str(self.home / "old-source" / "ledger"): str(self.home / "old-source")}
         installed_payload.update(self.ghost, {
             "installer": {"active_root": "/versions/first/core", "commit": "first"},
-            "source": {"root": "/development", "remote": "/origin", "ref": "main"},
+            "source": {"root": "/development", "remote": "/origin", "ref": "main",
+                       "ledger_source_roots": relationships},
         })
         installed_payload.update(self.ghost, {
             "installer": {"commit": "candidate", "schema_version": 2},
@@ -78,6 +80,33 @@ class SchemaAndWriteTests(RecordCase):
         self.assertEqual(record["installer"].get("active_root"), "/versions/first/core")
         self.assertEqual(record["source"]["root"], "/development")
         self.assertEqual(record["source"]["remote"], "/origin")
+        self.assertEqual(record["source"]["ledger_source_roots"], relationships)
+        installed_payload.update(self.ghost, {"source": {"ledger_source_roots": {}}})
+        self.assertEqual(installed_payload.read(self.ghost)["source"],
+                         dict(record["source"], ledger_source_roots={}))
+
+    def test_ledger_source_roots_reject_invalid_path_maps_before_writing_or_reading(self):
+        self.hold_lock()
+        installed_payload.update(self.ghost, {"source": {"root": "/development"}})
+        before = self.record.read_bytes()
+        ledger, source = str(self.home / "ledger"), str(self.home / "source")
+        invalid = (None, [], "bad", {"relative": source}, {ledger: "relative"},
+                   {ledger: None}, {0: source}, {ledger + "/../ledger": source},
+                   {ledger: source + "/."}, {ledger + "//child": source},
+                   {ledger: source + "/"})
+        for relationships in invalid:
+            with self.subTest(relationships=relationships):
+                with self.assertRaisesRegex(installed_payload.RecordError, "ledger_source_roots"):
+                    installed_payload.update(self.ghost, {"source": {"ledger_source_roots": relationships}})
+                self.assertEqual(self.record.read_bytes(), before)
+                corrupted = json.loads(before)
+                corrupted["source"]["ledger_source_roots"] = relationships
+                self.record.write_text(json.dumps(corrupted), encoding="utf-8")
+                try:
+                    with self.assertRaisesRegex(installed_payload.RecordError, "ledger_source_roots"):
+                        installed_payload.read(self.ghost)
+                finally:
+                    self.record.write_bytes(before)
 
     def test_the_record_lives_in_the_ghost_root_and_reads_none_when_absent(self):
         self.assertEqual(installed_payload.path(self.ghost), self.record)

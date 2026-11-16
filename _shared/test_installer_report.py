@@ -25,7 +25,7 @@ class ReportCase(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.home = Path(self.temp.name) / "home"
         self.home.mkdir()
-        self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=False)
+        self.env = mock.patch.dict(os.environ, {"HOME": str(self.home), "GHOST_ALICE_INSTALL_LOCALE": "en_US.UTF-8"}, clear=False)
         self.env.start()
         for key in ("GHOST_ALICE_INSTALL_LOG_FILE", "GHOST_ALICE_INSTALL_EVENT_FILE",
                     "GHOST_ALICE_INSTALL_REPORT_CHILD", "GHOST_ALICE_INSTALL_PROGRESS"):
@@ -137,6 +137,158 @@ class MessageTests(ReportCase):
             child = report.configure(verbose=False, report_child=True, tty=False, progress_env="auto", home=self.home)
             self.assertEqual(child.log_file, stale_log)
             self.assertEqual(child.event_file, self.home / "stale.events.jsonl")
+
+
+class LocalizedMessageTests(ReportCase):
+    def configure_locale(self, values):
+        with mock.patch.dict(os.environ, values, clear=True):
+            report.configure(tty=False, home=self.home)
+
+    def test_locale_precedence_and_english_fallback_are_visible_in_output(self):
+        cases = [
+            ({"GHOST_ALICE_INSTALL_LOCALE": "ko_KR", "LC_ALL": "en_US.UTF-8"}, "ko"),
+            ({"GHOST_ALICE_INSTALL_LOCALE": "", "LC_ALL": "ko_KR.UTF-8"}, "en"),
+            ({"LC_ALL": "ko-KR", "LC_MESSAGES": "en_US", "LANG": "en_US"}, "ko"),
+            ({"LC_MESSAGES": "ko_KR.UTF-8", "LANG": "en_US"}, "ko"),
+            ({"LC_ALL": "", "LC_MESSAGES": "ko_KR.UTF-8", "LANG": "en_US"}, "ko"),
+            ({"LANG": "ko"}, "ko"),
+            ({"LANG": "koala"}, "en"),
+            ({"LANG": "ja_JP.UTF-8"}, "en"),
+            ({"LANG": "C.UTF-8"}, "en"),
+        ]
+        for values, language in cases:
+            with self.subTest(values=values):
+                self.configure_locale(values)
+                expected = "Ghost-ALICE 설치를 완료했습니다." if language == "ko" else "Ghost-ALICE installation is complete."
+                self.assertEqual(self.captured(report.emit, report.message("install_complete")), expected + "\n")
+                self.assertEqual(report.state().language, language)
+
+    def test_configured_language_does_not_change_with_environment(self):
+        self.configure_locale({"GHOST_ALICE_INSTALL_LOCALE": "ko_KR"})
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_LOCALE": "en_US"}):
+            self.assertEqual(report.message("update_complete"), "Ghost-ALICE 업데이트를 완료했습니다.")
+        self.configure_locale({"LANG": "en_US"})
+        self.assertEqual(report.message("update_complete"), "Ghost-ALICE update is complete.")
+
+    def test_windows_display_language_is_only_used_without_locale(self):
+        native = mock.Mock()
+        native.kernel32.GetUserDefaultUILanguage.return_value = 0x0412
+        with mock.patch.object(sys, "platform", "win32"), mock.patch("ctypes.windll", native, create=True):
+            self.configure_locale({})
+            self.assertEqual(report.message("install_complete"), "Ghost-ALICE 설치를 완료했습니다.")
+            native.kernel32.GetUserDefaultUILanguage.assert_called_once_with()
+            native.kernel32.GetUserDefaultUILanguage.reset_mock()
+            self.configure_locale({"GHOST_ALICE_INSTALL_LOCALE": ""})
+            self.assertEqual(report.message("install_complete"), "Ghost-ALICE installation is complete.")
+            native.kernel32.GetUserDefaultUILanguage.assert_not_called()
+            native.kernel32.GetUserDefaultUILanguage.side_effect = OSError("unavailable")
+            self.configure_locale({})
+            self.assertEqual(report.message("install_complete"), "Ghost-ALICE installation is complete.")
+
+    def test_absent_locale_on_non_windows_uses_english(self):
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.configure_locale({})
+        self.assertEqual(report.message("install_complete"), "Ghost-ALICE installation is complete.")
+
+    def test_move_question_shows_locations_and_choices_in_selected_language(self):
+        fields = dict(source_path="/설치 원본", current_path="/설치 원본/작업 기록", new_path="/사용자/.ghost-alice/state")
+        for language, intro, explanation, question, choices in (
+            ("ko", "현재 Ghost-ALICE는 설치에 사용한 폴더 안에 작업 기록을 저장하고 있습니다.",
+             "기존 작업 기록을 설치에 사용한 폴더와 분리된 위치에 보관하려고 합니다.\n기존 작업 기록을 옮기면 앞으로의 작업 기록도 새 위치에 저장합니다.",
+             "기존 작업 기록을 새 위치로 옮길까요? [Y/n]", "Enter: 옮기기 · n: 지금은 옮기지 않기"),
+            ("en", "Ghost-ALICE currently stores your work records inside the folder used for installation.",
+             "This keeps your work records separate from the folder used for installation.\nAfter the move, Ghost-ALICE will also store new work records in the new location.",
+             "Move your existing work records to the new location? [Y/n]", "Enter: move records · n: leave them where they are for now"),
+        ):
+            with self.subTest(language=language):
+                self.configure_locale({"LANG": language})
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    for key, values in (("move_intro", {}), ("move_locations", fields), ("move_explanation", {}),
+                                        ("move_question", {}), ("move_choices", {})):
+                        report.emit(report.message(key, **values))
+                text = output.getvalue()
+                for part in (intro, explanation, question, choices, *fields.values()):
+                    self.assertIn(part, text)
+                self.assertNotIn("{source_path}", text)
+                self.assertNotIn("ledger", text)
+
+    def test_move_outcomes_preserve_evidence_and_command_tokens(self):
+        values = dict(source_path="C:\\설치 원본", current_path="C:\\설치 원본\\기록", new_path="C:\\사용자\\새 기록",
+                      entry_command='"C:\\사용자 폴더\\ghost-alice.cmd"', host_name="Claude Code", cause="[ERROR] source.root --verbose",
+                      recovery_paths="/복구 기록", recovery="ghost-alice update", step="service-resume", paths="/보관 자료",
+                      affected_paths="/설정 파일", phase="prepare")
+        cases = (
+            ("move_complete", ("current_path", "new_path"), "are now at", "옮겼습니다"),
+            ("move_cancelled", ("current_path", "entry_command"), "will ask again", "다시 묻습니다"),
+            ("move_deferred", ("current_path", "entry_command"), "in a terminal", "터미널에서"),
+            ("move_host_running", ("host_name",), "is still running", "아직 실행 중"),
+            ("move_host_unknown", ("host_name", "cause"), "could not check", "확인하지 못했습니다"),
+            ("move_not_moved", ("current_path", "cause"), "were not moved", "옮기지 않았습니다"),
+            ("move_restored", ("current_path", "cause"), "restored the previous state", "옮기기 전 상태로 되돌렸습니다"),
+            ("move_recovery_incomplete", ("current_path", "new_path", "recovery_paths", "cause", "recovery", "affected_paths", "phase"), "could not finish restoring", "복원을 마치지 못했습니다"),
+            ("move_committed_pending", ("current_path", "new_path", "step"), "is configured to use", "기록 위치도 이 경로로 설정했습니다"),
+            ("move_cleanup_failed", ("current_path", "new_path", "cause"), "could not finish cleaning up", "정리를 마치지 못했습니다"),
+            ("retained_installation_artifacts", ("paths",), "retained these installation artifacts", "배치 보관 자료를 유지했습니다"),
+            ("move_doctor", ("current_path", "entry_command"), "inside the folder", "폴더 안에 있습니다"),
+            ("move_uninstall", ("current_path", "source_path"), "were not deleted", "지우지 않았습니다"),
+            ("move_relation_unknown", ("current_path",), "could not establish its relation", "관계를 확인하지 못했습니다"),
+            ("move_not_run", ("current_path", "cause"), "was not started", "시작하지 않았습니다"),
+        )
+        for language in ("en", "ko"):
+            self.configure_locale({"LANG": language})
+            for key, fields, english, korean in cases:
+                with self.subTest(language=language, key=key):
+                    output = self.captured(report.warn, report.message(key, **{name: values[name] for name in fields}))
+                    self.assertTrue(output.startswith("[WARN] "))
+                    self.assertIn(korean if language == "ko" else english, output)
+                    for name in fields:
+                        self.assertIn(values[name], output)
+                    self.assertNotIn("{", output)
+            cancelled = report.message("move_cancelled", current_path=values["current_path"], entry_command=values["entry_command"])
+            self.assertNotIn(report.message("install_complete"), cancelled)
+            self.assertIn(values["entry_command"] + " update", cancelled)
+
+    def test_input_and_recovery_guidance_uses_the_selected_language(self):
+        expected = {
+            "en": {"move_invalid": "Press Enter, or type y, yes, n, or no", "move_wait_invalid": "Press Enter, or type n or no",
+                   "recovery_retry": "installation preparation", "step_restart": "Restarting the context gateway",
+                   "step_mark": "Saving the completion record"},
+            "ko": {"move_invalid": "Enter를 누르거나 y, yes, n, no", "move_wait_invalid": "Enter를 누르거나 n 또는 no",
+                   "recovery_retry": "설치 준비", "step_restart": "문맥 게이트웨이 다시 시작", "step_mark": "완료 기록 저장"},
+        }
+        for language, messages in expected.items():
+            self.configure_locale({"LANG": language})
+            for key, fragment in messages.items():
+                with self.subTest(language=language, key=key):
+                    self.assertIn(fragment, self.captured(report.emit, report.message(key)))
+
+    def test_unknown_observations_do_not_prescribe_closing_an_unidentified_writer(self):
+        for language in ('ko', 'en'):
+            self.configure_locale({'LANG': language})
+            for key in ('move_host_unknown', 'move_service_blocked'):
+                output = report.message(key, host_name='claude', cause='ps unavailable')
+                self.assertIn('\n' + ('진단 상세: ' if language == 'ko' else 'Diagnostic details: ') + 'ps unavailable', output)
+                for wrong in ('닫은 뒤', '중지한 뒤', 'Close it', 'Stop the service'):
+                    self.assertNotIn(wrong, output)
+
+    def test_unknown_relation_states_only_the_shared_fact(self):
+        for language in ('ko', 'en'):
+            self.configure_locale({'LANG': language})
+            output = report.message('move_relation_unknown', current_path='/records')
+            self.assertNotIn('did not move', output)
+            self.assertNotIn('옮기지 않았', output)
+
+    def test_localized_messages_use_the_existing_log_sink(self):
+        self.configure_locale({"LANG": "ko_KR"})
+        path = "C:\\사용자 폴더\\{기록}"
+        output = self.captured(report.run_logged, report.warn, report.message("move_not_moved", current_path=path,
+                                                                           cause="[ERROR] --verbose source.root"))
+        expected = (f"[WARN] 기존 작업 기록을 옮기지 않았습니다. 기록 위치는 그대로 {path}입니다.\n"
+                    "[WARN] 진단 상세: [ERROR] --verbose source.root\n")
+        self.assertEqual(output, expected)
+        self.assertEqual(report.state().log_file.read_text(encoding="utf-8"), expected)
+        self.assertIsNone(report.sink())
 
 
 class LogTests(ReportCase):

@@ -171,9 +171,6 @@ COMMAND_LINE: tuple[HelpRow, ...] = (
     Command(ADVANCED, "gateway ARGS...", "Run the context gateway installer once with ARGS", names=("gateway",),
             run=lambda ctx: runner.run_tool("_shared/context_gateway_install.py", *ctx.options.args[1:]).returncode,
             lock="gateway", platform=False),
-    Command(ADVANCED, "migrate-ledger --from-root PATH --writers-stopped",
-            "Move a stopped installation ledger to its fixed data root",
-            names=("migrate-ledger",), run=lambda ctx: run_ledger_migration(ctx), lock="migrate-ledger", platform=False),
     Command(ADVANCED, "--help, -h", "Show this help", names=("--help", "-h"), run=lambda ctx: print_help(),
             platform=False),
 )
@@ -183,22 +180,6 @@ COMMANDS: tuple[Command, ...] = tuple(row for row in COMMAND_LINE if isinstance(
 def _fail(message: str, code: int = 1) -> None:
     report.error(message)
     raise InstallerExit(code)
-
-
-def run_ledger_migration(ctx: Context) -> int:
-    import argparse
-    parser = argparse.ArgumentParser(prog='ghost-alice migrate-ledger')
-    parser.add_argument('--from-root', required=True, type=Path)
-    parser.add_argument('--writers-stopped', action='store_true',
-                        help='Confirm that host and CLI writers have stopped; the installer stops its registered service')
-    args = parser.parse_args(ctx.options.args[1:])
-    try:
-        root = transaction.migrate_ledger(args.from_root, writers_stopped=args.writers_stopped)
-    except RuntimeError as exc:
-        report.error(str(exc))
-        return 1
-    report.info(f'Ledger data and installed bindings now use {root}')
-    return 0
 
 
 def run_update(ctx: Context) -> int:
@@ -217,7 +198,7 @@ def run_update(ctx: Context) -> int:
     origin.update({key: value for key, value in vars(args).items() if value is not None})
     with source.acquire_update(origin) as (root, provenance):
         return dispatch(replace(ctx.options, args=[], addon_skip=True), input_root=root,
-                        provenance=provenance, selections=selected)
+                        provenance=provenance, selections=selected, execution_cause='update')
 
 
 def parse_options(argv: list[str]) -> Options:
@@ -481,7 +462,7 @@ def run_install(ctx: Context) -> int:
         report.ok(f"Done: {installed} installed, {skipped} skipped")
         report.emit("")
         report.info(f"Install path: {skills_dir}")
-        report.info(f"To update the installed Core selection: {locations.record_root() / 'bin' / ('ghost-alice.cmd' if os.name == 'nt' else 'ghost-alice')} update")
+        report.info(f"To update the installed Core selection: {locations.management_command()} update")
     # Runtime, hooks, managed blocks, commands (blocks after the runtime and hooks)
     if not report.run_logged(transaction.sync_runtime_shared, ctx):
         report.error("Runtime shared core sync failed. Aborting hook install")
@@ -562,7 +543,7 @@ def run_post_merge(ctx: Context) -> int:
     merged = Path(ctx.options.merged_checkout) if ctx.options.merged_checkout else None
     match = source.match_install_source(merged)
     if match.state == "same":
-        return dispatch(Options(), input_root=match.here, provenance=source.input_record(match.here))
+        return dispatch(Options(), input_root=match.here, provenance=source.input_record(match.here), execution_cause='post-merge')
     if match.state == "other":
         report.info(f"Post-merge: the merged checkout {match.here} is not the install source ({match.recorded}); "
                     "nothing was installed.")
@@ -634,15 +615,18 @@ def _dispatch(options: Options) -> int:
 
 
 def dispatch(options: Options, *, input_root: Path | None = None, provenance: dict | None = None,
-             selections: dict[str, list[str]] | None = None) -> int:
+             selections: dict[str, list[str]] | None = None, execution_cause: str = 'install') -> int:
     """Run an install from a fixed candidate; activate it only after the whole request succeeds."""
+    request = source.install_request()
+    if request and request.get('stage') == 'record-move':
+        from installer import record_move
+        return record_move.run(request['execution_cause'])
     if find_command(options) is not INSTALL:
         return _dispatch(options)
     if options.prompt_platform and not options.platform_explicit:
         options.platform = prompt_platform()
         options.platform_explicit = True
         options.prompt_platform = False
-    request = source.install_request()
     selected = selections if selections is not None else (request or {}).get('selections')
     if selected is None and request is None and input_root is None and not options.args:
         selected = source.reinstall_selection()
@@ -682,7 +666,20 @@ def dispatch(options: Options, *, input_root: Path | None = None, provenance: di
         if not result.ok:
             active = (install_transaction.record_after_recovery(locations.record_root()) or {}).get('installer', {}).get('active_root')
             report.error(f'Candidate install did not finish; retry with {folder / "core/install.sh"}. Active installer: {active or "none"}')
-        return result.returncode
+            return result.returncode
+        active_record = install_transaction.record_after_recovery(locations.record_root()) or {}
+        active = active_record.get('installer', {}).get('active_root')
+        if not active:
+            raise ValueError('The successful candidate did not record an active installer')
+        saved = json.loads((Path(active).parent / 'version.json').read_text(encoding='utf-8'))
+        if saved.get('record_move') is not True:
+            report.info(report.message('move_unsupported'))
+            return 0
+        followup = dict(package_root=active, source=active_record.get('source', {}),
+                        stage='record-move', execution_cause=execution_cause)
+        return runner.run_command([sys.executable, str(Path(active) / '_shared/installer/cli.py')],
+            inherit_stdin=True, env={source.REQUEST_ENV: json.dumps(followup),
+                                    'GHOST_ALICE_INSTALL_HOST_CHILD': '0'}).returncode
     if os.environ.get('GHOST_ALICE_INSTALL_HOST_CHILD') == '1':
         return _dispatch(options)
     handle = lock.acquire('install', ctx.platform)
@@ -713,6 +710,7 @@ def main(argv: list[str] | None = None) -> int:
                 report.error(f'The active installer is missing: {entry}')
                 return 1
             return runner.run_command([sys.executable, str(entry), *argv[1:]],
+                                      inherit_stdin=True,
                                       env={source.REQUEST_ENV: '', 'GHOST_ALICE_INSTALL_HOST_CHILD': '0'}).returncode
         reject_isolated_destination(argv)
         options = parse_options(argv)

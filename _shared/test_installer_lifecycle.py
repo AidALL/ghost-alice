@@ -92,6 +92,33 @@ class ArgumentTests(LifecycleCase):
 
 
 class UninstallTests(LifecycleCase):
+    def test_full_removal_reports_the_relation_observed_before_record_deletion(self):
+        import installed_payload
+        import install_lock
+        import runtime_config
+        root = (self.source / 'records').resolve()
+        root.mkdir()
+        evidence = root / 'kept.txt'
+        evidence.write_text('existing work')
+        with install_lock.command_lock(self.ghost / 'install.lock', owner='test'):
+            installed_payload.update(self.ghost, {'source': {'root': str(self.source.resolve())}})
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(root)}}})
+        other_hooks = self.home / '.codex/hooks.json'
+        other_hooks.parent.mkdir(exist_ok=True)
+        other_hooks.write_text('{"hooks": null}')
+        config_before = runtime_config.config_path().read_bytes()
+        def remove(*args, **kwargs):
+            installed_payload.path(self.ghost).unlink()
+            return ToolResult(3)
+        with mock.patch.object(lifecycle.runner, 'run_tool', side_effect=remove):
+            code, output = self.captured(lifecycle.run_full_uninstall, self.ctx)
+        self.assertEqual(code, 3)
+        self.assertIn(str(root), output)
+        self.assertIn(str(self.source.resolve()), output)
+        self.assertIn('codex', output)
+        self.assertEqual(runtime_config.config_path().read_bytes(), config_before)
+        self.assertEqual(evidence.read_text(), 'existing work')
+
     def test_addon_only_removal(self):
         # uninstall.sh:303-358
         self.stub_removal_flow()
@@ -459,10 +486,21 @@ class SelectedRemovalOwnershipTests(LifecycleCase):
         self.assertEqual(json.loads(self.state.read_text())['targets'], [])
 
     def test_last_managed_leaf_removes_owned_shared_and_prunes_both(self):
+        import runtime_config
+        records = self.home / 'unknown-source-records'
+        records.mkdir()
+        (records / 'evidence.txt').write_text('work history')
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(records)}}})
+        config_before = runtime_config.config_path().read_bytes()
         alpha = self.installed('alpha', linked=True)
         shared = self.installed('_shared', linked=True)
         self.inventory('alpha', '_shared')
-        self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ['alpha'])[0], 0)
+        code, output = self.captured(lifecycle.uninstall, self.ctx, ['alpha'])
+        self.assertEqual(code, 0)
+        self.assertIn(str(records), output)
+        self.assertNotIn('did not move', output)
+        self.assertEqual((records / 'evidence.txt').read_text(), 'work history')
+        self.assertEqual(runtime_config.config_path().read_bytes(), config_before)
         self.assertEqual(set(self.guard.call_args.args[1]), {alpha, shared})
         self.assertFalse(alpha.is_symlink())
         self.assertFalse(shared.is_symlink())

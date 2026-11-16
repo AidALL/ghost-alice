@@ -9,6 +9,7 @@ import re
 import stat
 import subprocess
 import time
+import urllib.error
 import urllib.request
 import uuid
 
@@ -72,8 +73,10 @@ def observe(domain):
     output = result.stdout.decode(errors='replace') if isinstance(result.stdout, bytes) else result.stdout
     matches = re.findall(r'^\s*path = (.+\.plist)\s*$', output or '', re.M)
     agent = Path(matches[0]) if len(matches) == 1 and Path(matches[0]).is_absolute() else None
+    pids = re.findall(r'^\s*pid = ([1-9][0-9]*)\s*$', output or '', re.M)
+    pid = int(pids[0]) if len(pids) == 1 else None
     return ServiceObservation('present', agent, result.returncode,
-                              '' if agent else 'Native service definition path is unavailable')
+                              '' if agent else 'Native service definition path is unavailable', pid)
 
 
 def service_state(domain):
@@ -104,15 +107,26 @@ def start(domain, agent):
         raise RuntimeError('Service bootstrap failed')
 
 
+def listener_health(state, *, inspect_binding=False):
+    """Read the scoped loopback endpoint; optional inspection reports the process's startup binding."""
+    headers = {'X-Ghost-Context-Scope': state['scope']}
+    if inspect_binding:
+        headers['X-Ghost-Context-Inspect'] = 'binding'
+    request = urllib.request.Request(f"http://127.0.0.1:{state['port']}/health", headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=1) as reply:
+            return json.load(reply)
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise
+
+
 def ready(state):
     deadline = time.monotonic() + 10
     while True:
         try:
-            request = urllib.request.Request(f"http://127.0.0.1:{state['port']}/health",
-                headers={'X-Ghost-Context-Scope': state['scope']})
-            with urllib.request.urlopen(request, timeout=1) as reply:
-                if json.load(reply) == {'status': 'ready'}:
-                    return True
+            if listener_health(state) == {'status': 'ready'}:
+                return True
         except (OSError, ValueError):
             pass
         if time.monotonic() >= deadline:
@@ -128,6 +142,7 @@ def record_service(home, section):
 class Platform:
     snapshot = staticmethod(snapshot)
     observe = staticmethod(observe)
+    listener_health = staticmethod(listener_health)
 
     def __init__(self, *, write=write, state=service_state, stop=stop, start=start, ready=ready, record=None):
         self.write, self.state, self.stop, self.start, self.ready = write, state, stop, start, ready

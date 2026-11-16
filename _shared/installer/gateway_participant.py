@@ -26,6 +26,7 @@ import context_gateway_install as gateway
 import context_gateway_platform as gateway_platform
 import installed_payload
 from context_gateway_model import GatewayBlocked, GatewayFailure, GatewayServiceError
+from context_gateway_plan import valid_state
 from context_gateway_transaction import owned_service_state
 from installer import locations
 from installer.participant import PublishContext
@@ -38,8 +39,17 @@ def _now() -> str:
 
 
 def _host(platform: str | None) -> str:
-    """The host platform, read when the judgment runs (the tests patch `sys.platform`)."""
+    """The operating system, read when the judgment runs."""
     return sys.platform if platform is None else platform
+
+
+def _listener(path: Path) -> tuple[bytes, dict]:
+    """Read listener content, including a linked state file, without granting replacement eligibility."""
+    raw = path.read_bytes()
+    state = json.loads(raw)
+    if not isinstance(state, dict):
+        raise ValueError('The listener state is not an object')
+    return raw, valid_state(state)
 
 
 def participants(ghost_root: Path | str, *, effects=None, platform: str | None = None,
@@ -122,9 +132,6 @@ class UnreadableRecordParticipant:
             raise GatewayBlocked(f"The install record cannot be read ({self.reason}); whether a gateway runs from "
                                  f"{self.runtime_root} is unknown, so its publish waits for the record to be reviewed")
 
-    def prepare_ledger_retarget(self, old_root: Path, new_root: Path):
-        raise GatewayBlocked(f'The install record cannot be read ({self.reason}); ledger migration cannot identify its service')
-
     def after_publish(self, ctx: PublishContext) -> None:
         return None
 
@@ -147,18 +154,13 @@ class GatewayParticipant:
         self.affected = self.was_running = self.stopped = self.started = False
         self.stop_attempted = self.recovering = False
 
-    def _listener(self) -> dict:
-        return json.loads(Path(self.service["state_path"]).read_bytes())
-
     def prepare_ledger_retarget(self, old_root: Path, new_root: Path) -> tuple[dict[Path, bytes], dict]:
         """Prepare this registered listener's new ledger binding without service effects."""
         from context_gateway_model import digest, encoded
-        from context_gateway_plan import valid_state
         path = Path(self.service['state_path'])
-        raw = path.read_bytes()
+        raw, state = _listener(path)
         if digest(raw) != self.service['state_digest']:
             raise GatewayBlocked('Gateway state changed outside the installer; preserve it before ledger migration')
-        state = valid_state(json.loads(raw))
         if Path(state['ledger_root']).resolve() not in (old_root, new_root):
             return {}, dict(self.service)
         state.update(ledger_root=str(new_root), ghost_root=str(self.ghost_root))
@@ -203,7 +205,7 @@ class GatewayParticipant:
                 raise RuntimeError('Gateway recovery needs its macOS launchctl owner')
             if not self.recovering or owned_service_state(self.effects, self.domain, self.agent) == 'absent':
                 self.effects.start(self.domain, self.agent)
-            ready = self.effects.ready(self._listener())
+            ready = self.effects.ready(_listener(Path(self.service['state_path']))[1])
         except Exception as exc:
             raise GatewayFailure(f"Service start failed after the publish: {exc}", phase="bootstrap",
                                  restored=not self.recovering) from exc
@@ -240,7 +242,7 @@ class GatewayParticipant:
             return
         try:
             self.effects.start(self.domain, self.agent)
-            ready = self.effects.ready(self._listener())
+            ready = self.effects.ready(_listener(Path(self.service['state_path']))[1])
         except Exception as exc:
             raise GatewayFailure(f"Restored service did not start: {exc}", phase="rollback") from exc
         if not ready:
@@ -283,6 +285,8 @@ class LoadedService:
     state: str
     program: Path | None = None
     detail: str = ""
+    state_path: Path | None = None
+    pid: int | None = None
 
     def runs_under(self, root) -> bool:
         """Whether the loaded program is `root` or lies under it."""
@@ -314,7 +318,81 @@ def loaded_service(*, effects=None, platform: str | None = None) -> LoadedServic
     argv = parsed.get("ProgramArguments") if isinstance(parsed, dict) else None
     if not isinstance(argv, list) or len(argv) != 5 or not isinstance(argv[2], str) or not Path(argv[2]).is_absolute():
         return LoadedService("unreadable", detail=f"{observed.agent} names no absolute program")
-    return LoadedService("loaded", program=Path(argv[2]))
+    state_path = (Path(argv[4]) if argv[3] == '--config' and isinstance(argv[4], str)
+                  and Path(argv[4]).is_absolute() and Path(argv[2]).name == 'context_gateway.py' else None)
+    return LoadedService("loaded", program=Path(argv[2]), state_path=state_path, pid=observed.pid)
+
+
+@dataclass(frozen=True)
+class ListenerBinding:
+    """The loaded listener's relation to the selected ledgers; independent of native service presence."""
+
+    state: str
+    ledger_root: Path | None = None
+    detail: str = ''
+
+
+def listener_binding(seen: LoadedService, roots, *, effects=None) -> ListenerBinding:
+    """Correlate the live listener's startup binding with its native PID; files supply contact coordinates."""
+    if seen.state == 'absent':
+        return ListenerBinding('absent')
+    if seen.state != 'loaded' or seen.state_path is None:
+        return ListenerBinding('unknown', detail=seen.detail or 'The native program/state binding is unavailable')
+    if type(seen.pid) is not int or seen.pid <= 0:
+        return ListenerBinding('unknown', detail='The native service process identity is unavailable')
+    try:
+        _, state = _listener(seen.state_path)
+        io = gateway._effects(Path.home()) if effects is None else effects
+        live = io.listener_health(state, inspect_binding=True)
+        if (not isinstance(live, dict) or live.get('status') != 'ready' or type(live.get('pid')) is not int
+                or live['pid'] != seen.pid or not isinstance(live.get('ledger_root'), str)
+                or not Path(live['ledger_root']).is_absolute()):
+            return ListenerBinding('unknown', detail='The live listener binding does not identify the native service process')
+        ledger_root = Path(live['ledger_root']).resolve()
+        related = ledger_root in {Path(root).resolve() for root in roots}
+    except (OSError, RuntimeError, ValueError, GatewayBlocked) as exc:
+        return ListenerBinding('unknown', detail=f'Live listener binding cannot be observed: {exc}')
+    return ListenerBinding('related' if related else 'unrelated', ledger_root)
+
+
+def ledger_migration_participants(ghost_root: Path | str, old_root: Path, new_root: Path, *, effects=None,
+                                  platform: str | None = None) -> tuple[list, str | None]:
+    """Select registered participants for the actual A/B listener, or return a reason to hold migration.
+
+    An unrelated loaded listener stays untouched. An absent registered listener keeps its participant
+    so the next start uses the new binding. Existing participants own all control and recovery.
+    """
+    ghost_root, old_root, new_root = Path(ghost_root), Path(old_root).resolve(), Path(new_root).resolve()
+    registered = participants(ghost_root, effects=effects, platform=platform)
+    if registered and isinstance(registered[0], UnreadableRecordParticipant):
+        return [], f'The install record cannot be read: {registered[0].reason}'
+    participant = registered[0] if registered else None
+    platform = participant.platform if platform is None and participant is not None else _host(platform)
+    if effects is not None:
+        io = effects
+    else:
+        io = participant.effects if participant is not None else gateway._effects(ghost_root.parent)
+    seen = loaded_service(effects=io, platform=platform)
+    binding = listener_binding(seen, (old_root, new_root), effects=io)
+    if binding.state == 'absent':
+        return registered, None
+    if binding.state == 'unrelated':
+        return [], None
+    if binding.state == 'unknown':
+        return [], binding.detail
+    if participant is None:
+        return [], 'The running service has no installation ownership record'
+    try:
+        changes, service = participant.prepare_ledger_retarget(old_root, new_root)
+        if not changes:
+            return [], 'The registered listener is unrelated, but the actual service uses a ledger being moved'
+        if (seen.program != Path(service['program'])
+                or seen.state_path.resolve() not in {Path(path).resolve() for path in changes}):
+            return [], 'The actual service program/state binding differs from the registered listener being retargeted'
+        owned_service_state(participant.effects, participant.domain, participant.agent)
+    except (OSError, RuntimeError, ValueError, GatewayBlocked) as exc:
+        return [], str(exc) or type(exc).__name__
+    return registered, None
 
 
 def _unregistered(io, removing, platform) -> dict:

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import content_digest
 import installed_payload
-from installer import hosts, locations, report, runner, source
+from installer import hosts, locations, record_move, report, runner, source
 
 if TYPE_CHECKING:
     from installer.cli import Context
@@ -162,6 +162,12 @@ def run_doctor(ctx: "Context") -> int:
     report.emit(f"Installer doctor ({skills_dir}):")
     report_install_record(ctx)
     rc = 0
+    observed = record_move.read_locations()
+    for root, value in (observed.roots if observed is not None else {}).items():
+        if value['state'] == 'fixed':
+            continue
+        report.emit(report.message('move_doctor' if value['state'] == 'source-bound' else 'move_relation_unknown',
+                                   current_path=root, entry_command=locations.management_command()))
     addons_dir = locations.addons_dir(ctx.platform)
     if addons_dir.is_dir() and any(addons_dir.glob("*.json.removing")):
         report.warn("A pending addon uninstall could not complete (the human user must review the kept items); see .removing markers "

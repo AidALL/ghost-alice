@@ -697,6 +697,10 @@ def _snapshot_files(root: Path) -> dict[str, tuple[str, str]]:
     return result
 
 
+class LedgerSnapshotConflict(ValueError):
+    """Two existing ledger histories or retained files cannot be combined."""
+
+
 def snapshot_roots(source: Path, existing: Path, destination: Path, *, writers_stopped: bool) -> None:
     """Stage A and existing B after their writers stop; never merge distinct SQLite histories."""
     if not writers_stopped:
@@ -715,7 +719,7 @@ def snapshot_roots(source: Path, existing: Path, destination: Path, *, writers_s
                 if selected and selected == read_current_session_pointer(existing, parts[0]):
                     # The existing reader owns discovery meaning; raw fingerprints still guard input stability.
                     continue
-            raise ValueError(f'Ledger migration conflict: {name}')
+            raise LedgerSnapshotConflict(f'Ledger migration conflict: {name}')
     # Compare matching sessions through the current reader before copying or importing.
     states = [{(row['platform'], row['session_id']): row for row in list_session_states(root)} for root in roots]
     for identity in states[0].keys() & states[1].keys():
@@ -723,7 +727,7 @@ def snapshot_roots(source: Path, existing: Path, destination: Path, *, writers_s
         if (states[0][identity] != states[1][identity] or
                 read_session_events(root=source, platform=platform, session_id=session) !=
                 read_session_events(root=existing, platform=platform, session_id=session)):
-            raise ValueError(f'Ledger migration conflict: session {platform}/{session}')
+            raise LedgerSnapshotConflict(f'Ledger migration conflict: session {platform}/{session}')
     destination.mkdir(parents=True)
     for root, files in zip(roots, snapshots):
         for relative, (kind, _) in files.items():

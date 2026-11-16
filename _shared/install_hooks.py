@@ -211,13 +211,31 @@ def _session_intent_root(platform: str | None = None) -> Path:
     return Path(_default_destination(platform or "codex").ledger_root)
 
 
+def observed_installation(platform_key: str, *, hook_fallback: bool = True, config: dict | None = None,
+                          strict: bool = True) -> dict:
+    """Read stored location fields, optionally retaining a ledger from managed hooks."""
+    if config is None:
+        config = runtime_config.load_config(home=_home())
+    value = config.get("install_locations", {}).get(platform_key, {})
+    if not isinstance(value, dict):
+        raise ValueError(f'Installed location for {platform_key} must be an object')
+    retained = dict(value)
+    if hook_fallback and not retained.get("ledger_root"):
+        ledger = _retained_installed_ledger(platform_key, strict=strict)
+        if ledger is not None:
+            retained["ledger_root"] = ledger
+    return retained
+
+
 def _default_destination(platform_key: str, *, project_root: Path | str | None = None,
                          installed: bool = False) -> install_destination.InstallDestination:
     ghost = install_destination.ghost_root(_home())
-    retained = runtime_config.load_config(home=_home()).get("install_locations", {}).get(platform_key, {})
+    explicit_ledger = os.environ.get("GHOST_ALICE_SESSION_INTENT_ROOT")
+    # Installation can rebuild unreadable settings; observation must not call them absent.
+    retained = observed_installation(platform_key, hook_fallback=not bool(explicit_ledger), strict=False)
     source = Path(os.environ.get("GHOST_ALICE_CORE_ROOT")
                   or (retained.get('core_source_root') if installed else None) or _repo_root_from_this_file())
-    ledger = os.environ.get("GHOST_ALICE_SESSION_INTENT_ROOT") or retained.get("ledger_root") or _retained_installed_ledger(platform_key) or str(ghost / 'session-intent')
+    ledger = explicit_ledger or retained.get("ledger_root") or str(ghost / 'session-intent')
     project = retained.get('project_root') or project_root or os.environ.get('GHOST_ALICE_PROJECT_ROOT') or str(source)
     return install_destination.InstallDestination.parse(dict(mode="normal", owned_root=str(_home()),
         platform_dir=str(_resolve_codex_dir() if platform_key == "codex" else _resolve_claude_dir()),
@@ -226,7 +244,7 @@ def _default_destination(platform_key: str, *, project_root: Path | str | None =
         runtime_shared_dir=str(os.environ.get(HOOK_SHARED_DIR_ENV) or os.environ.get("GHOST_ALICE_RUNTIME_SHARED_DIR") or ghost/"runtime/current/_shared")))
 
 
-def _retained_installed_ledger(platform_key):
+def _retained_installed_ledger(platform_key, *, strict=False):
     """Retain one ledger root from the selected installed hook chain.
 
     Reads only the chosen platform settings, never discovery/latest-checkout state.
@@ -236,12 +254,24 @@ def _retained_installed_ledger(platform_key):
     path=(_resolve_codex_dir()/"hooks.json" if platform_key=="codex" else _resolve_claude_dir()/"settings.json")
     try:
         settings=json.loads(path.read_text())
-    except (OSError,ValueError):
+    except FileNotFoundError:
         return None
+    except (OSError, ValueError):
+        if strict:
+            raise
+        return None
+    if not isinstance(settings, dict) or not isinstance(settings.get('hooks', {}), dict):
+        raise ValueError(f'Hook settings in {path} must contain a hooks object')
     roots=set()
     for groups in settings.get("hooks",{}).values():
-        for group in groups if isinstance(groups,list) else []:
-            for hook in group.get("hooks",[]):
+        if not isinstance(groups, list):
+            raise ValueError(f'Hook event entries in {path} must be a list')
+        for group in groups:
+            if not isinstance(group, dict) or not isinstance(group.get('hooks', []), list):
+                raise ValueError(f'Hook groups in {path} must contain a hooks list')
+            for hook in group.get('hooks', []):
+                if not isinstance(hook, dict) or not isinstance(hook.get('command', ''), str):
+                    raise ValueError(f'Hook handlers in {path} must be objects with string commands')
                 command=hook.get("command","")
                 if not any((globals().get("_hook_runner_id_match") or (lambda *_: False))(command,identity) for identity in ("session-intent","tool-checkpoint","session-start","session-receipt")):
                     continue

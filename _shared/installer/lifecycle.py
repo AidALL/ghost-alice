@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from installer import addons, hosts, locations, preservation, report, runner, selection, transaction
+from installer import addons, hosts, locations, preservation, record_move, report, runner, selection, transaction
 from installer.runner import InstallerExit
 
 if TYPE_CHECKING:
@@ -57,6 +57,7 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
             addon_ids.append(addon_id)
     if not skills and not addon_ids:
         return run_full_uninstall(ctx)
+    record_locations = record_move.read_locations()
     from install_hooks import settings_backup_sources
     backups = settings_backup_sources(ctx.platform)
     # Snapshot which requested addons exist before the resume runs.
@@ -174,15 +175,30 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
         report.info("No skills to remove.")
     else:
         report.ok(f"{removed} item(s) removed.")
+    if not selection.has_managed_installs(skills_dir, ctx.platform):
+        _report_retained_records(record_locations, ctx.platform)
     return 1 if failed else 0
 
 
 def run_full_uninstall(ctx: "Context") -> int:
     """Run the gateway, addon and Core cleanup as one itemized report."""
+    record_locations = record_move.read_locations()
     report.info("Full uninstall: removing Ghost-ALICE managed hooks, bootstrap, support state, and install targets.")
-    return runner.run_tool("_shared/uninstall_cleanup.py", "--platform", ctx.platform,
+    result = runner.run_tool("_shared/uninstall_cleanup.py", "--platform", ctx.platform,
                            "--install-state-manifest", str(locations.install_state_path(ctx.platform)),
                            "--apply").returncode
+    _report_retained_records(record_locations, ctx.platform)
+    return result
+
+
+def _report_retained_records(record_locations: transaction.LedgerLocations | None, platform: str) -> None:
+    """Use the relation observed before removal deleted the installation record."""
+    if record_locations is None:
+        return
+    for root, value in record_locations.roots.items():
+        if platform in value['hosts'] and value['state'] != 'fixed':
+            report.emit(report.message('move_uninstall' if value['state'] == 'source-bound' else 'move_relation_unknown',
+                                       current_path=root, source_path=value['source_root']))
 
 
 def run_repair(ctx: "Context") -> int:

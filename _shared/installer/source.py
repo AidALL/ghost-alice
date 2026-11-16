@@ -432,12 +432,13 @@ def input_record(input_root: Path | None = None) -> dict:
     """Development origin and acquisition coordinates, separate from this process's assets."""
     request = install_request() if input_root is None else None
     if request:
-        return dict(request['source'])
+        return {key: value for key, value in request['source'].items() if key != 'ledger_source_roots'}
     root_path = Path(input_root) if input_root is not None else runner.REPO_ROOT
     if root_path.resolve().is_relative_to((locations.record_root() / 'versions').resolve()):
         record = installed_payload.read(locations.record_root()) or {}
         saved = json.loads((root_path.parent / 'version.json').read_text())
         origin = dict(saved['source'])
+        origin.pop('ledger_source_roots', None)
         origin.update({key: value for key, value in record.get('source', {}).items()
                        if key in {'root', 'remote', 'ref', 'branch', 'hooks_path'}})
         return origin
@@ -636,8 +637,10 @@ def finalize_source(ctx: 'Context', folder: Path, platforms: list[str]) -> list[
             if expected != content_digest.tree(destination):
                 raise ValueError(f'Preserved source differs from installed code: {destination}')
     from installer.selection import installed_core_selection
+    # The executing package declares support for the parent's record-move request.
     saved.update(status='successful', platforms=sorted(set(saved.get('platforms', [])) | set(platforms)),
                  selections=installed_core_selection(record),
+                 record_move=True,
                  completed_at=datetime.now(timezone.utc).isoformat())
     with install_transaction.record_update(locations.record_root(), version_file=version_file) as journal:
         install_transaction._write_json(version_file, saved)
