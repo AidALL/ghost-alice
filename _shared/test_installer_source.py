@@ -71,6 +71,31 @@ class SourceCase(unittest.TestCase):
         return result, out.getvalue()
 
 
+class InputProvenanceTests(SourceCase):
+    def test_external_ledger_relationships_do_not_become_acquisition_metadata(self):
+        ctx = make_context(self.root / 'home', 'claude')
+        versions = self.root / 'home/.ghost-alice/versions'
+        external_source = dict(root=str(self.root / 'development'), commit='external',
+                               ledger_source_roots={str(self.root / 'ledger'): str(self.root / 'other-source')})
+        expected = dict(root=str(self.root / 'development'), commit='external')
+        for boundary in ('request', 'saved-package'):
+            with self.subTest(boundary=boundary):
+                package = (self.root / 'requested' if boundary == 'request' else versions / 'external/core')
+                (package / '_shared').mkdir(parents=True)
+                (package / '_shared/product.py').write_text(boundary)
+                request = dict(package_root=str(package.resolve()), source=external_source)
+                if boundary == 'saved-package':
+                    (package.parent / 'version.json').write_text(json.dumps(dict(source=external_source,
+                        files={'core/_shared/product.py': 'external-digest'})))
+                with use_source(package), mock.patch.dict(os.environ, {
+                        source.REQUEST_ENV: json.dumps(request) if boundary == 'request' else ''}):
+                    self.assertEqual(source.input_record(), expected)
+                    folder, _ = source.prepare_source(ctx)
+                self.assertEqual(json.loads((folder / 'version.json').read_text())['source'], expected)
+                self.assertEqual(external_source['ledger_source_roots'],
+                                 {str(self.root / 'ledger'): str(self.root / 'other-source')})
+
+
 class SuccessfulSourceVersionsTests(SourceCase):
     def setUp(self):
         super().setUp()
@@ -190,6 +215,7 @@ class SuccessfulSourceVersionsTests(SourceCase):
         self.assertFalse((kept / '.git').exists())
         self.assertIn('--adopt-source', '\n'.join(lines))
         self.assertEqual(self.save('codex')[0], folders)
+        self.assertIs(json.loads((folders[0] / 'version.json').read_text()).get('record_move'), True)
         self.assertEqual((self.repo / '.git/index').read_bytes(), before)
 
     def test_previous_manager_must_read_candidate_records_before_placement(self):

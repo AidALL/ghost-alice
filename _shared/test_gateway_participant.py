@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -207,6 +208,170 @@ class ReplacementTests(ParticipantCase):
         import context_gateway_platform as platform
         self.assertIsInstance(chosen.effects, platform.Platform)
         self.assertEqual(chosen.service, self.reg.service())
+
+
+class ListenerObservationTests(ParticipantCase):
+    def test_registered_unrelated_listener_does_not_exempt_actual_related_service(self):
+        actual_state = self.root / 'actual-state.json'
+        actual_state.write_bytes(self.reg.state_path.read_bytes())
+        recorded = json.loads(self.reg.state_path.read_bytes())
+        recorded['ledger_root'] = str(self.root / 'unrelated-ledger')
+        self.reg.state_path.write_text(json.dumps(recorded))
+        installed_payload.update(self.reg.ghost, {'service': gateway_testing.service_section(self.reg)})
+        actual_agent = self.root / 'actual-agent.plist'
+        definition = plistlib.loads(self.reg.agent.read_bytes())
+        definition['ProgramArguments'][4] = str(actual_state)
+        actual_agent.write_bytes(plistlib.dumps(definition))
+        effects = self.effects(agent=actual_agent)
+        selected, reason = gateway_participant.ledger_migration_participants(
+            self.reg.ghost, self.reg.ledger, self.root / 'new-ledger', effects=effects, platform='darwin')
+        self.assertEqual(selected, [])
+        self.assertTrue(reason)
+        self.assertTrue(effects.running)
+        self.assertEqual(effects.service_calls(), [])
+
+    def test_matching_registered_a_or_b_listener_can_use_existing_participant_control(self):
+        new_root = self.root / 'new-ledger'
+        for ledger_root in (self.reg.ledger, new_root):
+            with self.subTest(ledger_root=ledger_root):
+                state = json.loads(self.reg.state_path.read_bytes())
+                state['ledger_root'] = str(ledger_root)
+                self.reg.state_path.write_text(json.dumps(state))
+                installed_payload.update(self.reg.ghost, {'service': gateway_testing.service_section(self.reg)})
+                effects = self.effects()
+                selected, reason = gateway_participant.ledger_migration_participants(
+                    self.reg.ghost, self.reg.ledger, new_root, effects=effects, platform='darwin')
+                self.assertIsNone(reason)
+                self.assertEqual(len(selected), 1)
+                self.assertEqual(selected[0].service, self.reg.service())
+                self.assertTrue(effects.running)
+                self.assertEqual(effects.service_calls(), [])
+
+    def test_unreadable_actual_or_recorded_binding_holds_but_native_absence_does_not(self):
+        actual_state = self.root / 'actual-state.json'
+        original = self.reg.state_path.read_bytes()
+        definition = plistlib.loads(self.reg.agent.read_bytes())
+        definition['ProgramArguments'][4] = str(actual_state)
+        self.reg.agent.write_bytes(plistlib.dumps(definition))
+        for actual, recorded in ((b'{broken', original), (original, b'{broken')):
+            with self.subTest(actual_unreadable=actual != original):
+                actual_state.write_bytes(actual)
+                self.reg.state_path.write_bytes(recorded)
+                effects = self.effects()
+                selected, reason = gateway_participant.ledger_migration_participants(
+                    self.reg.ghost, self.reg.ledger, self.root / 'new-ledger', effects=effects, platform='darwin')
+                self.assertEqual(selected, [])
+                self.assertTrue(reason)
+                self.assertEqual(effects.service_calls(), [])
+                effects.running = False
+                selected, reason = gateway_participant.ledger_migration_participants(
+                    self.reg.ghost, self.reg.ledger, self.root / 'new-ledger', effects=effects, platform='darwin')
+                self.assertIsNone(reason)
+                self.assertEqual(len(selected), 1)
+        installed_payload.path(self.reg.ghost).write_text('{broken')
+        selected, reason = gateway_participant.ledger_migration_participants(
+            self.reg.ghost, self.reg.ledger, self.root / 'new-ledger', effects=effects, platform='darwin')
+        self.assertEqual(selected, [])
+        self.assertTrue(reason)
+
+    def test_native_unrelated_listener_is_allowed_and_different_owner_is_not_stopped(self):
+        other_agent = self.root / 'other-agent.plist'
+        other_agent.write_bytes(self.reg.agent.read_bytes())
+        effects = self.effects(agent=other_agent)
+        selected, reason = gateway_participant.ledger_migration_participants(
+            self.reg.ghost, self.reg.ledger, self.root / 'new-ledger', effects=effects, platform='darwin')
+        self.assertEqual(selected, [])
+        self.assertTrue(reason)
+        self.assertEqual(effects.service_calls(), [])
+        with mock.patch.object(effects, 'state', side_effect=RuntimeError()):
+            self.assertEqual(gateway_participant.ledger_migration_participants(
+                self.reg.ghost, self.reg.ledger, self.root / 'new-ledger', effects=effects, platform='darwin'), ([], 'RuntimeError'))
+        self.assertEqual(gateway_participant.ledger_migration_participants(
+            self.reg.ghost, self.root / 'other-a', self.root / 'other-b', effects=effects, platform='darwin'), ([], None))
+
+    def test_registered_a_with_actual_same_agent_using_d_is_excluded_from_migration(self):
+        actual_state = self.root / 'actual-unrelated.json'
+        state = json.loads(self.reg.state_path.read_bytes())
+        state['ledger_root'] = str(self.root / 'unrelated-ledger')
+        actual_state.write_text(json.dumps(state))
+        definition = plistlib.loads(self.reg.agent.read_bytes())
+        definition['ProgramArguments'][4] = str(actual_state)
+        self.reg.agent.write_bytes(plistlib.dumps(definition))
+        effects = self.effects()
+        participant = self.participant(effects)
+        with mock.patch.object(gateway_participant, 'participants', return_value=[participant]):
+            selected, reason = gateway_participant.ledger_migration_participants(
+                self.reg.ghost, self.reg.ledger, self.root / 'new-ledger')
+        self.assertEqual((selected, reason), ([], None))
+        self.assertEqual(json.loads(self.reg.state_path.read_bytes())['ledger_root'], str(self.reg.ledger))
+        self.assertEqual(json.loads(actual_state.read_bytes())['ledger_root'], str(self.root / 'unrelated-ledger'))
+        self.assertTrue(effects.running)
+        self.assertEqual(effects.service_calls(), [])
+
+    def test_native_presence_survives_unreadable_listener_state(self):
+        self.reg.state_path.write_text('{broken')
+        effects = self.effects()
+        seen = gateway_participant.loaded_service(effects=effects, platform='darwin')
+        self.assertEqual((seen.state, seen.program), ('loaded', self.reg.program))
+        binding = gateway_participant.listener_binding(seen, [self.reg.ledger], effects=effects)
+        self.assertEqual(binding.state, 'unknown')
+        self.assertTrue(binding.detail)
+        self.assertEqual(effects.service_calls(), [])
+
+    def test_linked_listener_is_readable_but_not_eligible_for_registration_replacement(self):
+        from context_gateway_plan import document
+        from context_gateway_model import GatewayBlocked
+        target = self.root / 'external-state.json'
+        self.reg.state_path.rename(target)
+        self.reg.state_path.symlink_to(target)
+        effects = self.effects()
+        seen = gateway_participant.loaded_service(effects=effects, platform='darwin')
+        related = gateway_participant.listener_binding(seen, [self.root / 'new', self.reg.ledger], effects=effects)
+        unrelated = gateway_participant.listener_binding(seen, [self.root / 'independent'], effects=effects)
+        self.assertEqual((related.state, related.ledger_root), ('related', self.reg.ledger.resolve()))
+        self.assertEqual(unrelated.state, 'unrelated')
+        with self.assertRaises(GatewayBlocked):
+            document(effects.snapshot(self.reg.state_path))
+        self.assertTrue(self.reg.state_path.is_symlink())
+        self.assertEqual(effects.service_calls(), [])
+
+    def test_program_location_is_not_a_ledger_binding(self):
+        definition = plistlib.loads(self.reg.agent.read_bytes())
+        definition['ProgramArguments'][2] = str(self.root / 'elsewhere' / 'context_gateway.py')
+        self.reg.agent.write_bytes(plistlib.dumps(definition))
+        effects = self.effects()
+        seen = gateway_participant.loaded_service(effects=effects, platform='darwin')
+        self.assertFalse(seen.runs_under(self.reg.runtime_root))
+        self.assertEqual(gateway_participant.listener_binding(seen, [self.reg.ledger], effects=effects).state, 'related')
+        definition['ProgramArguments'][3] = '--other-file'
+        self.reg.agent.write_bytes(plistlib.dumps(definition))
+        seen = gateway_participant.loaded_service(effects=effects, platform='darwin')
+        self.assertEqual(seen.state, 'loaded')
+        self.assertEqual(gateway_participant.listener_binding(seen, [self.reg.ledger], effects=effects).state, 'unknown')
+
+    def test_live_binding_requires_matching_native_pid_and_an_absolute_startup_root(self):
+        from dataclasses import replace
+        effects = self.effects()
+        seen = gateway_participant.loaded_service(effects=effects, platform='darwin')
+        valid = effects.listener_health(json.loads(self.reg.state_path.read_bytes()), inspect_binding=True)
+        replies = ({'status': 'ready'}, None, [], dict(valid, status='starting'),
+                   dict(valid, pid=seen.pid + 1), dict(valid, pid=True),
+                   dict(valid, ledger_root='relative'), dict(valid, ledger_root=None))
+        for reply in replies:
+            with self.subTest(reply=reply), mock.patch.object(effects, 'listener_health', return_value=reply):
+                self.assertEqual(gateway_participant.listener_binding(seen, [self.reg.ledger], effects=effects).state, 'unknown')
+        with mock.patch.object(effects, 'listener_health', side_effect=OSError('unreachable')):
+            self.assertEqual(gateway_participant.listener_binding(seen, [self.reg.ledger], effects=effects).state, 'unknown')
+        with mock.patch.object(effects, 'listener_health', side_effect=AssertionError('no native PID')):
+            self.assertEqual(gateway_participant.listener_binding(replace(seen, pid=None), [self.reg.ledger], effects=effects).state,
+                             'unknown')
+
+    def test_absence_and_unknown_native_observation_do_not_read_listener_state(self):
+        for seen, expected in ((gateway_participant.LoadedService('absent'), 'absent'),
+                               (gateway_participant.LoadedService('inconclusive', detail='denied'), 'unknown')):
+            with self.subTest(native=seen.state), mock.patch.object(Path, 'read_bytes', side_effect=AssertionError('read')):
+                binding = gateway_participant.listener_binding(seen, [self.reg.ledger])
+                self.assertEqual(binding.state, expected)
 
 
 class JournalTests(ParticipantCase):

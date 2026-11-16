@@ -9,7 +9,9 @@ from contextlib import ExitStack, contextmanager
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
+import time
 from typing import Callable
 import unittest
 from unittest import mock
@@ -35,6 +37,89 @@ def installer_env(home: str | Path) -> dict[str, str]:
                CLAUDE_CONFIG_DIR=str(home / ".claude"),
                CODEX_HOME=str(home / ".codex"), GHOST_ALICE_INSTALL_PROGRESS="off")
     return env
+
+
+def run_pty(command: list[str], *, env: dict[str, str], cwd: Path,
+            responses: list[tuple[str, str]] | None = None, timeout: float = 180) -> tuple[int, str]:
+    """Run a real terminal child; optional `(prompt, answer)` pairs also attach terminal input.
+
+    Each answer is sent only after its literal prompt appears. Without responses, stdin remains DEVNULL,
+    as in the progress tests. A failed or timed-out child retains its compact installer log in the assertion.
+    """
+    if not hasattr(os, "openpty"):
+        raise unittest.SkipTest("pseudo-terminal support is required")
+    import select
+    import signal
+
+    env = env.copy()
+    env.pop("GHOST_ALICE_INSTALL_PROGRESS", None)
+    master_fd, slave_fd = os.openpty()
+    proc = None
+    output = bytearray()
+    pending = list(responses or ())
+    matched = 0
+    search_from = 0
+    deadline = time.monotonic() + timeout
+    failure = None
+    try:
+        proc = subprocess.Popen(command, cwd=cwd, env=env,
+                                stdin=slave_fd if responses is not None else subprocess.DEVNULL,
+                                stdout=slave_fd, stderr=slave_fd, close_fds=True, start_new_session=True)
+        os.close(slave_fd)
+        slave_fd = -1
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                failure = f"PTY child timed out after {timeout:g}s"
+                break
+            ready, _, _ = select.select([master_fd], [], [], min(0.1, remaining))
+            if ready:
+                try:
+                    data = os.read(master_fd, 65536)
+                except OSError as error:
+                    import errno
+                    if error.errno != errno.EIO:
+                        raise
+                    data = b""
+                if not data:
+                    break
+                output.extend(data)
+                while matched < len(pending):
+                    prompt, answer = pending[matched]
+                    encoded = prompt.encode("utf-8")
+                    found = output.find(encoded, search_from)
+                    if found < 0:
+                        break
+                    os.write(master_fd, answer.encode("utf-8"))
+                    search_from = found + len(encoded)
+                    matched += 1
+            elif proc.poll() is not None:
+                break
+        if failure is None:
+            try:
+                proc.wait(timeout=max(0.1, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                failure = f"PTY child timed out after {timeout:g}s"
+        if failure is None and matched < len(pending):
+            failure = f"PTY child ended before prompt: {pending[matched][0]!r}"
+    finally:
+        if proc is not None and (failure is not None or proc.poll() is None):
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait(timeout=5)
+        if slave_fd != -1:
+            os.close(slave_fd)
+        os.close(master_fd)
+    if failure is not None or proc.returncode:
+        for log in sorted((Path(env["HOME"]) / ".ghost-alice" / "install").glob("*.log")):
+            details = "\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-80:])
+            output.extend(f"\nInstaller details ({log.name}):\n{details}\n".encode("utf-8"))
+    text = output.decode("utf-8", errors="replace")
+    if failure is not None:
+        raise AssertionError(f"{failure}\n{text}")
+    return proc.returncode, text
 
 
 def destination_fixture(root: Path, **overrides) -> dict:

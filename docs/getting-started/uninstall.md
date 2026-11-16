@@ -60,6 +60,8 @@ bash install.sh --platform codex --uninstall task-router
 
 ## Source Of Truth Files
 
+The uninstaller reads the current work-record locations and their confirmed installation-source relationships before removing installation records, then includes those locations with the removal result. It leaves the work records and `config.json` ledger locations unchanged. Records still stored inside an old installation source folder remain dependent on that folder; see [moving existing work records](./installation.md#move-existing-work-records) before moving or deleting it. Full removal can delete the installation record that held the old source relationship while preserving the data and its configured path. A later installation from another folder may therefore report an unknown relationship instead of offering a move; that missing relationship does not mean the work records were deleted.
+
 Per-platform manifests live at:
 
 - `~/.ghost-alice/install-state/claude.json`

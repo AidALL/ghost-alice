@@ -6,12 +6,14 @@ Expected arguments and texts come from installer_lib/install.sh:75-223, 411-610,
 from __future__ import annotations
 
 import contextlib
+import base64
 import io
 import json
 import os
 from pathlib import Path
 import plistlib
 import shutil
+import shlex
 import sys
 import tempfile
 import unittest
@@ -19,8 +21,10 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gateway_testing  # noqa: E402
+import install_lock  # noqa: E402
 import install_transaction  # noqa: E402
 import installed_payload  # noqa: E402
+import runtime_config  # noqa: E402
 from context_gateway_model import LABEL  # noqa: E402
 from installer import gateway_participant, report, selection, transaction  # noqa: E402
 from installer.runner import ToolResult  # noqa: E402
@@ -199,7 +203,7 @@ class PlacementTests(TransactionCase):
         return {"schema_version": 1, "host": host, "ghost_root": str(self.ghost),
                 "event_log": str(self.ghost / "install-state" / f"{host}-events.jsonl"),
                 "installer": {"commit": "abc123def", "schema_version": installed_payload.SCHEMA_VERSION},
-                "source": self.origin, "asset_root": str(self.source),
+                "source": dict(self.origin, ledger_source_roots={}), "asset_root": str(self.source),
                 **({"install_state": str(self.ghost / "install-state" / f"{host}.json")}
                    if any(t["kind"] == "support" for t in targets) else {}),
                 "targets": list(targets), **extra}
@@ -375,7 +379,9 @@ class PlacementTests(TransactionCase):
             transaction.sync_runtime_shared(ctx)
             with mock.patch("installer.source.input_record", side_effect=AssertionError("source changed")):
                 transaction.link_or_copy(ctx, Target("alpha", self.source / "alpha"), ctx.skills_dir / "alpha")
-        self.assertEqual([request["source"] for request in self.requests], [self.origin, self.origin])
+        self.assertEqual([request["source"] for request in self.requests],
+                         [dict(self.origin, ledger_source_roots={})] * 2)
+        self.assertEqual(ctx.record_source, self.origin)
 
     def test_placement_runs_no_child_tool(self):
         ctx = self.context("codex")
@@ -415,6 +421,156 @@ class PlacementTests(TransactionCase):
         self.assertEqual(self.runner.calls, [])
 
 
+class InstalledLedgerLocationTests(TransactionCase):
+    def setUp(self):
+        super().setUp()
+        self.enterContext(install_lock.command_lock(self.ghost / "install.lock", owner="installer:test"))
+        self.ctx = self.context("codex")
+        self.ctx.record_source = {"root": str(self.source), "commit": "candidate", "dirty": "clean"}
+        self.old_source = (self.home.parent / "old-source").resolve()
+        self.old_ledger = self.old_source / "session-intent"
+
+    def seed_source(self, root=None, relationships=None):
+        section = {"root": str(root or self.old_source), "commit": "previous"}
+        if relationships is not None:
+            section["ledger_source_roots"] = relationships
+        installed_payload.update(self.ghost, {"source": section})
+
+    def publish_alpha(self):
+        return transaction.copy_target(self.ctx, Target("alpha", self.source / "alpha"),
+                                       self.ctx.skills_dir / "alpha")
+
+    def legacy_hook(self):
+        # One root-only legacy fixture exercises observation before config is normalized.
+        script = Path(__file__).with_name("hook_profile_gate.py")
+        payload = base64.urlsafe_b64encode(
+            f'python3 ledger.py --root {shlex.quote(str(self.old_ledger))}'.encode()).decode()
+        settings = self.home / ".codex" / "hooks.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [{
+            "type": "command", "command":
+            f'python3 {shlex.quote(str(script))} run session-intent codex {payload}'}]}]}}))
+        return settings
+
+    def test_legacy_relationship_is_saved_on_first_publish_and_retained_until_config_normalization(self):
+        self.seed_source()
+        hooks = self.legacy_hook()
+        original_hooks = hooks.read_bytes()
+        expected = {str(self.old_ledger): str(self.old_source)}
+        for _ in range(2):
+            self.assertTrue(self.publish_alpha())
+            saved = installed_payload.read(self.ghost)["source"]
+            self.assertEqual(saved["root"], str(self.source))
+            self.assertEqual(saved["ledger_source_roots"], expected)
+            self.assertEqual(runtime_config.load_config().get("install_locations", {}), {})
+            self.assertEqual(hooks.read_bytes(), original_hooks)
+        runtime_config.save_config({"install_locations": {"codex": {"ledger_root": str(self.old_ledger)}}})
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)["source"]["ledger_source_roots"], expected)
+        self.assertNotIn("ledger_source_roots", self.ctx.record_source)
+
+    def test_later_publish_failure_and_retry_keep_the_first_publish_relationship(self):
+        self.seed_source()
+        self.legacy_hook()
+        self.assertTrue(self.publish_alpha())
+        original = installed_payload.read(self.ghost)["source"]
+        with mock.patch.object(installed_payload, "update", side_effect=OSError("record disk full")), \
+                contextlib.redirect_stderr(io.StringIO()):
+            result, _ = self.captured(self.publish_alpha)
+        self.assertFalse(result)
+        self.assertEqual(installed_payload.read(self.ghost)["source"], original)
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)["source"], original)
+
+    def test_observation_groups_hosts_by_normalized_root_and_retains_missing_original_source(self):
+        second = self.old_source / "second-ledger"
+        self.seed_source(root=self.source, relationships={str(self.old_ledger): str(self.old_source),
+                                                        str(second): str(self.old_source)})
+        bindings = {"claude": {"ledger_root": str(self.old_ledger)},
+                    "codex": {"ledger_root": str(self.old_ledger / ".." / self.old_ledger.name)},
+                    "future-host": {"ledger_root": str(second)}}
+        runtime_config.save_config({"install_locations": bindings})
+        before = (self.ghost / "config.json").read_bytes()
+        observed = transaction.installed_ledger_locations().roots
+        self.assertEqual(set(observed), {self.old_ledger, second})
+        self.assertEqual(observed[self.old_ledger], {"source_root": self.old_source, "state": "source-bound",
+                         "hosts": {host: bindings[host] for host in ("claude", "codex")}})
+        self.assertEqual(observed[second], {"source_root": self.old_source, "state": "source-bound",
+                         "hosts": {"future-host": bindings["future-host"]}})
+        self.assertFalse(self.old_source.exists())
+        self.assertEqual((self.ghost / "config.json").read_bytes(), before)
+
+    def test_publish_prunes_fixed_retired_and_unbound_relationships_and_then_clears_empty_map(self):
+        fixed = (self.ghost / "session-intent").resolve()
+        retired, unbound = self.old_source / "retired", self.old_source / "unbound"
+        self.seed_source(relationships={str(root): str(self.old_source)
+                                       for root in (self.old_ledger, fixed, retired, unbound)})
+        runtime_config.save_config({"install_locations": {
+            "claude": {"ledger_root": str(self.old_ledger)}, "codex": {"ledger_root": str(fixed)},
+            "future-host": {"ledger_root": str(retired)}}, "retired_ledger_roots": [str(retired)]})
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)["source"]["ledger_source_roots"],
+                         {str(self.old_ledger): str(self.old_source)})
+        runtime_config.save_config({"install_locations": {"claude": {"ledger_root": str(fixed)}}})
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)["source"]["ledger_source_roots"], {})
+
+    def test_transported_relationships_cannot_supply_installed_facts(self):
+        self.seed_source()
+        transported = {str(self.old_ledger): str(self.old_source)}
+        self.ctx.record_source["ledger_source_roots"] = transported
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)["source"]["ledger_source_roots"], {})
+        self.assertEqual(self.ctx.record_source["ledger_source_roots"], transported)
+
+    def test_unrelated_registered_location_has_unknown_source_and_development_override_is_not_installed(self):
+        self.seed_source(root=self.source)
+        runtime_config.save_config({"install_locations": {"codex": {"ledger_root": str(self.old_ledger)}}})
+        development = self.source / "independent-development-ledger"
+        development.mkdir()
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_SESSION_INTENT_ROOT": str(development)}):
+            observed = transaction.installed_ledger_locations().roots
+        self.assertEqual(observed, {self.old_ledger: {"source_root": None, "state": "unknown",
+                         "hosts": {"codex": {"ledger_root": str(self.old_ledger)}}}})
+
+    def test_unreadable_other_host_preserves_observed_and_previously_known_relationships(self):
+        remembered = self.old_source / 'unreadable-host-ledger'
+        expected = {str(self.old_ledger): str(self.old_source), str(remembered): str(self.old_source)}
+        self.seed_source(relationships={str(remembered): str(self.old_source)})
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(self.old_ledger)}}})
+        hooks = self.home / '.codex/hooks.json'
+        hooks.parent.mkdir(parents=True, exist_ok=True)
+        hooks.write_text('{"hooks": null}')
+        observed = transaction.installed_ledger_locations()
+        self.assertEqual(set(observed.roots), {self.old_ledger})
+        self.assertEqual(set(observed.unavailable_hosts), {'codex'})
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'], expected)
+        hooks.write_text('{"hooks": {}}')
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'],
+                         {str(self.old_ledger): str(self.old_source)})
+
+    def test_unreadable_host_does_not_invent_a_source_relationship(self):
+        self.seed_source()
+        hooks = self.legacy_hook()
+        hooks.write_text('{"hooks": null}')
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'], {})
+
+    def test_observation_uses_the_locked_installation_config_under_an_environment_override(self):
+        self.seed_source()
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(self.old_ledger)}}})
+        alternate = self.home / 'development-state'
+        alternate.mkdir()
+        (alternate / 'config.json').write_text(json.dumps({'install_locations': {
+            'codex': {'ledger_root': str(alternate / 'records')}}}))
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_GHOST_ROOT': str(alternate)}):
+            observed = transaction.installed_ledger_locations()
+            self.assertEqual(set(observed.roots), {self.old_ledger})
+            self.assertEqual(set(observed.roots[self.old_ledger]['hosts']), {'claude'})
+
+
 def unrecorded_launchd(effects, platform="darwin"):
     """Answer launchd questions with `effects` (a fake launchd) on `platform`."""
     stack = contextlib.ExitStack()
@@ -452,23 +608,26 @@ class GatewayReportTests(TransactionCase):
 
     def test_a_registered_running_gateway_is_one_info_line(self):
         reg = self.register()
-        self.runner.respond(lambda script, args: script == "command" and args[:2] == ["launchctl", "print"], ToolResult(0))
-        with self.runner.patch():
+        seen = gateway_participant.LoadedService("loaded", program=reg.program, pid=4242)
+        with self.runner.patch(), mock.patch("installer.gateway_participant.loaded_service", return_value=seen):
             observed, out = self.captured(transaction.report_gateway, self.context("codex"))
         line = f"Context gateway: registered, runtime {reg.runtime_root}, service running"
         self.assertIn(f"[INFO] {line}", out)
         self.assertEqual(observed, (line, True))
-        self.assertEqual(self.runner.commands()[0][:2], ["launchctl", "print"])
-        self.assertTrue(self.runner.commands()[0][2].endswith("/org.ghost-alice.context-gateway"))
 
-    def test_a_stopped_service_is_a_warning(self):
+    def test_absent_and_unavailable_service_observations_have_distinct_warnings(self):
         reg = self.register()
-        self.runner.respond(lambda script, args: script == "command", ToolResult(113))
-        with self.runner.patch():
-            observed, out = self.captured(transaction.report_gateway, self.context("codex"))
-        line = f"Context gateway: registered, runtime {reg.runtime_root}, service not running"
-        self.assertIn(f"[WARN] {line}", out)
-        self.assertEqual(observed, (line, False))
+        for state in ('absent', 'inconclusive', 'unreadable', 'loaded'):
+            seen = gateway_participant.LoadedService(state, detail='query unavailable')
+            with self.subTest(state=state), self.runner.patch(), \
+                    mock.patch("installer.gateway_participant.loaded_service", return_value=seen):
+                observed, out = self.captured(transaction.report_gateway, self.context("codex"))
+            suffix = ('service not running' if state == 'absent' else
+                      'service loaded; running process unconfirmed' if state == 'loaded' else
+                      'service state unknown (query unavailable)')
+            line = f"Context gateway: registered, runtime {reg.runtime_root}, {suffix}"
+            self.assertIn(f"[WARN] {line}", out)
+            self.assertEqual(observed, (line, False))
 
     def test_an_unreadable_record_is_a_warning_and_the_install_goes_on(self):
         record = installed_payload.path(self.ghost)
@@ -540,15 +699,6 @@ class UnrecordedServiceTests(TransactionCase):
             observed, out = self.captured(transaction.report_gateway, self.context("codex"))
         observe.assert_not_called()
         self.assertEqual((observed, out), (None, ""))
-
-    def test_the_report_and_the_removal_share_one_launchd_observation(self):
-        # The report reads launchd through the removal's own observation function, not a copy of it.
-        seen = gateway_participant.LoadedService("loaded", program=self.reg.program)
-        with mock.patch("installer.gateway_participant.loaded_service", return_value=seen) as observation:
-            observed, _ = self.captured(transaction.report_gateway, self.context("codex"))
-        observation.assert_called_once()
-        self.assertEqual(observed, (UNRECORDED_LINE, True))
-
 
 class RecordMigrationTests(TransactionCase):
     """The first install over an earlier installer's records creates the install record from them once, then

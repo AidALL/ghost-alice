@@ -359,6 +359,19 @@ class RunnerTests(unittest.TestCase):
         missing = runner.run_command(["definitely-not-a-command-ghost-alice"], capture=True)
         self.assertFalse(missing.ok)
 
+    def test_stdin_is_closed_by_default_and_inherited_only_when_requested(self):
+        import subprocess
+        script = ('import sys; from installer import runner; '
+                  'r=runner.run_command([sys.executable,"-c","import sys; print(sys.stdin.read())"], '
+                  'capture=True, inherit_stdin=sys.argv[1]=="yes"); print(r.stdout, end="")')
+        for choice, expected in (('no', '\n'), ('yes', 'terminal input\n')):
+            with self.subTest(choice=choice):
+                result = subprocess.run([sys.executable, '-c', script, choice], input='terminal input',
+                    env=dict(os.environ, PYTHONPATH=str(runner.REPO_ROOT / '_shared')),
+                    capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

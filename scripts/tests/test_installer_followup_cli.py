@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,19 +11,22 @@ from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / '_shared'))
-from installer_testing import checkout_copy, destination_fixture, installer_env
+from installer_testing import checkout_copy, destination_fixture, installer_env, run_pty
 
 
 class InstallerFollowupCliTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.source = checkout_copy(self)
         self.home = self.root / 'home'
         self.home.mkdir()
         (self.home / '.claude').mkdir()
         self.env = installer_env(self.home)
+        # An archive fixture must not discover the repository enclosing the test runner's TMPDIR.
+        self.env['GIT_CEILING_DIRECTORIES'] = str(self.root)
+        self.env['GHOST_ALICE_INSTALL_LOCALE'] = 'en_US.UTF-8'
         self.settings = self.home / '.claude/settings.json'
         self.settings.write_text(json.dumps({'custom': 'preserved', 'permissions': {'allow': ['Bash(custom)']}}))
         self.receipt = self.home / '.ghost-alice/addon-permissions/claude-v2.json'
@@ -37,6 +41,20 @@ class InstallerFollowupCliTests(unittest.TestCase):
         result = self.run_install('task-router', *args)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(self.receipt.is_file())
+
+    def test_unreadable_notice_config_does_not_block_full_or_last_skill_removal(self):
+        config = self.home / '.ghost-alice/config.json'
+        for args in (('--uninstall',), ('--uninstall', 'task-router')):
+            with self.subTest(args=args):
+                self.install()
+                original = config.read_bytes()
+                config.write_bytes(b'{broken')
+                result = self.run_install(*args)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('could not read the existing work record locations', result.stdout)
+                self.assertFalse(any(json.loads(self.settings.read_text())['hooks'].values()))
+                self.assertFalse((self.home / '.claude/skills/task-router').exists())
+                config.write_bytes(original)
 
     def inject(self, source):
         directory = self.root / 'injection'
@@ -54,6 +72,150 @@ def replace(source, target, *args, **kwargs):
     return _replace(source, target, *args, **kwargs)
 os.replace = replace
 ''')
+
+    def source_records(self):
+        """Use the installer to bind old source-local records, then remove the one-time override."""
+        import ledger_access
+        self.ledger = ledger_access.load_ledger()
+        self.a = self.source / '.tmp/session-intent'
+        self.b = self.home / '.ghost-alice/session-intent'
+        self.config = self.home / '.ghost-alice/config.json'
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            self.ledger.record_turn(root=self.a, platform='claude', session_id='followup-session', raw_input='before move')
+            self.before_move = self.ledger.read_session_state(root=self.a, platform='claude', session_id='followup-session')
+        self.env['GHOST_ALICE_SESSION_INTENT_ROOT'] = str(self.a)
+        try:
+            self.install()
+        finally:
+            self.env.pop('GHOST_ALICE_SESSION_INTENT_ROOT')
+        self.assertEqual(json.loads(self.config.read_text())['install_locations']['claude']['ledger_root'], str(self.a))
+
+    def controlled_writers(self, fault=''):
+        """Only external writer observations are controlled; the bound active CLI performs the move."""
+        self.inject('''import json, sys
+entry = Path(sys.argv[0]).resolve()
+request = json.loads(os.environ.get('GHOST_ALICE_INSTALL_REQUEST') or '{}')
+if entry.name == 'cli.py' and entry.parent.name == 'installer' and request.get('stage') == 'record-move':
+    sys.path.insert(0, str(entry.parent.parent))
+    from installer import hosts, gateway_participant
+    hosts.observe_writers = lambda platforms, **kwargs: {host: hosts.WriterObservation('absent') for host in platforms}
+    gateway_participant.listener_binding = lambda seen, roots, *, effects=None: gateway_participant.ListenerBinding('absent')
+''' + ''.join('    ' + line + '\n' for line in fault.splitlines()))
+
+    def test_source_change_cancel_then_fixed_command_moves_records_and_next_receipt(self):
+        import hook_definitions
+        self.source_records()
+        old_source = self.source
+        self.source = self.root / '설치 원본 2'
+        shutil.copytree(old_source, self.source, ignore=shutil.ignore_patterns('.git', '.tmp'))
+        self.controlled_writers()
+        question = 'Move your existing work records to the new location? [Y/n]'
+        code, output = run_pty(['bash', str(self.source / 'install.sh'), '--adopt-source', '--skip-source-health'],
+                              env=self.env, cwd=self.home, responses=[(question, 'n\n')])
+        self.assertEqual(code, 0, output)
+        self.assertEqual(output.count(question), 1)
+        self.assertIn(str(old_source), output)
+        self.assertIn(str(self.a), output)
+        self.assertIn('will ask again', output)
+        self.assertEqual(json.loads(self.config.read_text())['install_locations']['claude']['ledger_root'], str(self.a))
+        record = json.loads((self.home / '.ghost-alice/installed-payload-v2.json').read_text())
+        self.assertEqual(record['source']['root'], str(self.source))
+        self.assertEqual(record['source']['ledger_source_roots'], {str(self.a): str(old_source)})
+        code, output = run_pty(['bash', str(self.home / '.ghost-alice/bin/ghost-alice'), '--skip-source-health'],
+                              env=self.env, cwd=self.home, responses=[(question, '\n')])
+        self.assertEqual(code, 0, output)
+        self.assertEqual(output.count(question), 1)
+        self.assertIn(f'Your existing work records from {self.a} are now at {self.b}', output)
+        self.assertEqual(json.loads(self.config.read_text())['install_locations']['claude']['ledger_root'], str(self.b))
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='followup-session'),
+                             self.before_move)
+        settings = json.loads(self.settings.read_text())
+        command = next(handler['command'] for group in settings['hooks']['SessionStart'] for handler in group['hooks']
+                       if hook_definitions.parse_hook_runner_command(handler['command'])['hook_id'] == 'session-receipt')
+        result = subprocess.run(command, shell=True, env=self.env, capture_output=True, text=True, timeout=30,
+                                input=json.dumps(dict(session_id='followup-session', source='startup', hook_event_name='SessionStart')))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        context = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
+        receipt = json.loads(context.split('[session-intent-receipt]', 1)[1].split('[/session-intent-receipt]', 1)[0])
+        self.assertEqual((receipt['ledger_root'], receipt['session_id']), (str(self.b), 'followup-session'))
+
+    def test_original_locale_survives_shell_utf8_repair_to_the_followup_question(self):
+        self.source_records()
+        question = '기존 작업 기록을 새 위치로 옮길까요? [Y/n]'
+        for locale in ({'LANG': 'ko_KR'}, {'LC_MESSAGES': 'ko_KR'}):
+            with self.subTest(locale=locale):
+                env = self.env.copy()
+                for name in ('GHOST_ALICE_INSTALL_LOCALE', 'LC_ALL', 'LC_MESSAGES', 'LANG'):
+                    env.pop(name, None)
+                env.update(locale)
+                code, output = run_pty(['bash', str(self.source / 'install.sh'), '--skip-source-health'],
+                                      env=env, cwd=self.home, responses=[(question, 'n\n')])
+                self.assertEqual(code, 0, output)
+                self.assertEqual(output.count('Ghost-ALICE 설치를 완료했습니다.'), 1)
+                self.assertIn(f'기존 작업 기록은 그대로 {self.a}에 있습니다.', output)
+                self.assertNotIn('Move your existing work records', output)
+
+    def test_post_merge_install_does_not_ask_even_with_terminal_input(self):
+        self.source_records()
+        code, output = run_pty(['bash', str(self.source / 'install.sh'), '--post-merge', '--merged-checkout', str(self.source)],
+                              env=self.env, cwd=self.source, responses=[], timeout=90)
+        self.assertEqual(code, 0, output)
+        self.assertIn(f'Your existing work records remain at {self.a}', output)
+        self.assertNotIn('[Y/n]', output)
+        self.assertEqual(json.loads(self.config.read_text())['install_locations']['claude']['ledger_root'], str(self.a))
+
+    def test_move_write_failure_restores_records_and_keeps_install_success_distinct(self):
+        self.source_records()
+        self.controlled_writers(f'''import install_transaction
+rename = install_transaction._rename_path
+failed = False
+def fail_config(source, target):
+    global failed
+    if Path(target) == Path({str(self.config)!r}) and not failed:
+        failed = True
+        raise PermissionError('record move config write denied')
+    return rename(source, target)
+install_transaction._rename_path = fail_config''')
+        code, output = run_pty(['bash', str(self.source / 'install.sh'), '--skip-source-health'], env=self.env, cwd=self.home,
+                              responses=[('Move your existing work records to the new location? [Y/n]', '\n')])
+        self.assertEqual(code, 1, output)
+        self.assertIn('Ghost-ALICE installation is complete.', output)
+        self.assertIn('restored the previous state', output)
+        self.assertIn('record move config write denied', output)
+        self.assertNotIn('Candidate install did not finish', output)
+        self.assertEqual(json.loads(self.config.read_text())['install_locations']['claude']['ledger_root'], str(self.a))
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            self.assertEqual(self.ledger.read_session_state(root=self.a, platform='claude', session_id='followup-session'),
+                             self.before_move)
+
+    def test_committed_move_is_kept_until_normal_install_retries_completion(self):
+        import install_transaction
+        self.source_records()
+        self.controlled_writers('''import install_transaction
+mark = install_transaction.Journal.mark
+def fail_completion(journal, phase):
+    if phase == 'done':
+        raise OSError('move completion record denied')
+    return mark(journal, phase)
+install_transaction.Journal.mark = fail_completion''')
+        code, output = run_pty(['bash', str(self.source / 'install.sh'), '--skip-source-health'], env=self.env, cwd=self.home,
+                              responses=[('Move your existing work records to the new location? [Y/n]', '\n')])
+        self.assertEqual(code, 1, output)
+        self.assertIn(f'Your existing work records from {self.a} are at {self.b}', output)
+        self.assertIn('Saving the completion record', output)
+        self.assertIn('installation preparation checks', output)
+        self.assertNotIn('Candidate install did not finish', output)
+        self.assertEqual(json.loads(self.config.read_text())['install_locations']['claude']['ledger_root'], str(self.b))
+        self.env.pop('PYTHONPATH')
+        pending = install_transaction.unfinished(self.home / '.ghost-alice')
+        self.assertTrue(pending)
+        result = self.run_install('--doctor')
+        self.assertEqual(install_transaction.unfinished(self.home / '.ghost-alice'), pending, result.stdout + result.stderr)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(install_transaction.unfinished(self.home / '.ghost-alice'), [])
+        self.assertEqual(json.loads(self.config.read_text())['install_locations']['claude']['ledger_root'], str(self.b))
 
     def test_receipt_commit_and_legacy_restore_errors_reach_screen_log_and_json(self):
         original = self.settings.read_bytes()

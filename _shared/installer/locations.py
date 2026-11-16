@@ -11,6 +11,11 @@ import os
 from hook_definitions import SUPPORTED_PLATFORMS as PLATFORMS
 
 
+def management_command() -> Path:
+    """The installed command users invoke for installation and updates."""
+    return record_root() / 'bin' / ('ghost-alice.cmd' if os.name == 'nt' else 'ghost-alice')
+
+
 def home() -> Path:
     """`$HOME`, else the account home."""
     value = os.environ.get("HOME")
@@ -117,6 +122,11 @@ def record_root() -> Path:
 def install_lock_path() -> Path:
     """`~/.ghost-alice/install.lock`."""
     return record_root() / "install.lock"
+
+
+def ledger_root() -> Path:
+    """The fixed record location owned by the installation beside its lock."""
+    return record_root().resolve() / 'session-intent'
 
 
 def addon_source_cache_root() -> Path:

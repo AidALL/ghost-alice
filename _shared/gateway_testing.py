@@ -163,10 +163,30 @@ class FakeEffects:
         self.ready_answers = list(ready) if isinstance(ready, (list, tuple)) else [ready]
         self.stop_error, self.start_error, self.record_error = stop_error, start_error, record_error
         self.calls: list[tuple] = []
+        self.pid = 4242
+        self.listener = None
+        if running:
+            self._capture_listener()
+
+    def _capture_listener(self):
+        """The fake process captures config only at startup, as the real gateway does."""
+        try:
+            argv = plistlib.loads(self.agent.read_bytes())['ProgramArguments']
+            self.listener = json.loads(Path(argv[4]).read_bytes())
+        except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError):
+            self.listener = None
+
+    def listener_health(self, state, *, inspect_binding=False):
+        if (not self.running or not isinstance(self.listener, dict)
+                or any(state.get(key) != self.listener.get(key) for key in ('port', 'scope'))):
+            raise OSError('The simulated live listener cannot be reached')
+        if not inspect_binding:
+            return {'status': 'ready'}
+        return dict(status='ready', pid=self.pid, ledger_root=self.listener['ledger_root'])
 
     def observe(self, domain):
         if self.running:
-            return ServiceObservation("present", self.agent)
+            return ServiceObservation("present", self.agent, pid=self.pid)
         return ServiceObservation("absent", returncode=113)
 
     def state(self, domain):
@@ -184,6 +204,8 @@ class FakeEffects:
         if self.start_error is not None:
             raise self.start_error
         self.running, self.agent = True, Path(agent)
+        self.pid += 1
+        self._capture_listener()
 
     def ready(self, state):
         answer = self.ready_answers.pop(0) if len(self.ready_answers) > 1 else self.ready_answers[0]

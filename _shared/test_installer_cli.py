@@ -70,8 +70,6 @@ Advanced commands:
   --sync-commands        Sync workspace commands
   --check-commands       Check workspace commands only
   gateway ARGS...        Run the context gateway installer once with ARGS
-  migrate-ledger --from-root PATH --writers-stopped
-                          Move a stopped installation ledger to its fixed data root
   --help, -h             Show this help
 """
 
@@ -316,7 +314,6 @@ class OptionTests(CliCase):
             "--sync-commands": (None, True, None, False, False, False),
             "--check-commands": (None, True, None, False, False, False),
             "gateway ARGS...": ("gateway", False, None, False, False, False),
-            "migrate-ledger --from-root PATH --writers-stopped": ("migrate-ledger", False, None, False, False, False),
             "--help, -h": (None, False, None, False, False, False),
         })
         self.assertEqual(cli.INSTALL.names, ())
@@ -352,6 +349,47 @@ class OptionTests(CliCase):
                 self.assertLess(out.index(f"  {command.usage}"), min(following, default=len(out)))
 
 
+class CandidateHandoffTests(CliCase):
+    def test_only_successful_candidate_hands_terminal_to_the_recorded_active_cli(self):
+        from installer import runner, source
+        active = (self.home / 'new-package/core').resolve()
+        active.parent.mkdir(parents=True)
+        candidate = self.home / 'candidate'
+        self.stub('installer.source.check_install_source')
+        self.stub('installer.hosts.confirm_project_trust', '')
+        self.stub('installer.source.check_source_health', True)
+        self.stub('installer.source.prepare_source', (candidate, {}))
+        self.stub('installer.source.check_record_reader')
+        self.stub('installer.lock.acquire')
+        self.stub('installer.lock.release')
+        self.stub('installer.source.input_record', {'root': str(self.source), 'commit': 'old'})
+        with mock.patch.dict(os.environ, {source.REQUEST_ENV: ''}), \
+                mock.patch('installer.cli.install_transaction.record_after_recovery',
+                           return_value={'installer': {'active_root': str(active)}, 'source': {'root': str(self.source)}}):
+            for supported, child_codes in ((False, [1]), (False, [0]), (True, [0, 1])):
+                (active.parent / 'version.json').write_text(json.dumps({'record_move': True} if supported else {}))
+                calls = []
+                def run(argv, **kwargs):
+                    calls.append((argv, kwargs))
+                    return ToolResult(child_codes[min(len(calls), len(child_codes)) - 1])
+                with self.subTest(supported=supported, child_codes=child_codes), mock.patch.object(runner, 'run_command', side_effect=run):
+                    code, output = self.captured(cli.dispatch,
+                        cli.Options(platform='claude', platform_explicit=True, addon_skip=True, args=['task-router']),
+                        execution_cause='update')
+                    self.assertEqual(code, child_codes[-1])
+                    self.assertEqual(len(calls), len(child_codes))
+                    self.assertEqual('Candidate install did not finish' in output, child_codes[0] != 0)
+                    self.assertNotIn('execution_cause', json.loads(calls[0][1]['env'][source.REQUEST_ENV]))
+                    if supported:
+                        argv, kwargs = calls[-1]
+                        self.assertEqual(Path(argv[1]), active / '_shared/installer/cli.py')
+                        self.assertTrue(kwargs['inherit_stdin'])
+                        with mock.patch.dict(os.environ, kwargs['env']), mock.patch.object(runner, 'REPO_ROOT', active):
+                            request = source.install_request()
+                        self.assertEqual(request['execution_cause'], 'update')
+                        self.assertEqual(request['stage'], 'record-move')
+
+
 class DispatchCase(CliCase):
     """Command routing within a prepared installer; package execution is covered by shell installation tests."""
 
@@ -371,7 +409,6 @@ class DispatchCase(CliCase):
         self.stub("installer.auto.run_uninstall_children", 0)
         self.stub("installer.cli.prepare_install")
         self.stub("installer.cli.run_install", 0)
-        self.stub("installer.cli.run_ledger_migration", 0)
         self.stub("installer.lock.acquire", (self.home / "lock", "generation"))
         self.stub("installer.lock.release")
         self.stub("installer.runner.run_tool", mock.Mock(returncode=5))
@@ -783,7 +820,7 @@ class UnfinishedPublishTests(CliCase):
         runner = FakeRunner()
         locked = [command for command in cli.COMMANDS if command.lock]
         self.assertEqual(sorted(command.lock for command in locked),
-                         ["cleanup-pending", "gateway", "install", "migrate-ledger", "repair", "uninstall"])
+                         ["cleanup-pending", "gateway", "install", "repair", "uninstall"])
         for command in locked:
             with self.subTest(lock=command.lock):
                 self.calls.clear()
@@ -903,7 +940,7 @@ class InstallOrderTests(CliCase):
         note = f"Context gateway: registered, runtime {runtime}, service not running"
         self.patches.enter_context(mock.patch("installer.transaction.installed_payload.read",
                                               return_value={"service": {"runtime_root": runtime}}))
-        self.patches.enter_context(mock.patch("installer.transaction._gateway_service_running", return_value=False))
+        self.patches.enter_context(mock.patch("installer.gateway_participant.loaded_service", return_value=mock.Mock(state='absent')))
         self.patches.enter_context(mock.patch("installer.transaction.report_gateway", side_effect=report_gateway))
         # Compact mode: steps go to the log, the report tail carries the note under Attention.
         report.configure(verbose=False, report_child=False, tty=False, progress_env="off", home=self.home)

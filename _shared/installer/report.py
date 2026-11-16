@@ -1,5 +1,5 @@
 """Installer output: messages, verbosity, the install log, progress lines,
-the installation report and the event file. Installer messages are English-only.
+the installation report and the event file. Record-move messages use English or Korean.
 
 Wording and layout are fixed by `_shared/test_installer_report.py` and `scripts/tests/test_installer_default_auto.py`.
 """
@@ -50,6 +50,162 @@ _COLORS = dict(INFO="\033[0;36m", OK="\033[0;32m", WARN="\033[0;33m", ERROR="\03
 _RESET = "\033[0m"
 
 
+def _display_language() -> str:
+    """Use the original locale before shell UTF-8 repair, or the native Windows UI language."""
+    for name in ("GHOST_ALICE_INSTALL_LOCALE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        if name in os.environ and (name == 'GHOST_ALICE_INSTALL_LOCALE' or os.environ[name]):
+            value = os.environ[name]
+            break
+    else:
+        value = ""
+        if sys.platform == "win32":
+            import ctypes
+            import locale
+            try:
+                value = locale.windows_locale.get(ctypes.windll.kernel32.GetUserDefaultUILanguage(), "")
+            except (AttributeError, OSError):
+                pass
+    return "ko" if re.split(r"[_.@-]", value.strip().lower(), maxsplit=1)[0] == "ko" else "en"
+
+
+# Each pair is English, Korean. Callers supply observed facts and choose the message.
+_MESSAGES = {
+    "install_complete": ("Ghost-ALICE installation is complete.", "Ghost-ALICE 설치를 완료했습니다."),
+    "update_complete": ("Ghost-ALICE update is complete.", "Ghost-ALICE 업데이트를 완료했습니다."),
+    "move_unsupported": (
+        "The code installation is complete. This installer version does not support moving existing work records, so the move was not started.",
+        "코드 설치를 완료했습니다. 이 인스톨러 버전은 기존 작업 기록 옮기기를 지원하지 않아 기록 이동을 시작하지 않았습니다."),
+    "host_claude": ("Claude Code", "Claude Code"),
+    "host_codex": ("Codex", "Codex"),
+    "move_intro": (
+        "Ghost-ALICE currently stores your work records inside the folder used for installation.",
+        "현재 Ghost-ALICE는 설치에 사용한 폴더 안에 작업 기록을 저장하고 있습니다."),
+    "move_locations": (
+        "  Folder used for installation: {source_path}\n  Current record location:      {current_path}\n"
+        "  New record location:          {new_path}",
+        "  설치에 사용한 폴더: {source_path}\n  현재 기록 위치:     {current_path}\n  새 기록 위치:       {new_path}"),
+    "move_explanation": (
+        "This keeps your work records separate from the folder used for installation.\n"
+        "After the move, Ghost-ALICE will also store new work records in the new location.",
+        "기존 작업 기록을 설치에 사용한 폴더와 분리된 위치에 보관하려고 합니다.\n"
+        "기존 작업 기록을 옮기면 앞으로의 작업 기록도 새 위치에 저장합니다."),
+    "move_question": (
+        "Move your existing work records to the new location? [Y/n]", "기존 작업 기록을 새 위치로 옮길까요? [Y/n]"),
+    "move_choices": (
+        "Enter: move records · n: leave them where they are for now", "Enter: 옮기기 · n: 지금은 옮기지 않기"),
+    "move_invalid": ("Press Enter, or type y, yes, n, or no.", "Enter를 누르거나 y, yes, n, no 중 하나를 입력하세요."),
+    "move_wait_invalid": ("Press Enter, or type n or no.", "Enter를 누르거나 n 또는 no를 입력하세요."),
+    "move_complete": (
+        "Your existing work records from {current_path} are now at {new_path}. Ghost-ALICE will also store new work records there.",
+        "기존 작업 기록을 {current_path}에서 {new_path}로 옮겼습니다. 앞으로의 작업 기록도 이 위치에 저장합니다."),
+    "move_cancelled": (
+        "Your existing work records remain at {current_path}. Ghost-ALICE will ask again after a later installation "
+        "completes when you run {entry_command} or {entry_command} update in a terminal.",
+        "기존 작업 기록은 그대로 {current_path}에 있습니다. 나중에 터미널에서 {entry_command} 또는 "
+        "{entry_command} update를 실행해 설치를 마치면 다시 묻습니다."),
+    "move_deferred": (
+        "Your existing work records remain at {current_path}. Run {entry_command} in a terminal; after installation "
+        "completes, Ghost-ALICE will ask whether to move them.",
+        "기존 작업 기록은 그대로 {current_path}에 있습니다. 터미널에서 {entry_command}를 실행해 설치를 마치면 "
+        "새 위치로 옮길지 묻습니다."),
+    "move_host_running": (
+        "A {host_name} app or CLI, or a record-writing command it started, is still running. "
+        "Finish that work and close the app or end the CLI commands, then press Enter. Press n to stop moving the records.",
+        "{host_name} 앱·CLI 또는 그 호스트가 시작한 기록 명령이 아직 실행 중입니다. 작업을 마치고 해당 앱을 닫거나 CLI 명령을 종료한 뒤 Enter를 누르세요. "
+        "n을 누르면 기록 옮기기를 그만둡니다."),
+    "move_host_unknown": (
+        "Ghost-ALICE could not check whether {host_name} or its record-writing commands are running. "
+        "Check the process-inspection tools and permissions in the diagnostic details. After resolving the lookup problem, press Enter to check again, "
+        "or press n to stop moving the records.",
+        "{host_name} 및 그 호스트의 기록 명령이 실행 중인지 확인하지 못했습니다. 진단 상세에 나온 프로세스 조회 도구와 권한을 확인하세요. "
+        "조회 문제를 해결한 뒤 Enter를 누르면 다시 확인합니다. n을 누르면 기록 옮기기를 그만둡니다."),
+    "move_not_moved": (
+        "Your existing work records were not moved and remain at {current_path}.",
+        "기존 작업 기록을 옮기지 않았습니다. 기록 위치는 그대로 {current_path}입니다."),
+    "move_restored": (
+        "Ghost-ALICE could not move your existing work records and restored the previous state. "
+        "Your records remain at {current_path}.",
+        "기존 작업 기록을 옮기지 못해 옮기기 전 상태로 되돌렸습니다. 기록 위치는 그대로 {current_path}입니다."),
+    "move_recovery_incomplete": (
+        "Moving your existing work records from {current_path} stopped, and Ghost-ALICE could not finish restoring the previous state. "
+        "The move is not committed; recovery is restoring the previous state. Source: {current_path}. Destination: {new_path}.\n"
+        "Data and configuration targets of this move:\n{affected_paths}\n"
+        "Recovery records: {recovery_paths}. Journal phase: {phase}.\n{recovery}",
+        "인스톨러가 {current_path}의 기존 작업 기록을 옮기다가 멈췄고, 이전 상태 복원을 마치지 못했습니다. "
+        "이동을 확정하지 못했으며 현재 단계는 이전 상태 복원입니다. 원래 위치: {current_path}. 새 위치: {new_path}.\n"
+        "이 이동의 데이터·설정 대상:\n{affected_paths}\n"
+        "복구 기록 위치: {recovery_paths}. 저널 단계: {phase}.\n{recovery}"),
+    "move_committed_pending": (
+        "Your existing work records from {current_path} are at {new_path}, and Ghost-ALICE is configured to use that location. "
+        "Unfinished step: {step}. The next basic installation or update will retry this step when it passes "
+        "its installation preparation checks and proceeds.",
+        "{current_path}의 기존 작업 기록은 {new_path}에 있고, Ghost-ALICE의 기록 위치도 이 경로로 설정했습니다. 마치지 못한 단계: {step}. "
+        "다음 기본 설치 또는 업데이트가 설치 준비를 마치고 진행할 때 이 단계를 다시 시도합니다."),
+    "move_cleanup_failed": (
+        "Your existing work records from {current_path} are now at {new_path}. The installer could not finish cleaning up "
+        "completed installation artifacts.",
+        "기존 작업 기록을 {current_path}에서 {new_path}로 옮겼습니다. 인스톨러가 완료된 배치의 보관 자료 정리를 "
+        "마치지 못했습니다."),
+    "retained_installation_artifacts": (
+        "The installer retained these installation artifacts for the listed reasons:\n{paths}",
+        "인스톨러가 다음 배치 보관 자료를 유지했습니다. 각 위치와 이유는 다음과 같습니다:\n{paths}"),
+    "move_doctor": (
+        "Your existing work records are inside the folder used to install Ghost-ALICE: {current_path}. "
+        "Run {entry_command} in a terminal; after installation completes, Ghost-ALICE will ask whether to move them.",
+        "기존 작업 기록이 설치에 사용한 폴더 안에 있습니다: {current_path}. 터미널에서 {entry_command}를 실행해 "
+        "설치를 마치면 새 위치로 옮길지 묻습니다."),
+    "move_uninstall": (
+        "Your existing work records were not deleted: {current_path}. This location is inside the folder used "
+        "to install Ghost-ALICE ({source_path}).",
+        "기존 작업 기록은 지우지 않았습니다: {current_path}. 이 위치는 설치에 사용한 폴더({source_path}) 안에 있습니다."),
+    "move_relation_unknown": (
+        "The current work record location is {current_path}. Ghost-ALICE could not establish its relation to the "
+        "folder used for installation.",
+        "현재 작업 기록 위치는 {current_path}입니다. 이 위치와 설치에 사용한 폴더의 관계를 확인하지 못했습니다."),
+    "move_locations_unreadable": (
+        "Ghost-ALICE could not read the existing work record locations. Check the installation configuration and diagnostic details.",
+        "Ghost-ALICE가 기존 작업 기록 위치를 조회하지 못했습니다. 설치 설정과 진단 상세를 확인하세요."),
+    "move_location_unknown": (
+        "Ghost-ALICE could not establish the installed record location for host {host_name}. "
+        "Check that host's installation configuration and diagnostic details before retrying the move.",
+        "Ghost-ALICE가 호스트 {host_name}의 설치된 기록 위치를 확인하지 못했습니다. "
+        "기록 이동을 다시 시도하기 전에 해당 호스트의 설치 설정과 진단 상세를 확인하세요."),
+    "move_lookup_deferred": (
+        "Moving existing work records was not started because the required installation locations could not be read.",
+        "필요한 설치 위치를 조회하지 못해 기존 작업 기록 옮기기를 시작하지 않았습니다."),
+    "move_input_unavailable": (
+        "Ghost-ALICE could not prepare terminal input for the move question, so the move was not started. Retry in a working terminal.",
+        "Ghost-ALICE가 기록 이동 질문의 터미널 입력을 준비하지 못해 이동을 시작하지 않았습니다. 입력이 가능한 터미널에서 다시 실행하세요."),
+    "move_service_blocked": (
+        "Ghost-ALICE could not confirm the gateway conditions required to move the records. "
+        "Check the diagnostic details for its registration and running state. After resolving the cause, press Enter to check again, or n to stop moving the records.",
+        "Ghost-ALICE가 기록 이동에 필요한 게이트웨이 조건을 확인하지 못했습니다. "
+        "진단 상세에서 등록·실행 상태를 확인하세요. 원인을 해결한 뒤 Enter를 누르면 다시 확인합니다. n을 누르면 기록 옮기기를 그만둡니다."),
+    "move_not_run": (
+        "Moving your existing work records at {current_path} was not started because the previous move has unfinished recovery or completion work.",
+        "앞선 기록 이동의 복구 또는 마무리가 끝나지 않아 {current_path}에 있는 기존 작업 기록 옮기기를 시작하지 않았습니다."),
+    "recovery_retry": (
+        "Keep the affected host apps and CLI commands closed until recovery finishes. Reopening them may write new records at the destination. "
+        "The next basic installation or update retries recovery during installation preparation only if the unfinished data and configuration have not changed. "
+        "If they have changed, automatic recovery refuses to overwrite them. Preserve both record locations and the recovery records; do not delete the destination to force a retry.",
+        "복구가 끝날 때까지 관련 호스트 앱과 CLI 명령을 다시 실행하지 마세요. 다시 실행하면 새 위치에 기록이 추가될 수 있습니다. "
+        "다음 기본 설치 또는 업데이트는 설치 준비 중 미완료 데이터·설정이 바뀌지 않았을 때만 복구를 다시 시도합니다. "
+        "바뀐 경우 자동 복구는 덮어쓰기를 거부합니다. 두 기록 위치와 복구 기록을 보존하고, 재시도를 통과시키려고 새 기록 위치를 삭제하지 마세요."),
+    "step_restart": ("Restarting the context gateway", "문맥 게이트웨이 다시 시작"),
+    "step_mark": ("Saving the completion record", "완료 기록 저장"),
+}
+
+
+def message(key: str, **fields: object) -> str:
+    """Format user-facing text in this run's language; field values remain literal."""
+    if key in ('move_host_running', 'move_host_unknown') and fields.get('host_name') in ('claude', 'codex'):
+        fields['host_name'] = message('host_' + str(fields['host_name']))
+    output = _MESSAGES[key][1 if _state.language == "ko" else 0].format(**fields)
+    if fields.get('cause'):
+        output += ('\n진단 상세: ' if _state.language == 'ko' else '\nDiagnostic details: ') + str(fields['cause'])
+    return output
+
+
 @dataclass
 class OutputState:
     """The output state of this process: verbosity, report-child mode, log and event files, the sink."""
@@ -61,6 +217,7 @@ class OutputState:
     tty: bool = False
     progress_env: str = "auto"
     home: Path | None = None
+    language: str = "en"
     sink: IO[str] | None = field(default=None, repr=False)
 
 
@@ -92,7 +249,7 @@ def configure(*, verbose: bool = False, report_child: bool = False, log_file: Pa
     if progress_env is None:
         progress_env = os.environ.get("GHOST_ALICE_INSTALL_PROGRESS", "auto")
     _state = OutputState(verbose=verbose, report_child=report_child, log_file=log_file, event_file=event_file,
-                         tty=tty, progress_env=progress_env, home=home)
+                         tty=tty, progress_env=progress_env, home=home, language=_display_language())
     return _state
 
 
@@ -126,7 +283,7 @@ def _message(level: str, message: str) -> None:
     prefix = f"[{level}]"
     if colors_enabled():
         prefix = f"{_COLORS[level]}{prefix}{_RESET}"
-    emit(f"{prefix} {message}")
+    emit('\n'.join(f'{prefix} {line}' for line in message.split('\n')))
 
 
 def info(message: str) -> None:

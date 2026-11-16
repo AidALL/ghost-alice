@@ -50,6 +50,7 @@ if operation == 'print':
         print('service output cannot establish a definition')
     else:
         print('path = ' + (str(root / 'other.plist') if mode == 'different-agent' else state['agent']))
+        print('pid = ' + str(state['pid']))
     sys.exit(0)
 if operation == 'bootout':
     if mode == 'stop-error' or (mode == 'candidate-stop-error' and state['boots'] >= 2):
@@ -208,6 +209,32 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.assertTrue(service['listener_ready'])
         self.assertFalse((self.state / 'installation.json').exists())
         self.assertFalse((self.ghost / 'context-gateway-binding.json').exists())
+
+    def test_live_binding_uses_startup_state_after_the_same_file_changes(self):
+        from installer import gateway_participant
+        import context_gateway_platform
+        self.seed()
+        state_path = self.state / 'state.json'
+        contact = json.loads(state_path.read_bytes())
+        native_before = (self.root / 'native.json').read_bytes()
+        state_path.write_text(json.dumps(dict(contact, ledger_root=str(self.root / 'unrelated-ledger'))))
+        with mock.patch.dict(os.environ, self.environment, clear=True):
+            seen = gateway_participant.loaded_service(platform='darwin')
+            binding = gateway_participant.listener_binding(seen, (self.ledger, self.ghost / 'session-intent'))
+            self.assertEqual((binding.state, binding.ledger_root), ('related', self.ledger.resolve()))
+            live = context_gateway_platform.listener_health(contact, inspect_binding=True)
+            self.assertEqual(live['pid'], json.loads(native_before)['pid'])
+            self.assertEqual(live['ledger_root'], str(self.ledger))
+            with self.assertRaises(OSError):
+                context_gateway_platform.listener_health(dict(contact, scope='wrong-scope'), inspect_binding=True)
+            self.assertTrue(context_gateway_platform.ready(contact))
+            selected, reason = gateway_participant.ledger_migration_participants(
+                self.ghost, self.ledger, self.ghost / 'session-intent', platform='darwin')
+            self.assertEqual(selected, [])
+            self.assertTrue(reason, 'A changed disk file must not exempt the actual A writer')
+            self.assertEqual(gateway_participant.ledger_migration_participants(
+                self.ghost, self.root / 'other-a', self.ghost / 'other-b', platform='darwin'), ([], None))
+        self.assertEqual((self.root / 'native.json').read_bytes(), native_before)
 
     def test_real_candidate_refresh_and_removal_keep_the_native_configuration_contract(self):
         original = self.seed()

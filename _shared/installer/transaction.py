@@ -32,7 +32,70 @@ if TYPE_CHECKING:
 RUNTIME_COMPANIONS = ("session-intent-analyzer/scripts/session_intent_ledger.py",)
 
 
-def migrate_ledger(old_root: Path, *, writers_stopped: bool) -> Path:
+@dataclass(frozen=True)
+class LedgerLocations:
+    roots: dict[Path, dict]
+    unavailable_hosts: dict[str, str] = field(default_factory=dict)
+    source_roots: dict[str, str] = field(default_factory=dict)
+
+
+def installed_ledger_locations() -> LedgerLocations:
+    """Group actual installed bindings and their source relationships, without changing them."""
+    import install_hooks
+    import runtime_config
+
+    config = runtime_config.load_config(env={'GHOST_ALICE_GHOST_ROOT': str(locations.record_root())}, strict=True)
+    source_record = (installed_payload.read(locations.record_root()) or {}).get('source', {})
+    retained = source_record.get('ledger_source_roots', {})
+    origin = source_record.get('root')
+    fixed = locations.ledger_root().resolve()
+    retired = {Path(value).resolve() for value in config.get('retired_ledger_roots', [])}
+    grouped = {}
+    unavailable = {}
+    for host in dict.fromkeys([*install_hooks.PLATFORMS, *config.get('install_locations', {})]):
+        try:
+            value = install_hooks.observed_installation(host, hook_fallback=host in install_hooks.PLATFORMS, config=config)
+            raw_root = value.get('ledger_root')
+            if not raw_root:
+                continue
+            if not isinstance(raw_root, str) or not Path(raw_root).is_absolute():
+                raise ValueError(f'Installed ledger root for {host} must be an absolute path string')
+            root = Path(raw_root).resolve()
+        except (OSError, ValueError) as exc:
+            unavailable[host] = str(exc)
+            continue
+        if root in retired:
+            continue
+        entry = grouped.setdefault(root, dict(hosts={}, source_root=None, state='fixed' if root == fixed else 'unknown'))
+        entry['hosts'][host] = value
+        if root == fixed:
+            continue
+        previous = retained.get(str(root)) or origin
+        if previous and Path(previous).is_absolute() and root.is_relative_to(Path(previous).resolve()):
+            entry['source_root'] = Path(previous).resolve()
+            entry['state'] = 'source-bound'
+    # An unreadable host can still use a previously observed root. Keep that fact,
+    # but never invent a relationship from the current checkout or an override.
+    relationships = {root: origin for root, origin in retained.items()
+                     if unavailable and Path(root).resolve() not in retired and Path(root).resolve() != fixed}
+    relationships.update({str(root): str(value['source_root']) for root, value in grouped.items()
+                          if value['source_root'] is not None})
+    return LedgerLocations(grouped, unavailable, relationships)
+
+
+@dataclass(frozen=True)
+class LedgerMoveResult:
+    """The migration boundary reached; callers display it without parsing exception prose."""
+
+    status: str
+    detail: str = ''
+    recovery_paths: tuple[str, ...] = ()
+    retained: tuple[str, ...] = ()
+    phase: str = ''
+    affected_paths: tuple[str, ...] = ()
+
+
+def migrate_ledger(old_root: Path, *, writers_stopped: bool) -> LedgerMoveResult:
     """Move a stopped installation's ledger to its fixed root with existing journal/service owners.
 
     The caller confirms host and CLI writers have stopped. The gateway participant confirms
@@ -47,10 +110,10 @@ def migrate_ledger(old_root: Path, *, writers_stopped: bool) -> Path:
     from installer.participant import PublishContext
 
     if not writers_stopped:
-        raise ValueError('Host and CLI ledger writers must be stopped before migration')
+        return LedgerMoveResult('deferred', 'Host and CLI ledger writers must be stopped before migration')
     ghost = locations.record_root().resolve()
     install_transaction._require_lock(ghost)
-    old_root, new_root = Path(old_root).expanduser().resolve(), ghost / 'session-intent'
+    old_root, new_root = Path(old_root).expanduser().resolve(), locations.ledger_root()
     if old_root == new_root or old_root.is_relative_to(new_root) or new_root.is_relative_to(old_root):
         raise ValueError('Ledger migration requires separate source and fixed destination roots')
     if not old_root.is_dir() or new_root.is_symlink():
@@ -58,18 +121,21 @@ def migrate_ledger(old_root: Path, *, writers_stopped: bool) -> Path:
     ledger_access.require_writable_root(old_root, env={'GHOST_ALICE_GHOST_ROOT': str(ghost)})
     config_path = ghost / 'config.json'
     config = runtime_config.load_config(env={'GHOST_ALICE_GHOST_ROOT': str(ghost)}, strict=True)
+    observed = installed_ledger_locations()
+    if observed.unavailable_hosts:
+        return LedgerMoveResult('deferred', '; '.join(f'{host}: {cause}' for host, cause in observed.unavailable_hosts.items()))
     prepared, bindings = {}, {}
-    for host, value in config.get('install_locations', {}).items():
+    for host, value in observed.roots.get(old_root, {}).get('hosts', {}).items():
         destination = install_destination.InstallDestination.parse(value)
-        if Path(destination.ledger_root).resolve() != old_root:
-            continue
         if Path(destination.ghost_root).resolve() != ghost:
             raise ValueError(f'Ledger binding for {host} belongs to another installation')
         if host not in install_hooks.PLATFORMS:
             raise ValueError(f'The installed {host} adapter is required to retarget its ledger hooks')
         prepared.update(install_hooks.prepare_ledger_retarget(host, destination=destination, ledger_root=new_root))
         bindings[host] = asdict(replace(destination, ledger_root=str(new_root)))
-    participants = gateway_participant.participants(ghost)
+    participants, blocked = gateway_participant.ledger_migration_participants(ghost, old_root, new_root)
+    if blocked is not None:
+        return LedgerMoveResult('deferred', blocked)
     service_after = None
     for participant in participants:
         changes, section = participant.prepare_ledger_retarget(old_root, new_root)
@@ -109,6 +175,8 @@ def migrate_ledger(old_root: Path, *, writers_stopped: bool) -> Path:
         [(target['source'], target['dest'], target['mode']) for target in targets], rollback_root=journal.folder)
     ledger = ledger_access.load_ledger()
     committed = False
+    finishing = 'resume_incomplete'
+    outcome = LedgerMoveResult('complete')
     try:
         for participant in participants:
             participant.before_publish(context)
@@ -137,28 +205,35 @@ def migrate_ledger(old_root: Path, *, writers_stopped: bool) -> Path:
             if service_after is not None:
                 participant.service = service_after
             participant.after_publish(context)
+        finishing = 'mark_incomplete'
         journal.mark('done')
     except Exception as exc:
         if committed:
-            raise RuntimeError(f'Ledger migration committed to {new_root}; service resume failed ({exc}); '
-                               'current data and bindings remain in place') from exc
-        try:
-            for participant in participants:
-                participant.before_restore(context)
-            batch.restore()
-            journal.restore_record(ghost)
-            for participant in participants:
-                participant.after_restore(context)
-            journal.mark('restored')
-        except Exception as recovery:
-            raise install_transaction.InstallTransactionError(
-                f'Ledger migration failed ({exc}); restoration failed ({recovery}); review {journal.folder}') from recovery
-        raise
+            outcome = LedgerMoveResult(finishing, str(exc))
+        else:
+            try:
+                for participant in participants:
+                    participant.before_restore(context)
+                batch.restore()
+                journal.restore_record(ghost)
+                for participant in participants:
+                    participant.after_restore(context)
+                journal.mark('restored')
+                outcome = LedgerMoveResult('deferred' if isinstance(exc, ledger.LedgerSnapshotConflict) else 'restored', str(exc))
+            except Exception as recovery:
+                outcome = LedgerMoveResult('restore_incomplete', f'{exc}; {recovery}', (str(journal.folder),),
+                    phase=journal.phase, affected_paths=tuple(target['dest'] for target in targets))
     finally:
         batch.cleanup()
-    for line in install_transaction.cleanup_completed(ghost):
-        report.info(line)
-    return new_root
+    try:
+        cleanup = install_transaction.cleanup_completed(ghost)
+    except install_transaction.InstallTransactionError as exc:
+        if outcome.status == 'complete':
+            return LedgerMoveResult('cleanup_failed', str(exc))
+        return replace(outcome, detail=f'{outcome.detail}; {exc}')
+    if outcome.status == 'complete' and cleanup:
+        return LedgerMoveResult('complete', retained=tuple(cleanup))
+    return outcome
 
 
 @dataclass
@@ -214,10 +289,11 @@ def publish(ctx: "Context", targets: list[dict], progress: dict | None = None) -
     (the structured gateway cause when it has one) and returns its exit code.
     """
     checkout = record_source(ctx)
+    relationships = installed_ledger_locations().source_roots
     request = {"schema_version": install_transaction.REQUEST_SCHEMA_VERSION, "host": ctx.platform,
                "ghost_root": str(locations.record_root()), "event_log": str(locations.events_log(ctx.platform)),
                "installer": {"commit": checkout["commit"], "schema_version": installed_payload.SCHEMA_VERSION},
-               "source": dict(checkout), "asset_root": str(runner.REPO_ROOT), "targets": targets}
+               "source": dict(checkout, ledger_source_roots=relationships), "asset_root": str(runner.REPO_ROOT), "targets": targets}
     if any(target['kind'] == 'support' and target['name'] == '_shared' for target in targets):
         request['install_state'] = str(locations.install_state_path(ctx.platform))
     if progress:
@@ -338,15 +414,6 @@ def sync_runtime_shared(ctx: "Context") -> bool:
     return True
 
 
-GATEWAY_SERVICE_LABEL = "org.ghost-alice.context-gateway"
-
-
-def _gateway_service_running() -> bool:
-    """`launchctl print gui/<uid>/<label>` exits 0 while the service is loaded."""
-    domain = f"gui/{os.getuid()}" if hasattr(os, "getuid") else ""
-    return runner.run_command(["launchctl", "print", f"{domain}/{GATEWAY_SERVICE_LABEL}"], capture=True).ok
-
-
 def report_gateway(ctx: "Context") -> tuple[str, bool] | None:
     """One line about the context gateway after the runtime publish of an install and at the end of a repair,
     read-only, and the same line returned as `(summary, running)` for the report tail.
@@ -370,11 +437,14 @@ def report_gateway(ctx: "Context") -> tuple[str, bool] | None:
     if not isinstance(service, dict):
         return _report_unrecorded_service()
     summary = f"Context gateway: registered, runtime {service.get('runtime_root')}"
-    if _gateway_service_running():
+    observed = gateway_participant.loaded_service()
+    if observed.state == 'loaded' and observed.pid is not None:
         summary += ", service running"
         report.info(summary)
         return summary, True
-    summary += ", service not running"
+    summary += (", service not running" if observed.state == 'absent'
+                else ", service loaded; running process unconfirmed" if observed.state == 'loaded'
+                else f", service state unknown ({observed.detail})")
     report.warn(summary)
     return summary, False
 

@@ -33,7 +33,7 @@ import install_lock  # noqa: E402
 import install_transaction  # noqa: E402
 import installed_payload  # noqa: E402
 from installer import selection  # noqa: E402
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env, run_pty  # noqa: E402
 
 COMPANION = "session-intent-analyzer/scripts/session_intent_ledger.py"
 
@@ -291,7 +291,6 @@ raise SystemExit(cli.main(sys.argv[1:]))
         self.assert_matches_the_disk(targets)
 
     def test_saved_code_reinstall_keeps_current_selection_and_ledger_binding(self):
-        from installer_testing import installer_env
         (self.home / '.claude').mkdir()
         self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router')
         first = Path(self.record()['installer']['active_root'])
@@ -300,6 +299,8 @@ raise SystemExit(cli.main(sys.argv[1:]))
         skill.write_bytes(original + b'\nLater source revision.\n')
         self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router', 'compact-handoff')
         expected = {path for path, entry in self.record()['targets'].items() if entry['kind'] == 'skill'}
+        origin_fields = ('root', 'remote', 'ref', 'branch', 'hooks_path', 'ledger_source_roots')
+        expected_source = {key: self.record()['source'].get(key) for key in origin_fields}
         config_path = self.ghost / 'config.json'
         config = json.loads(config_path.read_text())
         config['retired_ledger_roots'] = [str(self.source / '.tmp/session-intent')]
@@ -318,9 +319,9 @@ raise SystemExit(cli.main(sys.argv[1:]))
         after = json.loads(config_path.read_text())
         self.assertEqual(after['retired_ledger_roots'], config['retired_ledger_roots'])
         self.assertEqual(after['install_locations']['claude']['ledger_root'], str(ledger.parent))
+        self.assertEqual({key: self.record()['source'].get(key) for key in origin_fields}, expected_source)
 
     def test_fixed_update_uses_remote_after_clone_removal_and_keeps_each_host_selection(self):
-        from installer_testing import installer_env
         (self.home / '.claude').mkdir()
         (self.home / '.codex').mkdir()
         remote = self.home / 'remote.git'
@@ -338,6 +339,29 @@ raise SystemExit(cli.main(sys.argv[1:]))
         subprocess.run(['git', '-C', str(self.source), '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'new candidate'], check=True)
         commit = self.head()
         subprocess.run(['git', '-C', str(self.source), '-c', 'core.hooksPath=/dev/null', 'push', '-q', 'origin', branch], check=True)
+        # The same remote also updates an installation whose records still use its source folder.
+        legacy_home = self.home / 'source-bound-home'
+        (legacy_home / '.claude').mkdir(parents=True)
+        legacy_records = self.source / '.tmp/interactive-update-records'
+        legacy_records.mkdir(parents=True)
+        (legacy_records / 'retained.txt').write_text('existing work records')
+        legacy_env = installer_env(legacy_home)
+        legacy_env.update(GHOST_ALICE_SESSION_INTENT_ROOT=str(legacy_records), GHOST_ALICE_INSTALL_LOCALE='en_US.UTF-8')
+        legacy_install = subprocess.run([self.bash, str(self.source / 'install.sh'), '--platform', 'claude',
+            '--skip-source-health', 'task-router'], cwd=legacy_home, env=legacy_env,
+            capture_output=True, text=True, timeout=180)
+        self.assertEqual(legacy_install.returncode, 0, legacy_install.stdout + legacy_install.stderr)
+        legacy_env.pop('GHOST_ALICE_SESSION_INTENT_ROOT')
+        question = 'Move your existing work records to the new location? [Y/n]'
+        code, output = run_pty([self.bash, str(legacy_home / '.ghost-alice/bin/ghost-alice'), 'update'],
+                              cwd=legacy_home, env=legacy_env, responses=[(question, 'n\n')])
+        self.assertEqual(code, 0, output)
+        self.assertEqual(output.count('Ghost-ALICE update is complete.'), 1)
+        self.assertEqual(output.count(question), 1)
+        self.assertNotIn('Ghost-ALICE installation is complete.', output)
+        self.assertEqual(json.loads((legacy_home / '.ghost-alice/config.json').read_text())
+                         ['install_locations']['claude']['ledger_root'], str(legacy_records))
+        self.assertEqual((legacy_records / 'retained.txt').read_text(), 'existing work records')
         shutil.rmtree(self.source)
         result = subprocess.run([self.bash, str(self.ghost / 'bin/ghost-alice'), 'update'],
                                 cwd=self.home, env=installer_env(self.home), capture_output=True, text=True, timeout=180)

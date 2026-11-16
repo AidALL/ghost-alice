@@ -88,12 +88,12 @@ def popen(argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdout=N
 
 
 def run_command(argv: Sequence[str], *, capture: bool = False, env: Mapping[str, str] | None = None,
-                cwd: Path | None = None) -> ToolResult:
+                cwd: Path | None = None, inherit_stdin: bool = False) -> ToolResult:
     """Run any command (git, brew, apt-get ...) with the same sink rules as `run_tool`."""
     merged = dict(os.environ)
     if env:
         merged.update(env)
-    kwargs: dict = dict(cwd=cwd, env=merged, stdin=subprocess.DEVNULL)
+    kwargs: dict = dict(cwd=cwd, env=merged, stdin=None if inherit_stdin else subprocess.DEVNULL)
     sink = report.sink()
     if capture:
         kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

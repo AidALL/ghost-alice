@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 import json
+import ntpath
+import os
+import re
+import shlex
+import sys
 from typing import TYPE_CHECKING
 
 import hook_definitions
+import ledger_access
 from installer import locations, report, runner, source
 
 if TYPE_CHECKING:
@@ -20,6 +27,149 @@ CLAUDE_MANAGED_BLOCK_BEGIN = "<!-- Ghost-ALICE managed block begin: claude-boots
 CLAUDE_MANAGED_BLOCK_END = "<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
 HOOK_ACTION_LABEL = " + ".join(hook_definitions.CORE_HOOK_IDS)
 GLOBAL_RULE_BLOCKS = "_shared/global_rule_blocks.py"
+
+
+@dataclass(frozen=True)
+class WriterObservation:
+    """A host/CLI process observation, not authority to stop a process or move its records."""
+
+    state: str
+    detail: str = ''
+    pids: tuple[int, ...] = ()
+
+
+def _process_argv(pid: int, platform: str) -> list[str]:
+    """Read actual argument boundaries; ps's displayed command loses spaces and quoting."""
+    if platform == 'linux':
+        raw = (Path('/proc') / str(pid) / 'cmdline').read_bytes()
+        return [os.fsdecode(arg) for arg in raw.rstrip(b'\0').split(b'\0')] if raw else []
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    mib = (ctypes.c_int * 3)(1, 49, pid)  # Darwin CTL_KERN, KERN_PROCARGS2.
+    size = ctypes.c_size_t()
+    if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0):
+        raise OSError(ctypes.get_errno(), 'Process argument size is unavailable')
+    buffer = ctypes.create_string_buffer(size.value)
+    if libc.sysctl(mib, 3, buffer, ctypes.byref(size), None, 0):
+        raise OSError(ctypes.get_errno(), 'Process arguments are unavailable')
+    raw = buffer.raw[:size.value]
+    count = int.from_bytes(raw[:4], sys.byteorder)
+    arguments = raw[raw.index(b'\0', 4) + 1:].lstrip(b'\0').split(b'\0')[:count]
+    if count < 1 or len(arguments) != count:
+        raise ValueError('Process arguments are incomplete')
+    return [os.fsdecode(arg) for arg in arguments]
+
+
+def observe_writers(platforms, *, platform: str | None = None) -> dict[str, WriterObservation]:
+    """Observe supported host processes and surviving host ledger/hook CLIs.
+
+    The OS inventory covers the current POSIX user or Windows session. Missing CLI identity remains
+    unknown. This snapshot neither tracks process history nor proves that no writer can start after
+    the observation; the caller owns the common waiting policy.
+    """
+    selected = tuple(dict.fromkeys(platforms))
+    if not selected:
+        return {}
+    platform = sys.platform if platform is None else platform
+    try:
+        if platform == 'win32':
+            command = ('$session = (Get-Process -Id $PID).SessionId; '
+                       'Get-CimInstance Win32_Process | Where-Object {$_.SessionId -eq $session} | '
+                       'Select-Object ProcessId,Name,ExecutablePath,CommandLine | ConvertTo-Json -Compress')
+            result = runner.run_command(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command], capture=True)
+            if not result.ok:
+                raise ValueError(result.stderr or 'Windows process discovery failed')
+            rows = json.loads(result.stdout or '')
+            rows = [rows] if isinstance(rows, dict) else rows
+            processes = [(int(row['ProcessId']),
+                          row.get('ExecutablePath') or row['Name'], row.get('CommandLine')) for row in rows]
+        elif platform in ('darwin', 'linux'):
+            result = runner.run_command(['ps', '-ww', '-U', str(os.getuid()), '-o', 'pid=,comm='], capture=True)
+            if not result.ok:
+                raise ValueError(result.stderr or 'POSIX process discovery failed')
+            processes = []
+            for line in (result.stdout or '').splitlines():
+                pid, executable = line.strip().split(None, 1)
+                processes.append((int(pid), executable, None))
+        else:
+            raise ValueError(f'Process observation is unavailable on {platform}')
+        if not processes:
+            raise ValueError('The process inventory is empty')
+        if any(not isinstance(executable, str) or not executable for _, executable, _ in processes):
+            raise ValueError('A process executable identity is unavailable')
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        return {host: WriterObservation('unknown', str(exc)) for host in selected}
+
+    running = {host: set() for host in selected}
+    unknown = []
+    for pid, executable, _ in processes:
+        name = ntpath.basename(executable).lower().removesuffix('.exe')
+        for host in hook_definitions.SUPPORTED_PLATFORMS:
+            if name == host or name.startswith((host + ' helper', host + ' (')):
+                if host in running:
+                    running[host].add(pid)
+    for pid, executable, command in processes:
+        name = ntpath.basename(executable).lower().removesuffix('.exe')
+        if not re.fullmatch(r'python(?:w|3(?:\.[0-9]+)?)?|node', name):
+            continue
+        try:
+            argv = ([arg.strip('"') for arg in shlex.split(command, posix=False)]
+                    if platform == 'win32' and command else _process_argv(pid, platform)
+                    if platform != 'win32' else [])
+            if not argv:
+                raise ValueError('Process arguments are unavailable')
+        except (FileNotFoundError, ProcessLookupError):
+            continue  # This process exited between the inventory and its argument read.
+        except (OSError, ValueError) as exc:
+            unknown.append(f'PID {pid}: {exc}')
+            continue
+        args = argv[1:]
+        if name != 'node':
+            # -W/-X consume the rest of their option group, or the next argument.
+            # -c/-m start a different execution form rather than a script path.
+            while args and args[0].startswith('-'):
+                option = args[0]
+                argument_option = re.search('[cmWX]', option[1:]) if not option.startswith('--') else None
+                if option == '-' or (argument_option and argument_option.group() in ('c', 'm')):
+                    break
+                separate_value = (option == '--check-hash-based-pycs' or
+                                  (argument_option and argument_option.end() == len(option) - 1))
+                args = args[2:] if separate_value else args[1:]
+                if option == '--':
+                    break
+        if not args:
+            continue
+        script = args[0].replace('\\', '/')
+        if name == 'node' and ntpath.basename(script) in hook_definitions.SUPPORTED_PLATFORMS:
+            host = ntpath.basename(script)
+        elif script.endswith('/@openai/codex/bin/codex.js'):
+            host = 'codex'
+        elif script.endswith('/@anthropic-ai/claude-code/cli.js'):
+            host = 'claude'
+        elif ntpath.basename(script) == 'hook_profile_gate.py':
+            parsed = hook_definitions.parse_hook_runner_command(shlex.join([argv[0], *args]))
+            host = (parsed or {}).get('platform')
+        elif ntpath.basename(script) in (ledger_access.LEDGER_PATH.name, 'session_intent_analyzer_hook.py',
+                                       'session_check_cache.py', 'claude_stop_verification_hook.py',
+                                       'pending_merge_precheck_hook.py', 'io_trace_hook.py',
+                                       'response_route.py', 'context_lifecycle.py',
+                                       'completion_assessment.py', 'source_lookup.py'):
+            # A parent app does not establish the CLI's environment-bound or default record host.
+            host = next((arg.split('=', 1)[1] for arg in args[1:] if arg.startswith('--platform=')), None)
+            if '--platform' in args:
+                index = args.index('--platform') + 1
+                host = args[index] if index < len(args) else None
+        else:
+            continue
+        if host in running:
+            running[host].add(pid)
+        elif host not in hook_definitions.SUPPORTED_PLATFORMS:
+            unknown.append(f'PID {pid}: the ledger CLI host binding is unavailable')
+    return {host: WriterObservation('running', 'Observed host or ledger CLI processes', tuple(sorted(pids))) if pids
+            else WriterObservation('unknown', f'The {host} host adapter is unavailable') if host not in hook_definitions.SUPPORTED_PLATFORMS
+            else WriterObservation('unknown', '; '.join(unknown)) if unknown
+            else WriterObservation('absent', 'No host or participating ledger CLI process was observed')
+            for host, pids in running.items()}
 
 
 def confirm_project_trust(platforms: list[str]) -> str:

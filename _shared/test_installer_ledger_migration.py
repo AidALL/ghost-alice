@@ -28,6 +28,7 @@ class LedgerMigrationTests(unittest.TestCase):
         self.reg = gateway_testing.registered_home(self, self.home)
         self.enterContext(mock.patch.dict(os.environ, {
             'HOME': str(self.home), 'GHOST_ALICE_GHOST_ROOT': str(self.reg.ghost),
+            'CODEX_HOME': str(self.reg.codex), 'CLAUDE_CONFIG_DIR': str(self.reg.claude),
         }))
         self.a, self.b = self.reg.ledger, self.reg.ghost / 'session-intent'
         self.ledger = ledger_access.load_ledger()
@@ -42,6 +43,7 @@ class LedgerMigrationTests(unittest.TestCase):
         self.participant = gateway_participant.GatewayParticipant(self.reg.ghost, self.reg.service(),
                                                                   effects=self.effects, platform='darwin')
         self.enterContext(mock.patch.object(gateway_participant, 'participants', return_value=[self.participant]))
+        self.enterContext(mock.patch.object(gateway_participant.sys, 'platform', 'darwin'))
 
     def migrate(self, **kwargs):
         return transaction.migrate_ledger(self.a, writers_stopped=kwargs.pop('writers_stopped', True), **kwargs)
@@ -59,7 +61,7 @@ class LedgerMigrationTests(unittest.TestCase):
             self.assertEqual(install_transaction.Journal.load(self.reg.ghost, txid).phase, 'committed')
             original_start(domain, agent)
         self.effects.start = start
-        self.migrate()
+        self.assertEqual(self.migrate().status, 'complete')
         self.assertEqual(self.effects.service_calls(), ['stop', 'start', 'ready'])
         self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session'), self.before)
         settings = json.loads((self.reg.claude / 'settings.json').read_bytes())
@@ -89,19 +91,57 @@ class LedgerMigrationTests(unittest.TestCase):
 
     def test_missing_stop_confirmation_changes_neither_files_nor_service(self):
         original = self.reg.state_path.read_bytes()
-        with self.assertRaisesRegex(ValueError, 'writers'):
-            self.migrate(writers_stopped=False)
+        self.assertEqual(self.migrate(writers_stopped=False).status, 'deferred')
         self.assertFalse(self.b.exists())
         self.assertEqual(self.reg.state_path.read_bytes(), original)
+        self.assertEqual(self.effects.calls, [])
+
+    def test_fixed_destination_symlink_cannot_redirect_record_publication(self):
+        external = self.home / 'unrelated'
+        external.mkdir()
+        (external / 'keep.txt').write_text('unrelated data')
+        self.b.symlink_to(external, target_is_directory=True)
+        before = {path: path.read_bytes() for path in (self.reg.state_path, runtime_config.config_path())}
+        with self.assertRaisesRegex(ValueError, 'unlinked destination'):
+            self.migrate()
+        self.assertTrue(self.b.is_symlink())
+        self.assertEqual(list(external.iterdir()), [external / 'keep.txt'])
+        self.assertEqual((external / 'keep.txt').read_text(), 'unrelated data')
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
         self.assertEqual(self.effects.calls, [])
 
     def test_completed_migration_removes_redundant_originals_and_preparation(self):
         self.b.mkdir()
         (self.b / 'existing.txt').write_text('existing B')
-        self.migrate()
+        self.assertEqual(self.migrate().status, 'complete')
         self.assertEqual((self.b / 'existing.txt').read_text(), 'existing B')
+        self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session'), self.before)
         self.assertEqual(list(install_transaction.rollbacks_root(self.reg.ghost).iterdir()), [])
         self.assertEqual(list(self.reg.ghost.glob('ledger-migration-*')), [])
+
+    def test_unreadable_other_host_prevents_shared_destination_move_without_changing_records(self):
+        codex = self.home / '.codex'
+        codex.mkdir(exist_ok=True)
+        (codex / 'hooks.json').write_text('{"hooks": null}')
+        original = runtime_config.config_path().read_bytes()
+        result = self.migrate()
+        self.assertEqual(result.status, 'deferred')
+        self.assertIn('codex', result.detail)
+        self.assertFalse(self.b.exists())
+        self.assertEqual(runtime_config.config_path().read_bytes(), original)
+        self.assertEqual(self.effects.calls, [])
+        self.assertEqual(self.ledger.read_session_state(root=self.a, platform='claude', session_id='same-session'), self.before)
+
+    def test_unverified_gateway_prevents_snapshot_and_preserves_configuration(self):
+        original = runtime_config.config_path().read_bytes()
+        journals = list(install_transaction.rollbacks_root(self.reg.ghost).glob('*'))
+        with mock.patch.object(gateway_participant, 'ledger_migration_participants', return_value=([], 'unknown listener')):
+            result = self.migrate()
+        self.assertEqual(result.status, 'deferred')
+        self.assertFalse(self.b.exists())
+        self.assertEqual(runtime_config.config_path().read_bytes(), original)
+        self.assertEqual(self.effects.calls, [])
+        self.assertEqual(list(install_transaction.rollbacks_root(self.reg.ghost).glob('*')), journals)
 
     @unittest.skipUnless(hasattr(os, 'fork'), 'requires process fork')
     def test_process_exit_during_preparation_recovers_without_orphan_snapshot(self):
@@ -133,12 +173,39 @@ class LedgerMigrationTests(unittest.TestCase):
         (self.a / 'original.txt').write_text('A')
         (self.b / 'original.txt').write_text('B')
         original = runtime_config.config_path().read_bytes()
-        with self.assertRaisesRegex(ValueError, 'conflict'):
-            self.migrate()
-        self.assertEqual((self.a / 'original.txt').read_text(), 'A')
-        self.assertEqual((self.b / 'original.txt').read_text(), 'B')
-        self.assertEqual(runtime_config.config_path().read_bytes(), original)
-        self.assertEqual(self.effects.service_calls(), ['stop', 'start', 'ready'])
+        for ready, expected in ((True, 'deferred'), (False, 'restore_incomplete')):
+            with self.subTest(restored_service_ready=ready):
+                self.effects.ready_answers = [ready]
+                self.effects.calls.clear()
+                result = self.migrate()
+                self.assertEqual(result.status, expected)
+                self.assertEqual((self.a / 'original.txt').read_text(), 'A')
+                self.assertEqual((self.b / 'original.txt').read_text(), 'B')
+                self.assertEqual(runtime_config.config_path().read_bytes(), original)
+                self.assertEqual(self.effects.service_calls(), ['stop', 'start', 'ready'])
+                if not ready:
+                    txid, = install_transaction.unfinished(self.reg.ghost)
+                    self.assertEqual(result.recovery_paths, (str(install_transaction.rollbacks_root(self.reg.ghost) / txid),))
+                    self.assertIn('not ready', result.detail)
+
+    def test_snapshot_validation_and_stage_copy_failures_restore_without_deferral(self):
+        self.b.mkdir()
+        (self.b / 'retained.txt').write_text('existing B')
+        originals = {path: path.read_bytes() for path in (self.reg.state_path, runtime_config.config_path())}
+        failures = ((self.ledger, 'snapshot_roots', ValueError('Ledger migration conflict: ordinary validation error')),
+                    (install_transaction, '_copy_to_stage', OSError('copy failed')))
+        for owner, method, error in failures:
+            with self.subTest(error=error), mock.patch.object(owner, method, side_effect=error):
+                self.effects.calls.clear()
+                result = self.migrate()
+            self.assertEqual(result.status, 'restored')
+            self.assertIn(str(error), result.detail)
+            self.assertEqual(self.ledger.read_session_state(root=self.a, platform='claude', session_id='same-session'), self.before)
+            self.assertEqual(sorted(path.name for path in self.b.iterdir()), ['retained.txt'])
+            self.assertEqual({path: path.read_bytes() for path in originals}, originals)
+            self.assertEqual(self.effects.service_calls(), ['stop', 'start', 'ready'])
+            self.assertTrue(self.effects.running)
+            self.assertFalse(install_transaction.unfinished(self.reg.ghost))
 
     def test_record_failure_restores_original_settings_symlink_and_existing_b(self):
         config = self.reg.claude / 'settings.json'
@@ -154,8 +221,9 @@ class LedgerMigrationTests(unittest.TestCase):
                 raise OSError('record failure')
             return update(root, patches, **kwargs)
         with mock.patch.object(installed_payload, 'update', side_effect=failed):
-            with self.assertRaisesRegex(OSError, 'record failure'):
-                self.migrate()
+            result = self.migrate()
+        self.assertEqual(result.status, 'restored')
+        self.assertIn('record failure', result.detail)
         self.assertTrue(config.is_symlink())
         self.assertEqual({path: path.read_bytes() for path in originals}, originals)
         self.assertEqual(sorted(path.name for path in self.b.iterdir()), ['retained.txt'])
@@ -168,8 +236,7 @@ class LedgerMigrationTests(unittest.TestCase):
             self.ledger.record_turn(root=self.b, platform='claude', session_id='same-session', raw_input='new write')
         self.effects.start = start
         self.effects.ready_answers = [False]
-        with self.assertRaisesRegex(RuntimeError, 'committed'):
-            self.migrate()
+        self.assertEqual(self.migrate().status, 'resume_incomplete')
         self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session')['latest_input_digest'],
                          self.ledger.text_digest('new write'))
         self.assertIn(str(self.a), runtime_config.load_config(strict=True)['retired_ledger_roots'])
@@ -187,6 +254,68 @@ class LedgerMigrationTests(unittest.TestCase):
         self.assertEqual(self.effects.service_calls().count('start'), 1)
         self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session')['latest_input_digest'],
                          self.ledger.text_digest('new write'))
+
+    def test_done_marker_write_failure_keeps_committed_b_and_running_service(self):
+        save = install_transaction.Journal.save
+        def fail_done(journal):
+            if journal.phase == 'done':
+                raise OSError('done marker write failed')
+            return save(journal)
+        with mock.patch.object(install_transaction.Journal, 'save', fail_done):
+            result = self.migrate()
+        self.assertEqual(result.status, 'mark_incomplete')
+        self.assertIn('done marker write failed', result.detail)
+        txid, = install_transaction.unfinished(self.reg.ghost)
+        journal = install_transaction.Journal.load(self.reg.ghost, txid)
+        self.assertEqual(journal.phase, 'committed')
+        self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session'), self.before)
+        config = runtime_config.load_config(strict=True)
+        self.assertEqual(config['install_locations']['claude']['ledger_root'], str(self.b))
+        self.assertIn(str(self.a), config['retired_ledger_roots'])
+        self.assertEqual(json.loads(self.reg.state_path.read_bytes())['ledger_root'], str(self.b))
+        self.assertTrue(self.effects.running)
+        self.assertEqual(self.effects.service_calls(), ['stop', 'start', 'ready'])
+
+    def test_cleanup_warning_returns_actual_retained_paths_after_completed_move(self):
+        root = install_transaction.rollbacks_root(self.reg.ghost)
+        root.mkdir(parents=True, exist_ok=True)
+        retained = root / 'user-kept.txt'
+        retained.write_text('preserve this unrelated file')
+        result = self.migrate()
+        self.assertEqual(result.status, 'complete')
+        self.assertEqual(retained.read_text(), 'preserve this unrelated file')
+        self.assertEqual(result.retained, (f'{retained}: unrecognized-publish-entry',))
+        self.assertEqual(list(root.iterdir()), [retained])
+        self.assertFalse(install_transaction.unfinished(self.reg.ghost))
+        self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session'), self.before)
+        self.assertEqual(runtime_config.load_config(strict=True)['install_locations']['claude']['ledger_root'], str(self.b))
+        self.assertTrue(self.effects.running)
+
+    def test_cleanup_deletion_failure_returns_error_without_reverting_committed_b(self):
+        remove = install_transaction._remove_path
+        failed = []
+        def deny_original(path):
+            path = Path(path)
+            if path.name.startswith('rollback-'):
+                failed.append(path)
+                raise PermissionError(13, 'cleanup deletion denied', str(path))
+            return remove(path)
+        with mock.patch.object(install_transaction, '_remove_path', side_effect=deny_original):
+            result = self.migrate()
+        self.assertEqual(result.status, 'cleanup_failed')
+        self.assertEqual(len(failed), 1)
+        self.assertTrue(failed[0].exists())
+        self.assertIn(str(failed[0]), result.detail)
+        self.assertIn('cleanup deletion denied', result.detail)
+        self.assertEqual(result.recovery_paths, ())
+        self.assertEqual(install_transaction.Journal.load(self.reg.ghost, failed[0].parent.name).phase, 'done')
+        self.assertFalse(install_transaction.unfinished(self.reg.ghost))
+        self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session'), self.before)
+        config = runtime_config.load_config(strict=True)
+        self.assertEqual(config['install_locations']['claude']['ledger_root'], str(self.b))
+        self.assertIn(str(self.a), config['retired_ledger_roots'])
+        self.assertTrue(self.effects.running)
+        self.assertEqual(self.effects.service_calls(), ['stop', 'start', 'ready'])
 
     def recover(self, txid):
         def participants(context, states, record):

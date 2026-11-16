@@ -73,7 +73,7 @@ class SQLiteAuthorityTests(unittest.TestCase):
                     else:
                         path.write_text(json.dumps(data))
                 before = [ledger._snapshot_files(root) for root in (source, existing)]
-                with self.assertRaisesRegex(ValueError, 'Ledger migration conflict:'):
+                with self.assertRaisesRegex(ledger.LedgerSnapshotConflict, 'Ledger migration conflict:'):
                     ledger.snapshot_roots(source, existing, staged, writers_stopped=True)
                 self.assertEqual([ledger._snapshot_files(root) for root in (source, existing)], before)
                 self.assertFalse(staged.exists())
@@ -150,9 +150,24 @@ class SQLiteAuthorityTests(unittest.TestCase):
         ledger.snapshot_roots(source, existing, self.root / 'same', writers_stopped=True)
         ledger.record_turn(root=existing, platform='codex', session_id='native', raw_input='different history')
         before = ledger.read_session_state(root=existing, platform='codex', session_id='native')
-        with self.assertRaisesRegex(ValueError, 'conflict'):
+        with self.assertRaisesRegex(ledger.LedgerSnapshotConflict, 'conflict'):
             ledger.snapshot_roots(source, existing, self.root / 'conflicting', writers_stopped=True)
         self.assertEqual(ledger.read_session_state(root=existing, platform='codex', session_id='native'), before)
+
+    def test_migration_snapshot_rejects_same_session_conflict_across_sqlite_and_legacy_storage(self):
+        source, existing, staged = (self.root / name for name in ('A', 'B', 'stage'))
+        identity = dict(platform='codex', session_id='native')
+        ledger.record_turn(root=source, **identity, raw_input='original history')
+        ledger.export_session(root=source, **identity, destination=existing)
+        ledger.record_turn(root=source, **identity, raw_input='new history only in SQLite')
+        self.assertNotEqual(ledger.read_session_state(root=source, **identity)['latest_input_digest'],
+                            ledger.read_session_state(root=existing, **identity)['latest_input_digest'])
+        before = [ledger._snapshot_files(root) for root in (source, existing)]
+        self.assertTrue(before[0].keys().isdisjoint(before[1]), 'No file conflict may mask the session comparison')
+        with self.assertRaisesRegex(ledger.LedgerSnapshotConflict, '^Ledger migration conflict: session codex/native$'):
+            ledger.snapshot_roots(source, existing, staged, writers_stopped=True)
+        self.assertEqual([ledger._snapshot_files(root) for root in (source, existing)], before)
+        self.assertFalse(staged.exists())
 
     def test_retired_root_rejects_writes_without_recreation_and_other_roots_remain_writable(self):
         original = self.seed()

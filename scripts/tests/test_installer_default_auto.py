@@ -18,7 +18,7 @@ README = REPO_ROOT / "README.md"
 ADDON_FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 if str(REPO_ROOT / "_shared") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "_shared"))
-from installer_testing import checkout_copy, installer_env  # noqa: E402
+from installer_testing import checkout_copy, installer_env, run_pty as _run_pty  # noqa: E402
 
 
 def _find_test_bash() -> str | None:
@@ -57,68 +57,6 @@ def _skill_target_count(*skill_names: str) -> int:
             if child.is_dir() and (child / "SKILL.md").exists()
         )
     return total
-
-
-def _run_pty(command: list[str], *, env: dict[str, str], cwd: Path) -> tuple[int, str]:
-    if not hasattr(os, "openpty"):
-        raise unittest.SkipTest("pseudo-terminal support is required for TTY progress test")
-
-    import select
-
-    # These TTY scenarios exercise isatty(), independent of a parent test runner's progress override.
-    env = env.copy()
-    env.pop("GHOST_ALICE_INSTALL_PROGRESS", None)
-    master_fd, slave_fd = os.openpty()
-    try:
-        proc = subprocess.Popen(
-            command,
-            cwd=cwd,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            close_fds=True,
-        )
-        os.close(slave_fd)
-        slave_fd = -1
-
-        chunks: list[bytes] = []
-        while True:
-            ready, _, _ = select.select([master_fd], [], [], 0.1)
-            if ready:
-                try:
-                    data = os.read(master_fd, 4096)
-                except OSError:
-                    break
-                if not data:
-                    break
-                chunks.append(data)
-            if proc.poll() is not None:
-                while True:
-                    ready, _, _ = select.select([master_fd], [], [], 0)
-                    if not ready:
-                        break
-                    try:
-                        data = os.read(master_fd, 4096)
-                    except OSError:
-                        break
-                    if not data:
-                        break
-                    chunks.append(data)
-                break
-        return_code = proc.wait(timeout=5)
-        if return_code:
-            # Compact installers retain child failures in the disposable HOME.
-            # Keep those diagnostics before TemporaryDirectory removes them.
-            for log in sorted((Path(env["HOME"]) / ".ghost-alice" / "install").glob("*.log")):
-                details = "\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-80:])
-                chunks.append(f"\nInstaller details ({log.name}):\n{details}\n".encode())
-    finally:
-        if slave_fd != -1:
-            os.close(slave_fd)
-        os.close(master_fd)
-
-    return return_code, b"".join(chunks).decode("utf-8", errors="replace")
 
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")

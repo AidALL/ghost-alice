@@ -28,6 +28,11 @@ fi
 
 set -euo pipefail
 
+# Keep the display language before the bootstrap adjusts the process encoding.
+if [ "${GHOST_ALICE_INSTALL_LOCALE+x}" != x ]; then
+  export GHOST_ALICE_INSTALL_LOCALE="${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Messages for the Python runtime step only ─────────────

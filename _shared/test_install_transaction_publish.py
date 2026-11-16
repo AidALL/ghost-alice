@@ -20,6 +20,7 @@ from context_gateway_model import GatewayServiceError  # noqa: E402
 import install_lock  # noqa: E402
 import install_transaction  # noqa: E402
 import installed_payload  # noqa: E402
+from installer_testing import installer_env  # noqa: E402
 
 
 class PublishCase(unittest.TestCase):
@@ -41,7 +42,7 @@ class PublishCase(unittest.TestCase):
         self.codex = self.home / ".agents" / "skills"
         self.claude.mkdir(parents=True)
         self.codex.mkdir(parents=True)
-        self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        self.env = mock.patch.dict(os.environ, installer_env(self.home), clear=True)
         self.env.start()
         self.lock_generation = install_lock.acquire_lock(self.ghost / "install.lock", owner="installer:install:claude:test")
 

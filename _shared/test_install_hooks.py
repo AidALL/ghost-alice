@@ -1043,6 +1043,57 @@ class TempHomeTestCase(unittest.TestCase):
         return source
 
 
+class TestObservedInstallation(TempHomeTestCase):
+    def _write_legacy_roots(self, platform, *roots):
+        commands = []
+        for root in roots:
+            payload = base64.urlsafe_b64encode(
+                f'python3 ledger.py --root {shlex.quote(str(root))}'.encode()).decode()
+            commands.append({"type": "command", "command":
+                f'python3 {shlex.quote(str(Path(install_hooks.__file__).with_name("hook_profile_gate.py")))} '
+                f'run session-intent {platform} {payload}'})
+        self._write_settings(platform, {"hooks": {"UserPromptSubmit": [{"hooks": commands}]}})
+
+    def test_partial_config_is_observed_without_environment_or_destination_defaults(self):
+        configured = {"project_root": str(self.fake_home / "project"),
+                      "ledger_root": str(self.fake_home / "configured-ledger")}
+        install_hooks.runtime_config.save_config({"install_locations": {"codex": configured}})
+        self._write_legacy_roots("codex", self.fake_home / "old-one", self.fake_home / "old-two")
+        with patch.dict(os.environ, {"GHOST_ALICE_SESSION_INTENT_ROOT": str(self.fake_home / "override"),
+                                     "GHOST_ALICE_CORE_ROOT": str(self.fake_home / "source")}):
+            self.assertEqual(install_hooks.observed_installation("codex"), configured)
+
+    def test_managed_hook_supplies_only_the_missing_ledger_field(self):
+        for platform in ("claude", "codex"):
+            with self.subTest(platform=platform):
+                root = str(self.fake_home / platform / "legacy ledger")
+                self._write_legacy_roots(platform, root)
+                self.assertEqual(install_hooks.observed_installation(platform), {"ledger_root": root})
+                configured = {"core_source_root": str(self.fake_home / "source")}
+                install_hooks.runtime_config.save_config({"install_locations": {platform: configured}})
+                self.assertEqual(install_hooks.observed_installation(platform),
+                                 dict(configured, ledger_root=root))
+                self.assertEqual(install_hooks.runtime_config.load_config()["install_locations"][platform],
+                                 configured)
+
+    def test_absent_installation_remains_empty_despite_explicit_environment(self):
+        with patch.dict(os.environ, {"GHOST_ALICE_SESSION_INTENT_ROOT": str(self.fake_home / "override"),
+                                     "GHOST_ALICE_CORE_ROOT": str(self.fake_home / "source")}):
+            self.assertEqual(install_hooks.observed_installation("codex"), {})
+
+    def test_conflicting_hooks_are_observed_unless_fallback_is_disabled(self):
+        self._write_legacy_roots("codex", self.fake_home / "one", self.fake_home / "two")
+        with self.assertRaisesRegex(ValueError, "conflicting ledger roots"):
+            install_hooks.observed_installation("codex")
+        self.assertEqual(install_hooks.observed_installation("codex", hook_fallback=False), {})
+
+    def test_explicit_default_destination_override_skips_conflicting_hooks(self):
+        self._write_legacy_roots("codex", self.fake_home / "one", self.fake_home / "two")
+        override = str(self.fake_home / "override")
+        with patch.dict(os.environ, {"GHOST_ALICE_SESSION_INTENT_ROOT": override}):
+            self.assertEqual(install_hooks._default_destination("codex").ledger_root, override)
+
+
 class TestInstallerFixtureIsolation(unittest.TestCase):
     def test_temp_home_fixture_isolates_inherited_platform_directories(self):
         with tempfile.TemporaryDirectory() as inherited:

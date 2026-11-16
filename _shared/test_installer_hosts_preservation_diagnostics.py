@@ -12,6 +12,7 @@ from dataclasses import asdict
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -58,6 +59,116 @@ class HostCase(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             result = fn(*args, **kwargs)
         return result, out.getvalue()
+
+
+class WriterObservationTests(unittest.TestCase):
+    def test_posix_native_identity_and_surviving_ledger_cli_are_distinct_from_argument_mentions(self):
+        processes = ('10 /Applications/Codex.app/Contents/MacOS/Codex\n'
+                     '11 /usr/bin/python3\n12 /bin/echo\n')
+        argv = ['/usr/bin/python3', '/tmp/path with spaces/session_intent_ledger.py', '--platform', 'claude']
+        for platform in ('darwin', 'linux'):
+            with self.subTest(platform=platform), mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, processes)), \
+                    mock.patch.object(hosts, '_process_argv', return_value=argv):
+                seen = hosts.observe_writers(['claude', 'codex'], platform=platform)
+                self.assertEqual((seen['codex'].state, seen['codex'].pids), ('running', (10,)))
+                self.assertEqual((seen['claude'].state, seen['claude'].pids), ('running', (11,)))
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '12 /bin/echo\n')):
+            self.assertEqual(hosts.observe_writers(['codex'], platform='darwin')['codex'].state, 'absent')
+
+    def test_windows_native_executable_and_python_script_arguments(self):
+        rows = [{'ProcessId': 10, 'ParentProcessId': 1, 'Name': 'Codex.exe',
+                 'ExecutablePath': r'C:\Program Files\Codex\Codex.exe', 'CommandLine': 'Codex.exe'},
+                {'ProcessId': 11, 'ParentProcessId': 1, 'Name': 'python.exe', 'ExecutablePath': r'C:\Python\python.exe',
+                 'CommandLine': 'python.exe "C:\\work files\\session_intent_ledger.py" --platform claude'}]
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, json.dumps(rows))):
+            seen = hosts.observe_writers(['claude', 'codex'], platform='win32')
+        self.assertEqual((seen['codex'].state, seen['codex'].pids), ('running', (10,)))
+        self.assertEqual((seen['claude'].state, seen['claude'].pids), ('running', (11,)))
+
+    def test_node_host_launcher_and_bound_hook_runner_survive_without_native_host_parent(self):
+        command = 'python3 /runtime/_shared/hook_profile_gate.py run session-intent claude eA=='
+        rows = '10 /usr/bin/node\n11 /usr/bin/python3\n'
+        argv = {10: ['node', '/usr/local/bin/codex'], 11: command.split()}
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, rows)), \
+                mock.patch.object(hosts, '_process_argv', side_effect=lambda pid, platform: argv[pid]):
+            seen = hosts.observe_writers(['claude', 'codex'], platform='darwin')
+        self.assertEqual(seen['codex'].pids, (10,))
+        self.assertEqual(seen['claude'].pids, (11,))
+
+    def test_unbound_writer_is_unknown_and_unrelated_python_argument_mentions_are_absent(self):
+        rows = '11 /usr/bin/python3\n'
+        cases = [(['python3', '/tmp/session_intent_ledger.py'], 'unknown'),
+                 (['python3', '/runtime/response_route.py', '--platform', 'codex', '--candidate-json', '{}'], 'running'),
+                 (['python3', '/runtime/context_lifecycle.py', '--platform=codex', '--selection-json', '[]'], 'running'),
+                 (['python3', '/runtime/source_lookup.py', '/tmp/source', '--platform', 'codex', '--purpose', 'review'], 'running'),
+                 (['python3', '/runtime/completion_assessment.py', 'record-response'], 'unknown'),
+                 (['python3', '/runtime/context_lifecycle.py', '--selection-json', '[]'], 'unknown'),
+                 (['python3', '/tmp/other.py', 'session_intent_ledger.py', '--platform', 'codex'], 'absent'),
+                 (['python3', '/tmp/other.py', 'response_route.py', '--platform', 'codex'], 'absent'),
+                 (['python3', '-W', 'session_intent_ledger.py', '/tmp/other.py'], 'absent'),
+                 (['python3', '-c', 'print("session_intent_ledger.py")'], 'absent')]
+        for options in (['-X', 'utf8'], ['-W', 'ignore'], ['-Xutf8'], ['-IBu'], ['--'],
+                        ['-uW', 'ignore'], ['-IX', 'utf8'], ['-uWignore'], ['-IXutf8'],
+                        ['--check-hash-based-pycs', 'always']):
+            cases.append((['python3', *options, '/runtime/session_intent_ledger.py', '--platform', 'codex'], 'running'))
+        for argv, expected in cases:
+            with self.subTest(argv=argv), mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, rows)), \
+                    mock.patch.object(hosts, '_process_argv', return_value=argv):
+                self.assertEqual(hosts.observe_writers(['codex'], platform='darwin')['codex'].state, expected)
+
+    def test_unbound_record_cli_is_not_attributed_to_its_native_ancestor_host(self):
+        rows = ('10 /Applications/Codex.app/Contents/MacOS/Codex\n'
+                '11 /bin/sh\n12 /usr/bin/python3\n')
+        for platform, script in ((platform, script) for platform in ('darwin', 'linux')
+                                for script in ('session_intent_ledger.py', 'completion_assessment.py')):
+            argv = ['python3', '/runtime/' + script]
+            with self.subTest(platform=platform, script=script), \
+                    mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, rows)), \
+                    mock.patch.object(hosts, '_process_argv', return_value=argv):
+                seen = hosts.observe_writers(['claude', 'codex'], platform=platform)
+                self.assertEqual((seen['codex'].state, seen['codex'].pids), ('running', (10,)))
+                self.assertEqual(seen['claude'].state, 'unknown')
+                self.assertEqual(hosts.observe_writers(['claude'], platform=platform)['claude'].state, 'unknown')
+
+    def test_unavailable_process_table_or_interpreter_arguments_is_unknown(self):
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '12 /bin/echo\n')):
+            unsupported = hosts.observe_writers(['future-host'], platform='darwin')['future-host']
+        self.assertEqual(unsupported.state, 'unknown')
+        self.assertIn('adapter', unsupported.detail.lower())
+        for output in (ToolResult(1, '', 'denied'), ToolResult(0, 'malformed'), ToolResult(0, '')):
+            with self.subTest(output=output), mock.patch.object(hosts.runner, 'run_command', return_value=output):
+                seen = hosts.observe_writers(['codex'], platform='darwin')['codex']
+                self.assertEqual(seen.state, 'unknown')
+                self.assertTrue(seen.detail)
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '11 /usr/bin/python3\n')), \
+                mock.patch.object(hosts, '_process_argv', side_effect=PermissionError('denied')):
+            seen = hosts.observe_writers(['codex'], platform='darwin')['codex']
+        self.assertEqual(seen.state, 'unknown')
+        self.assertIn('11', seen.detail)
+        for platform in ('darwin', 'linux'):
+            for exited in (FileNotFoundError('exited'), ProcessLookupError('exited')):
+                with self.subTest(platform=platform, exited=type(exited).__name__), \
+                        mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '11 /usr/bin/python3\n')), \
+                        mock.patch.object(hosts, '_process_argv', side_effect=exited):
+                    seen = hosts.observe_writers(['codex'], platform=platform)['codex']
+                    self.assertEqual((seen.state, seen.pids), ('absent', ()))
+
+    @unittest.skipUnless(sys.platform in ('darwin', 'linux'), 'local POSIX process lifetime evidence')
+    def test_real_ledger_cli_is_observed_until_it_exits_without_host_termination(self):
+        with tempfile.TemporaryDirectory(prefix='ghost writer ') as directory:
+            script = Path(directory) / 'session_intent_ledger.py'
+            script.write_text('import sys\nprint("ready", flush=True)\nsys.stdin.read()\n')
+            process = subprocess.Popen([sys.executable, str(script), '--platform', 'codex'],
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(process.stdout.readline().strip(), 'ready')
+                seen = hosts.observe_writers(['codex'])['codex']
+                self.assertIn(process.pid, seen.pids)
+            finally:
+                process.stdin.close()
+                process.wait(timeout=5)
+                process.stdout.close()
+            self.assertNotIn(process.pid, hosts.observe_writers(['codex'])['codex'].pids)
 
 
 class HookRegistrationTests(HostCase):
@@ -470,6 +581,23 @@ class InstallRecordReportTests(HostCase):
             with self.subTest(command=name):
                 self.assertEqual(rc, 0)
                 self.assertIn(f"[INFO] Install record: none yet; the next install writes {record}", out)
+
+    def test_doctor_reports_known_location_despite_other_host_error_without_changing_its_result(self):
+        import runtime_config
+        records = self.home / 'work-records'
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(records)}}})
+        before = runtime_config.config_path().read_bytes()
+        hooks = self.home / '.codex/hooks.json'
+        hooks.parent.mkdir(exist_ok=True)
+        hooks.write_text('{"hooks": null}')
+        with FakeRunner().patch(), mock.patch.object(diagnostics, 'run_install_doctor', return_value=7):
+            code, output = self.captured(diagnostics.run_doctor, self.context('claude'))
+        self.assertEqual(code, 7)
+        self.assertIn(str(records), output)
+        self.assertIn('codex', output)
+        self.assertNotIn('did not move', output)
+        self.assertEqual(runtime_config.config_path().read_bytes(), before)
+        self.assertFalse(records.exists())
 
     def test_the_summary_and_every_difference_of_this_hosts_targets(self):
         ctx = self.context("claude")
