@@ -18,7 +18,8 @@ Nov 18, 2026 · kyu
 - 테스트 쪽 차이 21건을 고쳤고, 실제 동작 차이 1건은 Windows에서 xfail(알려진 실패)로 표시했습니다.
 - 테스트 실행기(`scripts/run_windows_tests.ps1`)를 보완했습니다. 파이썬과 pytest가 없으면 이유를 알려 주고 멈춥니다.
 - PowerShell 5, PowerShell 7, CMD에서 각각 전체 테스트를 실행했습니다.
-- 호환표 Windows 항목 3개에 근거를 추가했습니다.
+- PowerShell 5, PowerShell 7, CMD에서 각각 Core 설치 도구로 격리 위치에 install/status/uninstall을 실행했습니다. 실제 설치본은 실행 전후 지문으로 그대로임을 확인했습니다.
+- 호환표 Windows 항목 3개를 `not-run` 에서 `verified-local` 로 올렸습니다.
 - Autopilot은 팀 fork가 없어서, 새 fork 대신 이 저장소의 `autopilot/` 브랜치에 올리고 PR을 만들었습니다.
 - CI가 AidALL 최신 Core를 받아 첫 단계에서 실패하던 문제를 고쳤습니다. 이제 CI는 팀 태그 `test-baseline-2026-11-16` 의 Core를 받습니다.
 
@@ -34,7 +35,7 @@ Nov 18, 2026 · kyu
 
 Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모두 통과했습니다. 테스트 수정이 Linux 동작을 바꾸지 않았다는 근거입니다. Linux에서 건너뛴 2건은 macOS 전용 도구(`sandbox-exec`)가 필요한 원래 테스트입니다.
 
-호환표의 Windows 항목은 상태를 `not-run` 으로 유지했습니다. 호환표는 "그 셸에서 install/status/remove 직접 실행"을 요구하는데, 이것은 아직 하지 않았기 때문입니다.
+셸별 격리 설치 확인도 세 셸 모두 성공했습니다. install은 Autopilot 훅 2개를 등록했고, status는 installed를 보고했고, uninstall은 훅 8개를 모두 지웠습니다(모두 종료 코드 0). 실제 사용자 설치 파일 921개와 설치 폴더 두 곳은 실행 전후 그대로였습니다. 이 근거로 호환표 Windows 항목 3개(CMD, PowerShell 5, PowerShell 7)를 `verified-local` 로 올렸습니다. 실제 Windows 실행 환경에서의 훅 동작은 호환표에 "다음에 필요한 근거"로 남겼습니다.
 
 ## 4. 발견한 문제
 
@@ -51,7 +52,6 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
 
 ## 5. 확인하지 못한 것
 
-- 각 셸에서 install/status/remove를 직접 실행 (호환표가 요구하는 항목)
 - 실제 Claude Code 세션에서 Windows 훅 전체 흐름. 테스트는 부품 단위 확인입니다.
 - 발견 사항 2번의 CRLF 파일 사례 직접 재현, 3번의 훅 경로 영향
 - 다른 팀원 PC에서의 실행 결과
@@ -59,6 +59,6 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
 ## 6. 다음 단계
 
 - PR [#2](https://github.com/bogop8-star/ghost-alice/pull/2) 검토 (jy, sk). 테스트 수정이 Linux·macOS 동작을 바꾸지 않는지, `icacls` 사용 방식이 괜찮은지 봐 주세요.
-- 격리 위치에서 셸별 install/status/remove를 실행해 호환표를 `verified-local` 로 올리기
+- 호환표 `os-linux` 항목: Linux CI 근거가 생겼으므로, Linux에서 격리 install/status/remove까지 확인해 올릴지 결정
 - 발견 사항 1~3번을 AidALL에 이슈로 낼지 결정. [개선 보고서](../../improvement-report.md) 4번 "Windows 테스트 실패 22건"과 이번 결과의 관계도 확인이 필요합니다.
 - 저장소 README에 `autopilot/` 브랜치 안내 추가 (별도 PR)
