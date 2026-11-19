@@ -15,3 +15,4 @@
 | 날짜 | 작성자 | 주제 |
 | --- | --- | --- |
 | 2026-11-18 | kyu | [Autopilot Windows 검증](kyu/2026-11-18-windows-verification.md) |
+| 2026-11-19 | jy | [Ghost-ALICE OS & Autopilot 실사용 개선](jy/2026-11-19-real-use-improvement.md) |
