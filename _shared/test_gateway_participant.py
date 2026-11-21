@@ -430,7 +430,8 @@ class InterruptedPublishTests(ParticipantCase):
                         contextlib.redirect_stderr(stderr):
                     code = install_transaction.main(["recover", "--ghost-root", str(self.reg.ghost), "--txid", txid])
                 self.assertNotEqual(code, 0)
-                self.assertIn("installer", stderr.getvalue())
+                expected_error = "invalid participant recovery facts" if state in ([], None) else "requires the installer owner"
+                self.assertIn(expected_error, stderr.getvalue())
                 self.assertEqual(self.runtime_files(), candidate)
                 self.assertEqual(effects.service_calls(), calls)
                 self.assertTrue(effects.running)

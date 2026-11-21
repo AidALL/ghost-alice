@@ -38,7 +38,7 @@ class RetirementTests(unittest.TestCase):
         self.enterContext(install_destination.use(destination_fixture(self.root)))
         self.release = self.enterContext(mock.patch.object(uninstall_cleanup, 'release_target_records',
                                                           create=True, return_value=None))
-        self.references = self.enterContext(mock.patch.object(uninstall_cleanup, '_platforms_referencing_target',
+        self.references = self.enterContext(mock.patch.object(uninstall_cleanup, 'platforms_referencing_target',
                                                              return_value=[]))
 
     def asset(self, name='jailbreak-detector', *, modified=False, source=None):

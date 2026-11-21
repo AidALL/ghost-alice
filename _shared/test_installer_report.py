@@ -8,10 +8,11 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -58,6 +59,25 @@ class InstallCommandTests(ReportCase):
 
 
 class MessageTests(ReportCase):
+    def test_removal_lines_keep_setting_cause_and_the_actual_retained_location(self):
+        item = dict(kind='source-repo-hook-config', path='/repository', action='manual-review',
+                    reason='restore-failed', detail='config.lock exists', removal_incomplete=True)
+        output = '\n'.join(text for _, text in report.removal_item_lines(item))
+        self.assertIn('core.hooksPath', output)
+        self.assertIn('/repository', output)
+        self.assertIn('config.lock exists', output)
+        for root, separator in ((PurePosixPath('/state'), '/'), (PureWindowsPath('C:/state'), '\\')):
+            with self.subTest(root=root), mock.patch.object(report, 'Path', type(root)), \
+                    mock.patch.object(report.os, 'sep', separator):
+                source, backup = root / 'rollbacks', root / 'backup/original'
+                original = f"{source / 'tx'}: pending"
+                item = dict(kind='support-artifact', target_name='publish-rollbacks', path=source.as_posix(),
+                            action='manual-review', reason='recovery-link-time-not-preserved',
+                            backup_path=backup.as_posix(), retained_originals=[original])
+                self.assertIn(('INFO', original), report.removal_item_lines(item))
+                item['action'] = 'quarantined-removed'
+                self.assertEqual(report.removal_item_lines(item), [('INFO', f"{backup / 'tx'}: pending")])
+
     def test_nested_exception_leaves_and_cleanup_note_keep_recovery_evidence(self):
         first = PermissionError('new receipt publish denied')
         second = OSError('legacy receipt restore denied')
@@ -217,7 +237,7 @@ class LocalizedMessageTests(ReportCase):
         values = dict(source_path="C:\\설치 원본", current_path="C:\\설치 원본\\기록", new_path="C:\\사용자\\새 기록",
                       entry_command='"C:\\사용자 폴더\\ghost-alice.cmd"', host_name="Claude Code", cause="[ERROR] source.root --verbose",
                       recovery_paths="/복구 기록", recovery="ghost-alice update", step="service-resume", paths="/보관 자료",
-                      affected_paths="/설정 파일", phase="prepare")
+                      affected_paths="/설정 파일", phase="prepare", journal_path="/정리 저널")
         cases = (
             ("move_complete", ("current_path", "new_path"), "are now at", "옮겼습니다"),
             ("move_cancelled", ("current_path", "entry_command"), "will ask again", "다시 묻습니다"),
@@ -228,7 +248,10 @@ class LocalizedMessageTests(ReportCase):
             ("move_restored", ("current_path", "cause"), "restored the previous state", "옮기기 전 상태로 되돌렸습니다"),
             ("move_recovery_incomplete", ("current_path", "new_path", "recovery_paths", "cause", "recovery", "affected_paths", "phase"), "could not finish restoring", "복원을 마치지 못했습니다"),
             ("move_committed_pending", ("current_path", "new_path", "step"), "is configured to use", "기록 위치도 이 경로로 설정했습니다"),
-            ("move_cleanup_failed", ("current_path", "new_path", "cause"), "could not finish cleaning up", "정리를 마치지 못했습니다"),
+            ("move_cleanup_failed", ("current_path", "new_path", "cause"), "could not finish deleting", "모두 삭제하지 못했습니다"),
+            ("move_source_removed", ("current_path", "new_path"), "deleted the old record folder", "삭제했습니다"),
+            ("move_source_cleanup_failed", ("new_path", "cause"), "could not finish deleting", "삭제를 마치지 못했습니다"),
+            ("record_source_journal_retained", ("current_path", "journal_path"), "cleanup journal", "정리 저널을"),
             ("retained_installation_artifacts", ("paths",), "retained these installation artifacts", "배치 보관 자료를 유지했습니다"),
             ("move_doctor", ("current_path", "entry_command"), "inside the folder", "폴더 안에 있습니다"),
             ("move_uninstall", ("current_path", "source_path"), "were not deleted", "지우지 않았습니다"),
@@ -376,6 +399,75 @@ class LogTests(ReportCase):
                          log_file=inherited)
         self.assertEqual(report.log_init(), inherited)
         self.assertEqual(len(list(root.iterdir())), 32)
+
+    def test_explicit_install_request_log_is_shared_without_changing_report_presentation(self):
+        original = report.log_init()
+        report.configure(report_child=False, log_file=original, home=self.home)
+        self.assertEqual(report.log_init(), original)
+        self.assertTrue(report.report_enabled())
+        self.assertEqual(report.state().event_file, original.with_suffix('.events.jsonl'))
+
+    def test_final_result_keeps_details_and_a_later_parent_only_summary_cannot_replace_them(self):
+        digest = 'a' * 64
+        version = self.home / '.ghost-alice/versions' / digest
+        version.mkdir(parents=True)
+        (version / 'version.json').write_text('{}')
+        report.run_logged(report.info, 'actual detail')
+        log = report.state().log_file
+        report.write_event('claude', 1, 0, 0, 1, verification='ok',
+                           hook_status=mock.Mock(legacy_status='installed', details={}))
+        report.finish_install(digest, 0)
+        self.assertIn('actual detail', log.read_text())
+        self.assertEqual(json.loads(log.with_suffix('.events.jsonl').read_text().splitlines()[-1]),
+                         dict(type='install-result', source_digest=digest, returncode=0))
+
+        # A legacy candidate writes elsewhere; the parent only emits a compatibility notice.
+        previous = log
+        original = previous.read_bytes()
+        report.configure(home=self.home)
+        summary = report.log_init()
+        self.captured(report.info, report.message('move_unsupported'))
+        report.finish_install('a' * 64, 0)
+        self.assertEqual(previous.read_bytes(), original)
+        self.assertTrue(summary.is_file())
+        self.assertFalse(summary.with_suffix('.events.jsonl').exists())
+
+    def test_finishing_an_older_failure_keeps_both_current_files_and_the_previous_success(self):
+        digest = 'a' * 64
+        version = self.home / '.ghost-alice/versions' / digest
+        version.mkdir(parents=True)
+        (version / 'version.json').write_text('{}')
+        report.run_logged(report.info, 'current failure details')
+        current = report.state().log_file
+        report.write_event('claude', 0, 0, 1, 0, verification='failed',
+                           hook_status=mock.Mock(legacy_status='installed', details={}))
+        previous = current.parent / '2026-01-01-000000.log'
+        previous.write_text('previous successful details\n')
+        previous_event = previous.with_suffix('.events.jsonl')
+        previous_event.write_text(json.dumps(dict(type='install-result', source_digest=digest, returncode=0)) + '\n')
+        saved_success = {path: path.read_bytes() for path in (previous, previous_event)}
+        failures = []
+        # Earlier runs can carry later timestamps after a wall-clock correction.
+        future = time.time() + 3600
+        for number in range(31):
+            log = current.parent / f'2026-02-01-000000-{number:032x}.log'
+            log.write_text(f'prior failure {number}\n')
+            event = log.with_suffix('.events.jsonl')
+            event.write_text(json.dumps(dict(type='install-result', source_digest=digest, returncode=1)) + '\n')
+            for path in (log, event):
+                os.utime(path, (future + number, future + number))
+            failures.append((log, event))
+
+        report.finish_install(digest, 1)
+
+        self.assertIn('current failure details', current.read_text())
+        self.assertEqual(json.loads(current.with_suffix('.events.jsonl').read_text().splitlines()[-1]),
+                         dict(type='install-result', source_digest=digest, returncode=1))
+        for path, content in saved_success.items():
+            self.assertEqual(path.read_bytes(), content)
+        self.assertEqual(set(current.parent.iterdir()),
+                         {current, current.with_suffix('.events.jsonl'), previous, previous_event,
+                          *(path for pair in failures[1:] for path in pair)})
 
     def test_run_logged_appends_step_output_to_the_log_in_compact_mode(self):
         # report.sh:103-110

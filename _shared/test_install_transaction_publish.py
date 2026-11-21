@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,8 @@ from installer_testing import installer_env  # noqa: E402
 
 class PublishCase(unittest.TestCase):
     def setUp(self):
+        from installer_testing import installer_observations
+        self.enterContext(installer_observations())
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
         self.home = root / "home"
@@ -275,7 +278,230 @@ class PublishTests(PublishCase):
         self.assertEqual(sorted(p.name for p in rollbacks.iterdir()), [*names, txid])
 
 
+class JournalDiscoveryTests(PublishCase):
+    def prepare(self):
+        return install_transaction.Journal.begin(self.request('codex'), [])
+
+    def test_absent_rollback_root_has_no_unfinished_publishes(self):
+        self.assertEqual(install_transaction.unfinished(self.ghost), [])
+
+    def test_existing_journal_phase_cannot_impersonate_a_missing_file(self):
+        journal = self.prepare()
+        journal.mark('absent')
+        self.assertTrue((journal.folder / 'journal.json').is_file())
+        self.assertEqual(install_transaction.unfinished(self.ghost), [journal.txid])
+        install_transaction.recover(self.ghost, journal.txid)
+        self.assertEqual(install_transaction.Journal.load(self.ghost, journal.txid).phase, 'restored')
+
+    @unittest.skipUnless(os.name == 'posix' and os.geteuid() != 0, 'requires ordinary POSIX permissions')
+    def test_unsearchable_link_target_does_not_hide_a_recoverable_publish(self):
+        journal = self.prepare()
+        protected = self.home / 'unsearchable'
+        target = protected / 'target'
+        target.mkdir(parents=True)
+        link = journal.folder.parent / 'unrelated-link'
+        link.symlink_to(target)
+        protected.chmod(0)
+        try:
+            with self.assertRaises(PermissionError):
+                link.stat()
+            self.assertEqual(install_transaction.unfinished(self.ghost), [journal.txid])
+            self.assertEqual(install_transaction.recover(self.ghost, journal.txid), [])
+            self.assertEqual(install_transaction.Journal.load(self.ghost, journal.txid).phase, 'restored')
+            self.assertTrue(link.is_symlink())
+        finally:
+            protected.chmod(0o700)
+
+    def test_linked_rollback_root_is_refused_without_reading_its_target(self):
+        journal = self.prepare()
+        root = journal.folder.parent
+        external = self.home / 'external-rollbacks'
+        root.rename(external)
+        root.symlink_to(external)
+        before = (external / journal.txid / 'journal.json').read_bytes()
+        with self.assertRaisesRegex(install_transaction.InstallTransactionError, str(root)) as refused:
+            install_transaction.unfinished(self.ghost)
+        self.assertEqual(refused.exception.journal_reason, 'linked-publish-root')
+        self.assertEqual((external / journal.txid / 'journal.json').read_bytes(), before)
+
+    @unittest.skipUnless(os.name == 'posix' and os.geteuid() != 0, 'requires ordinary POSIX permissions')
+    def test_unreadable_rollback_root_raises_instead_of_reporting_no_work(self):
+        journal = self.prepare()
+        root = journal.folder.parent
+        root.chmod(0)
+        try:
+            with self.assertRaisesRegex(install_transaction.InstallTransactionError, str(root)):
+                install_transaction.unfinished(self.ghost)
+        finally:
+            root.chmod(0o700)
+        self.assertEqual(install_transaction.unfinished(self.ghost), [journal.txid])
+
+    def test_entry_inspection_failure_raises_instead_of_hiding_other_publishes(self):
+        journal = self.prepare()
+        inaccessible = journal.folder.parent / 'unreadable-entry'
+        inaccessible.mkdir()
+        original_lstat = Path.lstat
+
+        def denied_lstat(path, *args, **kwargs):
+            if path == inaccessible:
+                raise PermissionError(13, 'permission denied', str(path))
+            return original_lstat(path, *args, **kwargs)
+
+        with mock.patch.object(Path, 'lstat', denied_lstat):
+            with self.assertRaisesRegex(install_transaction.InstallTransactionError, str(inaccessible)):
+                install_transaction.unfinished(self.ghost)
+        self.assertEqual(install_transaction.unfinished(self.ghost), [journal.txid])
+
+    @unittest.skipUnless(os.name == 'posix' and os.geteuid() != 0, 'requires ordinary POSIX permissions')
+    def test_unsearchable_journal_folder_stays_unfinished_and_recovery_refuses_it(self):
+        valid = self.prepare()
+        inaccessible = self.prepare()
+        inaccessible.folder.chmod(0)
+        try:
+            self.assertEqual(install_transaction.unfinished(self.ghost), [inaccessible.txid, valid.txid])
+            with self.assertRaises(install_transaction.InstallTransactionError):
+                install_transaction.recover(self.ghost, inaccessible.txid)
+        finally:
+            inaccessible.folder.chmod(0o700)
+        self.assertEqual(install_transaction.Journal.load(self.ghost, inaccessible.txid).phase, 'prepare')
+
+    def test_linked_finished_journal_is_unfinished_and_recovery_refuses_it(self):
+        journal = self.prepare()
+        external = self.home / 'external-journal.json'
+        journal.mark('done')
+        file = journal.folder / 'journal.json'
+        file.rename(external)
+        file.symlink_to(external)
+        before = external.read_bytes()
+        self.assertEqual(install_transaction.unfinished(self.ghost), [journal.txid])
+        with self.assertRaises(install_transaction.InstallTransactionError) as refused:
+            install_transaction.recover(self.ghost, journal.txid)
+        self.assertEqual(refused.exception.journal_reason, 'linked-publish-journal')
+        self.assertEqual(external.read_bytes(), before)
+
+    def test_entry_disappearing_after_enumeration_does_not_hide_other_publishes(self):
+        journal = self.prepare()
+        vanished = journal.folder.parent / 'vanished'
+        vanished.mkdir()
+        original_iterdir = Path.iterdir
+
+        def disappearing_entry(path):
+            entries = list(original_iterdir(path))
+            if path == journal.folder.parent and vanished in entries:
+                vanished.rmdir()
+            return iter(entries)
+
+        with mock.patch.object(Path, 'iterdir', disappearing_entry):
+            self.assertEqual(install_transaction.unfinished(self.ghost), [journal.txid])
+        self.assertFalse(vanished.exists())
+        self.assertEqual(install_transaction.recover(self.ghost, journal.txid), [])
+
+
 class CompletedCleanupTests(PublishCase):
+    @unittest.skipUnless(sys.platform == 'darwin' or os.name == 'nt', 'requires a native immutable or read-only file')
+    def test_completed_journal_with_older_locked_metadata_copy_retires_only_the_copy(self):
+        inventory = self.home / 'inventory'
+        inventory.write_bytes(b'original')
+        journal = install_transaction.Journal.begin(self.request('codex'), [])
+        journal.preserve_metadata(inventory)
+        copy = journal.folder / journal.data['metadata_records'][0]['copy']
+        def set_lock(file, locked):
+            if file.exists():
+                if os.name == 'nt':
+                    file.chmod(stat.S_IREAD if locked else stat.S_IREAD | stat.S_IWRITE)
+                else:
+                    os.chflags(file, stat.UF_IMMUTABLE if locked else 0)
+        set_lock(inventory, True)
+        try:
+            # Older installers copied both bytes and lock attributes into this journal path.
+            shutil.copy2(inventory, copy)
+            journal.mark('restored')
+            self.assertEqual(install_transaction.cleanup_completed(self.ghost, txids=(journal.txid,)), ())
+            self.assertFalse(journal.folder.exists())
+            self.assertEqual(inventory.read_bytes(), b'original')
+            if os.name == 'nt':
+                self.assertFalse(inventory.stat().st_mode & stat.S_IWRITE)
+            else:
+                self.assertTrue(inventory.stat().st_flags & stat.UF_IMMUTABLE)
+        finally:
+            set_lock(inventory, False)
+            set_lock(copy, False)
+
+    def test_partial_record_pair_cleanup_keeps_a_readable_baseline_for_retry(self):
+        install_transaction.publish(self.request('codex', self.target('alpha', self.codex / 'alpha', 'copy')))
+        with install_transaction.record_update(self.ghost) as journal:
+            pass
+        original_unlink = Path.unlink
+
+        def fail_pointer(path, *args, **kwargs):
+            if path == journal.folder / installed_payload.LEGACY_FILENAME:
+                raise PermissionError('legacy pointer deletion failed')
+            return original_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(Path, 'unlink', fail_pointer):
+            with self.assertRaisesRegex(install_transaction.InstallTransactionError, 'legacy pointer deletion failed'):
+                install_transaction.cleanup_completed(self.ghost, txids=(journal.txid,))
+        self.assertEqual(install_transaction.Journal.load(self.ghost, journal.txid).phase, 'done')
+        self.assertEqual(install_transaction.cleanup_completed(self.ghost, txids=(journal.txid,)), ())
+        self.assertFalse(journal.folder.exists())
+
+    def test_completed_directory_deletion_failure_keeps_journal_for_retry(self):
+        with install_transaction.record_update(self.ghost) as journal:
+            pass
+        original_rmdir = Path.rmdir
+
+        def fail_directory(path, *args, **kwargs):
+            if path == journal.folder:
+                raise PermissionError('completed directory deletion failed')
+            return original_rmdir(path, *args, **kwargs)
+
+        with mock.patch.object(Path, 'rmdir', fail_directory):
+            with self.assertRaisesRegex(install_transaction.InstallTransactionError, 'completed directory deletion failed'):
+                install_transaction.cleanup_completed(self.ghost, txids=(journal.txid,))
+        self.assertEqual(install_transaction.Journal.load(self.ghost, journal.txid).phase, 'done')
+        self.assertEqual(install_transaction.cleanup_completed(self.ghost, txids=(journal.txid,)), ())
+        self.assertFalse(journal.folder.exists())
+
+    def test_partial_metadata_cleanup_keeps_journal_for_retry(self):
+        for name in ('first', 'second'):
+            (self.home / name).write_text(name)
+        with install_transaction.record_update(self.ghost) as journal:
+            journal.preserve_metadata(self.home / 'first')
+            journal.preserve_metadata(self.home / 'second')
+        original_iterdir, original_unlink = Path.iterdir, Path.unlink
+
+        def journal_first(path):
+            entries = list(original_iterdir(path))
+            return iter(sorted(entries, key=lambda entry: (entry.name != 'journal.json', entry.name))) if path == journal.folder else iter(entries)
+
+        def fail_second(path, *args, **kwargs):
+            if path == journal.folder / 'metadata-1':
+                raise PermissionError('second metadata deletion failed')
+            return original_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(Path, 'iterdir', journal_first), mock.patch.object(Path, 'unlink', fail_second):
+            with self.assertRaisesRegex(install_transaction.InstallTransactionError, 'second metadata deletion failed'):
+                install_transaction.cleanup_completed(self.ghost, txids=(journal.txid,))
+        self.assertFalse((journal.folder / 'metadata-0').exists())
+        self.assertEqual(install_transaction.Journal.load(self.ghost, journal.txid).phase, 'done')
+        self.assertEqual(install_transaction.cleanup_completed(self.ghost, txids=(journal.txid,)), ())
+        self.assertFalse(journal.folder.exists())
+
+    def test_selected_metadata_cleanup_leaves_unrelated_record_source_journal_untouched(self):
+        source = self.home / 'retired-records'
+        source.mkdir()
+        (source / 'record.txt').write_text('preserved record')
+        unrelated = install_transaction.Journal.begin(self.request('codex'), [])
+        unrelated.data['source_cleanup'] = dict(path=str(source), destination=str(self.home / 'B'))
+        unrelated.mark('done')
+        before = (unrelated.folder / 'journal.json').read_bytes()
+        with install_transaction.record_update(self.ghost) as selected:
+            pass
+        self.assertEqual(install_transaction.cleanup_completed(self.ghost, txids=(selected.txid,)), ())
+        self.assertFalse(selected.folder.exists())
+        self.assertEqual((unrelated.folder / 'journal.json').read_bytes(), before)
+        self.assertEqual((source / 'record.txt').read_text(), 'preserved record')
+
     def replaced_copy(self, *, kind="skill", name="alpha", extra=None):
         dest = self.codex / name
         request = self.request("codex", self.target(name, dest, "copy", kind=kind))
@@ -291,6 +517,166 @@ class CompletedCleanupTests(PublishCase):
         install_transaction.cleanup_completed(self.ghost)
         self.assertFalse(original.exists())
         self.assertFalse((self.ghost / "rollbacks" / txid).exists())
+
+    def test_entry_disappearing_after_enumeration_does_not_stop_independent_cleanup(self):
+        txid, original = self.replaced_copy()
+        root = self.ghost / 'rollbacks'
+        vanished = root / '0-vanished'
+        vanished.mkdir()
+        original_iterdir = Path.iterdir
+        enumerations = 0
+
+        def disappearing_entry(path):
+            nonlocal enumerations
+            entries = list(original_iterdir(path))
+            if path == root:
+                enumerations += 1
+                if enumerations == 2:
+                    vanished.rmdir()
+            return iter(entries)
+
+        with mock.patch.object(Path, 'iterdir', disappearing_entry):
+            self.assertEqual(install_transaction.cleanup_completed(self.ghost), ())
+        self.assertFalse(vanished.exists())
+        self.assertFalse(original.exists())
+        self.assertFalse((root / txid).exists())
+
+    def test_entry_inspection_permission_failure_is_not_treated_as_disappearance(self):
+        txid, original = self.replaced_copy()
+        root = self.ghost / 'rollbacks'
+        inaccessible = root / '0-unreadable'
+        inaccessible.mkdir()
+        original_iterdir = Path.iterdir
+        original_lstat = Path.lstat
+        enumerations = 0
+
+        def counted_iterdir(path):
+            nonlocal enumerations
+            if path == root:
+                enumerations += 1
+            return original_iterdir(path)
+
+        def denied_lstat(path):
+            if path == inaccessible and enumerations >= 2:
+                raise PermissionError(13, 'permission denied', str(path))
+            return original_lstat(path)
+
+        with mock.patch.object(Path, 'iterdir', counted_iterdir), mock.patch.object(Path, 'lstat', denied_lstat):
+            with self.assertRaisesRegex(install_transaction.InstallTransactionError, str(inaccessible)):
+                install_transaction.cleanup_completed(self.ghost)
+        self.assertTrue(original.exists())
+        self.assertEqual(install_transaction.Journal.load(self.ghost, txid).phase, 'done')
+
+    def test_unusable_journal_keeps_record_source_and_reports_its_reason(self):
+        for case, reason in (('unsupported-schema', 'unsupported-journal-schema'),
+                             ('targets-shape', 'invalid-journal'),
+                             ('target-element', 'invalid-journal'),
+                             ('wrong-txid', 'invalid-journal'),
+                             ('record-copy', 'invalid-journal'),
+                             ('baseline-link', 'linked-installed-baseline')):
+            with self.subTest(case=case):
+                original = self.home / ('source-' + case)
+                original.mkdir()
+                (original / 'only-copy.txt').write_text('source to preserve')
+                journal = install_transaction.Journal.begin(self.request('codex'), [])
+                journal.data['source_cleanup'] = dict(path=str(original), destination=str(self.home / 'B'),
+                    baseline=content_digest.state(original, include_generated=True))
+                if case == 'unsupported-schema':
+                    journal.data['schema_version'] = 99
+                elif case == 'targets-shape':
+                    journal.data['targets'] = 'not-a-list'
+                elif case == 'target-element':
+                    journal.data['targets'] = ['not-a-target']
+                elif case == 'wrong-txid':
+                    journal.data['txid'] = 'another-publish'
+                elif case == 'record-copy':
+                    journal.data['record_files'] = ['../installed-payload.json']
+                else:
+                    journal.data.update(record_copy=installed_payload.FILENAME,
+                                        record_files=[installed_payload.FILENAME])
+                    (journal.folder / installed_payload.FILENAME).symlink_to(original / 'only-copy.txt')
+                journal.mark('done')
+                before = content_digest.state(original, include_generated=True)
+
+                def remove_source(ghost, removal):
+                    shutil.rmtree(removal['path'])
+
+                try:
+                    reasons = install_transaction.cleanup_completed(self.ghost, record_source_cleanup=remove_source)
+                    self.assertEqual(content_digest.state(original, include_generated=True), before)
+                    self.assertTrue((journal.folder / install_transaction.JOURNAL_FILENAME).is_file())
+                    self.assertTrue(any(str(journal.folder) in value and reason in value for value in reasons), reasons)
+                finally:
+                    shutil.rmtree(journal.folder, ignore_errors=True)
+
+    def test_legacy_record_copy_journal_still_cleans_managed_original(self):
+        txid, original = self.replaced_copy()
+        journal = install_transaction.Journal.load(self.ghost, txid)
+        for name in journal.data['record_files']:
+            if name != journal.data['record_copy']:
+                (journal.folder / name).unlink()
+        del journal.data['record_files']
+        journal.save()
+        install_transaction.cleanup_completed(self.ghost)
+        self.assertFalse(original.exists())
+        self.assertFalse(journal.folder.exists())
+
+    def test_malformed_recovery_fields_keep_source_before_cleanup_effects(self):
+        cases = {
+            'metadata-container': {'metadata_records': {}},
+            'metadata-entry': {'metadata_records': [None]},
+            'metadata-missing-fields': {'metadata_records': [{}]},
+            'metadata-missing-copy': {'metadata_records': [{'path': str(self.home / 'version')}]},
+            'metadata-relative-path': {'metadata_records': [{'path': 'version', 'copy': None}]},
+            'metadata-copy-type': {'metadata_records': [{'path': str(self.home / 'version'), 'copy': []}]},
+            'metadata-copy-escape': {'metadata_records': [{'path': str(self.home / 'version'), 'copy': '../outside'}]},
+            'metadata-copy-link': {'metadata_records': [{'path': str(self.home / 'version'), 'copy': 'metadata-0'}]},
+            'target-missing-dest': {'targets': [{}]},
+            'target-dest-type': {'targets': [{'dest': []}]},
+            **{f'target-{key}': {'targets': [{'dest': str(self.codex / 'alpha'), key: []}]}
+               for key in ('source', 'logical_dest', 'stage', 'rollback', 'kind', 'name', 'mode', 'before', 'candidate')},
+            'host-type': {'host': []},
+            'participant-container': {'participants': []},
+            'preparation-name': {'preparation_dir': '../outside'},
+        }
+        for case, fields in cases.items():
+            with self.subTest(case=case):
+                original = self.home / ('source-' + case)
+                original.mkdir()
+                (original / 'only-copy.txt').write_text('source to preserve')
+                journal = install_transaction.Journal.begin(self.request('codex'), [])
+                journal.data.update(fields, source_cleanup=dict(path=str(original), destination=str(self.home / 'B'),
+                    baseline=content_digest.state(original, include_generated=True)))
+                if case == 'metadata-copy-link':
+                    (journal.folder / 'metadata-0').symlink_to(original / 'only-copy.txt')
+                journal.mark('done')
+                before = content_digest.state(original, include_generated=True)
+
+                def remove_source(ghost, removal):
+                    shutil.rmtree(removal['path'])
+
+                try:
+                    reasons = install_transaction.cleanup_completed(self.ghost, record_source_cleanup=remove_source)
+                    self.assertEqual(content_digest.state(original, include_generated=True), before)
+                    self.assertTrue((journal.folder / install_transaction.JOURNAL_FILENAME).is_file())
+                    self.assertTrue(any(str(journal.folder) in value for value in reasons), reasons)
+                finally:
+                    shutil.rmtree(journal.folder, ignore_errors=True)
+
+    def test_metadata_recovery_and_completed_cleanup_use_saved_metadata(self):
+        version = self.home / 'version'
+        version.write_text('old version')
+        added = self.home / 'added-version'
+        journal = install_transaction.Journal.begin(self.request('codex'), [])
+        journal.preserve_metadata(version)
+        journal.preserve_metadata(added)
+        version.write_text('new version')
+        added.write_text('new file')
+        install_transaction.recover(self.ghost, journal.txid)
+        self.assertEqual(version.read_text(), 'old version')
+        self.assertFalse(added.exists())
+        self.assertEqual(install_transaction.cleanup_completed(self.ghost), ())
+        self.assertFalse(journal.folder.exists())
 
     def test_full_copy_check_preserves_user_content_excluded_from_hashes(self):
         for kind, name in (("skill", "alpha"), ("runtime", "beta")):

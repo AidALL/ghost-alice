@@ -36,51 +36,344 @@ RUNTIME_COMPANIONS = ("session-intent-analyzer/scripts/session_intent_ledger.py"
 class LedgerLocations:
     roots: dict[Path, dict]
     unavailable_hosts: dict[str, str] = field(default_factory=dict)
-    source_roots: dict[str, str] = field(default_factory=dict)
+    source_roots: dict[str, dict] = field(default_factory=dict)
+    retired_roots: tuple[Path, ...] = ()
+    configured_roots: dict[str, Path] = field(default_factory=dict)
+    observation_errors: dict[str, str] = field(default_factory=dict)
+    hook_roots: dict[str, tuple[Path, ...]] = field(default_factory=dict)
+    host_config_errors: dict[str, str] = field(default_factory=dict)
+    installed_hosts: tuple[str, ...] = ()
+    source_root: Path | None = None
+
+    def publication_source(self, checkout: dict) -> dict:
+        """Keep previously observed host identities even while this checkout is still the source."""
+        roots = {ledger: relation if relation['hosts'] else relation['source_root']
+                 for ledger, relation in self.source_roots.items()}
+        return dict(checkout, ledger_source_roots=roots)
+
+    @property
+    def active_config_errors(self) -> dict[str, str]:
+        """Config failures that can conceal an installed host's shared record dependency."""
+        return {host: cause for host, cause in self.host_config_errors.items()
+                if host in self.installed_hosts or self.hook_roots.get(host) != ()}
+
+    @property
+    def dependency_errors(self) -> tuple[tuple[str, str], ...]:
+        """Ordered causes preventing shared record movement or source cleanup."""
+        return (*self.observation_errors.items(), *self.active_config_errors.items(),
+                *self.unavailable_hosts.items())
 
 
-def installed_ledger_locations() -> LedgerLocations:
+def installed_ledger_locations(*, ghost_root: Path | None = None, before_handoff: dict | None = None) -> LedgerLocations:
     """Group actual installed bindings and their source relationships, without changing them."""
     import install_hooks
     import runtime_config
 
-    config = runtime_config.load_config(env={'GHOST_ALICE_GHOST_ROOT': str(locations.record_root())}, strict=True)
-    source_record = (installed_payload.read(locations.record_root()) or {}).get('source', {})
+    ghost_root = locations.record_root() if ghost_root is None else ghost_root
+    errors = {}
+    config_path = ghost_root / 'config.json'
+    try:
+        config = runtime_config.load_config(env={'GHOST_ALICE_GHOST_ROOT': str(ghost_root)}, strict=True)
+    except (OSError, ValueError) as exc:
+        config = {}
+        errors[str(config_path)] = str(exc)
+    record_path = str(installed_payload.read_path(ghost_root))
+    try:
+        record = installed_payload.read(ghost_root) or {}
+        source_record = installed_payload.recorded_source(ghost_root, record)
+    except (OSError, installed_payload.RecordError) as exc:
+        record = {}
+        source_record = {}
+        errors[record_path] = str(exc)
     retained = source_record.get('ledger_source_roots', {})
     origin = source_record.get('root')
-    fixed = locations.ledger_root().resolve()
+    if before_handoff and before_handoff.get('root') == origin:
+        # During an old manager's last publication, v2 contains the source path only.
+        # Keep the observed hosts for a still-matching path if its binding became unreadable.
+        retained = dict(retained)
+        for path, fact in before_handoff.get('ledger_source_roots', {}).items():
+            if isinstance(fact, dict) and retained.get(path) == fact['source_root']:
+                retained[path] = fact
+    fixed = (ghost_root / 'session-intent').resolve()
     retired = {Path(value).resolve() for value in config.get('retired_ledger_roots', [])}
     grouped = {}
     unavailable = {}
-    for host in dict.fromkeys([*install_hooks.PLATFORMS, *config.get('install_locations', {})]):
-        try:
-            value = install_hooks.observed_installation(host, hook_fallback=host in install_hooks.PLATFORMS, config=config)
-            raw_root = value.get('ledger_root')
-            if not raw_root:
-                continue
-            if not isinstance(raw_root, str) or not Path(raw_root).is_absolute():
-                raise ValueError(f'Installed ledger root for {host} must be an absolute path string')
-            root = Path(raw_root).resolve()
-        except (OSError, ValueError) as exc:
-            unavailable[host] = str(exc)
-            continue
-        if root in retired:
-            continue
-        entry = grouped.setdefault(root, dict(hosts={}, source_root=None, state='fixed' if root == fixed else 'unknown'))
-        entry['hosts'][host] = value
-        if root == fixed:
-            continue
-        previous = retained.get(str(root)) or origin
-        if previous and Path(previous).is_absolute() and root.is_relative_to(Path(previous).resolve()):
+    configured = {}
+    hook_roots = {}
+    host_errors = {}
+    relationships = {}
+
+    def add_binding(host, value, raw_root):
+        if not isinstance(raw_root, str) or not Path(raw_root).is_absolute():
+            raise ValueError(f'Installed ledger root for {host} must be an absolute path string')
+        root = Path(raw_root).resolve()
+        state = 'fixed' if root == fixed else 'unconfirmed' if str(config_path) in errors else 'retired' if root in retired else 'unknown'
+        entry = grouped.setdefault(root, dict(hosts={}, source_root=None, state=state))
+        entry['hosts'][host] = dict(value, ledger_root=raw_root)
+        saved = retained.get(str(root))
+        previous = saved.get('source_root') if isinstance(saved, dict) and host in saved['hosts'] else None
+        previous = previous or origin
+        if (root != fixed and root not in retired and previous and Path(previous).is_absolute()
+                and root.is_relative_to(Path(previous).resolve())):
             entry['source_root'] = Path(previous).resolve()
-            entry['state'] = 'source-bound'
-    # An unreadable host can still use a previously observed root. Keep that fact,
-    # but never invent a relationship from the current checkout or an override.
-    relationships = {root: origin for root, origin in retained.items()
-                     if unavailable and Path(root).resolve() not in retired and Path(root).resolve() != fixed}
-    relationships.update({str(root): str(value['source_root']) for root, value in grouped.items()
-                          if value['source_root'] is not None})
-    return LedgerLocations(grouped, unavailable, relationships)
+            relation = relationships.setdefault(str(root), dict(source_root=str(entry['source_root']), hosts=[]))
+            if host not in relation['hosts']:
+                relation['hosts'].append(host)
+            if str(config_path) not in errors:
+                entry['state'] = 'source-bound'
+        return root
+
+    for host in dict.fromkeys([*install_hooks.PLATFORMS, *config.get('install_locations', {})]):
+        value = {}
+        try:
+            value = install_hooks.observed_installation(host, hook_fallback=False, config=config)
+            if 'ledger_root' in value:
+                configured[host] = add_binding(host, value, value['ledger_root'])
+        except (OSError, ValueError) as exc:
+            host_errors[host] = f'{config_path}: install_locations.{host}: {exc}'
+        if host in install_hooks.PLATFORMS:
+            try:
+                hook_roots[host] = tuple(sorted(add_binding(host, value, raw_root)
+                    for raw_root in install_hooks.installed_hook_ledger_roots(host)))
+            except (OSError, ValueError) as exc:
+                unavailable[host] = str(exc)
+    leftovers = tuple(Path(value) for value in config.get('retired_ledger_roots', []) if os.path.lexists(value))
+    installed_hosts = set()
+    for destination, target in record.get('targets', {}).items():
+        try:
+            installed_hosts.update(installed_payload._check_entry(destination, target)['used_by'])
+        except installed_payload.RecordError as exc:
+            errors[record_path] = '; '.join(filter(None, (errors.get(record_path), str(exc))))
+    observed = LedgerLocations(grouped, unavailable, retired_roots=leftovers, configured_roots=configured,
+        observation_errors=errors, hook_roots=hook_roots, host_config_errors=host_errors,
+        installed_hosts=tuple(sorted(installed_hosts)), source_root=Path(origin).resolve() if origin else None)
+    # Retain a previously observed host's relation while its binding cannot be read.
+    # Unattributed legacy facts survive uncertainty but cannot identify a later binding.
+    for root, saved in retained.items():
+        if Path(root).resolve() in retired or Path(root).resolve() == fixed:
+            continue
+        if isinstance(saved, str):
+            saved = dict(source_root=saved, hosts=[])
+        hidden = {host for host in saved['hosts']
+                  if str(config_path) in errors or host in host_errors or host in unavailable}
+        if hidden:
+            relation = relationships.setdefault(root, dict(source_root=saved['source_root'], hosts=[]))
+            relation['hosts'].extend(hidden - set(relation['hosts']))
+        elif not saved['hosts'] and (errors or host_errors or unavailable or Path(root) in grouped):
+            relationships.setdefault(root, saved)
+    observed.source_roots.update({root: dict(value, hosts=sorted(value['hosts']))
+                                 for root, value in relationships.items()})
+    return observed
+
+
+def _record_roots_overlap(original: Path, root: Path) -> bool:
+    return original == root or original in root.parents or root in original.parents
+
+
+def _record_source_hosts(original: Path, observed: LedgerLocations) -> set[str]:
+    return {host for root, value in observed.roots.items()
+            if _record_roots_overlap(original, root)
+            for host in value['hosts']}
+
+
+def _saved_record_source_writers(removal: dict) -> tuple[set[str], dict[str, str]]:
+    writers = removal.get('writer_hosts', [])
+    unavailable = removal.get('unavailable_writer_hosts', {})
+    if (not isinstance(writers, list) or any(not isinstance(host, str) or not host for host in writers)
+            or not isinstance(unavailable, dict)
+            or any(not isinstance(host, str) or not host or not isinstance(cause, str)
+                   for host, cause in unavailable.items())):
+        raise ValueError('Invalid record source writer references in the completed journal')
+    return set(writers), dict(unavailable)
+
+
+@dataclass
+class RecordSourceRetention:
+    blocked_hosts: dict[str, dict[str, str]] = field(default_factory=dict)
+    errors: dict[str, str] = field(default_factory=dict)
+    cleanup_sources: dict[Path, Path] = field(default_factory=dict)
+
+
+def retain_record_source_writers(ghost: Path, prior_locations: LedgerLocations | None,
+                                 observation_error: Exception | None = None) -> RecordSourceRetention:
+    """Preserve cleanup observations; return only the detach scopes that would lose required facts."""
+    import install_hooks
+
+    install_transaction._require_lock(ghost)
+    result = RecordSourceRetention()
+    if (prior_locations is not None and not prior_locations.retired_roots
+            and not prior_locations.dependency_errors
+            and observation_error is None):
+        return result
+    observed = prior_locations or LedgerLocations({})
+    result.errors.update(observed.observation_errors)
+    unavailable = dict(observed.unavailable_hosts)
+    if observation_error is not None:
+        unavailable.update({host: str(observation_error) for host in install_hooks.PLATFORMS})
+        result.errors[str(ghost / 'config.json')] = str(observation_error)
+    # Unreadable installation facts plus unreadable hooks can conceal an unjournaled source.
+    for host, cause in unavailable.items():
+        dependencies = dict(result.errors)
+        if host in observed.host_config_errors:
+            dependencies[str(ghost / 'config.json')] = observed.host_config_errors[host]
+        for path, detail in dependencies.items():
+            result.blocked_hosts.setdefault(host, {})[path] = (
+                f'Cannot detach {host}: installation observation is unavailable: {detail}; '
+                f'its actual hook roots cannot be confirmed: {cause}')
+    remaining = {path.resolve(): _record_source_hosts(path.resolve(), observed) | set(unavailable)
+                 for path in observed.retired_roots}
+    fixed = (ghost / 'session-intent').resolve()
+    for host, roots in observed.hook_roots.items():
+        if result.errors or host in observed.host_config_errors:
+            for path in roots:
+                if path != fixed:
+                    remaining.setdefault(path, set()).add(host)
+    root = install_transaction.rollbacks_root(ghost)
+    try:
+        if root.is_symlink():
+            raise ValueError(f'Cleanup journal root is a symbolic link: {root}')
+        folders = sorted(root.iterdir()) if root.exists() else []
+    except (OSError, ValueError) as exc:
+        result.errors[str(root)] = str(exc)
+        folders = []
+    for folder in folders:
+        path = folder / install_transaction.JOURNAL_FILENAME
+        try:
+            if not install_transaction.is_journal_candidate(folder):
+                continue
+            journal = install_transaction.Journal.load(ghost, folder.name)
+            if journal.phase != 'done' or 'source_cleanup' not in journal.data:
+                continue
+            removal = journal.data['source_cleanup']
+            if (not isinstance(removal, dict) or not isinstance(removal.get('path'), str)
+                    or not Path(removal['path']).is_absolute()):
+                raise ValueError(f'Invalid record source cleanup in {path}')
+            original = Path(removal['path']).resolve()
+            if not os.path.lexists(original):
+                continue
+            result.cleanup_sources[folder] = original
+            writers, saved_unavailable = _saved_record_source_writers(removal)
+            confirmed = _record_source_hosts(original, observed)
+            remaining.setdefault(original, set()).update(confirmed | set(unavailable))
+            writers.update(confirmed)
+            saved_unavailable.update(unavailable)
+            revised = dict(removal, writer_hosts=sorted(writers), unavailable_writer_hosts=saved_unavailable)
+            if revised != removal:
+                journal.data['source_cleanup'] = revised
+                journal.save()
+            remaining[original].difference_update(writers | set(saved_unavailable))
+        except (OSError, ValueError, install_transaction.InstallTransactionError) as exc:
+            result.errors[str(path)] = str(exc)
+    for original, hosts in remaining.items():
+        # Config survives full uninstall and remains an input of the next cleanup.
+        preserved = {host for host, path in observed.configured_roots.items()
+                     if _record_roots_overlap(original, path)}
+        for host in hosts - preserved:
+            cause = (f'Cannot detach {host}: No completed cleanup journal preserves its reference to {original}; '
+                     'cleanup would lose its host reference')
+            if host in unavailable:
+                cause += f'; actual hook observation failed: {unavailable[host]}'
+            result.blocked_hosts.setdefault(host, {})[str(original)] = cause
+    return result
+
+
+def cleanup_record_source(ghost: Path, removal: dict, *, prior_locations: LedgerLocations | None = None) -> str:
+    """Delete only the verified remainder named by a completed migration journal."""
+    import content_digest
+    import runtime_config
+
+    config = runtime_config.load_config(env={'GHOST_ALICE_GHOST_ROOT': str(ghost)}, strict=True)
+    if (not isinstance(removal, dict) or not isinstance(removal.get('path'), str)
+            or not isinstance(removal.get('destination'), str)
+            or not isinstance(removal.get('baseline'), dict)):
+        raise ValueError('Invalid record source cleanup in the completed journal')
+    original, destination = Path(removal['path']), Path(removal['destination'])
+    baseline = removal['baseline'].get('folder')
+    if (not original.is_absolute() or not destination.is_absolute() or original.resolve() != original
+            or original == destination or original in destination.parents or destination in original.parents
+            or str(original) not in config.get('retired_ledger_roots', [])
+            or destination.is_symlink() or not (destination / 'ghost-state.sqlite3').is_file()
+            or not isinstance(baseline, dict) or 'other' in baseline.values()):
+        raise ValueError(f'Record source cleanup cannot confirm the retired location: {original}')
+    if not os.path.lexists(original):
+        return 'absent'
+    observed = installed_ledger_locations(ghost_root=ghost)
+    if observed.dependency_errors:
+        raise ValueError('Cannot confirm record source cleanup: ' + '; '.join(
+            f'{path}: {cause}' for path, cause in observed.dependency_errors))
+    if any(_record_roots_overlap(original, root) for root in observed.roots):
+        raise ValueError(f'An installed host still uses the retired record source: {original}')
+    writer_hosts, unavailable_hosts = _saved_record_source_writers(removal)
+    if prior_locations is not None:
+        writer_hosts.update(_record_source_hosts(original, prior_locations))
+        unavailable_hosts.update(prior_locations.unavailable_hosts)
+    # A fresh readable binding lookup above and absent processes resolve the earlier host uncertainty.
+    # Empty post-detach bindings alone cannot erase either saved host set.
+    writer_hosts.update(unavailable_hosts)
+    from installer import hosts
+    for host, writer in hosts.observe_writers(sorted(writer_hosts)).items():
+        if writer.state != 'absent':
+            raise ValueError(f'Cannot remove {original}: {host} writer {writer.state}: {writer.detail}')
+    registered = gateway_participant.participants(ghost)
+    participant = registered[0] if registered else None
+    if isinstance(participant, gateway_participant.UnreadableRecordParticipant):
+        raise ValueError(participant.reason)
+    effects = participant.effects if participant is not None else None
+    platform = participant.platform if participant is not None else None
+    live = gateway_participant.listener_binding(
+        gateway_participant.loaded_service(effects=effects, platform=platform), (original,), effects=effects)
+    if live.state not in ('absent', 'unrelated'):
+        raise ValueError(f'Cannot remove {original}: gateway {live.state}: {live.detail}')
+    remaining = content_digest.state(original, include_generated=True)
+    if remaining is not None:
+        changed = ([str(original)] if 'folder' not in remaining else
+                   [str(original / name) for name, value in remaining['folder'].items() if baseline.get(name) != value])
+        if changed:
+            raise ValueError('Retired record source changed before cleanup: ' + '; '.join(changed))
+        # Missing entries were deleted by a previous attempt after their data had been verified in B.
+        install_transaction._remove_path(original)
+        return 'removed'
+    return 'absent'
+
+
+def cleanup_retired_ledgers() -> tuple[Path, ...]:
+    """Finish already accepted moves using the existing retirement facts and publish journals."""
+    import ledger_access
+
+    ghost = locations.record_root()
+    install_transaction._require_lock(ghost)
+    observed = installed_ledger_locations()
+    old_roots = observed.retired_roots
+    if observed.dependency_errors:
+        raise ValueError('Cannot confirm record source cleanup: ' + '; '.join(
+            f'{path}: {cause}' for path, cause in observed.dependency_errors))
+    # A previous partial deletion already has a verified baseline; do not reopen a half-deleted DB.
+    install_transaction.cleanup_completed(ghost, record_source_cleanup=cleanup_record_source)
+    if install_transaction.unfinished(ghost):
+        raise ValueError('Record source cleanup requires the unfinished installation to recover first')
+    destination = locations.ledger_root().resolve()
+    ledger = ledger_access.load_ledger()
+    for root in old_roots:
+        if not os.path.lexists(root):
+            continue
+        if (root.is_symlink() or not root.is_dir() or root.resolve() != root
+                or root == destination or root in destination.parents or destination in root.parents):
+            raise ValueError(f'Invalid retired record source: {root}')
+        if any(_record_roots_overlap(root, current) for current in observed.roots):
+            raise ValueError(f'An installed host still uses the retired record source: {root}')
+        try:
+            baseline = ledger.verify_moved_source(root, destination)
+        except (ValueError, OSError) as exc:
+            raise ValueError(f'Cannot remove old record folder {root}; retained-history check against {destination}: {exc}') from exc
+        ledger.relocate_moved_links(root, destination)
+        journal = install_transaction.Journal.begin(dict(ghost_root=str(ghost), host='installer'), [])
+        journal.data['source_cleanup'] = dict(path=str(root), destination=str(destination),
+                                              baseline=baseline)
+        journal.mark('done')
+        retained = install_transaction.cleanup_completed(ghost, record_source_cleanup=cleanup_record_source)
+        if os.path.lexists(root):
+            raise ValueError(f'Record source cleanup did not remove {root}: {"; ".join(retained)}')
+    return old_roots
 
 
 @dataclass(frozen=True)
@@ -122,8 +415,9 @@ def migrate_ledger(old_root: Path, *, writers_stopped: bool) -> LedgerMoveResult
     config_path = ghost / 'config.json'
     config = runtime_config.load_config(env={'GHOST_ALICE_GHOST_ROOT': str(ghost)}, strict=True)
     observed = installed_ledger_locations()
-    if observed.unavailable_hosts:
-        return LedgerMoveResult('deferred', '; '.join(f'{host}: {cause}' for host, cause in observed.unavailable_hosts.items()))
+    if observed.dependency_errors:
+        return LedgerMoveResult('deferred', '; '.join(f'{path}: {cause}' for path, cause in
+            observed.dependency_errors))
     prepared, bindings = {}, {}
     for host, value in observed.roots.get(old_root, {}).get('hosts', {}).items():
         destination = install_destination.InstallDestination.parse(value)
@@ -180,7 +474,8 @@ def migrate_ledger(old_root: Path, *, writers_stopped: bool) -> LedgerMoveResult
     try:
         for participant in participants:
             participant.before_publish(context)
-        ledger.snapshot_roots(old_root, new_root, snapshot, writers_stopped=True)
+        import content_digest
+        original_source, original_destination = ledger.snapshot_roots(old_root, new_root, snapshot, writers_stopped=True)
         if any(install_transaction.ReplacementBatch.identity(path) != original for path, original in before.items()):
             raise ValueError('Installed configuration changed during ledger migration')
         batch.stage()
@@ -188,12 +483,17 @@ def migrate_ledger(old_root: Path, *, writers_stopped: bool) -> LedgerMoveResult
                 or any(item['before'] != before[item['dest']] for item in batch.prepared[1:])):
             raise ValueError('Installed configuration path or content changed during ledger migration')
         journal.record_staged(batch)
+        if journal.data['targets'][0]['before'] != original_destination:
+            raise ValueError('Record destination changed after snapshot validation')
         batch.publish()
-        import content_digest
         if content_digest.state(new_root, include_generated=True) != journal.data['targets'][0]['candidate']:
             raise ValueError('Published ledger differs from its verified snapshot')
         if any(path.read_bytes() != raw for path, raw in physical.items()):
             raise ValueError('Published ledger bindings differ from the prepared configuration')
+        if content_digest.state(old_root, include_generated=True) != original_source:
+            raise ValueError('Record source changed before the move committed')
+        journal.data['source_cleanup'] = dict(path=str(old_root), destination=str(new_root),
+                                              baseline=original_source)
         if service_after is not None:
             installed_payload.update(ghost, {'service': service_after}, journal=journal)
             if 'gateway' in journal.data['participants']:
@@ -226,11 +526,16 @@ def migrate_ledger(old_root: Path, *, writers_stopped: bool) -> LedgerMoveResult
     finally:
         batch.cleanup()
     try:
-        cleanup = install_transaction.cleanup_completed(ghost)
+        cleanup = install_transaction.cleanup_completed(ghost, record_source_cleanup=cleanup_record_source)
     except install_transaction.InstallTransactionError as exc:
         if outcome.status == 'complete':
-            return LedgerMoveResult('cleanup_failed', str(exc))
+            return LedgerMoveResult('cleanup_failed', str(exc), phase=journal.phase,
+                                    affected_paths=(str(old_root), str(new_root)), retained=(str(old_root),))
         return replace(outcome, detail=f'{outcome.detail}; {exc}')
+    if outcome.status == 'complete' and os.path.lexists(old_root):
+        return LedgerMoveResult('cleanup_failed', f'The old record folder remains: {old_root}',
+                                retained=(str(old_root), *cleanup), phase=journal.phase,
+                                affected_paths=(str(old_root), str(new_root)))
     if outcome.status == 'complete' and cleanup:
         return LedgerMoveResult('complete', retained=tuple(cleanup))
     return outcome
@@ -289,11 +594,22 @@ def publish(ctx: "Context", targets: list[dict], progress: dict | None = None) -
     (the structured gateway cause when it has one) and returns its exit code.
     """
     checkout = record_source(ctx)
-    relationships = installed_ledger_locations().source_roots
+    observed = installed_ledger_locations()
+    errors = dict(observed.observation_errors)
+    if ctx.platform in observed.host_config_errors:
+        errors[ctx.platform] = observed.host_config_errors[ctx.platform]
+    if observed.source_root is not None and observed.source_root != Path(checkout['root']).resolve():
+        # A malformed active host entry may still depend on the old common source
+        # even when no individual ledger relationship was recorded before it broke.
+        errors.update(observed.active_config_errors)
+    if errors:
+        raise ValueError('Cannot confirm installed record source relationships: ' + '; '.join(
+            f'{path}: {cause}' for path, cause in errors.items()))
     request = {"schema_version": install_transaction.REQUEST_SCHEMA_VERSION, "host": ctx.platform,
                "ghost_root": str(locations.record_root()), "event_log": str(locations.events_log(ctx.platform)),
                "installer": {"commit": checkout["commit"], "schema_version": installed_payload.SCHEMA_VERSION},
-               "source": dict(checkout, ledger_source_roots=relationships), "asset_root": str(runner.REPO_ROOT), "targets": targets}
+               "source": observed.publication_source(checkout), "asset_root": str(runner.REPO_ROOT), "targets": targets}
+    request['source'] = source.check_previous_manager(request['source'])
     if any(target['kind'] == 'support' and target['name'] == '_shared' for target in targets):
         request['install_state'] = str(locations.install_state_path(ctx.platform))
     if progress:
@@ -397,7 +713,7 @@ def sync_runtime_shared(ctx: "Context") -> bool:
         companion = runner.REPO_ROOT / relative
         if companion.is_file():
             targets.append(_request_target(ctx, relative, companion, runtime_root / relative, kind="runtime", mode="copy"))
-    for original, name in (("install.sh", "ghost-alice"), ("install.ps1", "ghost-alice.ps1"), ("install.cmd", "ghost-alice.cmd")):
+    for name, original in locations.MANAGEMENT_COMMANDS.items():
         entry = runner.REPO_ROOT / original
         if entry.is_file():
             target = _request_target(ctx, name, entry, locations.record_root() / 'bin' / name,
@@ -557,11 +873,12 @@ def remove_installed_target(ctx: "Context", label: str, target: Path, *,
         manifest = install_state_writer.read_state(state_path)
     except (OSError, ValueError) as exc:
         return dict(target_name=label, path=str(target), action="manual-review",
-                    reason="install-state-unreadable", detail=str(exc))
+                    reason="install-state-unreadable", detail=str(exc), removal_incomplete=True)
     manifest = manifest or dict(platform=ctx.platform, source_root=str(runner.REPO_ROOT), targets=[])
     row = next((row for row in manifest["targets"] if Path(row["dest_path"]) == target), None)
     if row is not None and row["target_name"] != label:
-        return dict(target_name=label, path=str(target), action="manual-review", reason="target-name-mismatch")
+        return dict(target_name=label, path=str(target), action="manual-review",
+                    reason="target-name-mismatch", removal_incomplete=True)
     if row is None:
         row = dict(target_name=label, dest_path=str(target), install_mode=detect_install_mode(target, False))
         if source_path is not None:
@@ -572,15 +889,18 @@ def remove_installed_target(ctx: "Context", label: str, target: Path, *,
         try:
             _apply_target_item(result, row, manifest=manifest, manifest_path=state_path, platform=ctx.platform)
         except (OSError, ValueError) as exc:
-            result.update(action='manual-review', reason='target-removal-failed', detail=str(exc))
+            result.update(action='manual-review', reason='target-removal-failed', detail=str(exc),
+                          file_state='present' if os.path.lexists(target) else 'absent')
     if only_if_absent and result["action"] != "missing":
         result.update(action="manual-review", reason="target-appeared-after-preview")
+    if result["action"] == "manual-review":
+        result["removal_incomplete"] = True
     if apply_changes and result["action"] in {"removed", "quarantined-removed", "missing", "reference-released"}:
         try:
             release_target_records(root=locations.record_root(), platform=ctx.platform, destination=target,
                                    kind='support' if label == '_shared' else 'skill', state_path=state_path)
         except (OSError, ValueError, installed_payload.NotLockHolder) as exc:
-            result.update(action='manual-review', reason='target-record-cleanup-failed', detail=str(exc),
+            result.update(action='manual-review', reason='target-record-cleanup-failed', detail=str(exc), removal_incomplete=True,
                           file_state='present' if os.path.lexists(target) else 'absent')
             return result
         if result["action"] != "missing":

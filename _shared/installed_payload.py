@@ -1,12 +1,14 @@
 """The install record: what the installer installed where, for every host, in one file.
 
-`~/.ghost-alice/installed-payload-v2.json` holds schema version 2. The former
-`installed-payload.json` holds only an incompatible-schema notice after migration.
+The record root holds one detailed record. Version 2 stores source paths and
+version 3 stores host attribution when a path alone cannot identify the relationship.
+Older filenames hold a notice identifying the detailed record.
 
 - `installer`: `{commit, schema_version}` of the last writer and optional
   `active_root` selecting the package the installed management command executes.
 - `source`: `{root, commit, dirty, hooks_path, remote, ref}` of the development input,
-  with optional `ledger_source_roots` mapping installed ledger paths to their source roots.
+  with optional `ledger_source_roots` mapping installed ledger paths to their source and observed hosts.
+  A path alone carries no host attribution after a change of source.
 - `last_transaction`: `{id, updated_at, rollback_dir}` of the last publish.
 - `targets`: one entry per install location path, used by one or more hosts:
   `name`, `kind`, `mode`, `provider`, `source`, `source_commit`, `used_by`,
@@ -48,7 +50,11 @@ import install_lock
 SCHEMA_VERSION = 2
 FILENAME = "installed-payload-v2.json"
 LEGACY_FILENAME = "installed-payload.json"
-RECORD_FILENAMES = (FILENAME, LEGACY_FILENAME)
+ATTRIBUTED_SCHEMA_VERSION = 3
+ATTRIBUTED_FILENAME = "installed-payload-v3.json"
+RECORD_FILENAMES = (ATTRIBUTED_FILENAME, FILENAME, LEGACY_FILENAME)
+PENDING_SOURCE_FILENAME = "pending-install-source.json"
+INSTALL_RECORD_FILES = (*RECORD_FILENAMES, PENDING_SOURCE_FILENAME)
 LOCK_FILENAME = "install.lock"
 SECTIONS = ("installer", "source", "last_transaction", "targets", "service")
 KINDS = ("skill", "support", "runtime", "command", "resource")
@@ -76,7 +82,8 @@ class NotLockHolder(RuntimeError):
 
 def path(ghost_root: Path | str) -> Path:
     """The current detailed install record under `ghost_root`."""
-    return Path(ghost_root) / FILENAME
+    attributed = Path(ghost_root) / ATTRIBUTED_FILENAME
+    return attributed if os.path.lexists(attributed) else Path(ghost_root) / FILENAME
 
 
 def read_path(ghost_root: Path | str) -> Path:
@@ -86,8 +93,14 @@ def read_path(ghost_root: Path | str) -> Path:
 
 
 def read(ghost_root: Path | str) -> dict | None:
-    """The record, or None when there is none; RecordError when it is unreadable or another schema version."""
-    file = read_path(ghost_root)
+    """Read the detailed record under ghost_root; a missing record returns None."""
+    return read_file(read_path(ghost_root))
+
+
+def read_file(file: Path | None) -> dict | None:
+    """Read a selected detail, including an absent pre-publication record during recovery."""
+    if file is None:
+        return None
     try:
         raw = file.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -100,11 +113,12 @@ def read(ghost_root: Path | str) -> dict | None:
         raise RecordError(f"{file} is not JSON: {exc}") from exc
     if not isinstance(record, dict):
         raise RecordError(f"{file} is not a JSON object")
-    if record.get("schema_version") not in (1, SCHEMA_VERSION):
+    supported = (ATTRIBUTED_SCHEMA_VERSION,) if file.name == ATTRIBUTED_FILENAME else (1, SCHEMA_VERSION)
+    if record.get("record_file") in (ATTRIBUTED_FILENAME, FILENAME):
+        raise RecordError(f"{file.parent / record['record_file']} is missing; restore the detailed install record")
+    if record.get("schema_version") not in supported:
         raise RecordError(f"{file} has schema_version {record.get('schema_version')!r}; this installer reads "
-                          f"1 and {SCHEMA_VERSION}")
-    if record.get("record_file") == FILENAME:
-        raise RecordError(f"{path(ghost_root)} is missing; restore the detailed install record")
+                          f"{supported} in this file")
     if not isinstance(record.get("targets", {}), dict):
         raise RecordError(f"{file} has targets that are not an object")
     if "source" in record:
@@ -142,21 +156,122 @@ def _encode(record: dict) -> bytes:
     return (json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
-def _save(ghost_root: Path | str, record: dict, *, journal=None) -> None:
-    record["schema_version"] = SCHEMA_VERSION
-    notice = Path(ghost_root) / LEGACY_FILENAME
-    expected = _encode({"schema_version": SCHEMA_VERSION, "record_file": FILENAME})
-    change_notice = not notice.exists() or notice.read_bytes() != expected
-    # A normal update replaces one file. The first promotion changes two files;
-    # service migration and other direct writers need the same journal as publish.
-    operation = nullcontext()
-    if change_notice and journal is None:
+def source_paths(relations: dict) -> dict:
+    """The path-only relationships readable by a v2 install-record reader."""
+    return {path: fact['source_root'] if isinstance(fact, dict) else fact for path, fact in relations.items()}
+
+
+def _pending_source(root: Path) -> dict | None:
+    file = root / PENDING_SOURCE_FILENAME
+    if file.is_symlink():
+        raise RecordError(f'Pending installation source is a symbolic link: {file}')
+    try:
+        pending = json.loads(file.read_bytes())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        raise RecordError(f'Cannot read pending installation source {file}: {exc}') from exc
+    if (not isinstance(pending, dict) or not _absolute(pending.get('active_root'))
+            or not isinstance(pending.get('source'), dict) or not _absolute(pending['source'].get('root'))
+            or not isinstance(pending['source'].get('ledger_source_roots'), dict)):
+        raise RecordError(f'Invalid pending installation source: {file}')
+    _check_source(pending['source'])
+    return pending
+
+
+def _matches_pending(record: dict, pending: dict) -> bool:
+    source = record.get('source', {})
+    saved = pending['source']
+    return (record.get('installer', {}).get('active_root') == pending['active_root']
+            and source.get('root') == saved['root']
+            and source.get('ledger_source_roots', {}) == source_paths(saved['ledger_source_roots']))
+
+
+def preserve_pending_source(file: Path, journal) -> None:
+    """Include this sidecar in the writer's existing rollback, once and before its first change."""
+    if file.is_symlink():
+        raise RecordError(f'Pending installation source is a symbolic link: {file}')
+    if not any(item['path'] == str(file.resolve()) for item in journal.data.get('metadata_records', [])):
+        journal.preserve_metadata(file)
+
+
+def recorded_source(ghost_root: Path, record: dict) -> dict:
+    """The record's source, including host names saved for its still-pending activation."""
+    source = record.get('source', {})
+    pending = _pending_source(ghost_root)
+    return dict(source, **pending['source']) if pending and _matches_pending(record, pending) else source
+
+
+def finish_pending_source(ghost_root: Path, *, selected_package: Path | None = None) -> None:
+    """Publish the saved host names under the install lock if this activation still owns the v2 record."""
+    _require_lock(ghost_root)
+    pending = _pending_source(ghost_root)
+    if pending is None:
+        return
+    record = read(ghost_root) or {}
+    if selected_package and str(selected_package) != record.get('installer', {}).get('active_root'):
+        return
+    if _matches_pending(record, pending):
+        update(ghost_root, {'source': pending['source']})
+    else:
+        # A different writer already replaced this activation, even if its package digest was reused.
         from install_transaction import record_update
-        operation = record_update(ghost_root)
-    with operation:
-        _write(path(ghost_root), _encode(record))
-        if change_notice:
-            _write(notice, expected)
+        file = ghost_root / PENDING_SOURCE_FILENAME
+        with record_update(ghost_root) as journal:
+            preserve_pending_source(file, journal)
+            file.unlink()
+
+
+def _save(ghost_root: Path | str, record: dict, *, journal=None, defer_source: bool = False) -> None:
+    root = Path(ghost_root)
+    source = record.get("source", {})
+    relations = source.get("ledger_source_roots", {})
+    pending_file = root / PENDING_SOURCE_FILENAME
+    pending = _pending_source(root)
+    deferred = None
+    if defer_source:
+        deferred = {'active_root': record['installer']['active_root'],
+                    'source': {'root': source['root'], 'ledger_source_roots': relations}}
+        relations = source_paths(relations)
+        record['source'] = dict(source, ledger_source_roots=relations)
+    clear_pending = pending is not None and not _matches_pending(record, pending)
+    attributed = any(isinstance(value, dict) for value in relations.values())
+    version = ATTRIBUTED_SCHEMA_VERSION if attributed else SCHEMA_VERSION
+    name = ATTRIBUTED_FILENAME if attributed else FILENAME
+    record["schema_version"] = version
+    notice = _encode({"schema_version": version, "record_file": name})
+    guards = [root / LEGACY_FILENAME]
+    if attributed:
+        guards.append(root / FILENAME)
+    guards = [file for file in guards if not file.exists() or file.read_bytes() != notice]
+    obsolete = root / ATTRIBUTED_FILENAME
+    demoting = not attributed and obsolete.exists()
+    operation = nullcontext(journal)
+    if (guards or demoting or deferred or clear_pending) and journal is None:
+        from install_transaction import record_update
+        operation = record_update(root)
+    with operation as transaction:
+        if deferred or clear_pending:
+            preserve_pending_source(pending_file, transaction)
+        if clear_pending and attributed and not obsolete.exists():
+            # A v2 recovery program knows only its two record filenames. Let it undo this first v3 detail too.
+            transaction.preserve_metadata(obsolete)
+        if deferred:
+            _write(pending_file, _encode(deferred))
+        _write(root / name, _encode(record))
+        for file in guards:
+            _write(file, notice)
+        if demoting:
+            obsolete.unlink()
+        if clear_pending and not deferred:
+            pending_file.unlink()
+
+
+def target_hosts(key: str, entry: Mapping) -> list[str]:
+    used_by = entry.get("used_by")
+    if not isinstance(used_by, list) or not all(isinstance(host, str) for host in used_by):
+        raise RecordError(f"target {key} needs used_by as a list of hosts")
+    return used_by
 
 
 def _check_entry(key: str, entry: object) -> dict:
@@ -164,9 +279,7 @@ def _check_entry(key: str, entry: object) -> dict:
         raise RecordError(f"target {key} is not an object")
     if entry.get("mode") not in MODES or entry.get("kind") not in KINDS or entry.get("baseline") not in BASELINES:
         raise RecordError(f"target {key} needs mode {MODES}, kind {KINDS} and baseline {BASELINES}")
-    used_by = entry.get("used_by")
-    if not isinstance(used_by, list) or not all(isinstance(host, str) for host in used_by):
-        raise RecordError(f"target {key} needs used_by as a list of hosts")
+    target_hosts(key, entry)
     return dict(entry)
 
 
@@ -179,10 +292,18 @@ def _check_source(section: object) -> dict:
         raise RecordError("section source is not an object")
     if "ledger_source_roots" in section:
         roots = section["ledger_source_roots"]
-        if not isinstance(roots, dict) or any(
-                not _absolute(value) or os.path.normpath(value) != value
-                for pair in roots.items() for value in pair):
-            raise RecordError("source ledger_source_roots must map normalized absolute ledger paths to source paths")
+        if not isinstance(roots, dict):
+            raise RecordError("source ledger_source_roots must be an object")
+        for root, relation in roots.items():
+            source = relation
+            if isinstance(relation, dict):
+                hosts = relation.get('hosts')
+                if (set(relation) != {'source_root', 'hosts'} or not isinstance(hosts, list)
+                        or any(not isinstance(host, str) or not host for host in hosts)):
+                    raise RecordError("source ledger_source_roots relationship needs source_root and a list of hosts")
+                source = relation['source_root']
+            if any(not _absolute(value) or os.path.normpath(value) != value for value in (root, source)):
+                raise RecordError("source ledger_source_roots must name normalized absolute ledger and source paths")
     return dict(section)
 
 
@@ -212,7 +333,8 @@ def _check_service(section: object) -> dict:
     return dict(section)
 
 
-def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None], *, journal=None) -> dict:
+def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None], *, journal=None,
+           defer_source: bool = False) -> dict:
     """Write the given sections in one replacement of the record and return the record.
 
     `targets` changes only the entries it names, and an entry keeps every host its
@@ -249,7 +371,7 @@ def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None], *, jou
             if isinstance(previous, Mapping) and isinstance(previous.get("used_by"), list):
                 merged["used_by"] = sorted(set(previous["used_by"]) | set(merged["used_by"]))
             targets[key] = merged
-    _save(ghost_root, record, journal=journal)
+    _save(ghost_root, record, journal=journal, defer_source=defer_source)
     return record
 
 
@@ -285,25 +407,31 @@ def release_target(ghost_root: Path | str, *, destination: Path | str,
 
 
 def restore(ghost_root: Path | str, saved: Path | str | None, *,
-            legacy_saved: Path | str | None = None) -> None:
+            legacy_saved: Path | str | None = None, attributed_saved: Path | str | None = None) -> None:
     """Put back the record bytes a publish saved, or remove a record that did not exist before it (`saved` None).
 
     A record that already equals what it should be is left alone.
     """
-    for name, original in ((FILENAME, saved), (LEGACY_FILENAME, legacy_saved)):
+    failures = []
+    for name, original in ((FILENAME, saved), (LEGACY_FILENAME, legacy_saved), (ATTRIBUTED_FILENAME, attributed_saved)):
         file = Path(ghost_root) / name
-        wanted = Path(original).read_bytes() if original is not None else None
         try:
-            current = file.read_bytes()
-        except FileNotFoundError:
-            current = None
-        if current == wanted:
-            continue
-        _require_lock(ghost_root)
-        if wanted is None:
-            file.unlink()
-        else:
-            _write(file, wanted)
+            wanted = Path(original).read_bytes() if original is not None else None
+            try:
+                current = file.read_bytes()
+            except FileNotFoundError:
+                current = None
+            if current == wanted:
+                continue
+            _require_lock(ghost_root)
+            if wanted is None:
+                file.unlink()
+            else:
+                _write(file, wanted)
+        except OSError as exc:
+            failures.append(f"{file}: {exc}")
+    if failures:
+        raise RecordError("; ".join(failures))
 
 
 def latest_target(record: Mapping, *, kind: str, name: str) -> tuple[str, dict] | None:
@@ -465,7 +593,7 @@ def migrate(ghost_root: Path | str, hosts: Sequence[str], *, installer_commit: s
     """
     root = Path(ghost_root)
     existing = read(root)
-    if existing is not None and existing['schema_version'] == SCHEMA_VERSION:
+    if existing is not None and existing['schema_version'] in (SCHEMA_VERSION, ATTRIBUTED_SCHEMA_VERSION):
         return None
     state_files = [(host, root / "install-state" / f"{host}.json") for host in hosts]
     state_files = [(host, file) for host, file in state_files if file.is_file()]

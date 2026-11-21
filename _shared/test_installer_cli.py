@@ -20,6 +20,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import addon_registry  # noqa: E402
 import hash_utils  # noqa: E402
+from install_transaction import cleanup_completed  # noqa: E402
 from installer import cli, report  # noqa: E402
 from installer.runner import InstallerExit, ToolResult  # noqa: E402
 from installer.selection import ALL_SKILLS, Collected, Target  # noqa: E402
@@ -350,8 +351,328 @@ class OptionTests(CliCase):
 
 
 class CandidateHandoffTests(CliCase):
+    def test_shutdown_stop_logs_the_reason_without_preparing_a_candidate_or_result(self):
+        from installer import hosts, source, terminal
+        self.stub('installer.source.check_install_source')
+        self.stub('installer.hosts.confirm_project_trust', '')
+        self.stub('installer.source.check_source_health', True)
+        options = cli.Options(platform='claude', platform_explicit=True, addon_skip=True, args=['task-router'])
+        running = hosts.WriterObservation('running', pids=(43210, 43211),
+                                          programs=((43210, 'Claude'), (43211, 'Claude helper')))
+        cases = [(running, True, False, 'cancelled', None),
+                 (hosts.WriterObservation('unknown', 'process lookup denied'), True, False, 'process lookup denied', None),
+                 (running, False, False, 'terminal', None),
+                 (running, True, True, 'cancelled', None),
+                 (running, True, False, 'input preparation denied', 'preparation'),
+                 (running, True, False, 'input read denied', 'read')]
+        for seen, interactive, verbose, expected, input_failure in cases:
+            with self.subTest(state=seen.state, interactive=interactive, verbose=verbose, input_failure=input_failure):
+                report.configure(home=self.home, tty=False, verbose=verbose)
+                previous_logs = set((self.home / '.ghost-alice/install').glob('*'))
+                with mock.patch.dict(os.environ, {source.REQUEST_ENV: ''}), \
+                        mock.patch.object(hosts, 'observe_writers', return_value={'claude': seen}) as observe, \
+                        mock.patch.object(source, 'interactive', return_value=interactive), \
+                        mock.patch.object(source, 'prepare_source', side_effect=AssertionError('no candidate before exit')), \
+                        mock.patch.object(hosts, 'request_writer_termination', side_effect=AssertionError('no termination approved')), \
+                        mock.patch.object(terminal, '_discard_previous_input',
+                                          side_effect=OSError(expected) if input_failure == 'preparation' else None), \
+                        mock.patch('builtins.input', return_value='n',
+                                   side_effect=OSError(expected) if input_failure == 'read' else None) as read_input:
+                    code, output = self.captured(cli.dispatch, options)
+                self.assertEqual(code, 1, output)
+                observe.assert_called_once()
+                if input_failure == 'preparation':
+                    read_input.assert_not_called()
+                if seen.state == 'running':
+                    for pid, name in seen.programs:
+                        self.assertEqual(output.count(f'{name}: still running (PID: {pid})'), 1, output)
+                log = report.state().log_file
+                if verbose:
+                    self.assertIsNone(log)
+                    self.assertIn(expected, output)
+                    self.assertEqual(set((self.home / '.ghost-alice/install').glob('*')), previous_logs)
+                    continue
+                self.assertIsNotNone(log, output)
+                self.assertIn(str(log), output)
+                self.assertIn(expected, log.read_text())
+                if seen.state == 'running':
+                    for pid, name in seen.programs:
+                        self.assertEqual(log.read_text().count(f'{name}: still running (PID: {pid})'), 1)
+                self.assertFalse(log.with_suffix('.events.jsonl').exists())
+                self.assertFalse((self.home / '.ghost-alice/versions').exists())
+                self.assertFalse((self.home / '.ghost-alice/installed-payload-v2.json').exists())
+
+    def test_platform_requires_only_stdin_tty_and_reports_unavailable_input_as_failure(self):
+        from installer import terminal
+        with mock.patch.object(sys.stdin, 'isatty', return_value=True), \
+                mock.patch.object(terminal, '_discard_previous_input'), \
+                mock.patch('builtins.input', return_value='2'):
+            selected, output = self.captured(cli.prompt_platform)
+        self.assertEqual(selected, 'codex')
+        self.assertIn('Enter number or name:', output)
+        with mock.patch.object(sys.stdin, 'isatty', return_value=True), \
+                mock.patch.object(terminal, '_discard_previous_input', side_effect=OSError('input unavailable')):
+            output = self.expect_exit(1, cli.prompt_platform)
+        self.assertIn('input unavailable', output)
+        with mock.patch.object(sys.stdin, 'isatty', return_value=True), \
+                mock.patch.object(terminal, '_discard_previous_input'), \
+                mock.patch('builtins.input', side_effect=EOFError):
+            self.expect_exit(1, cli.prompt_platform)
+
+    def test_installer_ancestor_is_shown_and_blocks_shutdown_before_any_request(self):
+        from installer import hosts
+        seen = hosts.WriterObservation('running', pids=(11,), programs=((11, 'Claude'),), ancestor_pids=(11,))
+        with mock.patch.object(hosts, 'observe_writers', return_value={'claude': seen}), \
+                mock.patch.object(hosts, 'request_writer_termination', side_effect=AssertionError('ancestor cannot be stopped')), \
+                mock.patch('builtins.input', side_effect=AssertionError('ancestor cannot be proposed')):
+            result, output = self.captured(cli.confirm_host_shutdown, ['claude'], interactive=True)
+        self.assertFalse(result)
+        self.assertEqual(output.count('Claude: still running (PID: 11)'), 1, output)
+        self.assertNotIn('Claude Code', output)
+        self.assertIn('independent terminal', output)
+
+    def test_windowless_program_is_left_for_manual_exit_while_supported_pid_is_requested(self):
+        from installer import hosts
+        current = [11, 12]
+        requested = []
+        displays = []
+        def observe(platforms):
+            return {'codex': hosts.WriterObservation('running' if current else 'absent', pids=tuple(current),
+                programs=tuple((pid, 'Codex.exe' if pid == 11 else 'codex.exe') for pid in current),
+                manual_pids=(12,) if 12 in current else ())}
+        def answer():
+            displays.append(sys.stdout.getvalue())
+            if 11 in current:
+                return 'y'
+            current.clear()
+            return ''
+        def request(pids):
+            requested.extend(pids)
+            for pid in pids:
+                current.remove(pid)
+            return {}
+        with mock.patch.object(hosts, 'observe_writers', side_effect=observe), \
+                mock.patch.object(hosts, 'request_writer_termination', side_effect=request), \
+                mock.patch('builtins.input', side_effect=answer), \
+                mock.patch.object(cli.time, 'sleep'), \
+                mock.patch.object(cli.time, 'monotonic', side_effect=[0, 6]):
+            result, output = self.captured(cli.confirm_host_shutdown, ['codex'], interactive=True)
+        self.assertTrue(result, output)
+        self.assertEqual(requested, [11])
+        status, question = displays[0].split('Programs for this termination request:')
+        self.assertIn('Codex.exe: still running (PID: 11)', status)
+        self.assertIn('codex.exe: still running (PID: 12)', status)
+        self.assertEqual(question.count('Codex.exe: still running (PID: 11)'), 1, question)
+        self.assertNotIn('codex.exe: still running (PID: 12)', question)
+        self.assertIn('Close these programs yourself', output)
+
+    @unittest.skipUnless(sys.platform in ('darwin', 'linux'), 'POSIX terminal input boundary')
+    def test_platform_question_discards_queued_selection(self):
+        from installer_testing import installer_env, run_pty
+        script = '''import select, sys
+from installer import cli
+print('BEFORE_PLATFORM_QUESTION', flush=True)
+assert select.select([sys.stdin], [], [], 5)[0]
+print('SELECTED=' + cli.prompt_platform(), flush=True)
+'''
+        env = installer_env(self.home)
+        env['PYTHONPATH'] = str(Path(__file__).resolve().parent)
+        code, output = run_pty([sys.executable, '-c', script], env=env, cwd=self.home,
+                              responses=[('BEFORE_PLATFORM_QUESTION', '1\n'), ('Enter number or name:', '2\n')],
+                              timeout=10)
+        self.assertEqual(code, 0, output)
+        self.assertIn('SELECTED=codex', output)
+
+    def test_enter_while_same_pid_remains_does_not_repeat_shutdown_consent(self):
+        from installer import hosts
+        running = {'codex': hosts.WriterObservation('running', pids=(43211,))}
+        requested = []
+        with mock.patch.object(hosts, 'observe_writers', return_value=running), \
+                mock.patch.object(hosts, 'request_writer_termination', side_effect=lambda pids: requested.extend(pids) or {}), \
+                mock.patch('builtins.input', side_effect=['y', '', 'n']), \
+                mock.patch.object(cli.time, 'sleep'), \
+                mock.patch.object(cli.time, 'monotonic', side_effect=[0, 6]):
+            result, output = self.captured(cli.confirm_host_shutdown, ['codex'], interactive=True)
+        self.assertFalse(result)
+        self.assertEqual(requested, [43211])
+        self.assertEqual(output.count('[y/N]'), 1, output)
+        self.assertEqual(output.count('codex: still running (PID: 43211)'), 3, output)
+
+    def test_only_displayed_still_present_pids_are_requested_and_new_pid_needs_consent(self):
+        from installer import hosts
+        current = [11, 12]
+        requested = []
+        displays = []
+        replies = iter(('y', 'yes', 'n'))
+        def answer():
+            displays.append(sys.stdout.getvalue())
+            reply = next(replies)
+            if reply == 'y':
+                current[:] = [12, 13]
+            elif reply == 'yes':
+                self.assertEqual(requested, [12])
+            return reply
+        def request(pids):
+            requested.extend(pids)
+            if 13 in pids:
+                current.clear()
+            return {}
+        with mock.patch.object(hosts, 'observe_writers', side_effect=lambda platforms: {
+                'codex': hosts.WriterObservation('running' if current else 'absent', pids=tuple(current))}), \
+                mock.patch.object(hosts, 'request_writer_termination', side_effect=request), \
+                mock.patch('builtins.input', side_effect=answer), \
+                mock.patch.object(cli.time, 'sleep'), \
+                mock.patch.object(cli.time, 'monotonic', side_effect=[0, 6, 7, 13]):
+            result, output = self.captured(cli.confirm_host_shutdown, ['codex'], interactive=True)
+        self.assertTrue(result, output)
+        self.assertEqual(requested, [12, 13])
+        self.assertEqual(displays[0].count('codex: still running (PID: 11)'), 1, displays[0])
+        self.assertEqual(displays[0].count('codex: still running (PID: 12)'), 1, displays[0])
+        self.assertEqual(displays[0].count('[y/N]'), 1, displays[0])
+        status, question = displays[1][len(displays[0]):].split('Programs for this termination request:')
+        self.assertIn('codex: still running (PID: 12)', status)
+        self.assertIn('codex: still running (PID: 13)', status)
+        self.assertNotIn('codex: still running (PID: 12)', question)
+        self.assertEqual(question.count('codex: still running (PID: 13)'), 1, question)
+        self.assertEqual(question.count('[y/N]'), 1, question)
+
+    def test_shutdown_confirmation_precedes_candidate_changes_and_observes_exit(self):
+        from installer import hosts, source
+        absent = {'claude': hosts.WriterObservation('absent')}
+        running = {'claude': hosts.WriterObservation('running', pids=(43210,))}
+        self.stub('installer.source.check_install_source')
+        self.stub('installer.hosts.confirm_project_trust', '')
+        self.stub('installer.source.check_source_health', True)
+        self.stub('installer.source.input_record', {'root': str(self.source)})
+        self.stub('installer.lock.acquire')
+        self.stub('installer.lock.release')
+        marker = self.home / 'candidate-prepared'
+        class Prepared(Exception):
+            pass
+        def prepare(*args, **kwargs):
+            self.assertEqual(current['value'], absent)
+            marker.write_text('after exit')
+            raise Prepared()
+        options = cli.Options(platform='claude', platform_explicit=True, addon_skip=True, args=['task-router'])
+        for answer, interactive, cause in [('n', True, 'install'), ('', True, 'install'),
+                                            (EOFError(), True, 'install'), ('y', False, 'install'),
+                                            ('y', True, 'post-merge'), ('yes', True, 'update')]:
+            with self.subTest(answer=answer, interactive=interactive, cause=cause):
+                current = {'value': running}
+                requested = []
+                def request(pids):
+                    requested.extend(pids)
+                    self.assertFalse(marker.exists())
+                    current['value'] = absent
+                    return {}
+                with mock.patch.dict(os.environ, {source.REQUEST_ENV: '', 'GHOST_ALICE_INSTALL_LOCALE': 'en'}), \
+                        mock.patch.object(hosts, 'observe_writers', side_effect=lambda platforms: current['value']), \
+                        mock.patch.object(hosts, 'request_writer_termination', side_effect=request), \
+                        mock.patch.object(source, 'interactive', return_value=interactive), \
+                        mock.patch.object(source, 'prepare_source', side_effect=prepare), \
+                        mock.patch('builtins.input', side_effect=[answer]):
+                    if cause == 'update':
+                        with self.assertRaises(Prepared):
+                            self.captured(cli.dispatch, options, execution_cause=cause)
+                        self.assertEqual(marker.read_text(), 'after exit')
+                        self.assertEqual(requested, [43210])
+                        marker.unlink()
+                    else:
+                        code, output = self.captured(cli.dispatch, options, execution_cause=cause)
+                        self.assertEqual(code, 1, output)
+                        self.assertFalse(marker.exists())
+                        self.assertEqual(requested, [])
+                        self.assertEqual(output.count('claude: still running (PID: 43210)'), 1, output)
+
+    def test_candidate_checks_selected_and_installed_hosts_before_lock_recovery_without_prompting(self):
+        from installer import hosts, source
+        record = {'targets': {'core': dict(kind='skill', provider='core', name='task-router', used_by=['claude'])}}
+        detail = self.home / '.ghost-alice' / cli.installed_payload.LEGACY_FILENAME
+        detail.parent.mkdir(exist_ok=True)
+        detail.write_text(json.dumps(dict(schema_version=1, **record)))
+        marker = self.home / 'recovery-started'
+        def observe(platforms):
+            self.assertEqual(set(platforms), {'claude', 'codex'})
+            return {'claude': hosts.WriterObservation('running', pids=(43212,)),
+                    'codex': hosts.WriterObservation('absent')}
+        with mock.patch.object(source, 'install_request', return_value={'package_root': str(self.source)}), \
+                mock.patch.object(hosts, 'observe_writers', side_effect=observe), \
+                mock.patch.object(hosts, 'request_writer_termination', side_effect=AssertionError('candidate cannot ask to close apps')), \
+                mock.patch.object(cli.lock, 'acquire', side_effect=lambda *args: marker.write_text('recovery')), \
+                mock.patch('builtins.input', side_effect=AssertionError('candidate has no terminal')):
+            code, output = self.captured(cli.dispatch, cli.Options(platform='codex', platform_explicit=True))
+        self.assertEqual(code, 1, output)
+        self.assertFalse(marker.exists())
+        self.assertIn('43212', output)
+
+    def test_unknown_observation_requires_a_successful_recheck_before_continuing(self):
+        from installer import hosts
+        with mock.patch.object(hosts, 'observe_writers', side_effect=[
+                {'claude': hosts.WriterObservation('unknown', 'process lookup denied'),
+                 'codex': hosts.WriterObservation('running', pids=(43214,))},
+                {'claude': hosts.WriterObservation('absent'), 'codex': hosts.WriterObservation('absent')}]), \
+                mock.patch.object(hosts, 'request_writer_termination', side_effect=AssertionError('no identified target')), \
+                mock.patch('builtins.input', side_effect=['']):
+            result, output = self.captured(cli.confirm_host_shutdown, ['claude', 'codex'], interactive=True)
+        self.assertTrue(result)
+        self.assertIn('process lookup denied', output)
+        self.assertEqual(output.count('codex: still running (PID: 43214)'), 1, output)
+        self.assertNotIn('[y/N]', output)
+
+    def test_interrupted_other_host_publish_is_not_restored_while_that_host_runs(self):
+        import install_lock
+        from installer import hosts, locations, source
+        (self.source / 'task-router').mkdir()
+        (self.source / 'task-router/SKILL.md').write_text('fixture skill')
+        for interruption in ('_write_record', 'finalize', 'corrupt-current', 'later-host'):
+            with self.subTest(interruption=interruption):
+                ghost = self.home / interruption / '.ghost-alice'
+                target = ghost.parent / 'codex-skill'
+                request = dict(schema_version=1, host='codex', ghost_root=str(ghost),
+                    installer=dict(commit='test', schema_version=1),
+                    source=dict(root=str(self.source), commit='test', dirty='clean', hooks_path='hooks'),
+                    targets=[dict(name='task-router', kind='skill', provider='core', mode='copy',
+                                  source=str(self.source / 'task-router'), dest=str(target), source_commit='test')])
+                generation = install_lock.acquire_lock(ghost / 'install.lock', owner='fixture')
+                try:
+                    with mock.patch.object(cli.install_transaction.PublishBatch,
+                                           '_write_record' if interruption == '_write_record' else 'finalize',
+                                           side_effect=KeyboardInterrupt):
+                        with self.assertRaises(KeyboardInterrupt):
+                            cli.install_transaction.publish(request)
+                    if interruption == 'later-host':
+                        cli.install_transaction.publish(dict(request, host='claude', targets=[
+                            dict(request['targets'][0], dest=str(ghost.parent / 'claude-skill'))]))
+                finally:
+                    install_lock.release_lock(ghost / 'install.lock', generation)
+                if interruption == 'corrupt-current':
+                    cli.installed_payload.path(ghost).write_text('{interrupted record')
+                before = (target / 'SKILL.md').read_bytes()
+                pending = cli.install_transaction.unfinished(ghost)
+                running_host = 'claude' if interruption == 'later-host' else 'codex'
+                def observe(platforms):
+                    return {host: hosts.WriterObservation('running', pids=(43213,)) if host == running_host
+                            else hosts.WriterObservation('absent') for host in platforms}
+                options = cli.Options(platform='codex' if interruption == 'later-host' else 'claude', platform_explicit=True)
+                with mock.patch.object(locations, 'record_root', return_value=ghost), \
+                        mock.patch.object(source, 'install_request', return_value={'package_root': str(self.source),
+                                          'source': request['source'], 'request_writer_reads_v3': True}), \
+                        mock.patch.object(hosts, 'observe_writers', side_effect=observe) as observer, \
+                        mock.patch.object(cli, '_dispatch', return_value=0), \
+                        mock.patch.object(source, 'finalize_source', return_value=[]):
+                    code, output = self.captured(cli.dispatch, options)
+                    self.assertEqual(code, 1, output)
+                    self.assertEqual((target / 'SKILL.md').read_bytes(), before)
+                    self.assertEqual(cli.install_transaction.unfinished(ghost), pending)
+                    observer.side_effect = lambda platforms: {host: hosts.WriterObservation('absent') for host in platforms}
+                    code, output = self.captured(cli.dispatch, options)
+                    self.assertEqual(code, 0, output)
+                    self.assertFalse(target.exists(), 'Recovery may restore the interrupted publish after host exit')
+                    self.assertEqual(cli.install_transaction.unfinished(ghost), [])
+
     def test_only_successful_candidate_hands_terminal_to_the_recorded_active_cli(self):
         from installer import runner, source
+        self.stub('installer.hosts.observe_writers', {'claude': cli.hosts.WriterObservation('absent')})
         active = (self.home / 'new-package/core').resolve()
         active.parent.mkdir(parents=True)
         candidate = self.home / 'candidate'
@@ -367,10 +688,37 @@ class CandidateHandoffTests(CliCase):
                 mock.patch('installer.cli.install_transaction.record_after_recovery',
                            return_value={'installer': {'active_root': str(active)}, 'source': {'root': str(self.source)}}):
             for supported, child_codes in ((False, [1]), (False, [0]), (True, [0, 1])):
+                report.configure(home=self.home, tty=False)
+                prior_files = set((self.home / '.ghost-alice/install').glob('*'))
                 (active.parent / 'version.json').write_text(json.dumps({'record_move': True} if supported else {}))
                 calls = []
+                old_runs = []
+                previous = {}
+                followup_ran = self.home / 'followup-ran'
                 def run(argv, **kwargs):
                     calls.append((argv, kwargs))
+                    if json.loads(kwargs['env'][source.REQUEST_ENV]).get('stage') == 'record-move':
+                        followup_ran.write_text('record move started')
+                    if not supported and child_codes == [0]:
+                        # This legacy candidate neither participates in the shared log nor writes platform events.
+                        logs = report.state().log_file.parent
+                        digest = 'b' * 64
+                        version = self.home / '.ghost-alice/versions' / digest
+                        version.mkdir(parents=True)
+                        (version / 'version.json').write_text('{}')
+                        success = logs / '2026-01-01-000000.log'
+                        success.write_text('previous successful details\n')
+                        event = success.with_suffix('.events.jsonl')
+                        event.write_text(json.dumps(dict(type='install-result', source_digest=digest, returncode=0)) + '\n')
+                        previous.update({path: path.read_bytes() for path in (success, event)})
+                        for number in range(31):
+                            log = logs / f'2026-02-01-000000-{number:032x}.log'
+                            log.write_text(f'legacy details {number}\n')
+                            event = log.with_suffix('.events.jsonl')
+                            event.write_text('{}\n')
+                            for path in (log, event):
+                                os.utime(path, (100 + number, 100 + number))
+                            old_runs.append((log, event))
                     return ToolResult(child_codes[min(len(calls), len(child_codes)) - 1])
                 with self.subTest(supported=supported, child_codes=child_codes), mock.patch.object(runner, 'run_command', side_effect=run):
                     code, output = self.captured(cli.dispatch,
@@ -380,6 +728,16 @@ class CandidateHandoffTests(CliCase):
                     self.assertEqual(len(calls), len(child_codes))
                     self.assertEqual('Candidate install did not finish' in output, child_codes[0] != 0)
                     self.assertNotIn('execution_cause', json.loads(calls[0][1]['env'][source.REQUEST_ENV]))
+                    if not supported and child_codes == [0]:
+                        current = report.state().log_file
+                        self.assertIn('does not support moving existing work records', current.read_text())
+                        self.assertFalse(current.with_suffix('.events.jsonl').exists())
+                        self.assertFalse(followup_ran.exists())
+                        for path, content in previous.items():
+                            self.assertEqual(path.read_bytes(), content)
+                        # A prior failed candidate from this loop also occupies the unclassified allowance.
+                        self.assertEqual(set(current.parent.iterdir()),
+                                         {current, *previous, *prior_files, *(path for pair in old_runs[3:] for path in pair)})
                     if supported:
                         argv, kwargs = calls[-1]
                         self.assertEqual(Path(argv[1]), active / '_shared/installer/cli.py')
@@ -880,6 +1238,32 @@ class InstallOrderTests(CliCase):
         targets = [Target("task-router", self.source / "task-router"), Target("alpha", self.source / "alpha")]
         self.collected = Collected(skill_targets=targets, addon_targets=[], skill_target_total=2, support_target_total=1)
         return self.collected
+
+    def test_install_finishes_the_previous_moves_record_source_cleanup(self):
+        import content_digest
+        import install_lock
+        import install_transaction
+        import runtime_config
+
+        ghost = (self.home / '.ghost-alice').resolve()
+        old, current = (self.home / 'old-records').resolve(), ghost / 'session-intent'
+        old.mkdir()
+        current.mkdir(parents=True)
+        (old / 'original.txt').write_text('verified history')
+        (current / 'ghost-state.sqlite3').write_bytes(b'current records')
+        config = runtime_config.config_path()
+        config.write_text(json.dumps({'retired_ledger_roots': [str(old)]}))
+        with install_lock.command_lock(ghost / 'install.lock', owner='installer:cleanup-fixture'):
+            journal = install_transaction.Journal.begin(dict(ghost_root=str(ghost), host='claude'), [])
+            journal.data['source_cleanup'] = dict(path=str(old), destination=str(current),
+                                                 baseline=content_digest.state(old, include_generated=True))
+            journal.mark('done')
+            with mock.patch.object(install_transaction, 'cleanup_completed', cleanup_completed):
+                rc, output = self.captured(cli.run_install, make_context(self.home, 'claude', args=['task-router']))
+        self.assertEqual(rc, 0, output)
+        self.assertFalse(old.exists())
+        self.assertFalse(journal.folder.exists())
+        self.assertEqual((current / 'ghost-state.sqlite3').read_bytes(), b'current records')
 
     def test_real_postflight_source_loss_stops_the_cli_before_snapshot(self):
         checkout = Path(__file__).resolve().parents[1]

@@ -20,6 +20,249 @@ spec.loader.exec_module(ledger)
 
 
 class SQLiteAuthorityTests(unittest.TestCase):
+    def moved_source_fixture(self, name):
+        source, current = (self.root / name / part for part in ('A', 'B'))
+        ledger.record_turn(root=source, platform='codex', session_id='native', raw_input='original input')
+        ledger.write_current_session_pointer(source, 'codex', 'native')
+        (source / 'original.txt').write_bytes(b'original companion\x00')
+        (source / 'original-link').symlink_to('original.txt')
+        with ledger.storage_transaction(source) as db:
+            ledger._shared_module('context_lifecycle')._schema(db)
+            uses = ledger._shared_module('response_context_use')
+            uses._schema(db)
+            uses._judgment_schema(db)
+            ledger._shared_module('completion_assessment')._schema(db)
+            db.execute("INSERT INTO core_context_dispositions VALUES ('old-context', ?)",
+                       (json.dumps(dict(input_binding=dict(platform='codex', session_id='native', input_event_id='original'))),))
+            db.execute("INSERT INTO core_context_current VALUES ('codex', 'native', 'old-context')")
+            db.execute("INSERT INTO core_response_context_uses VALUES ('use', 'codex', 'native', 'original use')")
+            db.execute("INSERT INTO core_response_use_judgments VALUES ('old-judgment', 'codex', 'native', 'use', 'original judgment')")
+            db.execute("INSERT INTO core_response_use_current VALUES ('codex', 'native', 'use', 'old-judgment')")
+            db.execute("INSERT INTO core_completion_candidates VALUES ('candidate', 'key', 'original proof')")
+            db.execute('CREATE TABLE unknown_history (body BLOB)')
+            db.executemany('INSERT INTO unknown_history VALUES (?)', [(b'original\x00',)] * 2)
+        self.assertTrue(ledger._shared_module('session_check_cache').record_delivery(
+            source, 'codex', 'native', 'receipt', 'original receipt', create=True))
+        ledger.snapshot_roots(source, self.root / 'absent', current, writers_stopped=True)
+        return source, current
+
+    def test_moved_source_verification_preserves_originals_while_current_heads_advance(self):
+        source, current = self.moved_source_fixture('continued')
+        ledger.record_turn(root=current, platform='codex', session_id='native', raw_input='later input')
+        ledger.record_turn(root=current, platform='codex', session_id='other', raw_input='another session')
+        ledger.write_current_session_pointer(current, 'codex', 'other')
+        with ledger.storage_transaction(current) as db:
+            db.execute("INSERT INTO core_context_dispositions VALUES ('new-context', ?)",
+                       (json.dumps(dict(input_binding=dict(platform='codex', session_id='native', input_event_id='later'))),))
+            db.execute("UPDATE core_context_current SET reference='new-context'")
+            db.execute("INSERT INTO core_response_use_judgments VALUES ('new-judgment', 'codex', 'native', 'use', 'later judgment')")
+            db.execute("UPDATE core_response_use_current SET reference='new-judgment'")
+            db.execute("INSERT INTO unknown_history VALUES ('later original')")
+        self.assertTrue(ledger._shared_module('session_check_cache').record_delivery(
+            current, 'codex', 'native', 'receipt', 'later receipt', create=False))
+        before = [ledger._snapshot_files(root) for root in (source, current)]
+        self.assertTrue(hasattr(ledger, 'verify_moved_source'), 'The ledger owner must verify retained migration sources')
+        baseline = ledger.verify_moved_source(source, current)
+        self.assertEqual(baseline, ledger._shared_module('content_digest').state(source, include_generated=True))
+        self.assertEqual([ledger._snapshot_files(root) for root in (source, current)], before)
+
+    def test_moved_source_verification_rejects_lost_or_changed_originals(self):
+        for case in ('event', 'same-revision-state', 'source-only-session', 'original', 'unknown-row',
+                     'duplicate-row', 'companion', 'nested-pointer', 'link', 'cache-audit',
+                     'missing-head-original', 'unknown-head-schema', 'storage-type', 'foreign-context-head'):
+            with self.subTest(case=case):
+                source, current = self.moved_source_fixture(case)
+                if case == 'source-only-session':
+                    ledger.record_turn(root=source, platform='codex', session_id='only-a', raw_input='not copied')
+                elif case == 'companion':
+                    (source / 'original.txt').write_bytes(b'changed after migration')
+                elif case == 'nested-pointer':
+                    for root in (source, current):
+                        path = root / 'codex/evidence/current-session.json'
+                        path.parent.mkdir(parents=True)
+                        path.write_text(root.name)
+                elif case == 'link':
+                    (current / 'original-link').unlink()
+                    (current / 'original-link').symlink_to('elsewhere')
+                elif case == 'cache-audit':
+                    with sqlite3.connect(current / 'session-checks.sqlite3') as db:
+                        db.execute('DELETE FROM check_events')
+                elif case == 'storage-type':
+                    for root in (source, current):
+                        with sqlite3.connect(root / 'ghost-state.sqlite3') as db:
+                            db.execute('UPDATE unknown_history SET body=?', (1,))
+                    with sqlite3.connect(current / 'ghost-state.sqlite3') as db:
+                        db.execute('UPDATE unknown_history SET body=? WHERE rowid=1', (1.0,))
+                        self.assertEqual(db.execute('SELECT typeof(body) FROM unknown_history ORDER BY rowid').fetchall(),
+                                         [('real',), ('integer',)])
+                else:
+                    with sqlite3.connect(current / 'ghost-state.sqlite3') as db:
+                        if case == 'event':
+                            db.execute('DELETE FROM intent_events')
+                        elif case == 'same-revision-state':
+                            state = json.loads(db.execute('SELECT state_json FROM sessions').fetchone()[0])
+                            state['current_goal'] = 'different state without history'
+                            db.execute('UPDATE sessions SET state_json=?', (json.dumps(state),))
+                        elif case == 'original':
+                            db.execute('DROP TABLE core_completion_candidates')
+                        elif case == 'unknown-row':
+                            db.execute('DELETE FROM unknown_history')
+                        elif case == 'duplicate-row':
+                            db.execute('DELETE FROM unknown_history WHERE rowid=1')
+                        elif case == 'missing-head-original':
+                            db.execute('DROP TRIGGER immutable_context_delete')
+                            db.execute('DELETE FROM core_context_dispositions')
+                        elif case == 'unknown-head-schema':
+                            db.execute('ALTER TABLE core_context_current ADD COLUMN original TEXT')
+                        elif case == 'foreign-context-head':
+                            db.execute("INSERT INTO core_context_dispositions VALUES ('foreign-context', ?)",
+                                       (json.dumps(dict(input_binding=dict(platform='codex', session_id='other'))),))
+                            db.execute("UPDATE core_context_current SET reference='foreign-context'")
+                before = [ledger._snapshot_files(root) for root in (source, current)]
+                with self.assertRaises(ValueError):
+                    ledger.verify_moved_source(source, current)
+                self.assertEqual([ledger._snapshot_files(root) for root in (source, current)], before)
+
+    def test_moved_source_verification_preserves_legacy_bytes_after_import_normalization(self):
+        origin, source, current = (self.root / name for name in ('origin', 'A', 'B'))
+        identity = dict(platform='codex', session_id='native')
+        ledger.record_turn(root=origin, **identity, raw_input='legacy input')
+        ledger.export_session(root=origin, **identity, destination=source)
+        ledger.snapshot_roots(source, self.root / 'absent', current, writers_stopped=True)
+        ledger.record_turn(root=current, **identity, raw_input='current input')
+        ledger.verify_moved_source(source, current)
+        ledger.session_paths(current, **identity)['state'].unlink()
+        with self.assertRaises(ValueError):
+            ledger.verify_moved_source(source, current)
+
+    def test_moved_source_verification_detects_source_change_during_comparison(self):
+        source, current = self.moved_source_fixture('changed-during-check')
+        snapshot = ledger._snapshot_files
+        def changed_after_reading_current(root):
+            result = snapshot(root)
+            if root.resolve() == current.resolve():
+                (source / 'original.txt').write_text('changed during comparison')
+            return result
+        with mock.patch.object(ledger, '_snapshot_files', side_effect=changed_after_reading_current):
+            with self.assertRaisesRegex(ValueError, 'source changed'):
+                ledger.verify_moved_source(source, current)
+
+    def moved_link_fixture(self, name):
+        root = (self.root / name).resolve()
+        source, current = root / 'old/A', root / 'new/deeper/B'
+        (source / 'nested').mkdir(parents=True)
+        (source / 'proof.txt').write_text('retained original')
+        external = root / 'external.txt'
+        external.write_text('external original')
+        indirect = root / 'external-tree/child'
+        indirect.mkdir(parents=True)
+        (indirect.parent / 'proof.txt').write_text('external original')
+        links = {
+            'absolute': str(source / 'proof.txt'),
+            'alias': str(external),
+            'alias-chain': str(source / 'alias'),
+            'relative': './proof.txt',
+            'indirect': str(indirect),
+            'nested/internal': '../proof.txt',
+            'external-absolute': str(external),
+            'external-parent': 'indirect/../proof.txt',
+            'nested/external-relative': os.path.relpath(external, source / 'nested'),
+        }
+        expected = dict(links, absolute='proof.txt', relative='proof.txt')
+        expected['alias-chain'] = 'alias'
+        expected['external-parent'] = os.path.relpath(indirect.parent / 'proof.txt', current)
+        expected['nested/external-relative'] = os.path.relpath(external, current / 'nested')
+        for relative, target in links.items():
+            (source / relative).symlink_to(target)
+        return source, current, links, expected
+
+    def test_snapshot_relocates_links_for_final_ledger_without_changing_inputs(self):
+        source, current, links, expected = self.moved_link_fixture('new-links')
+        current.mkdir(parents=True)
+        (current / 'existing-link').symlink_to(source / 'proof.txt')
+        (current / 'alias').symlink_to(links['alias'])
+        (current / 'alias-chain').symlink_to('alias')
+        expected['existing-link'] = 'proof.txt'
+        staged = self.root / 'temporary/stage'
+        before = [ledger._snapshot_files(root) for root in (source, current)]
+        ledger.snapshot_roots(source, current, staged, writers_stopped=True)
+        self.assertEqual([ledger._snapshot_files(root) for root in (source, current)], before)
+        self.assertEqual({name: os.readlink(staged / name) for name in expected}, expected)
+        shutil.rmtree(current)
+        staged.rename(current)
+        shutil.rmtree(source)
+        for name in expected:
+            if name == 'indirect':
+                self.assertTrue((current / name).is_dir())
+                continue
+            self.assertEqual((current / name).read_text(),
+                             'external original' if 'external' in name or 'alias' in name else 'retained original')
+        (current / 'alias').unlink()
+        (current / 'alias').symlink_to('proof.txt')
+        self.assertEqual((current / 'alias-chain').read_text(), 'retained original')
+
+    def test_snapshot_rejects_equal_relative_link_text_with_different_external_targets(self):
+        source, current, staged = (self.root / 'link-conflict' / name for name in ('old/A', 'new/B', 'stage'))
+        for root in (source, current):
+            root.mkdir(parents=True)
+            (root.parent / 'outside.txt').write_text(root.name)
+            (root / 'proof-link').symlink_to('../outside.txt')
+        before = [ledger._snapshot_files(root) for root in (source, current)]
+        with self.assertRaisesRegex(ledger.LedgerSnapshotConflict, 'proof-link'):
+            ledger.snapshot_roots(source, current, staged, writers_stopped=True)
+        self.assertFalse(staged.exists())
+        self.assertEqual([ledger._snapshot_files(root) for root in (source, current)], before)
+
+    def test_older_moved_links_relocate_atomically_and_retry_without_changing_source(self):
+        source, current, links, expected = self.moved_link_fixture('older-links')
+        shutil.copytree(source, current, symlinks=True)
+        links['existing-link'] = str(source / 'proof.txt')
+        expected['existing-link'] = 'proof.txt'
+        (current / 'existing-link').symlink_to(links['existing-link'])
+        before = ledger._snapshot_files(source)
+        copied = ledger._snapshot_files(current)
+        with self.assertRaisesRegex(ValueError, 'nested/external-relative'):
+            ledger.verify_moved_source(source, current)
+        self.assertEqual(ledger._snapshot_files(current), copied)
+        self.assertEqual(ledger._snapshot_files(source), before)
+        # A journal-free copy cannot establish ownership of this ambiguous B
+        # pointer. Only the separately corrected fixture proceeds to relocation.
+        (current / 'nested/external-relative').unlink()
+        (current / 'nested/external-relative').symlink_to(expected['nested/external-relative'])
+        links['nested/external-relative'] = expected['nested/external-relative']
+        ledger.verify_moved_source(source, current)
+        self.assertEqual({name: os.readlink(current / name) for name in links}, links)
+        replace = os.replace
+        changes = []
+        def interrupted(src, dst):
+            if changes:
+                raise OSError('interrupted link replacement')
+            changes.append(Path(dst))
+            return replace(src, dst)
+        self.assertTrue(hasattr(ledger, 'relocate_moved_links'), 'The ledger owner must relocate copied links before source cleanup')
+        with mock.patch.object(ledger.os, 'replace', side_effect=interrupted):
+            with self.assertRaisesRegex(OSError, 'interrupted link replacement'):
+                ledger.relocate_moved_links(source, current)
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(ledger._snapshot_files(source), before)
+        changes[0].unlink()
+        changes[0].symlink_to(current / 'proof.txt')
+        ledger.verify_moved_source(source, current)
+        ledger.relocate_moved_links(source, current)
+        self.assertEqual({name: os.readlink(current / name) for name in links}, expected)
+        self.assertEqual(ledger._snapshot_files(source), before)
+        ledger.verify_moved_source(source, current)
+        placed = ledger._snapshot_files(current)
+        ledger.relocate_moved_links(source, current)
+        self.assertEqual(ledger._snapshot_files(current), placed)
+        shutil.rmtree(source)
+        for name in expected:
+            if name == 'indirect':
+                self.assertTrue((current / name).is_dir())
+                continue
+            self.assertEqual((current / name).read_text(),
+                             'external original' if 'external' in name or 'alias' in name else 'retained original')
+
     def test_snapshot_keeps_selection_when_discovery_pointer_bytes_differ(self):
         host, session = 'future-host', 'same-session'
         origin = self.root / 'origin'
@@ -98,6 +341,69 @@ class SQLiteAuthorityTests(unittest.TestCase):
         self.assertEqual(pointer.read_bytes(), original)
         self.assertEqual(other.read_bytes(), other_original + b' ')
         self.assertEqual(ledger.read_current_session_pointer(existing, 'future-host'), 'same-session')
+
+    def test_snapshot_rejects_source_change_during_baseline_capture(self):
+        source, existing, staged = (self.root / name for name in ('A', 'B', 'stage'))
+        ledger.record_turn(root=source, platform='codex', session_id='native', raw_input='original input')
+        companion = source / 'original.txt'
+        companion.write_text('original companion')
+        digest = ledger._shared_module('content_digest')
+        capture = digest.state
+
+        def changed_before_capture(root, **kwargs):
+            companion.write_text('not preserved in the snapshot')
+            return capture(root, **kwargs)
+
+        with mock.patch.object(digest, 'state', side_effect=changed_before_capture):
+            with self.assertRaisesRegex(ValueError, 'Ledger input changed during snapshot'):
+                ledger.snapshot_roots(source, existing, staged, writers_stopped=True)
+        self.assertEqual(companion.read_text(), 'not preserved in the snapshot')
+        self.assertEqual((staged / 'original.txt').read_text(), 'original companion')
+
+    def test_snapshot_returns_baseline_before_final_input_validation(self):
+        source, existing, staged = ((self.root / name).resolve() for name in ('A', 'B', 'stage'))
+        ledger.record_turn(root=source, platform='codex', session_id='native', raw_input='original input')
+        companion = source / 'original.txt'
+        companion.write_text('original companion')
+        (source / 'original-link').symlink_to(companion)
+        # Stabilize SQLite's read sidecars before describing the original physical state.
+        ledger._snapshot_files(source)
+        expected = ledger._shared_module('content_digest').state(source, include_generated=True)
+        snapshot = ledger._snapshot_files
+
+        def changed_after_source_validation(root):
+            result = snapshot(root)
+            if root == existing.resolve() and staged.exists():
+                companion.write_text('later source content')
+            return result
+
+        with mock.patch.object(ledger, '_snapshot_files', side_effect=changed_after_source_validation):
+            baselines = ledger.snapshot_roots(source, existing, staged, writers_stopped=True)
+        self.assertEqual(baselines, (expected, None))
+        self.assertEqual(companion.read_text(), 'later source content')
+        self.assertEqual((staged / 'original.txt').read_text(), 'original companion')
+        self.assertEqual(os.readlink(staged / 'original-link'), 'original.txt')
+
+    def test_snapshot_returns_existing_baseline_before_final_input_validation(self):
+        source, existing, staged = ((self.root / name).resolve() for name in ('A', 'B', 'stage'))
+        ledger.record_turn(root=source, platform='codex', session_id='native', raw_input='original input')
+        existing.mkdir()
+        companion = existing / 'original-b.txt'
+        companion.write_text('original B content')
+        expected = ledger._shared_module('content_digest').state(existing, include_generated=True)
+        snapshot = ledger._snapshot_files
+
+        def changed_after_validation(root):
+            result = snapshot(root)
+            if root == existing and staged.exists():
+                companion.write_text('later B content')
+            return result
+
+        with mock.patch.object(ledger, '_snapshot_files', side_effect=changed_after_validation):
+            baselines = ledger.snapshot_roots(source, existing, staged, writers_stopped=True)
+        self.assertEqual(baselines[1], expected)
+        self.assertEqual(companion.read_text(), 'later B content')
+        self.assertEqual((staged / 'original-b.txt').read_text(), 'original B content')
 
     def test_snapshot_rejects_link_directory_collision_before_changing_either_input(self):
         source, existing, staged = self.root / 'A', self.root / 'B', self.root / 'stage'
@@ -201,6 +507,10 @@ class SQLiteAuthorityTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.enterContext(mock.patch.dict(os.environ, {
+            'HOME': str(self.root), 'GHOST_ALICE_GHOST_ROOT': str(self.root / '.ghost-alice'),
+            'CODEX_HOME': str(self.root / '.codex'), 'CLAUDE_CONFIG_DIR': str(self.root / '.claude'),
+        }))
         self.args = dict(root=self.root, platform="codex", session_id="session-a")
 
     def seed(self):

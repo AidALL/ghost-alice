@@ -305,6 +305,14 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.assertEqual((self.root / 'native.json').read_bytes(), native)
         self.assertEqual(self.service(), service)
 
+    def test_registered_gateway_does_not_account_for_an_unrecorded_management_command(self):
+        self.seed()
+        command = self.ghost / 'bin/ghost-alice'
+        command.parent.mkdir(parents=True, exist_ok=True)
+        command.write_text('user command')
+        self.assertEqual(self.selected_removal(['session-intent-analyzer'], remaining=False), 1)
+        self.assertEqual(command.read_text(), 'user command')
+
     def assert_private_service_detached(self):
         """Observe the native simulator, listener and artifacts, not just the guard result."""
         native = json.loads((self.root / 'native.json').read_text())

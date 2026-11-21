@@ -126,20 +126,49 @@ def _core_source(reference, *, storage_root=None):
     return matches[0]
 
 
+def _file_source_path(reference, storage_root):
+    """Select an installed copy only from its recorded retirement into the fixed ledger."""
+    original = Path(reference['locator'])
+    if storage_root is None:
+        return original
+    location = Path(storage_root)
+    if (not location.is_absolute() or location.name != 'session-intent'
+            or '..' in location.parts or '..' in original.parts):
+        return original
+    import runtime_config
+    env = {'GHOST_ALICE_GHOST_ROOT': str(location.parent)}
+    if runtime_config.config_path(env=env).resolve() != (location.parent / 'config.json').resolve():
+        return original
+    retired = runtime_config.load_config(env=env, strict=True).get('retired_ledger_roots', [])
+    if (not isinstance(retired, list) or any(not isinstance(root, str) or not Path(root).is_absolute()
+                                            or '..' in Path(root).parts for root in retired)):
+        raise SourceReferenceError('Installation config has invalid retired ledger roots')
+    copies = set()
+    for root in map(Path, retired):
+        # Preserve the path below A; only normalize a surviving ancestor alias such as /var -> /private/var.
+        ancestor = root if original.is_relative_to(root) else next(
+            (parent for parent in original.parents if parent.resolve() == root), None)
+        if ancestor is not None:
+            copies.add(location / original.relative_to(ancestor))
+    if len(copies) > 1:
+        raise SourceReferenceError('Original source matches more than one retired ledger root')
+    return next(iter(copies), original)
+
+
 def verify_source(reference, *, storage_root=None):
     if reference.get('storage') == CORE_FORMAT:
         source_text(_core_source(reference, storage_root=storage_root))
         return
     validate_source_reference(reference)
-    digest, length, more = _scan(reference['locator'], reference['byte_length'])
+    digest, length, more = _scan(_file_source_path(reference, storage_root), reference['byte_length'])
     if (digest != reference['digest'] or length != reference['byte_length']
             or (more and not reference['appendable'])):
         raise SourceReferenceError('Original source bytes changed')
 
-def source_bytes(reference, *, identity=None):
+def source_bytes(reference, *, identity=None, storage_root=None):
     """Return authenticated file bytes, checking optional device/inode on the same open file."""
     validate_source_reference(reference)
-    with Path(reference['locator']).open('rb') as stream:
+    with _file_source_path(reference, storage_root).open('rb') as stream:
         if identity is not None:
             actual = os.fstat(stream.fileno())
             if (not isinstance(identity, dict) or set(identity) != {'device', 'inode'}
@@ -166,4 +195,4 @@ def source_text(reference, *, storage_root=None):
                 raise SourceReferenceError('Original source bytes changed')
             return raw.decode('utf-8', errors='replace')
         return reference['text']
-    return source_bytes(reference).decode('utf-8', errors='replace')
+    return source_bytes(reference, storage_root=storage_root).decode('utf-8', errors='replace')

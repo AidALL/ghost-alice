@@ -18,7 +18,7 @@ This document is the contract for the install-state manifest that the Ghost-ALIC
 
 The install-state manifest is the baseline used to decide which artifacts the next install preflight and uninstall can treat as installer-owned.
 
-The pending merge manifest is the quarantine for external changes and the queue for the human user's merge decisions. An external change is a change that the installer finds in an installed target after install and that its records do not hold; the installer does not record who made the change. This per-host inventory retains target baselines and environment rollback facts; the shared `installed-payload-v2.json` additionally records each publication and current host references. [Installer architecture](../docs/reference/installer-architecture.md#install-record) defines those distinct owners. The two manifests do not mix their paths or purposes.
+The pending merge manifest is the quarantine for external changes and the queue for the human user's merge decisions. An external change is a change that the installer finds in an installed target after install and that its records do not hold; the installer does not record who made the change. This per-host inventory retains target baselines and environment rollback facts; the versioned shared installation record additionally records each publication and current host references. [Installer architecture](../docs/reference/installer-architecture.md#install-record) defines those distinct owners. The two manifests do not mix their paths or purposes.
 
 ## File location
 
@@ -29,22 +29,25 @@ The installer writes one manifest for the selected platform at the corresponding
 
 ## Installed ledger source relationships
 
-The shared `~/.ghost-alice/installed-payload-v2.json` record has an optional `source.ledger_source_roots` object. This field belongs to the shared record, not the per-host manifest fields below. Each key is a normalized absolute installed ledger path; its value is the normalized absolute path of the source folder associated with that ledger. Both must be strings. A source folder need not still exist. `_shared/installed_payload.py` validates the map when reading or updating the shared record.
+The shared record’s optional `source.ledger_source_roots` uses normalized absolute ledger paths as keys. For each known host relationship, the canonical value contains the absolute `source_root` and the observed `hosts`, including when the source is the same checkout that is being installed. It is written in schema `3` under `installed-payload-v3.json`. The example shows one such relationship. A genuinely unattributed source path is a string. An empty map or a map of strings can use schema `2` under `installed-payload-v2.json`. A historical string alone cannot establish which host used the path.
 
 ```json
 {
   "source": {
     "root": "/work/current-source",
     "ledger_source_roots": {
-      "/work/previous-source/session-intent": "/work/previous-source"
+      "/work/current-source/session-intent": {
+        "source_root": "/work/current-source",
+        "hosts": ["claude"]
+      }
     }
   }
 }
 ```
 
-`source.root` identifies the current acquisition input; the map retains only the source relationships needed by current installed ledger bindings. It is neither a complete source history nor an instruction to select a ledger. `config.install_locations` and existing managed hooks supply the installed locations; source metadata transported by a request or saved package does not supply this map. The [installer architecture](../docs/reference/installer-architecture.md#fixed-commands-policies-and-ledger-data) owns relationship calculation and publication order.
+On the first upgrade of an active v2-only manager, the candidate can temporarily publish same-source observed relationships as path strings. Before host preparation and again before each placement, the candidate checks that the old manager can read that record and that this representation loses no previously recorded host attribution. Cross-source host relationships and historical attributions hidden by current observation cannot be discarded to obtain compatibility. For a current outer installer, `source.finalize_source` publishes the canonical relationships, version success and the new `installer.active_root` in one `record_update`. If the old outer installer needs to read v2 once more after success, activation keeps that active binding in v2 and stores the full pending relationships in `pending-install-source.json` beside the installation record in the same transaction. The new record-move stage publishes the saved facts under the installation lock and removes the pending file in the same transaction. The file binds the host names to the active package, installation source and v2 ledger paths. A later publication that replaces these relationships retires the pending file. The journal preserves it as ordinary metadata so that a deployed v2 recovery command can restore the prior file or its absence. An interrupted handoff can resume when the new manager next runs. While v3 is active, notices at the v2 and legacy filenames prevent older writers from replacing it. Once no relationship requires host attribution, a later journaled update can publish v2 and retire the v3 detail. [Installer architecture](../docs/reference/installer-architecture.md#fixed-commands-policies-and-ledger-data)
 
-The existing source writer merges fields by name. An omitted `ledger_source_roots` keeps the previous map; an explicit `{}` replaces it with an empty map. A valid map is stored with the new source fields in the same record replacement and journal. Records without the optional field remain readable.
+The existing source writer merges fields by name. An omitted `ledger_source_roots` keeps the previous map; an explicit `{}` replaces it with an empty map. A valid map is stored with the new source fields in the same journaled update. Records without the optional field remain readable.
 
 ## top-level fields
 

@@ -7,12 +7,13 @@ it before an install or a repair changes anything.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import stat
@@ -26,9 +27,9 @@ import install_transaction
 import installed_payload
 import addon_registry
 import content_digest
-from installer_assets import unrecorded_copy_content
+from installer_assets import _is_windows_junction, unrecorded_copy_content
 import file_lock
-from installer import locations, report, runner
+from installer import locations, report, runner, terminal
 from installer.runner import InstallerExit
 
 if TYPE_CHECKING:
@@ -237,10 +238,11 @@ def check_install_source(ctx: "Context", *, can_adopt: bool = True, match: Sourc
     _name_both(report.warn if asking else report.error, match)
     if asking:
         try:
-            answer = input("Replace the install source with this checkout? [y/N]: ")
-        except EOFError:
-            answer = ""
-        if answer.strip().lower() in ("y", "yes"):
+            answer = terminal.read_answer("Replace the install source with this checkout? [y/N]: ")
+        except (OSError, ValueError) as exc:
+            report.error(report.message('terminal_input_unavailable', cause=exc))
+            raise InstallerExit(2) from exc
+        if answer is not None and answer.strip().lower() in ("y", "yes"):
             ctx.options.adopt_source = True
             report.info(f"Install source: this checkout replaces {match.recorded}")
             return
@@ -275,9 +277,7 @@ def acquire_update(origin: dict):
             result = _git(root, *args)
             if not result.ok:
                 raise ValueError(f'Update acquisition failed: {result.stderr.strip() or result.stdout.strip()}')
-        captured = input_record(root)
-        captured.update({key: origin.get(key) for key in ('root', 'remote', 'ref', 'branch', 'hooks_path')})
-        yield root, captured
+        yield root
 
 
 def hooks_path_value(checkout: Path) -> str:
@@ -313,14 +313,19 @@ def _hook_path_records() -> list[dict]:
     return records
 
 
+def relative_hook_path_matches_repository(change: dict, root: Path) -> bool:
+    """The legacy relative hooks path identifies an installation only within the same Git repository."""
+    recorded = change.get('repo_root')
+    return isinstance(recorded, str) and Path(recorded).is_absolute() and _same_repository(Path(recorded), root)
+
+
 def _recorded_hook_path(value: str) -> HookPathChange | None:
     """The hook path change the installation records as writing `value`, else None. The relative `hooks` an earlier
     installer wrote names no folder, so its record counts only for a checkout of this repository."""
     for change in _hook_path_records():
         if change.get("after") != value:
             continue
-        if value == HOOKS_DIR and not (isinstance(change.get("repo_root"), str)
-                                       and _same_repository(Path(change["repo_root"]), Path(input_record()['root']))):
+        if value == HOOKS_DIR and not relative_hook_path_matches_repository(change, Path(input_record()['root'])):
             continue
         before_present = change.get("before_present") is True and isinstance(change.get("before"), str)
         return HookPathChange(changed=False, recorded=True, before_present=before_present,
@@ -562,23 +567,111 @@ def _active_versions(root: Path, record: dict) -> dict[Path, set[str]]:
 def _unchanged_version(folder: Path) -> bool:
     """Only an intact source version without extra user files is eligible for pruning."""
     try:
-        saved = json.loads((folder / 'version.json').read_text(encoding='utf-8'))
-        files = saved['files']
-        if not isinstance(files, dict) or unrecorded_copy_content(folder, [*files, 'version.json']):
-            return False
-        return _version_hash(files) == folder.name and all(install_transaction._file_hash(folder / name) == digest
-                                                          for name, digest in files.items())
+        files = _version_metadata(folder)['files']
+        return (not unrecorded_copy_content(folder, [*files, 'version.json'])
+                and not _missing_version_entries(folder, files, check_bytes=True))
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
 
-def prepare_source(ctx: 'Context', *, input_root: Path | None = None, provenance: dict | None = None,
-                   selections: dict[str, list[str]] | None = None) -> tuple[Path, dict[str, str]]:
-    """Capture the requested product bytes once without declaring installation success."""
+def _version_entry_exists(path: Path, *, directory: bool) -> bool:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    if (getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            or not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))):
+        raise ValueError(f'Preserved source entry has changed or is a link: {path}')
+    return True
+
+
+def _version_metadata(folder: Path) -> dict:
+    metadata = folder / 'version.json'
+    if _version_entry_exists(metadata, directory=False):
+        saved = json.loads(metadata.read_text(encoding='utf-8'))
+        files = saved.get('files') if isinstance(saved, dict) else None
+        if (isinstance(files, dict) and files and _version_hash(files) == folder.name
+                and all(isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest) for digest in files.values())):
+            return saved
+    raise ValueError(f'Preserved source file list is missing or has changed: {metadata}')
+
+
+def _missing_version_entries(folder: Path, files: dict[str, str], *, check_bytes: bool) -> list[Path]:
+    """Verify surviving entries before returning the topmost absent files and directories."""
+    directories = set()
+    regular = {}
+    for name, digest in files.items():
+        relative = Path(name)
+        if relative.anchor or '..' in relative.parts or not relative.parts or relative.as_posix() != name:
+            raise ValueError(f'Invalid preserved source entry in {folder}: {name}')
+        regular[relative] = digest
+        directories.update(relative.parents)
+    directories.discard(Path('.'))
+    absent = set()
+    missing = []
+    for relative in sorted(directories | regular.keys()):
+        if relative.parent in absent:
+            absent.add(relative)
+            continue
+        path = folder / relative
+        if not _version_entry_exists(path, directory=relative in directories):
+            absent.add(relative)
+            missing.append(relative)
+        elif check_bytes and relative in regular and install_transaction._file_hash(path) != regular[relative]:
+            raise ValueError(f'Preserved source version has changed: {path}')
+    return missing
+
+
+def _active_version(root: Path) -> Path | None:
+    record = installed_payload.read(locations.record_root()) or {}
+    active = record.get('installer', {}).get('active_root')
+    if active:
+        package = Path(active)
+        if package.name == 'core' and package.parent.parent == root:
+            return package.parent
+    return None
+
+
+def _manager_missing(folder: Path) -> bool:
+    """When saved files are missing, check whether the active CLI imports and its reader reads the current record."""
+    if not _version_entry_exists(folder, directory=True):
+        return True
+    files = _version_metadata(folder)['files']
+    if _missing_version_entries(folder, files, check_bytes=False):
+        try:
+            check_record_reader(folder / 'core', locations.record_root(), check_entry=True)
+        except ValueError:
+            return True
+    return False
+
+
+def _version_root() -> Path:
     root = locations.record_root() / 'versions'
-    if root.is_symlink():
+    if root.is_symlink() or _is_windows_junction(root):
         raise ValueError(f'Source version root is a link: {root}')
-    root = root.resolve()
+    return root.resolve()
+
+
+def repair_active_source(ctx: 'Context') -> None:
+    """Under the repair lock, restore a recorded version before publishing any managed targets."""
+    active = _active_version(_version_root())
+    if active is None:
+        return
+    if not _version_entry_exists(active, directory=True):
+        raise ValueError(report.message('active_version_missing', package=active / 'core', command=report.install_command()))
+    files = _version_metadata(active)['files']
+    if _missing_version_entries(active, files, check_bytes=True):
+        addon_paths = sorted({str(active.joinpath(*Path(name).parts[:2])) for name in files if name.startswith('addons/')})
+        inputs = replace(ctx, addon_sources=ctx.addon_sources or addon_paths)
+        prepare_source(inputs, required_version=active)
+    check_record_reader(active / 'core', locations.record_root(), check_entry=True)
+
+
+def prepare_source(ctx: 'Context', *, input_root: Path | None = None, provenance: dict | None = None,
+                   selections: dict[str, list[str]] | None = None,
+                   required_version: Path | None = None) -> tuple[Path, dict[str, str]]:
+    """Capture the requested product bytes once without declaring installation success."""
+    root = _version_root()
     root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.stage-', dir=root) as temporary:
         stage = Path(temporary)
@@ -605,12 +698,19 @@ def prepare_source(ctx: 'Context', *, input_root: Path | None = None, provenance
                  'selections': selections,
                  'source': provenance if provenance is not None else input_record(),
                  'origins': {relative: str(original) for original, relative in captured}}
-        if folder.is_symlink():
-            raise ValueError(f'Preserved source version is a link: {folder}')
-        if folder.exists():
-            previous = json.loads((folder / 'version.json').read_text(encoding='utf-8'))
-            if previous['files'] != files or any(install_transaction._file_hash(folder / name) != digest for name, digest in files.items()):
+        active = required_version or _active_version(root)
+        if active and folder != active and (required_version or _manager_missing(active)):
+            raise ValueError(report.message('active_version_mismatch', package=active / 'core', command=report.install_command()))
+        if _version_entry_exists(folder, directory=True):
+            if _version_metadata(folder)['files'] != files:
                 raise ValueError(f'Preserved source version has changed: {folder}')
+            missing = _missing_version_entries(folder, files, check_bytes=True)
+            if missing and folder != active:
+                raise ValueError(f'Preserved source version is incomplete: {folder}')
+            if missing:
+                from retired_assets import _restore_no_replace
+                for relative in missing:
+                    _restore_no_replace(stage / relative, folder / relative)
         else:
             # The complete file set moves into place; a failed copy never becomes a saved version.
             install_transaction._write_json(stage / 'version.json', saved)
@@ -619,14 +719,17 @@ def prepare_source(ctx: 'Context', *, input_root: Path | None = None, provenance
                     for original, relative in captured if relative != 'core'}
 
 
-def finalize_source(ctx: 'Context', folder: Path, platforms: list[str]) -> list[str]:
+def finalize_source(ctx: 'Context', folder: Path, platforms: list[str], *, before_handoff: dict | None = None) -> list[str]:
     """After the requested placements succeed, commit success and active CLI, then prune old successes."""
     root = (locations.record_root() / 'versions').resolve()
     version_file = folder / 'version.json'
-    saved = json.loads(version_file.read_text(encoding='utf-8'))
-    if any(install_transaction._file_hash(folder / name) != digest for name, digest in saved['files'].items()):
-        raise ValueError(f'Preserved source version has changed: {folder}')
-    record = installed_payload.read(locations.record_root()) or {}
+    saved = _version_metadata(folder)
+    if _missing_version_entries(folder, saved['files'], check_bytes=True):
+        raise ValueError(f'Preserved source version is incomplete: {folder}')
+    from installer.selection import installed_core_selection
+    record_path = installed_payload.read_path(locations.record_root())
+    record = installed_payload.read_file(record_path) or {}
+    selections = installed_core_selection(record, record_path)
     for destination, entry in record.get('targets', {}).items():
         if not set(platforms).intersection(entry.get('used_by', [])):
             continue
@@ -636,22 +739,32 @@ def finalize_source(ctx: 'Context', folder: Path, platforms: list[str]) -> list[
             expected = entry.get('files') if entry.get('kind') == 'command' else content_digest.tree(original)
             if expected != content_digest.tree(destination):
                 raise ValueError(f'Preserved source differs from installed code: {destination}')
-    from installer.selection import installed_core_selection
     # The executing package declares support for the parent's record-move request.
     saved.update(status='successful', platforms=sorted(set(saved.get('platforms', [])) | set(platforms)),
-                 selections=installed_core_selection(record),
+                 selections=selections,
                  record_move=True,
                  completed_at=datetime.now(timezone.utc).isoformat())
+    sections = {'installer': {'active_root': str(folder / 'core')}}
+    if record.get('source', {}).get('root'):
+        from installer.transaction import installed_ledger_locations
+        observed = installed_ledger_locations(before_handoff=before_handoff)
+        if observed.observation_errors:
+            raise ValueError('; '.join(observed.observation_errors.values()))
+        facts = observed.publication_source({'root': record['source']['root']})
+        sections['source'] = facts
+    defer_source = (request_writer_needs_v2() and
+                    any(isinstance(value, dict) for value in sections.get('source', {}).get('ledger_source_roots', {}).values()))
     with install_transaction.record_update(locations.record_root(), version_file=version_file) as journal:
         install_transaction._write_json(version_file, saved)
-        installed_payload.update(locations.record_root(), {'installer': {'active_root': str(folder / 'core')}}, journal=journal)
+        installed_payload.update(locations.record_root(), sections, journal=journal, defer_source=defer_source)
     record = installed_payload.read(locations.record_root()) or {}
     command = ['pwsh', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(folder / 'core/install.ps1')] if os.name == 'nt' else ['bash', str(folder / 'core/install.sh')]
     command += ['--platform', ctx.platform, '--adopt-source']
     for selected in sorted(source for source in saved['sources'] if source != 'core'):
         command += ['--addon-source', str(folder / selected)]
     lines = [f'Successful source version: {folder}', 'Reinstall this code: ' + (subprocess.list2cmdline(command) if os.name == 'nt' else shlex.join(command))]
-    lines.extend(install_transaction.cleanup_completed(locations.record_root()))
+    from installer.transaction import cleanup_record_source
+    lines.extend(install_transaction.cleanup_completed(locations.record_root(), record_source_cleanup=cleanup_record_source))
     try:
         active = _active_versions(root, record)
     except (OSError, ValueError, addon_registry.RegistryError, install_transaction.InstallTransactionError) as exc:
@@ -665,9 +778,9 @@ def finalize_source(ctx: 'Context', folder: Path, platforms: list[str]) -> list[
     for obsolete in successful[3:]:
         if obsolete in active or not _unchanged_version(obsolete):
             continue
-        from uninstall_cleanup import _platforms_referencing_target
+        from uninstall_cleanup import platforms_referencing_target
         try:
-            consumers = _platforms_referencing_target(obsolete,
+            consumers = platforms_referencing_target(obsolete,
                 current_manifest=locations.record_root() / 'install-state' / f'{ctx.platform}.json',
                 current_platform=ctx.platform, include_current=True, source_tree=True)
         except (OSError, ValueError) as exc:
@@ -693,37 +806,75 @@ def reinstall_selection() -> dict[str, list[str]] | None:
     if not runner.REPO_ROOT.resolve().is_relative_to((locations.record_root() / 'versions').resolve()):
         return None
     saved = json.loads((runner.REPO_ROOT.parent / 'version.json').read_text())
-    current = installed_core_selection(installed_payload.read(locations.record_root()) or {})
+    record_path = install_transaction.record_path_after_recovery(locations.record_root())
+    current = installed_core_selection(installed_payload.read_file(record_path) or {}, record_path)
     selected = (current if saved.get('status') == 'successful' and current else saved.get('selections'))
     if not selected:
         raise ValueError('This saved package has no recorded Core selection; name the host and skills to reinstall')
     return selected
 
 
-def check_record_reader(package: Path, ghost_root: Path) -> None:
-    """Execute the package's record reader against this installation format before running its installer."""
-    expected = installed_payload.read(ghost_root)
-    if expected is None:
-        return
-    probe = ('import json,sys; sys.path.insert(0,sys.argv[1]); import installed_payload; '
-             'print(json.dumps(installed_payload.read(sys.argv[2]),sort_keys=True))')
-    result = subprocess.run([sys.executable, '-I', '-B', '-c', probe, str(package / '_shared'), str(ghost_root)],
+def _read_with_package(package: Path, ghost_root: Path, operation: str):
+    program = 'import json,sys; sys.path.insert(0,sys.argv[1]); ' + operation
+    result = subprocess.run([sys.executable, '-I', '-B', '-c', program, str(package / '_shared'), str(ghost_root)],
                             capture_output=True, text=True, encoding='utf-8')
     if result.returncode:
-        raise ValueError(f'Installer {package} cannot read the installation record: {result.stderr.strip()}')
-    if json.loads(result.stdout) != expected:
-        raise ValueError(f'Installer {package} does not preserve the installation record fields it reads')
+        raise ValueError(report.message('package_record_unreadable', package=package))
+    return json.loads(result.stdout)
 
 
-def check_previous_manager() -> None:
-    """Before candidate placement, confirm the retained manager can read the candidate's record format."""
+def check_record_reader(package: Path, ghost_root: Path, *, check_entry: bool = False) -> None:
+    """Check that a package reads the same installation record before giving it write access."""
+    expected = installed_payload.read(ghost_root)
+    operation = 'import installed_payload; print(json.dumps(installed_payload.read(sys.argv[2])))'
+    if check_entry:
+        operation = 'from installer import cli; ' + operation
+    if expected is not None and _read_with_package(package, ghost_root, operation) != expected:
+        raise ValueError(report.message('package_record_unreadable', package=package))
+
+
+def request_writer_needs_v2() -> bool:
+    """A deployed request writer reads v2 after placement, even when another package is active."""
+    request = install_request()
+    return request is not None and not request.get('request_writer_reads_v3')
+
+
+def check_previous_manager(source_fields: dict) -> dict:
+    """Select the record the manager handling an interrupted placement must still be able to read."""
     import install_lock
     record = installed_payload.read(locations.record_root()) or {}
     active = record.get('installer', {}).get('active_root')
-    if not active:
-        return
+    recorded_source = record.get('source', {})
+    relations = source_fields.get('ledger_source_roots', {})
+    old_parent = request_writer_needs_v2()
+    attributed = [fact for fact in relations.values() if isinstance(fact, dict)]
+    if not active and not old_parent:
+        return source_fields
+    choices = [] if old_parent and attributed else [source_fields]
+    if attributed and record.get('schema_version', 2) <= 2:
+        # Only the first upgrade on the same source can temporarily expose a path-only view.
+        origin = recorded_source.get('root')
+        if (origin == source_fields.get('root')
+                and not any(isinstance(fact, dict) for fact in recorded_source.get('ledger_source_roots', {}).values())
+                and all(fact['source_root'] == origin for fact in attributed)):
+            choices.append(dict(source_fields, ledger_source_roots=installed_payload.source_paths(relations)))
     with tempfile.TemporaryDirectory(prefix='ghost-alice-record-check-') as directory:
-        root = Path(directory)
-        with install_lock.command_lock(root / 'install.lock', owner='compatibility-check'):
-            installed_payload._save(root, record)
-        check_record_reader(Path(active), root)
+        for index, fields in enumerate(choices):
+            if not active:
+                return fields
+            root = Path(directory) / str(index)
+            with install_lock.command_lock(root / 'install.lock', owner='compatibility-check'):
+                installed_payload._save(root, dict(record, source=dict(recorded_source, **fields)))
+            try:
+                check_record_reader(Path(active), root)
+            except ValueError:
+                continue
+            return fields
+    if active:
+        # Offer the installed command only when the retained manager can still start and read today's record.
+        try:
+            check_record_reader(Path(active), locations.record_root(), check_entry=True)
+        except ValueError as exc:
+            raise ValueError(report.message('active_manager_unavailable', package=active, command=report.install_command())) from exc
+    raise ValueError(report.message('previous_manager_incompatible', package=active or runner.REPO_ROOT,
+                                   origin=recorded_source.get('root', active), command=locations.management_command()))

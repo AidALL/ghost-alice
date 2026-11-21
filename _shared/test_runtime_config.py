@@ -20,6 +20,17 @@ from test_atomic_write import _FailAfterPartialWrite  # noqa: E402
 
 
 class TestRuntimeConfigDefaults(unittest.TestCase):
+    def test_retired_root_shape_errors_belong_to_the_config_reader(self):
+        path = runtime_config.config_path(self.home, env={})
+        path.parent.mkdir(parents=True)
+        for value in (None, 7, 'old-root', [7], ['relative'], [''], ['bad\0path']):
+            with self.subTest(value=value):
+                path.write_text(json.dumps({'retired_ledger_roots': value}))
+                with self.assertRaisesRegex(ValueError, 'retired_ledger_roots') as caught:
+                    runtime_config.load_config(env={}, home=self.home, strict=True)
+                self.assertIn(str(path), str(caught.exception))
+                self.assertNotIn('retired_ledger_roots', runtime_config.load_config(env={}, home=self.home))
+
     def test_partial_save_uses_the_same_custom_installation_for_reading_and_writing(self):
         import ledger_access
         ghost = self.home / 'custom-installation'

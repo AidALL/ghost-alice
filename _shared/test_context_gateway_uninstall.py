@@ -29,6 +29,7 @@ import uninstall_cleanup as cleanup  # noqa: E402
 from context_gateway_model import GatewayBlocked, LABEL  # noqa: E402
 from hook_definitions import PROVIDER  # noqa: E402
 from install_hooks import HookStatus
+from installer import report as installer_report
 from installer_testing import destination_fixture, installer_env
 
 
@@ -169,8 +170,10 @@ class GatewayUninstallTests(RegisteredHomeCase):
             result, hooks = self.report()
         self.assertEqual(self.targets, [])
         self.assertEqual(hooks, 1)
-        self.assertTrue(any(item.get('kind') == 'context-gateway' and item['action'] == 'manual-review'
-                            for item in result['items']))
+        item = next(item for item in result['items'] if item.get('kind') == 'context-gateway')
+        self.assertEqual(item['action'], 'manual-review')
+        self.assertTrue(any(level == 'ERROR' and item['detail'] in line
+                            for level, line in installer_report.removal_item_lines(item)))
         self.assertTrue(self.reg.agent.exists())
         self.assertIn('ghost_alice_context', self.reg.config.read_text())
         self.assertIsNotNone(self.reg.service())
@@ -254,6 +257,8 @@ class GatewayUninstallTests(RegisteredHomeCase):
         self.assertEqual((hooks, self.targets), (0, []))
         self.assertEqual(result['items'][0]['action'], 'manual-review')
         self.assertIn('install record', result['items'][0]['detail'])
+        self.assertTrue(any(level == 'ERROR' and 'install record' in line
+                            for level, line in installer_report.removal_item_lines(result['items'][0])))
         self.assertEqual(self.stops, 0)
         self.assertTrue(result['blocked'])
 

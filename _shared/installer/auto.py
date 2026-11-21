@@ -97,8 +97,8 @@ def _run_verbose(ctx: "Context", detected: list[str]) -> int:
 
 def _run_compact(ctx: "Context", detected: list[str]) -> int:
     log = report.log_init()
-    event_file = Path(str(log)[:-len(".log")] + ".events.jsonl") if str(log).endswith(".log") else Path(f"{log}.events.jsonl")
-    event_file.write_text("", encoding="utf-8")
+    event_file = report.state().event_file
+    event_file.touch(exist_ok=True)
     skills = list(ctx.options.args) or list(selection.ALL_SKILLS)
     total = len(detected)
     common = count_common_targets(ctx, detected, skills)

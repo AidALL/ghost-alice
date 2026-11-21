@@ -14,6 +14,7 @@ import unittest
 from unittest import mock
 
 import install_hooks
+import install_lock
 import installer_assets
 import install_transaction
 import installed_payload
@@ -176,7 +177,8 @@ class UnreadableRecoveryTests(unittest.TestCase):
             for path in files:
                 path.write_text('{broken')
             args = argparse.Namespace(platform='codex', install_state_manifest=files[0], apply_changes=True)
-            with mock.patch.dict(os.environ, installer_env(home), clear=True):
+            with mock.patch.dict(os.environ, installer_env(home), clear=True), \
+                    install_lock.command_lock(home / '.ghost-alice/install.lock', owner='uninstall:codex:test'):
                 report = uninstall_cleanup.build_report(args)
             self.assertTrue(any(row['action'] == 'manual-review' for row in report['items']))
             self.assertEqual({p.name: p.read_text() for p in files}, {p.name: '{broken' for p in files})

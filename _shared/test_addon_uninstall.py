@@ -177,6 +177,20 @@ class CoreUninstallTest(UninstallTestBase):
         self.assertEqual(settings.read_bytes(), b'\xff')
         self.assertTrue((self.skills / 'one').exists())
 
+    def test_unreadable_permission_receipt_names_the_retained_settings(self):
+        self._install('first', ['one'])
+        settings = self.root / '.claude/settings.json'
+        settings.write_text('{"permissions":{"allow":["Skill(one)"]}}')
+        receipt = self.root / '.ghost-alice/addon-permissions/claude-v2.json'
+        receipt.parent.mkdir()
+        receipt.write_bytes(b'{')
+        result = self._uninstall('first')
+        self.assertEqual(result['status'], 'permissions-retained')
+        row = next(item for item in result['items'] if item.get('reason') == 'permission-attribution-unresolved')
+        self.assertEqual(row['path'], str(settings))
+        self.assertIn('Expecting property name', row['detail'])
+        self.assertEqual(json.loads(settings.read_text())['permissions']['allow'], ['Skill(one)'])
+
     def test_resume_without_markers_does_not_require_settings(self):
         self.addons.mkdir(parents=True)
         (self.root / '.claude/settings.json').mkdir(parents=True)

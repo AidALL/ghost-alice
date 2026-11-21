@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-import os
-import sys
 
 import install_transaction
 import installed_payload
 
-from installer import gateway_participant, hosts, locations, lock, report, source, transaction
+from installer import gateway_participant, hosts, locations, lock, report, source, terminal, transaction
 
 
 def read_locations() -> transaction.LedgerLocations | None:
@@ -19,33 +17,25 @@ def read_locations() -> transaction.LedgerLocations | None:
     except (OSError, ValueError, installed_payload.RecordError) as exc:
         report.warn(report.message('move_locations_unreadable', cause=exc))
         return None
+    for path, cause in observed.observation_errors.items():
+        report.warn(report.message('move_locations_unreadable', cause=f'{path}: {cause}'))
     for host, cause in observed.unavailable_hosts.items():
+        report.warn(report.message('move_location_unknown', host_name=host, cause=cause))
+    for host, cause in observed.host_config_errors.items():
         report.warn(report.message('move_location_unknown', host_name=host, cause=cause))
     return observed
 
 
-def _discard_previous_input() -> None:
-    """End the installation's input lifetime before displaying the first move question."""
-    if not sys.stdin.isatty():
-        return
-    if os.name == 'nt':
-        import msvcrt
-        while msvcrt.kbhit():
-            msvcrt.getwch()
-    else:
-        import termios
-        try:
-            termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
-        except termios.error as exc:
-            raise OSError(str(exc)) from exc
-
-
-def _answer(*, waiting: bool = False) -> bool:
+def _answer(question: str, *, waiting: bool = False) -> bool | None:
     while True:
         try:
-            answer = input().strip().lower()
-        except EOFError:
+            answer = terminal.read_answer(question)
+        except (OSError, ValueError) as exc:
+            report.warn(report.message('move_input_unavailable', cause=exc))
+            return None
+        if answer is None:
             return False
+        answer = answer.strip().lower()
         if answer == '' or (not waiting and answer in ('y', 'yes')):
             return True
         if answer in ('n', 'no'):
@@ -75,13 +65,23 @@ def run(execution_cause: str) -> int:
     report.emit(report.message('update_complete' if execution_cause == 'update' else 'install_complete'))
     fixed = locations.ledger_root().resolve()
     observed = read_locations()
-    if observed is None:
+    if observed is None or observed.observation_errors or observed.active_config_errors:
         report.emit(report.message('move_lookup_deferred'))
         return 0
+    if observed.retired_roots:
+        handle = lock.acquire('record-move', 'installer')
+        try:
+            for root in transaction.cleanup_retired_ledgers():
+                report.emit(report.message('move_source_removed', current_path=root, new_path=fixed))
+        except (OSError, ValueError, install_transaction.InstallTransactionError) as exc:
+            report.error(report.message('move_source_cleanup_failed', new_path=fixed, cause=exc))
+            return 1
+        finally:
+            lock.release(handle)
     bindings = observed.roots
     candidates = []
     for root, value in bindings.items():
-        if value['state'] == 'fixed':
+        if value['state'] in ('fixed', 'retired'):
             continue
         if value['state'] == 'unknown':
             report.emit(report.message('move_relation_unknown', current_path=root))
@@ -99,14 +99,10 @@ def run(execution_cause: str) -> int:
             report.emit(report.message('move_deferred', current_path=root, entry_command=locations.management_command()))
         return 0
     report.emit(report.message('move_explanation'))
-    try:
-        _discard_previous_input()
-    except (OSError, ValueError) as exc:
-        report.warn(report.message('move_input_unavailable', cause=exc))
+    answer = _answer(report.message('move_question') + '\n' + report.message('move_choices'))
+    if answer is None:
         return 0
-    report.emit(report.message('move_question'))
-    report.emit(report.message('move_choices'))
-    if not _answer():
+    if not answer:
         for root in candidates:
             report.emit(report.message('move_cancelled', current_path=root, entry_command=locations.management_command()))
         return 0
@@ -118,7 +114,7 @@ def run(execution_cause: str) -> int:
             continue
         while True:
             observed = read_locations()
-            if observed is None or observed.unavailable_hosts:
+            if observed is None or observed.dependency_errors:
                 result = transaction.LedgerMoveResult('deferred')
                 break
             bindings = observed.roots
@@ -130,7 +126,7 @@ def run(execution_cause: str) -> int:
                 handle = lock.acquire('record-move', 'installer')
                 try:
                     observed = read_locations()
-                    if observed is None or observed.unavailable_hosts:
+                    if observed is None or observed.dependency_errors:
                         result = transaction.LedgerMoveResult('deferred')
                         break
                     bindings = observed.roots
@@ -146,9 +142,10 @@ def run(execution_cause: str) -> int:
                         break
                 finally:
                     lock.release(handle)
-            for key, fields in blocked:
-                report.emit(report.message(key, **fields))
-            if not _answer(waiting=True):
+            answer = _answer('\n'.join(report.message(key, **fields) for key, fields in blocked), waiting=True)
+            if answer is None:
+                return exit_code
+            if not answer:
                 for remaining in candidates[candidates.index(root):]:
                     report.emit(report.message('move_cancelled', current_path=remaining, entry_command=locations.management_command()))
                 return exit_code

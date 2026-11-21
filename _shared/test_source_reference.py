@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 
@@ -179,6 +180,90 @@ class SourcePrefixReferenceTest(unittest.TestCase):
                 with self.subTest(reference=value):
                     with self.assertRaises(source_reference.SourceReferenceError):
                         source_reference.validate_source_reference(value)
+
+
+class RelocatedFileReferenceTest(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.home = Path(temporary.name).resolve()
+        self.old = self.home / 'A'
+        self.current = self.home / 'installation' / 'session-intent'
+        self.original = self.old / 'evidence' / 'proof.txt'
+        self.original.parent.mkdir(parents=True)
+        self.original.write_bytes(b'original proof\n')
+        self.reference = source_reference.reference_source(str(self.original))
+        self.moved = self.current / 'evidence' / 'proof.txt'
+        self.moved.parent.mkdir(parents=True)
+        self.moved.write_bytes(self.original.read_bytes())
+        self.config = self.current.parent / 'config.json'
+        self.config.write_text(json.dumps({'retired_ledger_roots': [str(self.old)]}))
+
+    def test_explicit_fixed_storage_reads_retired_original_without_rewriting_reference(self):
+        before = dict(self.reference)
+        shutil.rmtree(self.old)
+        self.assertEqual(source_reference.source_text(self.reference, storage_root=self.current), 'original proof\n')
+        self.assertEqual(source_reference.source_bytes(self.reference, storage_root=self.current), b'original proof\n')
+        self.assertIsNone(source_reference.verify_source(self.reference, storage_root=self.current))
+        self.assertEqual(self.reference, before)
+        with self.assertRaises(FileNotFoundError):
+            source_reference.source_text(self.reference)
+
+    def test_selected_retired_copy_must_authenticate_even_when_old_file_still_exists(self):
+        for changed in (b'changed proof\n', b'original', b'original proof\nextra'):
+            self.moved.write_bytes(changed)
+            for reader in (source_reference.source_text, source_reference.source_bytes, source_reference.verify_source):
+                with self.subTest(changed=changed, reader=reader.__name__):
+                    with self.assertRaises(source_reference.SourceReferenceError):
+                        reader(self.reference, storage_root=self.current)
+        appendable = source_reference.reference_source(str(self.original), appendable=True)
+        self.assertEqual(source_reference.source_bytes(appendable, storage_root=self.current), b'original proof\n')
+        original_stat = self.original.stat()
+        with self.assertRaises(source_reference.SourceReferenceError):
+            source_reference.source_bytes(appendable, storage_root=self.current,
+                identity=dict(device=original_stat.st_dev, inode=original_stat.st_ino))
+
+    def test_original_locator_through_surviving_ancestor_alias_reads_moved_file(self):
+        alias = self.home / 'alias'
+        alias.symlink_to(self.home, target_is_directory=True)
+        reference = source_reference.reference_source(str(alias / 'A/evidence/proof.txt'))
+        shutil.rmtree(self.old)
+        self.assertEqual(source_reference.source_text(reference, storage_root=self.current), 'original proof\n')
+        self.assertEqual(reference['locator'], str(alias / 'A/evidence/proof.txt'))
+
+    def test_unrelated_or_unrecorded_paths_keep_their_original_location(self):
+        self.moved.write_bytes(b'different copied bytes')
+        self.config.write_text('{}')
+        self.assertEqual(source_reference.source_text(self.reference, storage_root=self.current), 'original proof\n')
+        self.config.write_text(json.dumps({'retired_ledger_roots': [str(self.old)]}))
+        self.assertEqual(source_reference.source_text(self.reference, storage_root=self.current.parent / 'other'),
+                         'original proof\n')
+        outside = self.home / 'unrelated.txt'
+        outside.write_text('outside source')
+        reference = source_reference.reference_source(str(outside))
+        self.assertEqual(source_reference.source_text(reference, storage_root=self.current), 'outside source')
+        self.config.unlink()
+        shutil.rmtree(self.old)
+        with self.assertRaises(FileNotFoundError):
+            source_reference.source_text(self.reference, storage_root=self.current)
+
+    def test_another_active_installation_cannot_supply_retirement_for_selected_storage(self):
+        import install_destination
+        other = self.home / 'other-installation'
+        other.mkdir()
+        (other / 'config.json').write_text(json.dumps({'retired_ledger_roots': [str(self.old)]}))
+        self.config.write_text('{}')
+        self.moved.write_bytes(b'unrelated selected copy')
+        destination = dict(mode='normal', owned_root=str(self.home), platform_dir=str(self.home),
+            skills_dir=str(self.home), ghost_root=str(other), ledger_root=str(other / 'session-intent'),
+            project_root=str(self.home), core_source_root=str(self.home))
+        with install_destination.use(destination):
+            self.assertEqual(source_reference.source_text(self.reference, storage_root=self.current), 'original proof\n')
+
+    def test_overlapping_retired_roots_do_not_guess_a_physical_original(self):
+        self.config.write_text(json.dumps({'retired_ledger_roots': [str(self.old), str(self.original.parent)]}))
+        with self.assertRaises(source_reference.SourceReferenceError):
+            source_reference.source_text(self.reference, storage_root=self.current)
 
 
 if __name__ == '__main__':

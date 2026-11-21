@@ -1,9 +1,11 @@
 import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 
@@ -95,19 +97,35 @@ class EncodingGuardTest(unittest.TestCase):
             self.assertEqual(len(issues), 1)
             self.assertEqual(issues[0].code, "missing-utf8-bom")
 
-    def test_repo_scan_ignores_tmp_local_artifacts(self) -> None:
+    def test_repo_scan_does_not_enter_excluded_directories(self) -> None:
         guard = _load_guard()
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            (root / "AGENTS.md").write_text("# Project rules\n", encoding="utf-8")
+            root = Path(temp_dir).resolve()
+            tracked = root / "AGENTS.md"
+            tracked.write_bytes(b"invalid\xff")
             local_run = root / ".tmp" / "local-model-experiments"
             local_run.mkdir(parents=True)
             (local_run / "http-models.json").write_text("not json", encoding="utf-8")
-            (local_run / "Activate.ps1").write_text("Write-Host 'local venv'\n", encoding="utf-8")
+            explicit = root / "existing-skill"
+            explicit.mkdir()
+            staging = {local_run / ".stage-1", explicit / ".stage-2"}
+            for directory in staging:
+                directory.mkdir()
+            entered = []
+            scandir = os.scandir
 
-            issues = guard.validate_repo(root)
+            def discard_stage_when_scanned(path):
+                directory = Path(path)
+                if directory in staging:
+                    entered.append(directory)
+                    directory.rmdir()
+                return scandir(path)
 
-            self.assertEqual(issues, [])
+            with patch("os.scandir", side_effect=discard_stage_when_scanned):
+                issues = guard.validate_repo(root, exclude_roots=[explicit])
+
+            self.assertEqual(entered, [])
+            self.assertEqual([(item.path, item.code) for item in issues], [(tracked.resolve(), "invalid-utf8")])
 
     def test_cli_returns_nonzero_for_invalid_semantic_asset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -15,7 +15,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from git_hook_paths import hook_paths  # noqa: E402
 import installer_testing  # noqa: E402
-from installer_testing import checkout_copy, installer_env  # noqa: E402
+from installer_testing import checkout_copy, installer_env, installer_home_effects  # noqa: E402
 
 GIT = shutil.which("git")
 
@@ -57,6 +57,35 @@ class CheckoutCopyTests(unittest.TestCase):
         self.root = Path(temp.name).resolve()
         self.repo = init_repo(self.root / "repo")
 
+    def test_installer_child_observes_no_native_gateway_without_querying_launchd(self):
+        env = installer_env(self.root / "home")
+        child = subprocess.run(
+            [sys.executable, "-c", "\n".join((
+                "import subprocess, sys",
+                "from unittest import mock",
+                "sys.path.insert(0, sys.argv[1])",
+                "from context_gateway_platform import observe",
+                "with mock.patch.object(subprocess, 'Popen', side_effect=AssertionError('native query escaped fixture')):",
+                "    observed = observe('gui/12345')",
+                "assert observed.presence == 'absent', observed",
+            )), str(Path(__file__).resolve().parent)],
+            env=env, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(child.returncode, 0, child.stdout + child.stderr)
+
+    def test_in_process_native_observations_share_the_child_boundary(self):
+        from context_gateway_platform import observe
+        with mock.patch.object(subprocess, "run", side_effect=AssertionError("native query escaped fixture")) as native:
+            with installer_testing.installer_observations():
+                self.assertEqual(observe("gui/12345").presence, "absent")
+                native.assert_not_called()
+                for command in (["launchctl", "print", "gui/12345/another-service"],
+                                ["launchctl", "bootout", "gui/12345/org.ghost-alice.context-gateway"]):
+                    with self.subTest(command=command), self.assertRaisesRegex(AssertionError, "native query escaped fixture"):
+                        subprocess.run(command, capture_output=True)
+                self.assertEqual(native.call_count, 2)
+            self.assertIs(subprocess.run, native)
+
     def test_installer_child_uses_fixture_home_and_repository_despite_parent_overrides(self):
         sentinel = init_repo(self.root / "sentinel")
         home = self.root / "home"
@@ -73,11 +102,13 @@ class CheckoutCopyTests(unittest.TestCase):
         with mock.patch.dict(os.environ, inherited):
             original = dict(os.environ)
             env = installer_env(home)
+            self.assertEqual(installer_home_effects(home), [])
             child = subprocess.run(
                 [sys.executable, "-c", (
                     "import sys; from pathlib import Path; "
                     "sys.path.insert(0, sys.argv[1]); "
-                    "from installer import source; "
+                    "from installer import source, hosts; "
+                    "assert all(value.state == 'absent' for value in hosts.observe_writers(['claude', 'codex']).values()); "
                     "result = source._git(Path(sys.argv[2]), 'config', 'core.hooksPath', 'fixture-hooks'); "
                     "raise SystemExit(result.returncode)"
                 ), str(Path(__file__).resolve().parent), str(self.repo)],

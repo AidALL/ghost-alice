@@ -280,6 +280,24 @@ def _use_payload(connection, reference, owner):
     return payload
 
 
+def moved_current_preserved(table, columns, original, retained, connection):
+    """Read whether moved judgment heads retain their original native use owners.
+
+    Schema and immutable rows remain the ledger owner's preservation checks.
+    """
+    if table != 'core_response_use_current' or columns != ('platform', 'session_id', 'use_reference', 'reference'):
+        return False
+    heads = {row[:3]: row[-1] for row in retained}
+    for *owner, reference in original:
+        after = heads.get(tuple(owner))
+        if (after is None or connection.execute('SELECT platform,session_id FROM core_response_context_uses '
+                'WHERE reference=?', (owner[2],)).fetchone() != tuple(owner[:2])
+                or any(connection.execute('SELECT platform,session_id,use_reference FROM core_response_use_judgments '
+                    'WHERE reference=?', (value,)).fetchone() != tuple(owner) for value in (reference, after))):
+            return False
+    return True
+
+
 def record_use_judgments(source, expected_input_event_id, judgments, *, transaction=None):
     """Authenticate model post-use judgments within an existing Core operation.
 

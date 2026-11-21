@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import installed_payload
 from install_state_writer import read_state
 from installer import addons, locations, report, runner, source
 from installer.runner import InstallerExit
@@ -56,12 +57,21 @@ class Collected:
         return self.skill_target_total + self.support_target_total
 
 
-def installed_core_selection(record: dict) -> dict[str, list[str]]:
+def _skill_hosts(target: str, entry: dict, record_path: Path | None) -> list[str]:
+    try:
+        return installed_payload.target_hosts(target, entry)
+    except installed_payload.RecordError as exc:
+        if record_path is None:
+            raise
+        raise installed_payload.RecordError(report.message('invalid_skill_hosts', file=record_path, target=target)) from exc
+
+
+def installed_core_selection(record: dict, record_path: Path | None = None) -> dict[str, list[str]]:
     """The recorded Core leaf names per host, independent of current adapter availability."""
     selected: dict[str, set[str]] = {}
-    for entry in record.get('targets', {}).values():
+    for target, entry in record.get('targets', {}).items():
         if entry.get('kind') == 'skill' and entry.get('provider') == 'core':
-            for host in entry.get('used_by', []):
+            for host in _skill_hosts(target, entry, record_path):
                 selected.setdefault(host, set()).add(entry['name'])
     return {host: sorted(names) for host, names in sorted(selected.items())}
 
@@ -134,10 +144,10 @@ def has_managed_installs(skills_root: Path, platform: str, *, excluding: tuple[P
                 return True
     # After a host reference was released, another host's shared file must not
     # recreate the first host's installation merely by retaining a Core name.
-    import installed_payload
-    from uninstall_cleanup import _platforms_referencing_target
+    from uninstall_cleanup import platforms_referencing_target
     try:
-        record = installed_payload.read(locations.record_root())
+        record_path = installed_payload.read_path(locations.record_root())
+        record = installed_payload.read_file(record_path)
     except (OSError, ValueError) as exc:
         report.warn(f'Keeping shared support because the install record could not be read: {exc}')
         return True
@@ -146,10 +156,10 @@ def has_managed_installs(skills_root: Path, platform: str, *, excluding: tuple[P
         if path.absolute() in excluded or not _present(path):
             return False
         entry = (record or {}).get('targets', {}).get(str(path))
-        if isinstance(entry, dict) and platform in entry.get('used_by', []):
-            return True
         try:
-            return not _platforms_referencing_target(path, current_manifest=state_path, current_platform=platform)
+            if isinstance(entry, dict) and platform in _skill_hosts(str(path), entry, record_path):
+                return True
+            return not platforms_referencing_target(path, current_manifest=state_path, current_platform=platform)
         except (OSError, ValueError) as exc:
             report.warn(f'Keeping shared support because host references are unresolved for {path}: {exc}')
             return True

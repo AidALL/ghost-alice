@@ -67,6 +67,13 @@ class RecordMoveTests(unittest.TestCase):
             self.assertNotIn('[Y/n]', output)
             self.migrate.assert_not_called()
 
+    def test_input_preparation_failure_keeps_records_and_defers_the_move(self):
+        with mock.patch.object(record_move.terminal, '_discard_previous_input', side_effect=OSError('terminal failed')):
+            code, output = self.run_flow([])
+        self.assertEqual(code, 0)
+        self.assertIn('terminal failed', output)
+        self.migrate.assert_not_called()
+
     def test_writer_reappearing_under_lock_returns_to_wait_without_moving(self):
         locked = False
         observed = iter(('running', 'absent', 'running'))
@@ -143,7 +150,7 @@ class RecordMoveTests(unittest.TestCase):
             with self.subTest(argv=argv), \
                     mock.patch.object(record_move.hosts.sys, 'platform', 'darwin'), \
                     mock.patch.object(record_move.hosts.runner, 'run_command', return_value=ToolResult(0,
-                        '10 /Applications/Codex.app/Contents/MacOS/Codex\n11 /usr/bin/python3\n')), \
+                        '10 1 /Applications/Codex.app/Contents/MacOS/Codex\n11 1 /usr/bin/python3\n')), \
                     mock.patch.object(record_move.hosts, '_process_argv', return_value=argv):
                 code, output = self.run_flow(['', 'n'])
                 self.assertEqual(code, 0)
@@ -189,6 +196,44 @@ class RecordMoveTests(unittest.TestCase):
         self.assertNotIn('[Y/n]', output)
         self.migrate.assert_not_called()
 
+    def test_inactive_other_host_config_error_warns_without_blocking_record_move(self):
+        self.bindings[self.b]['hosts'] = {}
+        observed = transaction.LedgerLocations(self.bindings, hook_roots={'codex': ()},
+            host_config_errors={'codex': f'{self.ghost}/config.json: ledger_root must be absolute'})
+        self.lookup.side_effect = None
+        self.lookup.return_value = observed
+        code, output = self.run_flow()
+        self.assertEqual(code, 0)
+        self.assertIn('host codex', output)
+        self.assertIn('config.json: ledger_root must be absolute', output)
+        self.assertIn(f'are now at {self.b}', output)
+        self.migrate.assert_called_once_with(self.a, writers_stopped=True)
+
+    def test_active_host_config_error_discovered_under_lock_defers_without_moving(self):
+        initial = transaction.LedgerLocations(self.bindings)
+        changed = transaction.LedgerLocations(self.bindings, hook_roots={'codex': (self.b,)},
+            host_config_errors={'codex': f'{self.ghost}/config.json: ledger_root must be absolute'})
+        self.lookup.side_effect = [initial, initial, changed]
+        code, output = self.run_flow()
+        self.assertEqual(code, 0)
+        self.assertIn(f'were not moved and remain at {self.a}', output)
+        self.assertIn('config.json: ledger_root must be absolute', output)
+        self.migrate.assert_not_called()
+        self.release.assert_called_once()
+
+    def test_config_failure_preserves_hook_observations_but_never_requests_a_move(self):
+        observed = transaction.LedgerLocations(self.bindings, observation_errors={
+            str(self.ghost / 'config.json'): 'invalid installation config'})
+        self.lookup.side_effect = None
+        self.lookup.return_value = observed
+        code, output = self.run_flow(['n'])
+        self.assertEqual(code, 0)
+        self.assertIn(f'Diagnostic details: {self.ghost / "config.json"}: invalid installation config', output)
+        self.assertNotIn('[Y/n]', output)
+        self.migrate.assert_not_called()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertIs(record_move.read_locations(), observed)
+
     def test_global_location_failure_under_lock_defers_and_releases_the_lock(self):
         observed = transaction.LedgerLocations(self.bindings)
         self.lookup.side_effect = [observed, observed, ValueError('invalid installation config')]
@@ -221,7 +266,7 @@ class RecordMoveTests(unittest.TestCase):
             ('retained artifacts then complete', transaction.LedgerMoveResult('complete', retained=(retained,)), complete,
              0, 'are now at', 'are now at'),
             ('cleanup failed then complete', transaction.LedgerMoveResult('cleanup_failed', 'cleanup denied'), complete,
-             1, 'could not finish cleaning up', 'are now at'),
+             1, 'could not finish deleting the old record folder', 'are now at'),
             ('restore incomplete', transaction.LedgerMoveResult('restore_incomplete', 'restore denied', (recovery,),
                 affected_paths=(str(self.b), str(self.ghost / 'config.json')), phase='prepare'), None,
              1, 'could not finish restoring the previous state', 'was not started'),
@@ -274,7 +319,7 @@ class RecordMoveTests(unittest.TestCase):
         question = 'Move your existing work records to the new location? [Y/n]'
         cases = ((True, 'n\n', False, False), (True, '\x04', False, False),
                  (False, '\n', False, True), (False, 'Y\n', False, True),
-                 (False, '\nn\n', True, False), (False, '\n\x04', True, False))
+                 (False, 'n\n', True, False), (False, '\x04', True, False))
         for queued, answer, running, moved in cases:
             with self.subTest(queued=queued, answer=repr(answer), running=running):
                 script = f'''import select, sys
@@ -301,8 +346,9 @@ raise SystemExit(record_move.run('install'))
                 env = installer_env(self.ghost)
                 env.update(PYTHONPATH=str(Path(__file__).resolve().parent), GHOST_ALICE_INSTALL_LOCALE='en')
                 responses = [('BEFORE_RECORD_QUESTION', '\n')] if queued else []
+                responses += [(question, '\n'), ('then press Enter.', answer)] if running else [(question, answer)]
                 code, output = run_pty([sys.executable, '-c', script], env=env, cwd=self.ghost,
-                                       responses=responses + [(question, answer)], timeout=10)
+                                       responses=responses, timeout=10)
                 self.assertEqual(code, 0, output)
                 self.assertEqual('MIGRATION_STARTED' in output, moved, output)
                 self.assertIn('are now at' if moved else 'will ask again', output)

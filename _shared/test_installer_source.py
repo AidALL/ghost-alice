@@ -224,12 +224,40 @@ class SuccessfulSourceVersionsTests(SourceCase):
         with install_lock.command_lock(root / 'install.lock', owner='test'):
             installed_payload.update(root, {'installer': {'active_root': str(package)}})
             original = installed_payload.path(root).read_bytes()
-            source.check_previous_manager()
+            source.check_previous_manager({'root': str(self.repo)})
             reader = package / '_shared/installed_payload.py'
             reader.write_text(reader.read_text().replace('SCHEMA_VERSION = 2', 'SCHEMA_VERSION = 99'))
             with self.assertRaisesRegex(ValueError, 'cannot read'):
-                source.check_previous_manager()
+                source.check_previous_manager({'root': str(self.repo)})
             self.assertEqual(installed_payload.path(root).read_bytes(), original)
+
+    def test_previous_manager_checks_the_next_relationship_format_before_placement(self):
+        from installer import transaction
+        from installer.selection import Target
+        package = checkout_copy(self)
+        root = self.versions.parent
+        skill = self.repo / 'alpha'
+        skill.mkdir()
+        (skill / 'SKILL.md').write_text('alpha')
+        destination = self.ctx.skills_dir / 'alpha'
+        reader = package / '_shared/installed_payload.py'
+        reader.write_text(reader.read_text().replace(
+            '        roots = section["ledger_source_roots"]',
+            '        roots = section["ledger_source_roots"]\n'
+            '        if any(not isinstance(value, str) for value in roots.values()):\n'
+            '            raise RecordError("legacy reader requires source path strings")'))
+        with install_lock.command_lock(root / 'install.lock', owner='test'):
+            installed_payload.update(root, {'installer': {'active_root': str(package)},
+                'source': {'root': str(self.repo), 'ledger_source_roots': {}}})
+            (root / 'config.json').write_text(json.dumps({'install_locations': {
+                'claude': {'ledger_root': str(self.repo / 'ledger')}}}))
+            original = installed_payload.path(root).read_bytes()
+            source.check_record_reader(package, root)
+            self.ctx.record_source = dict(root=str(self.repo / 'replacement'), commit='next', dirty='clean')
+            with use_source(self.repo), self.assertRaisesRegex(ValueError, 'cannot read the proposed installation record'):
+                transaction.copy_target(self.ctx, Target('alpha', skill), destination)
+            self.assertEqual(installed_payload.path(root).read_bytes(), original)
+            self.assertFalse(destination.exists())
 
     def test_latest_three_versions_remain_beside_an_older_live_version(self):
         folders, _ = self.save()
@@ -242,7 +270,7 @@ class SuccessfulSourceVersionsTests(SourceCase):
                                          'mode': 'link', 'link_target': str(earlier_source)},
                               str(self.root / 'absent'): {'used_by': ['claude'],
                                                          'source': str(self.versions / 'absent/core')}}}
-        with mock.patch.object(source.installed_payload, 'read', return_value=record):
+        with mock.patch.object(source.installed_payload, 'read_file', return_value=record):
             for number in range(1, 5):
                 (self.repo / '_shared/tracked.txt').write_text(str(number))
                 folders, _ = self.save()
@@ -259,7 +287,7 @@ class SuccessfulSourceVersionsTests(SourceCase):
             folder, _ = source.prepare_source(self.ctx)
         record = {'targets': {str(installed): {'source': str(folder / 'core/_shared/tracked.txt'),
                                               'used_by': ['claude'], 'mode': 'copy'}}}
-        with mock.patch.object(source.installed_payload, 'read', return_value=record):
+        with mock.patch.object(source.installed_payload, 'read_file', return_value=record):
             with self.assertRaisesRegex(ValueError, 'Preserved source differs from installed code'):
                 source.finalize_source(self.ctx, folder, ['claude'])
         self.assertEqual(json.loads((folder / 'version.json').read_text())['status'], 'candidate')
@@ -313,9 +341,53 @@ class SuccessfulSourceVersionsTests(SourceCase):
         self.assertIn('--addon-source', '\n'.join(lines))
         self.assertIn(str(kept), '\n'.join(lines))
 
+    def test_recovery_checks_all_surviving_files_and_rejects_linked_paths_before_writing(self):
+        (self.repo / 'VERSION').write_bytes(b'original')
+        folder = self.save()[0][0]
+        missing = folder / 'core/VERSION'
+        missing.unlink()
+        shared = folder / 'core/_shared'
+        tracked = shared / 'tracked.txt'
+        original = tracked.read_bytes()
+        tracked.write_bytes(b'changed')
+        with use_source(self.repo):
+            with self.assertRaises(ValueError):
+                source.prepare_source(self.ctx)
+            self.assertFalse(missing.exists())
+            self.assertEqual(tracked.read_bytes(), b'changed')
+            tracked.write_bytes(original)
+            target = self.root / 'outside'
+            shared.rename(target)
+            install_transaction._create_directory_link(target, shared)
+            with self.assertRaises(ValueError):
+                source.prepare_source(self.ctx)
+            self.assertFalse(missing.exists())
+            self.assertEqual((target / 'tracked.txt').read_bytes(), original)
+
+    def test_retry_preserves_a_file_created_after_recovery_checked_the_destination(self):
+        (self.repo / '_shared/a.py').write_bytes(b'first')
+        (self.repo / '_shared/b.py').write_bytes(b'second')
+        folder = self.save()[0][0].resolve()
+        first, second = folder / 'core/_shared/a.py', folder / 'core/_shared/b.py'
+        first.unlink()
+        second.unlink()
+        from retired_assets import _restore_no_replace
+        def competing_writer(staged, destination):
+            if destination == second:
+                second.write_bytes(b'user')
+            _restore_no_replace(staged, destination)
+        with use_source(self.repo), install_lock.command_lock(self.versions.parent / 'install.lock', owner='test'):
+            with mock.patch('retired_assets._restore_no_replace', side_effect=competing_writer), self.assertRaises(FileExistsError):
+                source.prepare_source(self.ctx)
+            self.assertEqual(first.read_bytes(), b'first')
+            self.assertEqual(second.read_bytes(), b'user')
+            second.unlink()
+            source.prepare_source(self.ctx)
+            self.assertEqual(second.read_bytes(), b'second')
+
     def test_all_live_versions_survive_with_named_references_when_more_than_three_are_needed(self):
         record = {'targets': {}}
-        with mock.patch.object(source.installed_payload, 'read', return_value=record):
+        with mock.patch.object(source.installed_payload, 'read_file', return_value=record):
             for number in range(4):
                 (self.repo / '_shared/tracked.txt').write_text(str(number))
                 folders, lines = self.save()
@@ -407,7 +479,7 @@ class SuccessfulSourceVersionsTests(SourceCase):
         pending.parent.mkdir(parents=True)
         pending.write_text(json.dumps({'entries': [{'backup_path': str(pending_version / 'core/_shared/tracked.txt'), 'decided': False}]}))
         record = {'service': {'program': str(service_version / 'core/_shared/tracked.txt')}}
-        with mock.patch.object(source.installed_payload, 'read', return_value=record):
+        with mock.patch.object(source.installed_payload, 'read_file', return_value=record):
             for number in range(4):
                 (self.repo / '_shared/tracked.txt').write_text(str(number))
                 folders, _ = self.save()
@@ -941,7 +1013,6 @@ class InstallSourceTests(SourceCase):
         self.write_record(self.other)
         code, out, replies = self.run_check(interactive=True, answer="y")
         self.assertEqual(code, 0)
-        self.assertEqual(replies.call_args.args, ("Replace the install source with this checkout? [y/N]: ",))
         self.assertIn(f"[WARN]   Install source: {self.other}\n", out)
         self.assertIn(f"[WARN]   This checkout:  {self.here.resolve()}\n", out)
         self.assertIn(f"[INFO] Install source: this checkout replaces {self.other}", out)
@@ -954,6 +1025,12 @@ class InstallSourceTests(SourceCase):
                 self.assertEqual(code, 2)
                 self.assertIn(f"[ERROR] {STOP_HINT}", out)
                 self.assertFalse(ctx.options.adopt_source)
+        ctx = make_context(self.home, 'codex')
+        with mock.patch.object(source.terminal, '_discard_previous_input', side_effect=OSError('input failed')):
+            code, out, replies = self.run_check(ctx, interactive=True, answer='yes')
+        self.assertEqual(code, 2)
+        self.assertFalse(ctx.options.adopt_source)
+        self.assertIn('input failed', out)
 
     def test_a_publish_that_stopped_halfway_does_not_decide_the_source(self):
         # The check runs before the lock, so before the lock restores unfinished publishes: it reads the record the
@@ -965,14 +1042,14 @@ class InstallSourceTests(SourceCase):
             folder.mkdir(parents=True)
             shutil.copyfile(self.record, folder / installed_payload.FILENAME)
             (folder / "journal.json").write_text(json.dumps({
-                "schema_version": 1, "phase": "prepare", "record_copy": installed_payload.FILENAME, "targets": []}),
+                "schema_version": 1, "txid": folder.name, "phase": "prepare", "record_copy": installed_payload.FILENAME, "targets": []}),
                 encoding="utf-8")
         self.write_record(self.other)
         self.assertEqual(source.match_install_source().state, "same")
         self.assertEqual(self.run_check()[:2], (0, ""))
         # The oldest unfinished publish found no record: after the restore there is none, so nothing is compared.
         (older / installed_payload.FILENAME).unlink()
-        (older / "journal.json").write_text(json.dumps({"schema_version": 1, "phase": "prepare", "record_copy": None,
+        (older / "journal.json").write_text(json.dumps({"schema_version": 1, "txid": older.name, "phase": "prepare", "record_copy": None,
                                                         "targets": []}), encoding="utf-8")
         self.assertEqual(source.match_install_source().state, "unrecorded")
         # A journal that cannot be read leaves the record unknown; the lock's restore reports that journal.

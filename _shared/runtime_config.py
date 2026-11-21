@@ -153,6 +153,13 @@ def _apply_env_overrides(config: dict[str, Any], env: dict[str, str]) -> None:
         config["agent_visibility"]["profile"] = canonical_agent_visibility_profile(profile)
 
 
+def _retired_ledger_roots(value: Any, path: Path) -> list[str]:
+    if (not isinstance(value, list) or any(not isinstance(root, str) or '\0' in root
+            or not Path(root).is_absolute() for root in value)):
+        raise ValueError(f'Installation config retired_ledger_roots must be a list of absolute path strings: {path}')
+    return list(value)
+
+
 def load_config(env: dict[str, str] | None = None, home: Path | None = None, *, strict: bool = False) -> dict[str, Any]:
     source_env = env if env is not None else os.environ
     path = config_path(home, env=source_env)
@@ -184,8 +191,14 @@ def load_config(env: dict[str, str] | None = None, home: Path | None = None, *, 
         )
     if isinstance(loaded.get("install_locations"), dict):
         config["install_locations"] = loaded["install_locations"]
+    elif strict and "install_locations" in loaded:
+        raise ValueError(f'Installation config install_locations must be an object: {path}')
     if 'retired_ledger_roots' in loaded:
-        config['retired_ledger_roots'] = loaded['retired_ledger_roots']
+        try:
+            config['retired_ledger_roots'] = _retired_ledger_roots(loaded['retired_ledger_roots'], path)
+        except ValueError:
+            if strict:
+                raise
     config["schema_version"] = "ghost-alice-config.v1"
     config["agent_visibility"]["profile"] = canonical_agent_visibility_profile(
         config["agent_visibility"].get("profile")
@@ -219,7 +232,7 @@ def prepare_config(config: dict[str, Any], path: Path) -> dict[str, Any]:
     if isinstance(config.get("install_locations"),dict):
         normalized.setdefault("install_locations",{}).update(config["install_locations"])
     if 'retired_ledger_roots' in config:
-        normalized['retired_ledger_roots'] = config['retired_ledger_roots']
+        normalized['retired_ledger_roots'] = _retired_ledger_roots(config['retired_ledger_roots'], path)
     agent_visibility = config.get("agent_visibility")
     if isinstance(agent_visibility, dict):
         normalized["agent_visibility"].update(agent_visibility)

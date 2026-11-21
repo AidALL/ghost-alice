@@ -44,6 +44,56 @@ class RecordCase(unittest.TestCase):
 
 
 class SchemaAndWriteTests(RecordCase):
+    def test_later_publication_supersedes_pending_hosts_even_when_the_package_and_paths_match(self):
+        self.hold_lock()
+        checkout = str(self.home / 'checkout')
+        ledger = str(self.home / 'checkout/records')
+        def source_for(host):
+            return {'root': checkout, 'ledger_source_roots': {ledger: {'source_root': checkout, 'hosts': [host]}}}
+
+        installed_payload.update(self.ghost, {'installer': {'active_root': str(self.home / 'package')},
+                                             'source': source_for('claude')}, defer_source=True)
+        installed_payload.update(self.ghost, {'source': source_for('codex')})
+        installed_payload.finish_pending_source(self.ghost)
+        self.assertFalse((self.ghost / installed_payload.PENDING_SOURCE_FILENAME).exists())
+        self.assertEqual(installed_payload.read(self.ghost)['source'], source_for('codex'))
+
+    def test_host_attribution_uses_a_versioned_detail_until_the_relation_is_released(self):
+        self.hold_lock()
+        ledger = str(self.home / 'original/ledger')
+        original = str(self.home / 'original')
+        relation = {'source_root': original, 'hosts': ['claude']}
+        from installer.transaction import LedgerLocations
+        observed = LedgerLocations({}, source_roots={ledger: relation})
+        def publish(root):
+            section = observed.publication_source({'root': root})
+            return installed_payload.update(self.ghost, {'source': section})
+
+        compatible = installed_payload.update(self.ghost, {'source': {'root': original, 'ledger_source_roots': {}}})
+        self.assertEqual(publish(original)['source']['ledger_source_roots'][ledger], relation)
+        attributed = publish(str(self.home / 'replacement'))
+        self.assertEqual(attributed['schema_version'], 3)
+        self.assertEqual(attributed['source']['ledger_source_roots'][ledger], relation)
+        detail = self.ghost / 'installed-payload-v3.json'
+        self.assertEqual(json.loads(detail.read_bytes()), attributed)
+        for name in ('installed-payload-v2.json', 'installed-payload.json'):
+            self.assertEqual(json.loads((self.ghost / name).read_bytes()),
+                             {'schema_version': 3, 'record_file': detail.name})
+        before = {name: (self.ghost / name).read_bytes() for name in installed_payload.RECORD_FILENAMES}
+        real_unlink = Path.unlink
+        def interrupt_demote(path, *args, **kwargs):
+            if path == detail:
+                raise OSError('attributed detail still present')
+            return real_unlink(path, *args, **kwargs)
+        observed.source_roots.clear()
+        with mock.patch.object(Path, 'unlink', interrupt_demote), self.assertRaisesRegex(OSError, 'detail still present'):
+            publish(original)
+        self.assertEqual({name: (self.ghost / name).read_bytes() for name in before}, before)
+        self.assertEqual(installed_payload.read(self.ghost), attributed)
+        self.assertEqual(publish(original), compatible)
+        self.assertFalse(detail.exists())
+        self.assertEqual(installed_payload.read(self.ghost), compatible)
+
     def test_legacy_record_is_migrated_without_leaving_new_targets_writable_by_old_installer(self):
         self.hold_lock()
         old = {"schema_version": 1, "targets": {"/old": _entry()},
@@ -93,7 +143,12 @@ class SchemaAndWriteTests(RecordCase):
         invalid = (None, [], "bad", {"relative": source}, {ledger: "relative"},
                    {ledger: None}, {0: source}, {ledger + "/../ledger": source},
                    {ledger: source + "/."}, {ledger + "//child": source},
-                   {ledger: source + "/"})
+                   {ledger: source + "/"},
+                   {ledger: {'source_root': source, 'hosts': None}},
+                   {ledger: {'source_root': source, 'hosts': ['claude', 7]}},
+                   {ledger: {'source_root': source, 'hosts': ['']}},
+                   {ledger: {'source_root': 'relative', 'hosts': ['claude']}},
+                   {ledger: {'source_root': source, 'hosts': ['claude'], 'extra': True}})
         for relationships in invalid:
             with self.subTest(relationships=relationships):
                 with self.assertRaisesRegex(installed_payload.RecordError, "ledger_source_roots"):
@@ -107,6 +162,15 @@ class SchemaAndWriteTests(RecordCase):
                         installed_payload.read(self.ghost)
                 finally:
                     self.record.write_bytes(before)
+
+    def test_ledger_source_relationships_accept_legacy_paths_and_host_scoped_facts(self):
+        self.hold_lock()
+        source = str(self.home / 'source')
+        relationships = {str(self.home / 'legacy'): source,
+                         str(self.home / 'uncertain'): {'source_root': source, 'hosts': []},
+                         str(self.home / 'scoped'): {'source_root': source, 'hosts': ['claude', 'codex']}}
+        installed_payload.update(self.ghost, {'source': {'ledger_source_roots': relationships}})
+        self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'], relationships)
 
     def test_the_record_lives_in_the_ghost_root_and_reads_none_when_absent(self):
         self.assertEqual(installed_payload.path(self.ghost), self.record)

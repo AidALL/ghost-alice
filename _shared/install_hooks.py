@@ -250,44 +250,52 @@ def _retained_installed_ledger(platform_key, *, strict=False):
     Reads only the chosen platform settings, never discovery/latest-checkout state.
     Multiple managed roots require GHOST_ALICE_SESSION_INTENT_ROOT, --ledger-root or --destination-file to identify the ledger root. The installer does not check who supplies the value.
     """
-    import shlex
-    path=(_resolve_codex_dir()/"hooks.json" if platform_key=="codex" else _resolve_claude_dir()/"settings.json")
-    try:
-        settings=json.loads(path.read_text())
-    except FileNotFoundError:
-        return None
-    except (OSError, ValueError):
-        if strict:
-            raise
-        return None
-    if not isinstance(settings, dict) or not isinstance(settings.get('hooks', {}), dict):
-        raise ValueError(f'Hook settings in {path} must contain a hooks object')
-    roots=set()
-    for groups in settings.get("hooks",{}).values():
-        if not isinstance(groups, list):
-            raise ValueError(f'Hook event entries in {path} must be a list')
-        for group in groups:
-            if not isinstance(group, dict) or not isinstance(group.get('hooks', []), list):
-                raise ValueError(f'Hook groups in {path} must contain a hooks list')
-            for hook in group.get('hooks', []):
-                if not isinstance(hook, dict) or not isinstance(hook.get('command', ''), str):
-                    raise ValueError(f'Hook handlers in {path} must be objects with string commands')
-                command=hook.get("command","")
-                if not any((globals().get("_hook_runner_id_match") or (lambda *_: False))(command,identity) for identity in ("session-intent","tool-checkpoint","session-start","session-receipt")):
-                    continue
-                runner = hook_definitions.parse_hook_runner_command(command)
-                if runner["binding"] is not None:
-                    binding=install_destination.decode_binding(runner["binding"])
-                    roots.add(binding["destination"]["ledger_root"])
-                else:
-                    inner=shlex.split(runner["command"],comments=True)
-                    for flag in ("--root","--session-intent-root"):
-                        if flag in inner:
-                            root=inner[inner.index(flag)+1]
-                            if Path(root).is_absolute(): roots.add(root)
+    roots = installed_hook_ledger_roots(platform_key, strict=strict)
     if len(roots)>1:
         raise ValueError("installed managed hooks contain conflicting ledger roots; identify one with GHOST_ALICE_SESSION_INTENT_ROOT, --ledger-root or --destination-file")
     return next(iter(roots),None)
+
+
+def installed_hook_ledger_roots(platform_key: str, *, strict: bool = True) -> set[str]:
+    """Return every ledger root read from the selected platform's actual managed hooks."""
+    import shlex
+    path = PLATFORMS[platform_key]['hook_file']()
+    try:
+        settings = _read_settings(path, backup_corrupt=False, strict=True)
+        _validate_hook_settings(settings)
+        roots = set()
+        for command in _hook_commands(settings.get('hooks', {})):
+            if not any(_hook_runner_id_match(command, identity) for identity in
+                       ('session-intent', 'tool-checkpoint', 'session-start', 'session-receipt')):
+                continue
+            runner = hook_definitions.parse_hook_runner_command(command)
+            if runner['binding'] is not None:
+                binding = install_destination.decode_binding(runner['binding'])
+                roots.add(binding['destination']['ledger_root'])
+                continue
+            inner = shlex.split(runner['command'], comments=True)
+            for index, flag in enumerate(inner):
+                if flag in ('--root', '--session-intent-root'):
+                    if index + 1 == len(inner) or not Path(inner[index + 1]).is_absolute():
+                        raise ValueError(f'{flag} requires an absolute ledger root')
+                    roots.add(inner[index + 1])
+        return roots
+    except (OSError, ValueError) as exc:
+        if isinstance(exc, OSError):
+            if exc.filename is None:
+                exc.filename = str(path)
+        elif isinstance(exc, json.JSONDecodeError):
+            exc = json.JSONDecodeError(f'{path}: {exc.msg}', exc.doc, exc.pos)
+        elif isinstance(exc, UnicodeError):
+            exc.reason = f'{path}: {exc.reason}'
+        else:
+            exc = ValueError(f'{path}: {exc}')
+        if strict:
+            raise exc
+        # Preserve the reader's permissive behavior for read/encoding/JSON errors.
+        if not isinstance(exc, (OSError, json.JSONDecodeError, UnicodeError)):
+            raise exc
+        return set()
 
 
 def _destination_action(platform_key, destination, action, *, dry_run=False):
@@ -643,9 +651,9 @@ def _home() -> Path:
     return Path.home()
 
 
-def _resolve_claude_dir() -> Path:
+def _resolve_claude_dir(*, use_destination: bool = True) -> Path:
     active = install_destination.current()
-    if active:
+    if active and use_destination:
         return Path(active.platform_dir)
     env = os.environ.get("CLAUDE_CONFIG_DIR")
     if env:
@@ -653,9 +661,9 @@ def _resolve_claude_dir() -> Path:
     return _home() / ".claude"
 
 
-def _resolve_codex_dir() -> Path:
+def _resolve_codex_dir(*, use_destination: bool = True) -> Path:
     active = install_destination.current()
-    if active:
+    if active and use_destination:
         return Path(active.platform_dir)
     env = os.environ.get("CODEX_HOME")
     if env:
@@ -973,6 +981,13 @@ def _platform_io_trace_entry(platform_key: str, event: str) -> Optional[dict[str
     return _command_entry(_hook_runner_command("io-trace", io_command, IO_TRACE_MARKER, platform_key=platform_key))
 
 
+def _hook_dispatcher_current(source: Path, target: Path) -> bool:
+    try:
+        return target.is_file() and source.read_bytes() == target.read_bytes()
+    except OSError:
+        return False
+
+
 def _ensure_hook_dispatcher_installed(dry_run: bool = False) -> bool:
     source = _resolve_source_hook_dispatcher()
     target = _resolve_installed_hook_dispatcher()
@@ -980,12 +995,7 @@ def _ensure_hook_dispatcher_installed(dry_run: bool = False) -> bool:
         raise FileNotFoundError(f"Ghost-ALICE hook dispatcher not found: {source}")
 
     retired = [path for path in (_resolve_ghost_alice_hooks_dir() / name for name in RETIRED_HOOK_FILES) if path.exists()]
-    current = False
-    if target.exists():
-        try:
-            current = source.read_bytes() == target.read_bytes()
-        except OSError:
-            current = False
+    current = _hook_dispatcher_current(source, target)
 
     if current and not retired:
         _log("  Ghost-ALICE hook dispatcher is already current")
@@ -2585,7 +2595,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
                 core_names, settings_file, settings)
             details['pending_owner'] = addon_skill_permissions.pending_owner(permission_prepared)
         except (OSError, ValueError, UnicodeError) as error:
-            permission_items.append(dict(kind='permission', action='manual-review',
+            permission_items.append(dict(kind='permission', action='manual-review', path=str(settings_file),
                                          reason='permission-attribution-unresolved', detail=str(error)))
 
     final_candidate = candidate
@@ -2610,7 +2620,9 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
 
     if dry_run:
         details.update(settings_state='readable' if settings_existed else 'missing',
-                       would_detach=not any(item.get('settings_state') == 'preserved' for item in permission_items))
+                       would_detach=not any(item.get('settings_state') == 'preserved' for item in permission_items),
+                       hooks_detached=not total_removed,
+                       remaining_commands=_hook_commands(original.get('hooks', {})) if total_removed else [])
     else:
         try:
             actual, detached, commands = _read_hook_references(platform_key)
@@ -2641,14 +2653,28 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
                       STATUS_LABELS[legacy], legacy, details)
 
 
-def _read_hook_references(platform_key):
+def _hook_commands(hooks):
+    return [handler.get('command', '') for groups in hooks.values()
+            for group in groups for handler in group.get('hooks', [])]
+
+
+def _read_hook_references(platform_key, *, peer=False):
     """Read the effect and apply the same managed-command predicate as removal."""
-    actual = _read_settings(PLATFORMS[platform_key]['hook_file'](), strict=True)
+    host = PLATFORMS[platform_key]
+    settings_file = host['hook_file']()
+    if peer:
+        # The active destination belongs to the host being removed. Observe the peer at its own location.
+        try:
+            recorded = observed_installation(platform_key, hook_fallback=False)
+        except ValueError:
+            recorded = {}
+        directory = recorded.get('platform_dir') or host['config_dir'](use_destination=False)
+        settings_file = Path(directory) / settings_file.name
+    actual = _read_settings(settings_file, strict=True)
     _validate_hook_settings(actual)
     hooks = actual.get('hooks', {})
     detached = not _remove_managed_hook_entries(platform_key, copy.deepcopy(hooks))
-    commands = [handler.get('command', '') for groups in hooks.values()
-                for group in groups for handler in group.get('hooks', [])] if not detached else []
+    commands = _hook_commands(hooks) if not detached else []
     return actual, detached, commands
 
 

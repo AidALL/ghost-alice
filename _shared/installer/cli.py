@@ -23,11 +23,13 @@ if __name__ == "__main__" and not __package__:
 from dataclasses import dataclass, field, replace  # noqa: E402
 import os  # noqa: E402
 import json  # noqa: E402
+import time  # noqa: E402
 from typing import Callable  # noqa: E402
 
 import install_transaction  # noqa: E402
+import installed_payload  # noqa: E402
 from installer import (addons, auto, config, diagnostics, hosts, lifecycle, locations, lock, prerequisites,  # noqa: E402
-                       preservation, report, runner, selection, source, transaction)
+                       preservation, report, runner, selection, source, terminal, transaction)
 from installer.runner import InstallerExit  # noqa: E402
 
 ISOLATED_REJECTION = "isolated destinations require the Python hook installer; shell source integration is unsupported"
@@ -53,6 +55,7 @@ class Options:
     verbose: bool = False
     visibility: str | None = None
     args: list[str] = field(default_factory=list)
+    argv: tuple[str, ...] = ()
 
 
 @dataclass
@@ -182,23 +185,35 @@ def _fail(message: str, code: int = 1) -> None:
     raise InstallerExit(code)
 
 
-def run_update(ctx: Context) -> int:
+def run_update(ctx: Context, *, acquired_from: list[str] | None = None) -> int:
     import argparse
-    parser = argparse.ArgumentParser(prog='ghost-alice update')
+    parser = argparse.ArgumentParser(prog='ghost-alice update', add_help=acquired_from is not None)
     parser.add_argument('--remote')
     parser.add_argument('--ref')
-    args = parser.parse_args(ctx.options.args[1:])
-    record = install_transaction.record_after_recovery(locations.record_root()) or {}
-    selected = selection.installed_core_selection(record)
+    arguments = ctx.options.args[1:]
+    args = parser.parse_known_args(arguments)[0] if acquired_from is None else parser.parse_args(arguments)
+    record_path = install_transaction.record_path_after_recovery(locations.record_root())
+    record = installed_payload.read_file(record_path) or {}
+    origin = dict(record.get('source', {}))
+    origin.update({key: value for key, value in vars(args).items() if value is not None})
+    coordinates = [origin.get(key) for key in ('root', 'remote', 'ref')]
+    if acquired_from is None:
+        if not origin.get('root'):
+            raise ValueError('Update found no recorded installation source')
+        with source.acquire_update(origin) as root:
+            return runner.run_command([sys.executable, str(root / '_shared/installer/cli.py'),
+                                       '--install-acquired-update', *coordinates, *ctx.options.argv], inherit_stdin=True).returncode
+    if acquired_from != coordinates:
+        raise ValueError(report.message('update_origin_changed'))
+    selected = selection.installed_core_selection(record, record_path)
     if ctx.options.platform_explicit:
         selected = {host: names for host, names in selected.items() if host == ctx.platform}
     if not selected:
         raise ValueError('Update found no installed Core skills to update')
-    origin = dict(record.get('source', {}))
-    origin.update({key: value for key, value in vars(args).items() if value is not None})
-    with source.acquire_update(origin) as (root, provenance):
-        return dispatch(replace(ctx.options, args=[], addon_skip=True), input_root=root,
-                        provenance=provenance, selections=selected, execution_cause='update')
+    provenance = source.input_record(runner.REPO_ROOT)
+    provenance.update({key: origin.get(key) for key in ('root', 'remote', 'ref', 'branch', 'hooks_path')})
+    return dispatch(replace(ctx.options, args=[], addon_skip=True), input_root=runner.REPO_ROOT,
+                    provenance=provenance, selections=selected, execution_cause='update')
 
 
 def parse_options(argv: list[str]) -> Options:
@@ -207,7 +222,7 @@ def parse_options(argv: list[str]) -> Options:
     `--visibility|--agent-visibility` and the table's flag commands
     (`Command.flag`); everything else stays in `args` in order. Missing or
     invalid values print an error and exit 1."""
-    options = Options()
+    options = Options(argv=tuple(argv))
     flag_fields = {name: command.flag for command in COMMANDS if command.flag for name in command.names}
     tokens = list(argv)
     index = 0
@@ -315,11 +330,15 @@ def prompt_platform() -> str:
     if not sys.stdin.isatty():
         _fail("--prompt-platform requires an interactive terminal.")
     while True:
-        report.emit("Select AI tool to install:")
-        report.emit("  1) Claude Code  (~/.claude/skills)")
-        report.emit("  2) Codex        (~/.agents/skills)")
-        report.emit("  q) Cancel")
-        choice = input("Enter number or name: ")
+        try:
+            choice = terminal.read_answer("Select AI tool to install:\n"
+                                          "  1) Claude Code  (~/.claude/skills)\n"
+                                          "  2) Codex        (~/.agents/skills)\n"
+                                          "  q) Cancel\nEnter number or name: ")
+        except (OSError, ValueError) as exc:
+            _fail(report.message('terminal_input_unavailable', cause=exc))
+        if choice is None:
+            _fail(report.message('terminal_input_unavailable'))
         lowered = choice.strip().lower()
         if lowered in ("1", "claude", "claude code"):
             return "claude"
@@ -503,7 +522,8 @@ def run_install(ctx: Context) -> int:
         report.error('New placement is verified, but previous-original cleanup is incomplete; review the listed paths.')
         raise InstallerExit(1)
     try:
-        notes.extend(report.run_logged(install_transaction.cleanup_completed, locations.record_root()))
+        notes.extend(report.run_logged(install_transaction.cleanup_completed, locations.record_root(),
+                                       record_source_cleanup=transaction.cleanup_record_source))
     except install_transaction.InstallTransactionError as exc:
         report.error(f'Code placement finished, but completed-publish cleanup failed: {exc}')
         raise InstallerExit(1)
@@ -543,6 +563,9 @@ def run_post_merge(ctx: Context) -> int:
     merged = Path(ctx.options.merged_checkout) if ctx.options.merged_checkout else None
     match = source.match_install_source(merged)
     if match.state == "same":
+        if match.here != runner.REPO_ROOT.resolve():
+            return runner.run_command([sys.executable, str(match.here / '_shared/installer/cli.py'),
+                                       '--post-merge', '--merged-checkout', str(match.here)]).returncode
         return dispatch(Options(), input_root=match.here, provenance=source.input_record(match.here), execution_cause='post-merge')
     if match.state == "other":
         report.info(f"Post-merge: the merged checkout {match.here} is not the install source ({match.recorded}); "
@@ -614,12 +637,88 @@ def _dispatch(options: Options) -> int:
     return run_command(command, ctx)
 
 
+def confirm_host_shutdown(platforms, *, interactive: bool) -> bool:
+    """Ask the terminal user once per displayed set; observe exit before installation changes."""
+    approved = set()
+    def running_text(host, seen, pids):
+        names = dict(seen.programs)
+        return '\n'.join(report.message('shutdown_running', host_name=names.get(pid, host), pids=pid)
+                         for pid in pids)
+
+    def unsafe_ancestor(observed):
+        ancestors = sorted({pid for seen in observed.values() for pid in seen.ancestor_pids})
+        if ancestors:
+            report.error(report.message('shutdown_ancestor', pids=', '.join(map(str, ancestors))))
+        return bool(ancestors)
+
+    while True:
+        observed = hosts.observe_writers(platforms)
+        blocked = {host: seen for host, seen in observed.items() if seen.state != 'absent'}
+        if not blocked:
+            return True
+        proposed = {host: tuple(pid for pid in seen.pids if pid not in approved and pid not in seen.manual_pids)
+                    for host, seen in blocked.items() if seen.state == 'running'}
+        retry = not any(proposed.values()) or any(seen.state != 'running' for seen in blocked.values())
+        show_status = (not interactive or retry or
+                       any(seen.ancestor_pids or proposed[host] != seen.pids for host, seen in blocked.items()))
+        if show_status:
+            for host, seen in blocked.items():
+                report.emit(running_text(host, seen, seen.pids) if seen.state == 'running'
+                            else report.message('shutdown_unknown', host_name=host, cause=seen.detail))
+                if seen.manual_pids:
+                    report.emit(report.message('shutdown_manual', pids=', '.join(map(str, seen.manual_pids)), cause=seen.detail))
+        if unsafe_ancestor(blocked):
+            return False
+        if not interactive:
+            report.error(report.message('shutdown_terminal_required'))
+            return False
+        proposed_rows = '\n'.join(
+            running_text(host, blocked[host], pids) for host, pids in proposed.items() if pids)
+        question = report.message('shutdown_retry') if retry else '\n'.join([
+            report.message('shutdown_targets'), proposed_rows, report.message('shutdown_question')])
+        preparation_failure_text = None if show_status else proposed_rows
+        while True:
+            try:
+                answer = terminal.read_answer(question, preparation_failure_text=preparation_failure_text)
+            except (OSError, ValueError) as exc:
+                report.error(report.message('terminal_input_unavailable', cause=exc))
+                return False
+            answer = answer.strip().lower() if answer is not None else None
+            if answer is None or answer in ('n', 'no') or (not retry and answer == ''):
+                report.emit(report.message('shutdown_cancelled'))
+                return False
+            if (retry and answer == '') or (not retry and answer in ('y', 'yes')):
+                break
+        if retry:
+            continue
+        approved.update(pid for pids in proposed.values() for pid in pids)
+        current = hosts.observe_writers(platforms)
+        if unsafe_ancestor(current):
+            return False
+        pids = sorted({pid for host, pids in proposed.items() if host in current and current[host].state == 'running'
+                       for pid in pids if pid in current[host].pids and pid not in current[host].manual_pids})
+        for pid, cause in hosts.request_writer_termination(pids).items():
+            report.warn(report.message('shutdown_request_failed', pid=pid, cause=cause))
+        deadline = time.monotonic() + 5
+        while any(seen.state != 'absent' for seen in hosts.observe_writers(platforms).values()):
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.1)
+
+
 def dispatch(options: Options, *, input_root: Path | None = None, provenance: dict | None = None,
              selections: dict[str, list[str]] | None = None, execution_cause: str = 'install') -> int:
     """Run an install from a fixed candidate; activate it only after the whole request succeeds."""
     request = source.install_request()
     if request and request.get('stage') == 'record-move':
         from installer import record_move
+        root = locations.record_root()
+        if os.path.lexists(root / installed_payload.PENDING_SOURCE_FILENAME) or install_transaction.unfinished(root):
+            handle = lock.acquire('activate', 'installer')
+            try:
+                installed_payload.finish_pending_source(root, selected_package=runner.REPO_ROOT)
+            finally:
+                lock.release(handle)
         return record_move.run(request['execution_cause'])
     if find_command(options) is not INSTALL:
         return _dispatch(options)
@@ -642,9 +741,33 @@ def dispatch(options: Options, *, input_root: Path | None = None, provenance: di
         raise ValueError('Update requires adapters for installed hosts: ' + ', '.join(host for host in platforms if host not in locations.PLATFORMS))
     if request is None:
         source.check_install_source(ctx, match=source.match_install_source(Path(provenance['root'])) if provenance else None)
-        confirmed_project = hosts.confirm_project_trust(platforms)
+        confirmed_project = hosts.confirm_project_trust(platforms, project_root=Path(provenance['root']) if provenance else None)
         if not source.check_source_health(skip=options.skip_source_health, **({'input_root': input_root} if input_root else {})):
             return 1
+    ghost_root = locations.record_root()
+    record_path = install_transaction.record_path_after_recovery(ghost_root)
+    installed = selection.installed_core_selection(installed_payload.read_file(record_path) or {}, record_path)
+    shutdown_hosts = set(platforms) | set(installed)
+    pending = install_transaction.unfinished(ghost_root)
+    for txid in pending:
+        host = install_transaction.Journal.load(ghost_root, txid).data.get('host')
+        if host and host != 'installer':
+            shutdown_hosts.add(host)
+    if pending:
+        try:
+            current_path = installed_payload.read_path(ghost_root)
+            current = installed_payload.read_file(current_path) or {}
+            shutdown_hosts.update(selection.installed_core_selection(current, current_path))
+        except installed_payload.RecordError:
+            # The validated saved record and journal hosts cover the record that recovery will replace.
+            pass
+    log_file = report.log_init() if request is None and report.compact_output_enabled() else None
+    if not confirm_host_shutdown(sorted(shutdown_hosts),
+                                 interactive=request is None and execution_cause != 'post-merge' and source.interactive()):
+        if log_file is not None:
+            _details_log()
+        return 1
+    if request is None:
         if not options.addon_skip and ctx.addon_sources:
             addons.prepare_sources(ctx)
         input_source = provenance if provenance is not None else source.input_record()
@@ -657,7 +780,12 @@ def dispatch(options: Options, *, input_root: Path | None = None, provenance: di
             lock.release(handle)
         ctx.addon_sources = list(addon_commits)
         ctx.addon_sources_prepared = True
-        request = dict(package_root=str(folder / 'core'), source=input_source, addon_commits=addon_commits)
+        request = dict(package_root=str(folder / 'core'), source=input_source, addon_commits=addon_commits,
+                       request_writer_reads_v3=True)
+        if execution_cause == 'post-merge':
+            request['execution_cause'] = execution_cause
+        if log_file is not None:
+            request['log_file'] = str(log_file)
         if selected is not None:
             request['selections'] = selected
         command = auto.child_command(ctx, options.platform if options.platform_explicit else None, package=folder / 'core')
@@ -665,7 +793,12 @@ def dispatch(options: Options, *, input_root: Path | None = None, provenance: di
                                                    'GHOST_ALICE_CONFIRMED_PROJECT_TRUST': confirmed_project})
         if not result.ok:
             active = (install_transaction.record_after_recovery(locations.record_root()) or {}).get('installer', {}).get('active_root')
-            report.error(f'Candidate install did not finish; retry with {folder / "core/install.sh"}. Active installer: {active or "none"}')
+            if active:
+                report.error(report.message('candidate_failed', active=active))
+            else:
+                report.error(report.message('candidate_first_retry', package=folder / 'core' /
+                                            ('install.cmd' if os.name == 'nt' else 'install.sh')))
+            report.finish_install(folder.name, result.returncode)
             return result.returncode
         active_record = install_transaction.record_after_recovery(locations.record_root()) or {}
         active = active_record.get('installer', {}).get('active_root')
@@ -674,20 +807,32 @@ def dispatch(options: Options, *, input_root: Path | None = None, provenance: di
         saved = json.loads((Path(active).parent / 'version.json').read_text(encoding='utf-8'))
         if saved.get('record_move') is not True:
             report.info(report.message('move_unsupported'))
+            report.finish_install(folder.name, 0)
             return 0
         followup = dict(package_root=active, source=active_record.get('source', {}),
                         stage='record-move', execution_cause=execution_cause)
-        return runner.run_command([sys.executable, str(Path(active) / '_shared/installer/cli.py')],
+        if log_file is not None:
+            followup['log_file'] = str(log_file)
+        result = runner.run_command([sys.executable, str(Path(active) / '_shared/installer/cli.py')],
             inherit_stdin=True, env={source.REQUEST_ENV: json.dumps(followup),
-                                    'GHOST_ALICE_INSTALL_HOST_CHILD': '0'}).returncode
+                                    'GHOST_ALICE_INSTALL_HOST_CHILD': '0'})
+        report.finish_install(folder.name, result.returncode)
+        return result.returncode
     if os.environ.get('GHOST_ALICE_INSTALL_HOST_CHILD') == '1':
         return _dispatch(options)
     handle = lock.acquire('install', ctx.platform)
     try:
-        source.check_previous_manager()
+        if request.get('execution_cause') == 'post-merge' and source.match_install_source(Path(request['source']['root'])).state != 'same':
+            report.info(report.message('merged_origin_changed'))
+            return 1
+        if not source.request_writer_needs_v2():
+            installed_payload.finish_pending_source(locations.record_root())
+        initial = transaction.installed_ledger_locations().publication_source(source.input_record())
+        interim = source.check_previous_manager(initial)
         result = _dispatch(options)
         if result == 0:
-            for line in source.finalize_source(ctx, runner.REPO_ROOT.parent, platforms):
+            for line in source.finalize_source(ctx, runner.REPO_ROOT.parent, platforms,
+                                             before_handoff=initial if interim != initial else None):
                 report.info(line)
         return result
     finally:
@@ -712,10 +857,23 @@ def main(argv: list[str] | None = None) -> int:
             return runner.run_command([sys.executable, str(entry), *argv[1:]],
                                       inherit_stdin=True,
                                       env={source.REQUEST_ENV: '', 'GHOST_ALICE_INSTALL_HOST_CHILD': '0'}).returncode
+        acquired_from = None
+        if argv[:1] == ['--install-acquired-update']:
+            acquired_from, argv = argv[1:4], argv[4:]
         reject_isolated_destination(argv)
-        options = parse_options(argv)
+        # The downloaded version owns adapter names and install options for the public update command.
+        options = (Options(args=argv, argv=tuple(argv)) if argv[:1] == ['update'] and acquired_from is None
+                   else parse_options(argv))
+        request = source.install_request() or {}
         report.configure(verbose=options.verbose,
-                         report_child=os.environ.get("GHOST_ALICE_INSTALL_REPORT_CHILD") == "1")
+                         report_child=os.environ.get("GHOST_ALICE_INSTALL_REPORT_CHILD") == "1",
+                         log_file=Path(request['log_file']) if request.get('log_file') else None)
+        if request.get('log_file'):
+            report.log_init()
+        if acquired_from is not None:
+            if options.args[:1] != ['update'] or request:
+                raise ValueError('The acquired update entry requires an update command')
+            return run_update(build_context(options), acquired_from=acquired_from)
         return dispatch(options)
     except InstallerExit as stop:
         return stop.code

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 from dataclasses import asdict
+import inspect
 import json
 from contextlib import ExitStack, contextmanager
 import os
@@ -25,6 +26,42 @@ CHECKOUT = Path(__file__).resolve().parents[1]
 _copy_template: Path | None = None
 
 
+def _installer_observation_run(native_run):
+    """Supply only the native observations shared by in-process and child installer fixtures."""
+    def run(argv, *args, **kwargs):
+        if isinstance(argv, (list, tuple)):
+            command = [str(arg) for arg in argv]
+            if command[:3] == ['ps', '-ww', '-U'] and command[-2:] == ['-o', 'pid=,ppid=,comm=']:
+                return subprocess.CompletedProcess(argv, 0, '1 0 fixture-idle\n', '')
+            if (command[:4] == ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command']
+                    and 'Get-CimInstance Win32_Process' in command[-1]):
+                return subprocess.CompletedProcess(argv, 0,
+                    '{"ProcessId":1,"ParentProcessId":0,"Name":"fixture-idle","ExecutablePath":"fixture-idle","CommandLine":"fixture-idle"}', '')
+            if len(command) == 3 and command[:2] == ['launchctl', 'print']:
+                target = command[2].split('/')
+                if (len(target) == 3 and target[0] == 'gui' and target[1].isdigit()
+                        and target[2] == 'org.ghost-alice.context-gateway'):
+                    empty = '' if kwargs.get('text') or kwargs.get('encoding') else b''
+                    return subprocess.CompletedProcess(argv, 113, empty, empty)
+        return native_run(argv, *args, **kwargs)
+    return run
+
+
+def installer_observations():
+    """Patch native observations for an in-process installer test without replacing product decisions."""
+    return mock.patch.object(subprocess, 'run', _installer_observation_run(subprocess.run))
+
+
+def inject_installer_python(env: dict[str, str], extra: str = '') -> None:
+    """Apply the shared native observations to child Pythons and append any test-specific injection."""
+    directory = Path(env['HOME']) / '.cache' / 'installer-python'
+    directory.mkdir(parents=True, exist_ok=True)
+    code = 'import os, subprocess\nfrom pathlib import Path\n' + inspect.getsource(_installer_observation_run)
+    code += '\n_run = subprocess.run\nrun = _installer_observation_run(_run)\nsubprocess.run = run\n'
+    (directory / 'sitecustomize.py').write_text(code + extra, encoding='utf-8')
+    env['PYTHONPATH'] = str(directory)
+
+
 def installer_env(home: str | Path) -> dict[str, str]:
     """Use fixture-owned home/config paths and the explicit Git checkout, without a host session identity."""
     home = Path(home)
@@ -35,7 +72,8 @@ def installer_env(home: str | Path) -> dict[str, str]:
     env.update(HOME=str(home), USERPROFILE=str(home), TMPDIR=str(home), XDG_CONFIG_HOME=str(home / ".config"),
                GIT_CONFIG_GLOBAL=str(home / ".gitconfig"), GIT_CONFIG_NOSYSTEM="1",
                CLAUDE_CONFIG_DIR=str(home / ".claude"),
-               CODEX_HOME=str(home / ".codex"), GHOST_ALICE_INSTALL_PROGRESS="off")
+               CODEX_HOME=str(home / ".codex"), GHOST_ALICE_INSTALL_PROGRESS="off", PYTHONDONTWRITEBYTECODE="1")
+    inject_installer_python(env)
     return env
 
 
@@ -177,8 +215,10 @@ def make_context(home: Path, platform: str = "claude", **options) -> cli.Context
 
 def hook_status(platform='claude', action='install', status='installed'):
     """The child hook action's result, including the registration state."""
-    return HookStatus(platform, f'HOOK_{status.upper()}', status, status,
-                      {'action': action, 'items': [], 'errors': []})
+    details = {'action': action, 'items': [], 'errors': []}
+    if action == 'uninstall':
+        details['hooks_detached'] = status != 'error'
+    return HookStatus(platform, f'HOOK_{status.upper()}', status, status, details)
 
 
 class FakeRunner:
