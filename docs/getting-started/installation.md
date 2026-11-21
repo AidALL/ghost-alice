@@ -55,6 +55,8 @@ On the first upgrade from a v2-only manager, the candidate can install from the 
 
 Run installation and update commands from a terminal and save your work in the related hosts first. Before changing installed files, the installer checks the selected platforms, every host with an installed Core selection, and hosts involved in unfinished installations. If related host programs or record-writing CLIs are running, it displays their observed program names and process IDs (PIDs) and asks whether to request their normal exit. Answer after the question appears; input entered before each question is discarded. The installer continues only after its process observation confirms their absence.
 
+On macOS the list shows the desktop app once for its bundled helpers. The Codex app can appear as `ChatGPT`. If you agree, the installer asks that running app to quit. A separately running CLI is listed with its own PID.
+
 | Answer | Installer action |
 | --- | --- |
 | `y` or `yes` | Request normal exit for the displayed PIDs that are still observed, then check whether the programs have exited. |

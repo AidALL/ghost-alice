@@ -11,6 +11,7 @@ import json
 from dataclasses import asdict
 import os
 from pathlib import Path
+import plistlib
 import shutil
 import signal
 import subprocess
@@ -33,7 +34,7 @@ from installer_testing import FakeRunner, hook_status, make_context, make_source
 class HostCase(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        root = Path(self.temp.name)
+        root = Path(self.temp.name).resolve()
         self.home = root / "home"
         self.home.mkdir()
         self.source = make_source(root / "src")
@@ -64,6 +65,29 @@ class HostCase(unittest.TestCase):
 
 
 class WriterObservationTests(unittest.TestCase):
+    def test_macos_codex_bundle_owns_its_helpers_but_not_an_independent_cli(self):
+        with tempfile.TemporaryDirectory() as directory:
+            contents = Path(directory) / 'A renamed app.app' / 'Contents'
+            contents.mkdir(parents=True)
+            (contents / 'Info.plist').write_bytes(plistlib.dumps({
+                'CFBundleIdentifier': 'com.openai.codex', 'CFBundleExecutable': 'ChatGPT'}))
+            app = contents / 'MacOS' / 'ChatGPT'
+            other = Path(directory) / 'ChatGPT.app' / 'Contents'
+            other.mkdir(parents=True)
+            (other / 'Info.plist').write_bytes(plistlib.dumps({
+                'CFBundleIdentifier': 'org.example.unrelated', 'CFBundleExecutable': 'ChatGPT'}))
+            children = (f'12 11 {contents}/Frameworks/Codex (Aperitif)\n13 12 {contents}/Resources/codex\n'
+                        '14 11 /usr/bin/codex\n15 1 /opt/ChatGPT\n'
+                        f'16 1 {contents}/MacOS/other\n17 1 {other}/MacOS/ChatGPT\n')
+            with mock.patch.object(hosts.os, 'getpid', return_value=13), \
+                    mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, f'11 1 {app}\n' + children)):
+                observed = hosts.observe_writers(['claude', 'codex'], platform='darwin')
+            self.assertEqual(observed['codex'].programs, ((11, 'ChatGPT'), (14, 'codex')))
+            self.assertEqual(observed['codex'].ancestor_pids, (11,))
+            self.assertEqual(observed['claude'].state, 'absent')
+            with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, children)):
+                self.assertEqual(hosts.observe_writers(['codex'], platform='darwin')['codex'].pids, (12, 13, 14))
+
     def test_observation_preserves_program_names_and_installer_ancestor(self):
         rows = '10 1 /Applications/Claude.app/Contents/MacOS/Claude\n20 10 /bin/zsh\n30 20 /usr/bin/python3\n'
         with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, rows)), \

@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import json
 import ntpath
 import os
+import plistlib
 import re
 import shlex
 import signal
 import sys
 from typing import TYPE_CHECKING
+from xml.parsers.expat import ExpatError
 
 import hook_definitions
 import ledger_access
@@ -28,6 +30,7 @@ CLAUDE_MANAGED_BLOCK_BEGIN = "<!-- Ghost-ALICE managed block begin: claude-boots
 CLAUDE_MANAGED_BLOCK_END = "<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
 HOOK_ACTION_LABEL = " + ".join(hook_definitions.CORE_HOOK_IDS)
 GLOBAL_RULE_BLOCKS = "_shared/global_rule_blocks.py"
+MACOS_HOST_BUNDLES = {'com.openai.codex': 'codex', 'com.anthropic.claudefordesktop': 'claude'}
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,35 @@ class WriterObservation:
     programs: tuple[tuple[int, str], ...] = ()
     ancestor_pids: tuple[int, ...] = ()
     manual_pids: tuple[int, ...] = ()
+    macos_apps: dict[int, str] = field(default_factory=dict)
+
+
+def _macos_host_bundle(executable: str) -> str | None:
+    """Identify the bundle's main executable regardless of the app's installed name or location."""
+    if '/Contents/MacOS/' not in executable:
+        return None
+    path = Path(executable)
+    contents = path.parent.parent
+    if not path.is_absolute() or path.parent.name != 'MacOS' or contents.name != 'Contents' or contents.parent.suffix != '.app':
+        return None
+    try:
+        with (contents / 'Info.plist').open('rb') as handle:
+            info = plistlib.load(handle)
+    except (OSError, ValueError, ExpatError, plistlib.InvalidFileException):
+        return None
+    if isinstance(info, dict) and info.get('CFBundleExecutable') == path.name:
+        identifier = info.get('CFBundleIdentifier')
+        if isinstance(identifier, str) and identifier in MACOS_HOST_BUNDLES:
+            return identifier
+    return None
+
+
+def _ancestor_pids(pid: int, parents: dict[int, int]) -> set[int]:
+    result = set()
+    while pid and pid not in result:
+        result.add(pid)
+        pid = parents.get(pid, 0)
+    return result
 
 
 def _process_argv(pid: int, platform: str) -> list[str]:
@@ -116,15 +148,21 @@ def observe_writers(platforms, *, platform: str | None = None) -> dict[str, Writ
         return {host: WriterObservation('unknown', str(exc)) for host in selected}
 
     running = {host: set() for host in selected}
-    programs = {pid: ntpath.basename(executable) for pid, _, executable, _ in processes}
+    executables = {pid: executable for pid, _, executable, _ in processes}
+    programs = {pid: ntpath.basename(executable) for pid, executable in executables.items()}
     parents = {pid: parent for pid, parent, _, _ in processes}
-    ancestors = {os.getpid()}
-    parent = parents.get(os.getpid())
-    while parent and parent not in ancestors:
-        ancestors.add(parent)
-        parent = parents.get(parent)
+    ancestors = _ancestor_pids(os.getpid(), parents)
+    apps = {}
     unknown = []
     for pid, _, executable, _ in processes:
+        if platform == 'darwin':
+            bundle = _macos_host_bundle(executable)
+            if bundle:
+                host = MACOS_HOST_BUNDLES[bundle]
+                if host in running:
+                    running[host].add(pid)
+                    apps[pid] = bundle
+                continue
         name = ntpath.basename(executable).lower().removesuffix('.exe')
         for host in hook_definitions.SUPPORTED_PLATFORMS:
             if name == host or name.startswith((host + ' helper', host + ' (')):
@@ -188,19 +226,30 @@ def observe_writers(platforms, *, platform: str | None = None) -> dict[str, Writ
             programs[pid] = f'{ntpath.basename(executable)} ({ntpath.basename(script)})'
         elif host not in hook_definitions.SUPPORTED_PLATFORMS:
             unknown.append(f'PID {pid}: the ledger CLI host binding is unavailable')
+    # Cover bundled helpers with their app. External CLIs and orphaned helpers stay independent.
+    for host, pids in running.items():
+        host_apps = apps.keys() & pids
+        if host_apps:
+            for pid in pids - host_apps:
+                for owner in host_apps & _ancestor_pids(pid, parents):
+                    if Path(executables[pid]).is_relative_to(Path(executables[owner]).parents[2]):
+                        pids.remove(pid)
+                        break
     return {host: WriterObservation('running',
                                    '; '.join(f'PID {pid}: {window_details[pid]}' for pid in sorted(pids - windows))
                                    if platform == 'win32' else 'Observed host or ledger CLI processes', tuple(sorted(pids)),
                                    tuple((pid, programs[pid]) for pid in sorted(pids)),
                                    tuple(sorted(pids & ancestors)),
-                                   tuple(sorted(pids - windows)) if platform == 'win32' else ()) if pids
+                                   tuple(sorted(pids - windows)) if platform == 'win32' else (),
+                                   {pid: apps[pid] for pid in apps.keys() & pids}) if pids
             else WriterObservation('unknown', f'The {host} host adapter is unavailable') if host not in hook_definitions.SUPPORTED_PLATFORMS
             else WriterObservation('unknown', '; '.join(unknown)) if unknown
             else WriterObservation('absent', 'No host or participating ledger CLI process was observed')
             for host, pids in running.items()}
 
 
-def request_writer_termination(pids, *, platform: str | None = None) -> dict[int, str]:
+def request_writer_termination(pids, *, macos_apps: dict[int, str] | None = None,
+                               platform: str | None = None) -> dict[int, str]:
     """Request normal termination of approved PIDs and return per-PID request failures.
 
     The caller owns confirmation and subsequent observation. An empty result does not prove exit.
@@ -225,6 +274,19 @@ def request_writer_termination(pids, *, platform: str | None = None) -> dict[int
                 if not result.ok:
                     failures[pid] = ((result.stderr or '').strip() or (result.stdout or '').strip()
                                      or f'Window close request exited with code {result.returncode}')
+            elif platform == 'darwin' and macos_apps and pid in macos_apps:
+                # NSRunningApplication targets a live instance; lookup cannot launch the app.
+                script = """ObjC.import('AppKit')
+function run([pid, bundle]) {
+    const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(Number(pid))
+    if (app.isNil()) return
+    if (ObjC.unwrap(app.bundleIdentifier) !== bundle) throw Error('Application identity changed')
+    if (!app.terminate) throw Error('Application declined the quit request')
+}"""
+                result = runner.run_command(['/usr/bin/osascript', '-l', 'JavaScript', '-e', script,
+                                             str(pid), macos_apps[pid]], capture=True)
+                if not result.ok:
+                    failures[pid] = (result.stderr or result.stdout or 'Application quit request failed').strip()
             else:
                 os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
