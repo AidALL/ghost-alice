@@ -645,6 +645,10 @@ def confirm_host_shutdown(platforms, *, interactive: bool) -> bool:
         return '\n'.join(report.message('shutdown_running', host_name=names.get(pid, host), pids=pid)
                          for pid in pids)
 
+    def requestable(observed):
+        return {(host, pid, seen.macos_apps.get(pid)) for host, seen in observed.items()
+                if seen.state == 'running' for pid in seen.pids if pid not in seen.manual_pids}
+
     def unsafe_ancestor(observed):
         ancestors = sorted({pid for seen in observed.values() for pid in seen.ancestor_pids})
         if ancestors:
@@ -656,11 +660,11 @@ def confirm_host_shutdown(platforms, *, interactive: bool) -> bool:
         blocked = {host: seen for host, seen in observed.items() if seen.state != 'absent'}
         if not blocked:
             return True
-        proposed = {host: tuple(pid for pid in seen.pids if pid not in approved and pid not in seen.manual_pids)
-                    for host, seen in blocked.items() if seen.state == 'running'}
-        retry = not any(proposed.values()) or any(seen.state != 'running' for seen in blocked.values())
+        proposed = requestable(blocked) - approved
+        retry = not proposed or any(seen.state != 'running' for seen in blocked.values())
         show_status = (not interactive or retry or
-                       any(seen.ancestor_pids or proposed[host] != seen.pids for host, seen in blocked.items()))
+                       any(seen.ancestor_pids for seen in blocked.values()) or
+                       len(proposed) != sum(len(seen.pids) for seen in blocked.values()))
         if show_status:
             for host, seen in blocked.items():
                 report.emit(running_text(host, seen, seen.pids) if seen.state == 'running'
@@ -672,8 +676,7 @@ def confirm_host_shutdown(platforms, *, interactive: bool) -> bool:
         if not interactive:
             report.error(report.message('shutdown_terminal_required'))
             return False
-        proposed_rows = '\n'.join(
-            running_text(host, blocked[host], pids) for host, pids in proposed.items() if pids)
+        proposed_rows = '\n'.join(running_text(host, blocked[host], (pid,)) for host, pid, _ in sorted(proposed))
         question = report.message('shutdown_retry') if retry else '\n'.join([
             report.message('shutdown_targets'), proposed_rows, report.message('shutdown_question')])
         preparation_failure_text = None if show_status else proposed_rows
@@ -691,13 +694,14 @@ def confirm_host_shutdown(platforms, *, interactive: bool) -> bool:
                 break
         if retry:
             continue
-        approved.update(pid for pids in proposed.values() for pid in pids)
+        approved.update(proposed)
         current = hosts.observe_writers(platforms)
         if unsafe_ancestor(current):
             return False
-        pids = sorted({pid for host, pids in proposed.items() if host in current and current[host].state == 'running'
-                       for pid in pids if pid in current[host].pids and pid not in current[host].manual_pids})
-        for pid, cause in hosts.request_writer_termination(pids).items():
+        targets = proposed & requestable(current)
+        pids = sorted({pid for _, pid, _ in targets})
+        apps = {pid: bundle for _, pid, bundle in targets if bundle}
+        for pid, cause in hosts.request_writer_termination(pids, macos_apps=apps).items():
             report.warn(report.message('shutdown_request_failed', pid=pid, cause=cause))
         deadline = time.monotonic() + 5
         while any(seen.state != 'absent' for seen in hosts.observe_writers(platforms).values()):

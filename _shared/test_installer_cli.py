@@ -446,7 +446,7 @@ class CandidateHandoffTests(CliCase):
                 return 'y'
             current.clear()
             return ''
-        def request(pids):
+        def request(pids, *, macos_apps):
             requested.extend(pids)
             for pid in pids:
                 current.remove(pid)
@@ -488,7 +488,7 @@ print('SELECTED=' + cli.prompt_platform(), flush=True)
         running = {'codex': hosts.WriterObservation('running', pids=(43211,))}
         requested = []
         with mock.patch.object(hosts, 'observe_writers', return_value=running), \
-                mock.patch.object(hosts, 'request_writer_termination', side_effect=lambda pids: requested.extend(pids) or {}), \
+                mock.patch.object(hosts, 'request_writer_termination', side_effect=lambda pids, **kwargs: requested.extend(pids) or {}), \
                 mock.patch('builtins.input', side_effect=['y', '', 'n']), \
                 mock.patch.object(cli.time, 'sleep'), \
                 mock.patch.object(cli.time, 'monotonic', side_effect=[0, 6]):
@@ -500,7 +500,8 @@ print('SELECTED=' + cli.prompt_platform(), flush=True)
 
     def test_only_displayed_still_present_pids_are_requested_and_new_pid_needs_consent(self):
         from installer import hosts
-        current = [11, 12]
+        current = [11, 12, 14]
+        app_bundles = {14: 'com.openai.codex'}
         requested = []
         displays = []
         replies = iter(('y', 'yes', 'n'))
@@ -508,24 +509,29 @@ print('SELECTED=' + cli.prompt_platform(), flush=True)
             displays.append(sys.stdout.getvalue())
             reply = next(replies)
             if reply == 'y':
-                current[:] = [12, 13]
+                # The app moved from PID 14 to 13. PID 14 now belongs to a CLI.
+                current[:] = [12, 13, 14]
+                app_bundles.clear()
+                app_bundles[13] = 'com.openai.codex'
             elif reply == 'yes':
                 self.assertEqual(requested, [12])
             return reply
-        def request(pids):
+        def request(pids, *, macos_apps):
             requested.extend(pids)
+            self.assertEqual(macos_apps, {13: 'com.openai.codex'} if 13 in pids else {})
             if 13 in pids:
                 current.clear()
             return {}
         with mock.patch.object(hosts, 'observe_writers', side_effect=lambda platforms: {
-                'codex': hosts.WriterObservation('running' if current else 'absent', pids=tuple(current))}), \
+                'codex': hosts.WriterObservation('running' if current else 'absent', pids=tuple(current),
+                                                 macos_apps=app_bundles.copy())}), \
                 mock.patch.object(hosts, 'request_writer_termination', side_effect=request), \
                 mock.patch('builtins.input', side_effect=answer), \
                 mock.patch.object(cli.time, 'sleep'), \
                 mock.patch.object(cli.time, 'monotonic', side_effect=[0, 6, 7, 13]):
             result, output = self.captured(cli.confirm_host_shutdown, ['codex'], interactive=True)
         self.assertTrue(result, output)
-        self.assertEqual(requested, [12, 13])
+        self.assertEqual(requested, [12, 13, 14])
         self.assertEqual(displays[0].count('codex: still running (PID: 11)'), 1, displays[0])
         self.assertEqual(displays[0].count('codex: still running (PID: 12)'), 1, displays[0])
         self.assertEqual(displays[0].count('[y/N]'), 1, displays[0])
@@ -534,6 +540,7 @@ print('SELECTED=' + cli.prompt_platform(), flush=True)
         self.assertIn('codex: still running (PID: 13)', status)
         self.assertNotIn('codex: still running (PID: 12)', question)
         self.assertEqual(question.count('codex: still running (PID: 13)'), 1, question)
+        self.assertEqual(question.count('codex: still running (PID: 14)'), 1, question)
         self.assertEqual(question.count('[y/N]'), 1, question)
 
     def test_shutdown_confirmation_precedes_candidate_changes_and_observes_exit(self):
@@ -560,7 +567,7 @@ print('SELECTED=' + cli.prompt_platform(), flush=True)
             with self.subTest(answer=answer, interactive=interactive, cause=cause):
                 current = {'value': running}
                 requested = []
-                def request(pids):
+                def request(pids, *, macos_apps):
                     requested.extend(pids)
                     self.assertFalse(marker.exists())
                     current['value'] = absent
