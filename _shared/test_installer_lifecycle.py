@@ -22,7 +22,8 @@ import gateway_testing  # noqa: E402
 from context_gateway_model import LABEL  # noqa: E402
 from installer import lifecycle  # noqa: E402
 from installer.runner import InstallerExit, ToolResult  # noqa: E402
-from installer_testing import hook_status, FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
+from installer_testing import (hook_status, FakeRunner, destination_fixture, installer_observations,
+                               make_context, make_source, quiet, use_source)  # noqa: E402
 
 
 class LifecycleCase(unittest.TestCase):
@@ -43,6 +44,9 @@ class LifecycleCase(unittest.TestCase):
         self.ctx.skills_dir.mkdir(parents=True)
         self.patches = contextlib.ExitStack()
         self.calls: list[str] = []
+        import install_lock
+        self.patches.enter_context(install_lock.command_lock(self.ghost / 'install.lock', owner='lifecycle-test'))
+        self.patches.enter_context(installer_observations())
 
     def tearDown(self):
         self.patches.close()
@@ -118,6 +122,29 @@ class UninstallTests(LifecycleCase):
         self.assertIn('codex', output)
         self.assertEqual(runtime_config.config_path().read_bytes(), config_before)
         self.assertEqual(evidence.read_text(), 'existing work')
+
+    def test_full_removal_does_not_display_retired_records_as_the_current_location(self):
+        from installer import transaction
+        retired = self.source / 'retired-records'
+        retired.mkdir()
+        current = self.ghost / 'ledger'
+        unknown = self.home / 'unknown-records'
+        observed = transaction.LedgerLocations({
+            retired: dict(hosts={'claude': {}}, state='retired', source_root=None),
+            current: dict(hosts={'claude': {}}, state='fixed', source_root=None),
+            unknown: dict(hosts={'claude': {}}, state='unknown', source_root=None),
+        })
+        def remove(*args, **kwargs):
+            retired.rmdir()
+            return ToolResult(0)
+        with mock.patch.object(lifecycle.record_move, 'read_locations', return_value=observed), \
+                mock.patch.object(lifecycle.runner, 'run_tool', side_effect=remove):
+            code, output = self.captured(lifecycle.run_full_uninstall, self.ctx)
+        self.assertEqual(code, 0)
+        self.assertFalse(retired.exists())
+        self.assertNotIn(str(retired), output)
+        self.assertNotIn(str(current), output)
+        self.assertIn(f'The current work record location is {unknown}', output)
 
     def test_addon_only_removal(self):
         # uninstall.sh:303-358
@@ -265,6 +292,98 @@ class SelectedRemovalOwnershipTests(LifecycleCase):
                           install_mode="copy") for name in names])
         self.state.write_text(json.dumps(value), encoding="utf-8")
 
+    def removal_screen(self, scope, locale):
+        import uninstall_cleanup
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_INSTALL_LOCALE': locale}):
+            quiet(self.home)
+            if scope == 'selected':
+                return self.captured(lifecycle.uninstall, self.ctx, ['alpha'])
+            with mock.patch('installer.gateway_participant.removal',
+                    side_effect=lambda *args, **kwargs: dict(kind='context-gateway', action='missing')):
+                return self.captured(uninstall_cleanup.main, ['--platform', 'claude', '--apply',
+                    '--install-state-manifest', str(self.state), '--report-path', str(self.home / 'removal.json')])
+
+    def test_target_failure_prints_the_cause_on_both_removal_screens(self):
+        import uninstall_cleanup
+        target = self.installed('alpha')
+        self.inventory('alpha')
+        remove_path = uninstall_cleanup._remove_path
+        def deny_target(path):
+            if path == target:
+                raise PermissionError('target busy')
+            return remove_path(path)
+        for scope in ('full', 'selected'):
+            for locale, failure, diagnostic in (
+                    ('en', f'Removal incomplete for {target.as_posix()}.', 'Diagnostic details:'),
+                    ('ko', f'다음 항목의 제거를 마치지 못했습니다: {target.as_posix()}.', '진단 상세:')):
+                with self.subTest(scope=scope, locale=locale), \
+                        mock.patch.object(uninstall_cleanup, '_remove_path', side_effect=deny_target):
+                    code, output = self.removal_screen(scope, locale)
+                    self.assertEqual(code, 1, output)
+                    self.assertTrue((target / 'SKILL.md').is_file())
+                    self.assertIn('target-removal-failed', output)
+                    self.assertIn(failure, output)
+                    self.assertIn(diagnostic, output)
+                    self.assertIn('target busy', output)
+
+    def test_failed_selected_reference_release_reports_the_absent_file(self):
+        target = self.installed('alpha')
+        self.inventory('alpha')
+        with mock.patch('uninstall_cleanup.release_target_records', side_effect=OSError('inventory busy')):
+            code, output = self.removal_screen('selected', 'en')
+        self.assertEqual(code, 1, output)
+        self.assertFalse(target.exists())
+        self.assertIn(f'Installation path already absent: {target.as_posix()}', output)
+        self.assertIn('target-record-cleanup-failed', output)
+        self.assertIn('inventory busy', output)
+
+    def test_permission_review_keeps_the_grant_and_explains_it_on_both_removal_screens(self):
+        from install_hooks import uninstall_hook
+        self.stub('installer.hosts.install_hooks', side_effect=lambda ctx, action, platform, **kwargs:
+                  uninstall_hook(platform, **kwargs))
+        settings = self.home / '.claude/settings.json'
+        settings.write_text(json.dumps({'permissions': {'allow': ['Skill(alpha)']}}))
+        receipt = self.ghost / 'addon-permissions/claude-v2.json'
+        receipt.parent.mkdir()
+        receipt.write_bytes(b'{')
+        for scope in ('full', 'selected'):
+            for locale, kept, failure in (
+                    ('en', f'Retained installation item: {settings}', 'Removal incomplete for'),
+                    ('ko', f'남긴 설치 항목: {settings}', '다음 항목의 제거를 마치지 못했습니다')):
+                with self.subTest(scope=scope, locale=locale):
+                    target = self.installed('alpha')
+                    self.inventory('alpha')
+                    code, output = self.removal_screen(scope, locale)
+                    self.assertEqual(code, 0, output)
+                    self.assertFalse(target.exists())
+                    self.assertEqual(json.loads(settings.read_text())['permissions']['allow'], ['Skill(alpha)'])
+                    self.assertEqual(receipt.read_bytes(), b'{')
+                    self.assertIn(kept, output)
+                    self.assertIn('permission-attribution-unresolved', output)
+                    self.assertIn('Expecting property name', output)
+                    self.assertNotIn(failure, output)
+
+    def hook_only_retired_source(self):
+        import install_hooks
+        import runtime_config
+        import sqlite3
+        original = (self.source / 'retired-records').resolve()
+        destination = (self.ghost / 'session-intent').resolve()
+        original.mkdir()
+        destination.mkdir()
+        (original / 'evidence.txt').write_text('existing source evidence')
+        shutil.copy2(original / 'evidence.txt', destination / 'evidence.txt')
+        connection = sqlite3.connect(destination / 'ghost-state.sqlite3')
+        connection.close()
+        value = destination_fixture(self.home, owned_root=str(self.home.parent), platform_dir=str(self.home / '.claude'),
+            skills_dir=str(self.ctx.skills_dir), ghost_root=str(self.ghost), ledger_root=str(original),
+            runtime_shared_dir=str(self.ghost / 'runtime' / '_shared'))
+        self.assertEqual(self.captured(install_hooks.install_hook, 'claude', destination=value)[0].legacy_status,
+                         'installed')
+        runtime_config.save_config({'install_locations': {'claude': dict(value, ledger_root=str(destination))},
+                                    'retired_ledger_roots': [str(original)]})
+        return original, destination
+
     def test_personal_slots_and_private_shared_survive_even_with_force(self):
         for name in ("alpha", "_shared"):
             path = self.ctx.skills_dir/name
@@ -305,6 +424,15 @@ class SelectedRemovalOwnershipTests(LifecycleCase):
         self.assertTrue(alpha.is_symlink())
         self.assertTrue(shared.is_symlink())
 
+    def test_known_record_hold_precedes_gateway_detachment(self):
+        self.installed('alpha')
+        self.installed('_shared', linked=True)
+        self.inventory('alpha', '_shared')
+        self.hook_only_retired_source()
+        code, _ = self.captured(lifecycle.uninstall, self.ctx, ['alpha'])
+        self.assertEqual(code, 1)
+        self.guard.assert_not_called()
+
     def test_failed_last_skill_hook_detach_preserves_files_and_inventory(self):
         alpha, shared = self.installed('alpha'), self.installed('_shared', linked=True)
         self.inventory('alpha', '_shared')
@@ -316,17 +444,54 @@ class SelectedRemovalOwnershipTests(LifecycleCase):
         self.assertTrue(shared.is_symlink())
         self.assertEqual(self.state.read_bytes(), original)
 
-    def test_last_skill_hook_detach_observes_intact_files(self):
+    def test_last_skill_hook_detach_observes_intact_files_and_preserves_later_cleanup_scope(self):
+        import content_digest
+        import install_hooks
+        import install_transaction
+        from installer import hosts, transaction
         alpha, shared = self.installed('alpha'), self.installed('_shared', linked=True)
         self.inventory('alpha', '_shared')
+        original, destination = self.hook_only_retired_source()
+        journal = install_transaction.Journal.begin(dict(ghost_root=str(self.ghost), host='installer'), [])
+        journal.data['source_cleanup'] = dict(path=str(original), destination=str(destination),
+                                              baseline=content_digest.state(original, include_generated=True))
+        journal.mark('done')
         def detach(*args, **kwargs):
             self.assertTrue((alpha / 'SKILL.md').is_file())
             self.assertTrue(shared.is_symlink())
-            return hook_status(action='uninstall', status='removed')
+            return install_hooks.uninstall_hook('claude', **kwargs)
         with mock.patch('installer.hosts.install_hooks', side_effect=detach):
             self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ['alpha'])[0], 0)
         self.assertFalse(alpha.exists())
         self.assertFalse(shared.is_symlink())
+        self.assertTrue(original.is_dir(), 'Selected removal must not clean up A')
+        self.assertEqual(install_hooks.installed_hook_ledger_roots('claude'), set())
+        with mock.patch.object(hosts, 'observe_writers', side_effect=lambda requested: {
+                host: hosts.WriterObservation('running', pids=(43210,)) for host in requested}):
+            with self.assertRaisesRegex(install_transaction.InstallTransactionError, 'claude writer running'):
+                install_transaction.cleanup_completed(self.ghost, record_source_cleanup=transaction.cleanup_record_source)
+        self.assertEqual((original / 'evidence.txt').read_text(), 'existing source evidence')
+        with mock.patch.object(hosts, 'observe_writers', side_effect=lambda requested: {
+                host: hosts.WriterObservation('absent') for host in requested}):
+            self.assertEqual(install_transaction.cleanup_completed(self.ghost,
+                record_source_cleanup=transaction.cleanup_record_source), ())
+        self.assertFalse(original.exists())
+        self.assertEqual((destination / 'evidence.txt').read_text(), 'existing source evidence')
+
+    def test_last_skill_preserves_hook_and_files_when_source_observation_cannot_be_saved(self):
+        alpha, shared = self.installed('alpha'), self.installed('_shared', linked=True)
+        self.inventory('alpha', '_shared')
+        original, _ = self.hook_only_retired_source()
+        settings = self.home / '.claude' / 'settings.json'
+        before = settings.read_bytes(), self.state.read_bytes()
+        with mock.patch('installer.hosts.install_hooks', side_effect=AssertionError('source reference would be lost')):
+            code, output = self.captured(lifecycle.uninstall, self.ctx, ['alpha'])
+        self.assertEqual(code, 1)
+        self.assertIn(str(original), output)
+        self.assertIn('No completed cleanup journal', output)
+        self.assertEqual((settings.read_bytes(), self.state.read_bytes()), before)
+        self.assertTrue((alpha / 'SKILL.md').is_file())
+        self.assertTrue(shared.is_symlink())
 
     def test_managed_link_and_modified_copy_remove_without_losing_earlier_backup(self):
         alpha = self.installed("alpha", linked=True)
@@ -369,7 +534,6 @@ class SelectedRemovalOwnershipTests(LifecycleCase):
     def recorded_removal_with_collector(self, name='alpha', *, shared=False):
         import content_digest
         import installed_payload
-        import install_lock
         checkout = Path(__file__).resolve().parents[1]
         companion_source = self.source/'merge-companion'
         companion_source.mkdir()
@@ -379,8 +543,6 @@ class SelectedRemovalOwnershipTests(LifecycleCase):
         target, one = self.installed(name), self.installed('one')
         self.inventory(name, 'one')
         original_files = {p.relative_to(target): p.read_bytes() for p in target.rglob('*') if p.is_file()}
-        generation = install_lock.acquire_lock(self.ghost/'install.lock', owner='test')
-        self.addCleanup(install_lock.release_lock, self.ghost/'install.lock', generation)
         entry = dict(name=name, kind='skill', mode='copy', provider='core', source=str(self.source/name),
             source_commit='fixture', baseline='recorded', installed_at='2026-10-02T00:00:00Z',
             used_by=['claude', 'codex'] if shared else ['claude'], files=content_digest.tree(target))
@@ -633,7 +795,7 @@ class RepairTests(LifecycleCase):
     def test_repair_reports_the_context_gateway_like_the_install(self):
         # The same `Context gateway:` line as the install, from the same report: here a loaded service that the
         # install record does not name, which the repair neither stops nor starts.
-        reg = gateway_testing.registered_home(self, self.home, service=False)
+        reg = gateway_testing.registered_home(self, self.home, service=False, lock=False)
         agent = self.home / "Library" / "LaunchAgents" / f"{LABEL}.plist"
         agent.parent.mkdir(parents=True, exist_ok=True)
         agent.write_bytes(plistlib.dumps({"Label": LABEL, "ProgramArguments": [

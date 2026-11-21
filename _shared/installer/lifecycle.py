@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from installer import addons, hosts, locations, preservation, record_move, report, runner, selection, transaction
+from installer import addons, hosts, locations, preservation, record_move, report, runner, selection, source, transaction
 from installer.runner import InstallerExit
 
 if TYPE_CHECKING:
@@ -119,7 +119,7 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
             absent.append((label, path, target.path))
         else:
             failed += 1
-            report.warn(f"Preserving {label}: {proposed['reason']}")
+            report.emit_removal_item(proposed)
     if not selection.has_managed_installs(skills_dir, ctx.platform,
             excluding=tuple(path for _, path, _ in [*removal, *shared_references])):
         shared = skills_dir / "_shared"
@@ -133,16 +133,32 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
             absent.append(("_shared", shared, runner.REPO_ROOT / "_shared"))
         else:
             failed += 1
-            report.warn(f"Preserving _shared: {proposed['reason']}")
+            report.emit_removal_item(proposed)
+    managed_remain = selection.has_managed_installs(skills_dir, ctx.platform,
+            excluding=tuple(path for _, path, _ in [*removal, *shared_references]))
+    if not managed_remain:
+        if record_locations is None:
+            return 1
+        retention = transaction.retain_record_source_writers(locations.record_root(), record_locations)
+        blocked = retention.blocked_hosts.get(ctx.platform, {})
+        for causes in (retention.errors, blocked):
+            for path, cause in causes.items():
+                report.error(report.message('record_source_references_failed', path=path, cause=cause))
+        if blocked:
+            return 1
+        failed += len(retention.errors)
     guard = transaction.guard_gateway_removal(ctx, [path for _, path, _ in removal])
     if guard != 0:
         return guard
-    if selection.has_managed_installs(skills_dir, ctx.platform,
-            excluding=tuple(path for _, path, _ in [*removal, *shared_references])):
+    if managed_remain:
         report.info("Managed skills remain; keeping hooks installed.")
-    elif hosts.install_hooks(ctx, "uninstall", ctx.platform, backup_sources=backups).legacy_status == 'error':
-        report.error("Hook removal failed. Aborting skill removal")
-        raise InstallerExit(1)
+    else:
+        hooks = hosts.install_hooks(ctx, "uninstall", ctx.platform, backup_sources=backups)
+        for item in hooks.details.get('items', []):
+            report.emit_removal_item(item)
+        if hooks.legacy_status == 'error' or not hooks.details.get('hooks_detached'):
+            report.error("Hook removal failed. Aborting skill removal")
+            raise InstallerExit(1)
     absent_paths = {path for _, path, _ in absent}
     released_paths = []
     for label, path, source_path in sorted([*removal, *shared_references, *absent], key=lambda row: row[0] == '_shared'):
@@ -157,20 +173,22 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
             released_paths.append(path)
         elif result["action"] != "missing":
             failed += 1
-            report.warn(f"Removal incomplete for {path}: {result['reason']}; "
-                        f"file {result.get('file_state', 'retained')}; {result.get('detail', '')}")
+            report.emit_removal_item(result)
     if ctx.platform == "claude":
         if hosts.remove_claude_bootstrap_if_unused(ctx, skills_dir):
             removed += 1
     elif ctx.platform == "codex":
         if hosts.remove_codex_bootstrap_if_unused(ctx, skills_dir):
             removed += 1
-    if not failed and not selection.has_managed_installs(skills_dir, ctx.platform):
+    if not selection.has_managed_installs(skills_dir, ctx.platform):
         from uninstall_cleanup import retire_unused_management
-        for item in retire_unused_management(ctx.platform, locations.install_state_path(ctx.platform)):
+        for item in retire_unused_management(ctx.platform, locations.install_state_path(ctx.platform),
+                                             apply_changes=not failed, backup_sources=backups):
             if item.get('removal_incomplete'):
                 failed += 1
-                report.warn(f"Removal incomplete for {item['path']}: {item['reason']}; {item.get('detail', '')}")
+            report.emit_removal_item(item)
+        if failed:
+            report.warn(report.message('removal_retry'))
     if removed == 0:
         report.info("No skills to remove.")
     else:
@@ -196,8 +214,9 @@ def _report_retained_records(record_locations: transaction.LedgerLocations | Non
     if record_locations is None:
         return
     for root, value in record_locations.roots.items():
-        if platform in value['hosts'] and value['state'] != 'fixed':
-            report.emit(report.message('move_uninstall' if value['state'] == 'source-bound' else 'move_relation_unknown',
+        if platform in value['hosts'] and value['state'] in ('source-bound', 'unknown', 'unconfirmed'):
+            report.emit(report.message({'source-bound': 'move_uninstall', 'unknown': 'move_relation_unknown',
+                                        'unconfirmed': 'move_location_unconfirmed'}[value['state']],
                                        current_path=root, source_path=value['source_root']))
 
 
@@ -206,6 +225,7 @@ def run_repair(ctx: "Context") -> int:
     managed targets stay untouched."""
     report.emit("")
     report.info("Installer repair: re-provisioning missing managed targets...")
+    source.repair_active_source(ctx)
     # Repair publishes like install, so the first command that writes the install record migrates first.
     transaction.migrate_record(ctx)
     copy_only = locations.prefers_copy_install(ctx.platform)

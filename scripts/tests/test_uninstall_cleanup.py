@@ -5,6 +5,7 @@ import io
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,7 @@ from _installer_source import installer_bash_source, installer_ps1_source
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
 import uninstall_cleanup as cleanup
-from installer_testing import checkout_copy, destination_fixture, installer_home_effects, installer_env  # noqa: E402
+from installer_testing import checkout_copy, destination_fixture, installer_home_effects, installer_env, installer_observations  # noqa: E402
 import install_destination
 from installer import gateway_participant
 
@@ -170,6 +171,89 @@ def _write_manifest(
 
 
 class SelectedManagementRetirementTest(unittest.TestCase):
+    def test_invalid_shared_runtime_is_reported_without_losing_its_record(self):
+        import installed_payload
+        path = installed_payload.path(self.ghost)
+        before = path.read_bytes()
+        record = json.loads(before)
+        record['targets'][str(self.runtime)]['used_by'] = None
+        path.write_text(json.dumps(record))
+        corrupted = path.read_bytes()
+        output = io.StringIO()
+        args = ['--platform', 'codex', '--install-state-manifest', str(self.manifest),
+                '--report-path', str(self.home / 'removal.json'), '--apply']
+        with mock.patch.object(gateway_participant, 'removal',
+                side_effect=lambda *args, **kwargs: dict(kind='context-gateway', action='missing')), contextlib.redirect_stdout(output):
+            code = cleanup.main(args)
+        self.assertEqual(code, 1)
+        self.assertEqual(path.read_bytes(), corrupted)
+        self.assertTrue(self.command.exists())
+        self.assertTrue(self.runtime.exists())
+        result = json.loads((self.home / 'removal.json').read_text())
+        failure = next(row for row in result['items'] if row.get('reason') == 'invalid-installed-target')
+        self.assertEqual(failure['path'], str(path))
+        self.assertIn(str(self.runtime), '\n'.join(failure['errors']))
+        self.assertIn(str(path), output.getvalue())
+        self.assertIn('run the same removal command', output.getvalue())
+        path.write_bytes(before)
+        with mock.patch.object(gateway_participant, 'removal',
+                side_effect=lambda *args, **kwargs: dict(kind='context-gateway', action='missing')), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cleanup.main(args), 0)
+        self.assertFalse(self.runtime.exists())
+        self.assertFalse(self.command.exists())
+
+    def test_selected_invalid_command_lists_kept_dependencies_and_retries(self):
+        import installed_payload
+        path = installed_payload.path(self.ghost)
+        before = path.read_bytes()
+        record = json.loads(before)
+        record['targets'][str(self.command)]['used_by'] = None
+        path.write_text(json.dumps(record))
+        items = cleanup.retire_unused_management('codex', self.manifest)
+        kept = {row['path'] for row in items if row.get('removal_incomplete')}
+        self.assertTrue({str(path), str(self.manifest), str(self.runtime), str(self.command)} <= kept, items)
+        self.assertTrue(self.command.exists())
+        self.assertTrue(self.runtime.exists())
+        # Missing inventory must not enter a raw membership lookup before validation.
+        inventory = self.manifest.read_bytes()
+        self.manifest.unlink()
+        retried = cleanup.retire_unused_management('codex', self.manifest)
+        self.assertTrue(any(row.get('reason') == 'invalid-installed-target' for row in retried), retried)
+        self.manifest.write_bytes(inventory)
+        path.write_bytes(before)
+        done = cleanup.retire_unused_management('codex', self.manifest)
+        self.assertFalse(any(row.get('removal_incomplete') for row in done), done)
+        self.assertFalse(self.command.exists())
+        self.assertFalse(self.runtime.exists())
+
+    def test_missing_inventory_and_invalid_record_do_not_imply_hooks_are_detached(self):
+        import installed_payload
+        from install_hooks import HookStatus
+        self.manifest.unlink()
+        payload = installed_payload.path(self.ghost)
+        record = json.loads(payload.read_text())
+        record['targets'][str(self.runtime)]['used_by'] = None
+        payload.write_text(json.dumps(record))
+        def retained_hook(*args, **kwargs):
+            return HookStatus('codex', 'partial', 'Retained', 'already', details={
+                'items': [], 'would_detach': False, 'hooks_detached': False,
+                'remaining_commands': ['retained managed hook']})
+        report_path = self.home / 'missing-inventory.json'
+        with mock.patch.object(cleanup, 'uninstall_hook', side_effect=retained_hook) as hooks, \
+                mock.patch.object(gateway_participant, 'removal',
+                    side_effect=lambda *a, **k: dict(kind='context-gateway', action='missing')), \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = cleanup.main(['--platform', 'codex', '--install-state-manifest', str(self.manifest),
+                                 '--report-path', str(report_path), '--apply'])
+        result = json.loads(report_path.read_text())
+        self.assertEqual(code, 1)
+        self.assertFalse(result['hooks_detached'])
+        self.assertTrue(hooks.called)
+        paths = {row.get('path') for row in result['items']}
+        self.assertTrue({str(payload), str(self.runtime), str(self.command)} <= paths, result)
+        self.assertTrue(self.command.exists())
+        self.assertTrue(self.runtime.exists())
+
     def setUp(self):
         import content_digest
         import install_lock
@@ -207,13 +291,121 @@ class SelectedManagementRetirementTest(unittest.TestCase):
         self.assertTrue(self.runtime.exists())
         self.assertTrue(command.exists())
 
-    def test_inventory_only_other_host_keeps_management_and_activation(self):
+    def test_empty_other_host_inventory_does_not_orphan_management(self):
         import installed_payload
         self.manifest.with_name('future-host.json').write_text(json.dumps(dict(platform='future-host', targets=[])))
         cleanup.retire_unused_management('codex', self.manifest)
+        self.assertFalse(self.command.exists())
+        self.assertFalse(self.runtime.exists())
+        self.assertIsNone(installed_payload.read(self.ghost)['installer']['active_root'])
+
+    def test_completed_shared_release_is_not_overwritten_by_later_failure(self):
+        import installed_payload
+        from install_hooks import HookStatus
+        installed_payload.update(self.ghost, {'targets': {
+            str(path): dict(entry, used_by=['claude'])
+            for path, entry in installed_payload.read(self.ghost)['targets'].items()}})
+        item = cleanup._management_command_item(self.command, 'codex')
+        self.assertEqual(item['action'], 'would-release-reference')
+        cleanup._apply_managed_support(item, 'codex', self.manifest)
+        items = [item, dict(kind='support-artifact', target_name='pending-merges',
+                           path=str(self.ghost / 'pending-merges/codex'), action='manual-review',
+                           errors=['original copy denied'])]
+        hooks = HookStatus('codex', 'ready', 'Ready', 'installed', details={'hooks_detached': True})
+        cleanup._retain_dependencies(items, [], [], hooks, applied=True, manifest_available=True)
+        self.assertEqual(item['action'], 'reference-released')
+        self.assertTrue(self.command.exists())
+        self.assertEqual(installed_payload.read(self.ghost)['targets'][str(self.command)]['used_by'], ['claude'])
+
+    def test_manifest_write_failure_keeps_payload_reference_for_retry(self):
+        import install_state_writer
+        import installed_payload
+        installed_payload.update(self.ghost, {'targets': {
+            str(self.command): dict(installed_payload.read(self.ghost)['targets'][str(self.command)], used_by=['claude'])}})
+        self.manifest.write_text(json.dumps(dict(platform='codex', targets=[dict(
+            target_name=self.command.name, dest_path=str(self.command), install_mode='copy')])))
+        with mock.patch.object(install_state_writer, 'remove_targets', side_effect=PermissionError('inventory write denied')):
+            with self.assertRaisesRegex(PermissionError, 'inventory write denied'):
+                cleanup.release_target_records(root=self.ghost, platform='codex', destination=self.command,
+                    kind='command', state_path=self.manifest)
+        self.assertEqual(installed_payload.read(self.ghost)['targets'][str(self.command)]['used_by'], ['claude', 'codex'])
+
+    def test_shared_support_group_restores_snapshot_payload_and_inventory_after_late_record_failure(self):
+        import installed_payload
+        installed_payload.update(self.ghost, {'targets': {
+            path: dict(entry, used_by=['claude'])
+            for path, entry in installed_payload.read(self.ghost)['targets'].items()}})
+        snapshot = self.ghost / 'pending-merges/codex/snapshot.json'
+        snapshot.parent.mkdir(parents=True)
+        snapshot.write_text(json.dumps(dict(version=2, platform='codex', files={
+            str(self.runtime / 'module.py'): '0' * 64, str(self.command): '1' * 64})))
+        files = [snapshot, self.manifest, installed_payload.path(self.ghost)]
+        before = {path: path.read_bytes() for path in files}
+        items = [*cleanup._runtime_artifact_items('codex', ['claude']),
+                 cleanup._management_command_item(self.command, 'codex'),
+                 cleanup._support_artifact_item('install-state-manifest', self.manifest)]
+        release = installed_payload.release_target
+        def fail_late(root, *, destination, provider, platform):
+            if Path(destination) == self.command:
+                self.assertNotEqual(snapshot.read_bytes(), before[snapshot], 'Real snapshot pruning must precede failure')
+                raise PermissionError('late reference write denied')
+            return release(root, destination=destination, provider=provider, platform=platform)
+        with mock.patch.object(installed_payload, 'release_target', side_effect=fail_late):
+            cleanup._release_shared_support(items, 'codex', self.manifest)
+        self.assertEqual({path: path.read_bytes() for path in files}, before)
+        self.assertTrue(all(row['action'] == 'manual-review' and row['removal_incomplete'] for row in items))
         self.assertTrue(self.command.exists())
         self.assertTrue(self.runtime.exists())
-        self.assertEqual(installed_payload.read(self.ghost)['installer']['active_root'], str(self.active))
+
+    def test_shared_reference_commit_cleans_only_its_completed_metadata_journal(self):
+        import content_digest
+        import installed_payload
+        import install_transaction
+        installed_payload.update(self.ghost, {'targets': {
+            path: dict(entry, used_by=['claude'])
+            for path, entry in installed_payload.read(self.ghost)['targets'].items()}})
+        source = self.home / 'retired-records'
+        source.mkdir()
+        (source / 'history').write_text('user records')
+        destination = self.home / 'current-records'
+        shutil.copytree(source, destination)
+        unrelated = install_transaction.Journal.begin(dict(ghost_root=str(self.ghost), host='installer'), [])
+        unrelated.data['source_cleanup'] = dict(path=str(source), destination=str(destination),
+            baseline=content_digest.state(source, include_generated=True))
+        unrelated.mark('done')
+        before = {path: path.read_bytes() for path in (self.ghost / 'rollbacks').rglob('*') if path.is_file()}
+        folders = set((self.ghost / 'rollbacks').iterdir())
+        items = cleanup.retire_unused_management('codex', self.manifest)
+        self.assertFalse(any(row.get('removal_incomplete') for row in items), items)
+        self.assertEqual(set((self.ghost / 'rollbacks').iterdir()), folders)
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+        self.assertEqual((source / 'history').read_text(), 'user records')
+        self.assertTrue(all(row['action'] == 'reference-released' for row in items
+                            if row.get('target_name') in {'management-command', 'runtime-core'}))
+
+    def test_shared_reference_journal_cleanup_error_preserves_committed_effects(self):
+        import installed_payload
+        import install_transaction
+        installed_payload.update(self.ghost, {'targets': {
+            path: dict(entry, used_by=['claude'])
+            for path, entry in installed_payload.read(self.ghost)['targets'].items()}})
+        with mock.patch.object(install_transaction, 'cleanup_completed', side_effect=OSError('journal cleanup denied')):
+            items = cleanup.retire_unused_management('codex', self.manifest)
+        retained = [row for row in items if row.get('target_name') == 'publish-rollbacks']
+        self.assertEqual(len(retained), 1, items)
+        self.assertTrue(retained[0]['removal_incomplete'])
+        self.assertIn('journal cleanup denied', '\n'.join(retained[0]['errors']))
+        for row in items:
+            if row.get('target_name') in {'management-command', 'runtime-core'}:
+                self.assertEqual(row['action'], 'reference-released')
+                self.assertTrue(Path(row['path']).exists())
+                self.assertEqual(installed_payload.read(self.ghost)['targets'][row['path']]['used_by'], ['claude'])
+        self.assertFalse(self.manifest.exists(), 'Committed metadata removal must not be reported as unexecuted')
+        committed = installed_payload.path(self.ghost).read_bytes()
+        retried = cleanup.retire_unused_management('codex', self.manifest)
+        self.assertFalse(any(item.get('removal_incomplete') for item in retried), retried)
+        self.assertFalse(Path(retained[0]['path']).exists())
+        self.assertEqual(installed_payload.path(self.ghost).read_bytes(), committed)
 
     def test_addon_sidecar_remnant_keeps_runtime_without_payload_entry(self):
         import addon_registry
@@ -264,14 +456,31 @@ class SelectedManagementRetirementTest(unittest.TestCase):
 
     def test_runtime_failure_holds_full_removal_records(self):
         (self.runtime / 'module.py').write_text('user changes')
-        args = argparse.Namespace(platform='codex', install_state_manifest=self.manifest)
-        items = cleanup._support_artifact_items(args)
+        items = cleanup._support_artifact_items('codex', self.manifest)
         from install_hooks import HookStatus
         hooks = HookStatus('codex', 'ready', 'Ready', 'installed', details={'would_detach': True})
         cleanup._retain_dependencies(items, [], [], hooks, applied=False, manifest_available=True)
         for item in items:
             if item['target_name'] in {'runtime-core', 'install-record', 'install-state-manifest'}:
                 self.assertEqual(item['action'], 'manual-review', item)
+
+    def test_held_host_keeps_its_shared_support_references_for_retry(self):
+        import installed_payload
+        from install_hooks import HookStatus
+        installed_payload.update(self.ghost, {'targets': {
+            str(path): dict(entry, used_by=['claude'])
+            for path, entry in installed_payload.read(self.ghost)['targets'].items()}})
+        items = cleanup._support_artifact_items('codex', self.manifest)
+        hooks = HookStatus('codex', 'partial', 'Retained', 'already', details={
+            'hooks_detached': False, 'remaining_commands': [str(self.runtime / 'module.py')]})
+        cleanup._retain_dependencies(items, [], [], hooks, applied=True, manifest_available=True)
+        for item in items:
+            if item['target_name'] in {'management-command', 'runtime-core'}:
+                cleanup._apply_managed_support(item, 'codex', self.manifest)
+        record = installed_payload.read(self.ghost)['targets']
+        for path in (self.runtime, self.command):
+            self.assertEqual(record[str(path)]['used_by'], ['claude', 'codex'])
+            self.assertTrue(path.exists())
 
     def test_retry_after_command_deletion_failure_preserves_unrecorded_runtime_sibling(self):
         import installed_payload
@@ -290,6 +499,667 @@ class SelectedManagementRetirementTest(unittest.TestCase):
         cleanup.retire_unused_management('codex', self.manifest)
         self.assertEqual(sibling.read_text(), 'user data')
         self.assertEqual(installed_payload.read(self.ghost)['targets'], {})
+
+
+class FinalManagementRetryTest(unittest.TestCase):
+    def setUp(self):
+        import content_digest
+        import installed_payload
+        import install_transaction
+        SelectedManagementRetirementTest.setUp(self)
+        self.enterContext(installer_observations())
+        self.enterContext(install_destination.use(destination_fixture(
+            self.home, platform_dir=str(self.home / '.codex'), skills_dir=str(self.home / '.agents/skills'),
+            ghost_root=str(self.ghost))))
+        self.enterContext(mock.patch.object(gateway_participant, 'removal',
+            side_effect=lambda *args, **kwargs: dict(kind='context-gateway', action='missing')))
+        self.commands = [self.command, self.command.with_suffix('.cmd'), self.command.with_suffix('.ps1')]
+        self.bootstrap = self.ghost / 'versions/bootstrap/core'
+        self.bootstrap.mkdir(parents=True)
+        for index, path in enumerate(self.commands):
+            path.write_text(f'original management command {index}\n')
+            path.chmod(0o751 if index == 0 else 0o640)
+        installed_payload.update(self.ghost, {'targets': {str(path): dict(kind='command', name=path.name,
+            provider='core', used_by=['codex'], mode='copy', baseline='recorded', source=str(self.bootstrap),
+            files=content_digest.tree(path)) for path in self.commands}})
+        self.command_state = {path: (path.read_bytes(), stat.S_IMODE(path.stat().st_mode)) for path in self.commands}
+        install_transaction.cleanup_completed(self.ghost)
+
+    def _remove(self, *, selected=False):
+        if selected:
+            self.items = cleanup.retire_unused_management('codex', self.manifest)
+            self.incomplete = any(item.get('removal_incomplete') for item in self.items)
+            return
+        output = io.StringIO()
+        report = self.home / 'removal.json'
+        with contextlib.redirect_stdout(output):
+            self.code = cleanup.main(['--platform', 'codex', '--install-state-manifest', str(self.manifest),
+                '--apply', '--report-path', str(report)])
+        self.output = output.getvalue()
+        self.report = json.loads(report.read_text())
+        self.items = self.report['items']
+        self.incomplete = self.report['removal_incomplete']
+
+    def _assert_retry_then_finish(self, *, selected=False):
+        import installed_payload
+        self.assertTrue(self.incomplete, self.items)
+        self.assertTrue(self.manifest.exists(), self.items)
+        self.assertTrue(all(path.exists() for path in self.commands), self.items)
+        self.assertEqual({path: (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+                          for path in self.commands}, self.command_state)
+        record = installed_payload.read(self.ghost)
+        self.assertEqual(record['installer']['active_root'], str(self.active))
+        for path in self.commands:
+            self.assertIn('codex', record['targets'][str(path)]['used_by'])
+        self.assertTrue(self.active.is_dir())
+        self.assertTrue(self.bootstrap.is_dir())
+        if not selected:
+            self.assertEqual(self.code, 1)
+            self.assertTrue(self.report['hooks_detached'])
+        self._remove(selected=selected)
+        self.assertFalse(self.incomplete, self.items)
+        self.assertFalse(self.manifest.exists())
+        self.assertFalse(any(path.exists() for path in self.commands))
+        self.assertFalse((installed_payload.read(self.ghost) or {}).get('installer', {}).get('active_root'))
+
+    def test_last_host_inventory_unlink_failure_restores_exact_retry_command(self):
+        unlink = Path.unlink
+        def denied(path, *args, **kwargs):
+            if path == self.manifest:
+                raise PermissionError('final inventory unlink denied')
+            return unlink(path, *args, **kwargs)
+        with mock.patch.object(Path, 'unlink', denied):
+            self._remove()
+        self._assert_retry_then_finish()
+
+    def test_absent_host_runtime_does_not_hide_invalid_sibling_ownership(self):
+        import installed_payload
+        path = installed_payload.path(self.ghost)
+        record = json.loads(path.read_bytes())
+        sibling = self.runtime.parent / 'absent-companion.py'
+        record['targets'][str(sibling)] = dict(record['targets'][str(self.runtime)], files={})
+        record['targets'][str(self.runtime)]['used_by'] = None
+        path.write_text(json.dumps(record), encoding='utf-8')
+        self._remove()
+        self.assertEqual(self.code, 1)
+        self.assertTrue(self.runtime.exists())
+        self.assertIn(('invalid-installed-target', str(path)),
+                      {(row.get('reason'), row.get('path')) for row in self.items})
+        self.assertIn(('installed-target-ownership-unresolved', str(self.runtime)),
+                      {(row.get('reason'), row.get('path')) for row in self.items})
+
+    @unittest.skipIf(os.name == 'nt' or getattr(os, 'geteuid', lambda: 0)() == 0,
+                     'requires POSIX directory write permissions for an unprivileged user')
+    def test_runtime_partly_deleted_before_rmdir_is_removed_on_retry(self):
+        parent = self.runtime.parent
+        mode = stat.S_IMODE(parent.stat().st_mode)
+        parent.chmod(0o555)
+        try:
+            self._remove()
+            self.assertEqual(self.code, 1)
+            self.assertTrue(self.runtime.is_dir())
+            self.assertFalse((self.runtime / 'module.py').exists())
+        finally:
+            parent.chmod(mode)
+        self._remove()
+        self.assertEqual(self.code, 0, self.output)
+        self.assertFalse(self.runtime.exists())
+
+    def test_last_host_payload_unlink_failure_restores_exact_retry_command(self):
+        import installed_payload
+        unlink = Path.unlink
+        def denied(path, *args, **kwargs):
+            if path == installed_payload.path(self.ghost):
+                raise PermissionError('final payload unlink denied')
+            return unlink(path, *args, **kwargs)
+        with mock.patch.object(Path, 'unlink', denied):
+            self._remove()
+        self._assert_retry_then_finish()
+
+    def test_later_command_unlink_failure_restores_all_os_entries(self):
+        unlink = Path.unlink
+        def denied(path, *args, **kwargs):
+            if path == self.commands[-1]:
+                raise PermissionError('PowerShell command unlink denied')
+            return unlink(path, *args, **kwargs)
+        with mock.patch.object(Path, 'unlink', denied):
+            self._remove()
+        self._assert_retry_then_finish()
+
+    def test_interrupt_after_unlink_restores_command_before_returning_control(self):
+        unlink = Path.unlink
+
+        def interrupt(path, *args, **kwargs):
+            result = unlink(path, *args, **kwargs)
+            if path == self.command:
+                raise KeyboardInterrupt
+            return result
+
+        with mock.patch.object(Path, 'unlink', interrupt), self.assertRaises(KeyboardInterrupt):
+            self._remove()
+        self.assertEqual((self.command.read_bytes(), stat.S_IMODE(self.command.stat().st_mode)),
+                         self.command_state[self.command])
+        self._remove()
+        self.assertEqual(self.code, 0, self.output)
+        self.assertFalse(self.command.exists())
+
+    def test_last_host_commit_mark_failure_restores_retry_command(self):
+        import install_transaction
+        mark = install_transaction.Journal.mark
+        def denied(journal, phase):
+            if phase == 'done':
+                raise PermissionError('final transaction mark denied')
+            return mark(journal, phase)
+        with mock.patch.object(install_transaction.Journal, 'mark', denied):
+            self._remove()
+        self._assert_retry_then_finish()
+
+    def test_persistent_journal_write_failure_does_not_skip_command_restoration(self):
+        import installed_payload
+        import install_transaction
+        write = install_transaction._write_json
+        failed = False
+        def denied(path, data):
+            nonlocal failed
+            if data.get('phase') == 'done':
+                failed = True
+            if failed:
+                raise PermissionError('journal remains unwritable')
+            return write(path, data)
+        with mock.patch.object(install_transaction, '_write_json', denied):
+            self._remove()
+        self.assertTrue(self.incomplete, self.items)
+        self.assertIn('saved files and records were restored', self.output)
+        self.assertIn('restored phase', self.output)
+        self.assertIn('journal remains unwritable', self.output)
+        self.assertNotIn('restore failed', self.output)
+        self.assertTrue(all(path.exists() for path in self.commands), self.items)
+        self.assertEqual(installed_payload.read(self.ghost)['installer']['active_root'], str(self.active))
+        pending = install_transaction.unfinished(self.ghost)
+        self.assertEqual(len(pending), 1)
+        # A fresh management command obtains the lock and performs this recovery.
+        install_transaction.recover(self.ghost, pending[0])
+        self._assert_retry_then_finish()
+
+    def test_failed_metadata_restore_still_restores_other_commands_and_payload(self):
+        import installed_payload
+        import install_transaction
+        clean = install_transaction.cleanup_completed
+        write = installed_payload._write
+        recovering = False
+        def denied_cleanup(root, **kwargs):
+            nonlocal recovering
+            if kwargs.get('txids'):
+                recovering = True
+                raise PermissionError('final cleanup denied')
+            return clean(root, **kwargs)
+        restored_command = self.commands[0].resolve()
+        def denied_restore(path, data):
+            if recovering and path == restored_command:
+                raise PermissionError('metadata write denied')
+            return write(path, data)
+        with mock.patch.object(install_transaction, 'cleanup_completed', denied_cleanup), \
+                mock.patch.object(installed_payload, '_write', denied_restore):
+            self._remove()
+        self.assertEqual(self.code, 1)
+        self.assertFalse(self.commands[0].exists())
+        self.assertIn(f'{restored_command}: metadata write denied', self.output)
+        self.assertTrue(all(path.is_file() for path in self.commands[1:]))
+        self.assertTrue(self.manifest.is_file())
+        targets = installed_payload.read(self.ghost)['targets']
+        self.assertTrue(all(targets[str(path)]['used_by'] == ['codex'] for path in self.commands))
+        self.assertEqual(len(install_transaction.unfinished(self.ghost)), 1)
+
+    def test_selected_final_inventory_failure_restores_retry_command(self):
+        unlink = Path.unlink
+        def denied(path, *args, **kwargs):
+            if path == self.manifest:
+                raise PermissionError('selected inventory unlink denied')
+            return unlink(path, *args, **kwargs)
+        with mock.patch.object(Path, 'unlink', denied):
+            self._remove(selected=True)
+        self._assert_retry_then_finish(selected=True)
+
+    def test_selected_changed_command_holds_final_inventory_and_other_entries(self):
+        self.commands[-1].write_text('user-edited command')
+        self._remove(selected=True)
+        self.assertTrue(self.incomplete, self.items)
+        self.assertTrue(self.manifest.exists(), self.items)
+        self.assertTrue(all(path.exists() for path in self.commands), self.items)
+        self.assertEqual(self.commands[-1].read_text(), 'user-edited command')
+
+    def test_late_external_command_edit_survives_failed_removal_and_journal_restore(self):
+        import install_transaction
+        apply = cleanup._apply_managed_support
+        def edited(item, platform, state_path):
+            if item.get('path') == str(self.command):
+                self.command.write_text('external edit after snapshot')
+            return apply(item, platform, state_path)
+        with mock.patch.object(cleanup, '_apply_managed_support', edited):
+            self._remove()
+        self.assertTrue(self.incomplete, self.items)
+        self.assertEqual(self.command.read_text(), 'external edit after snapshot')
+        self.assertTrue(all(path.exists() for path in self.commands))
+        self.assertTrue(self.manifest.exists())
+        # A later reader must preserve that same existing file, not just this process.
+        folder, = (self.ghost / 'rollbacks').iterdir()
+        journal = install_transaction.Journal.load(self.ghost, folder.name)
+        journal.restore_record(self.ghost, metadata_first=True)
+        self.assertEqual(self.command.read_text(), 'external edit after snapshot')
+
+    def test_cleanup_error_restores_retry_command(self):
+        import install_transaction
+        clean = install_transaction.cleanup_completed
+        def denied(root, **kwargs):
+            if kwargs.get('txids'):
+                raise PermissionError('final journal cleanup denied')
+            return clean(root, **kwargs)
+        with mock.patch.object(install_transaction, 'cleanup_completed', denied):
+            self._remove()
+        self._assert_retry_then_finish()
+
+    def test_cleanup_metadata_unlink_after_an_earlier_copy_was_deleted_restores_retry(self):
+        unlink = Path.unlink
+        removed = []
+        def denied(path, *args, **kwargs):
+            if path.name.startswith('metadata-') and path.parent.parent == self.ghost / 'rollbacks':
+                if removed:
+                    raise PermissionError('later metadata copy unlink denied')
+                removed.append(path)
+            return unlink(path, *args, **kwargs)
+        with mock.patch.object(Path, 'unlink', denied):
+            self._remove()
+        self.assertTrue(removed, 'The real cleanup must delete a saved copy before the fault')
+        self._assert_retry_then_finish()
+
+    def test_cleanup_final_directory_failure_restores_retry_after_all_copies_are_deleted(self):
+        rmdir = Path.rmdir
+        saw_empty = []
+        def denied(path, *args, **kwargs):
+            if path.parent == self.ghost / 'rollbacks':
+                saw_empty.append(not any(path.iterdir()))
+                raise PermissionError('final journal directory removal denied')
+            return rmdir(path, *args, **kwargs)
+        with mock.patch.object(Path, 'rmdir', denied):
+            self._remove()
+        self.assertEqual(saw_empty, [True])
+        self._assert_retry_then_finish()
+
+    def test_cleanup_and_payload_restore_failure_keep_command_and_unfinished_recovery(self):
+        import installed_payload
+        import install_transaction
+        clean = install_transaction.cleanup_completed
+        write = installed_payload._write
+        recovering = False
+        def denied_cleanup(root, **kwargs):
+            nonlocal recovering
+            if kwargs.get('txids'):
+                recovering = True
+                raise PermissionError('final cleanup denied')
+            return clean(root, **kwargs)
+        def denied_restore(path, data):
+            if recovering and path == installed_payload.path(self.ghost):
+                raise PermissionError('payload restoration denied')
+            return write(path, data)
+        with mock.patch.object(install_transaction, 'cleanup_completed', denied_cleanup), \
+                mock.patch.object(installed_payload, '_write', denied_restore):
+            self._remove()
+        self.assertTrue(self.incomplete, self.items)
+        self.assertTrue(all(path.exists() for path in self.commands), self.items)
+        self.assertEqual({path: (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+                          for path in self.commands}, self.command_state)
+        pending = install_transaction.unfinished(self.ghost)
+        self.assertEqual(len(pending), 1)
+        journal = install_transaction.Journal.load(self.ghost, pending[0])
+        self.assertEqual(journal.phase, 'prepare')
+        self.assertTrue(journal.record_copy().is_file())
+        self.assertTrue(all((journal.folder / row['copy']).is_file()
+                            for row in journal.data['metadata_records'] if row['copy']))
+        self.assertEqual(install_transaction.record_after_recovery(self.ghost)['installer']['active_root'], str(self.active))
+        # This fixture deliberately inherits a parent lock; perform the same recovery
+        # that a new management command's standalone lock acquisition performs.
+        install_transaction.recover(self.ghost, journal.txid)
+        self._remove()
+        self.assertFalse(self.incomplete, self.items)
+        self.assertFalse(any(path.exists() for path in self.commands))
+
+    def test_shared_metadata_failure_keeps_host_only_windows_entries(self):
+        import installed_payload
+        installed_payload.update(self.ghost, {'targets': {str(path): dict(
+            installed_payload.read(self.ghost)['targets'][str(path)], used_by=['claude'])
+            for path in (self.runtime, self.command)}})
+        release = installed_payload.release_target
+        def denied(root, *, destination, **kwargs):
+            if Path(destination) == self.command:
+                raise PermissionError('shared reference write denied')
+            return release(root, destination=destination, **kwargs)
+        with mock.patch.object(installed_payload, 'release_target', denied):
+            self._remove()
+        self.assertTrue(self.incomplete, self.items)
+        self.assertTrue(self.manifest.exists())
+        self.assertEqual({path: (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+                          for path in self.commands}, self.command_state)
+        self._remove()
+        self.assertFalse(self.incomplete, self.items)
+        self.assertFalse(self.manifest.exists())
+        self.assertTrue(self.command.exists())
+        self.assertFalse(self.commands[1].exists())
+        self.assertFalse(self.commands[2].exists())
+
+    def test_host_only_command_failure_does_not_release_shared_inventory_first(self):
+        import installed_payload
+        installed_payload.update(self.ghost, {'targets': {str(path): dict(
+            installed_payload.read(self.ghost)['targets'][str(path)], used_by=['claude'])
+            for path in (self.runtime, self.command)}})
+        remove = cleanup._remove_path
+        def denied(path):
+            if path == self.commands[1]:
+                raise PermissionError('host-only command deletion denied')
+            return remove(path)
+        with mock.patch.object(cleanup, '_remove_path', denied):
+            self._remove()
+        self.assertTrue(self.incomplete, self.items)
+        self.assertTrue(self.manifest.exists(), self.items)
+        for path in (self.runtime, self.command):
+            self.assertEqual(installed_payload.read(self.ghost)['targets'][str(path)]['used_by'], ['claude', 'codex'])
+        self._remove()
+        self.assertFalse(self.incomplete, self.items)
+        self.assertFalse(self.manifest.exists())
+
+    def test_reference_journal_keeps_internal_host_and_retries_without_inventory_copy(self):
+        import installed_payload
+        import install_transaction
+        installed_payload.update(self.ghost, {'targets': {str(path): dict(entry, used_by=['claude'])
+            for path, entry in installed_payload.read(self.ghost)['targets'].items()}})
+        with mock.patch.object(install_transaction, 'cleanup_completed', side_effect=PermissionError('cleanup denied')):
+            self._remove(selected=True)
+        journals = [install_transaction.Journal.load(self.ghost, row['path'].split('/')[-1])
+                    for row in self.items if row.get('target_name') == 'publish-rollbacks']
+        self.assertEqual(len(journals), 1, self.items)
+        journal = journals[0]
+        self.assertEqual(journal.data['host'], 'installer')
+        inventory = next(row for row in journal.data['metadata_records']
+                         if row['path'] == str(self.manifest.resolve()))
+        (journal.folder / inventory['copy']).unlink()
+        self._remove(selected=True)
+        self.assertFalse(self.incomplete, self.items)
+        self.assertFalse(journal.folder.exists())
+
+    def test_other_host_keeps_publish_root_and_finished_full_removal_repeats(self):
+        import installed_payload
+        installed_payload.update(self.ghost, {'targets': {str(path): dict(
+            installed_payload.read(self.ghost)['targets'][str(path)], used_by=['claude'])
+            for path in (self.runtime, self.command)}})
+        self._remove()
+        self.assertEqual(self.code, 0, self.output)
+        root = self.ghost / 'rollbacks'
+        row = next(item for item in self.items if item.get('path') == str(root))
+        self.assertEqual(row.get('shared_platforms'), ['claude'])
+        self.assertIn(str(root), self.output)
+        self.assertTrue(root.is_dir(), row)
+        self._remove()
+        self.assertEqual(self.code, 0, self.output)
+        self.assertNotIn('run the same removal command again', self.output)
+        self.assertFalse(any(row['kind'] == 'install-state' for row in self.items))
+        self.assertEqual(installed_payload.read(self.ghost)['targets'][str(self.command)]['used_by'], ['claude'])
+
+    def test_failed_final_boundary_reports_recreated_publish_root(self):
+        unlink = Path.unlink
+        def denied(path, *args, **kwargs):
+            if path == self.manifest:
+                raise PermissionError('inventory unlink denied')
+            return unlink(path, *args, **kwargs)
+        with mock.patch.object(Path, 'unlink', denied):
+            self._remove()
+        root = self.ghost / 'rollbacks'
+        self.assertEqual(self.code, 1)
+        self.assertTrue(root.is_dir())
+        row = next(item for item in self.items if item.get('path') == str(root))
+        self.assertEqual(row['action'], 'manual-review', row)
+        self.assertIn(str(root), self.output)
+        self._remove()
+        self.assertEqual(self.code, 0, self.output)
+        self.assertFalse(root.exists())
+
+    def test_two_host_selected_repeat_reports_only_host_residue(self):
+        import installed_payload
+        installed_payload.update(self.ghost, {'targets': {path: dict(entry, used_by=['claude'])
+            for path, entry in installed_payload.read(self.ghost)['targets'].items()}})
+        self._remove(selected=True)
+        self.assertFalse(self.incomplete, self.items)
+        self._remove(selected=True)
+        self.assertFalse(self.incomplete, self.items)
+        self.assertFalse(any(row['kind'] == 'install-state' for row in self.items))
+        pending = self.ghost / 'pending-merges/codex'
+        pending.mkdir(parents=True)
+        changes = [self.manifest.with_name(name) for name in (
+            'codex-hook-feature-change.json', 'codex-project-trust-change.json')]
+        for path in changes:
+            path.write_text('{}')
+        self._remove(selected=True)
+        self.assertEqual({Path(row['path']) for row in self.items if row.get('removal_incomplete')},
+                         {pending, *changes})
+        self._remove()
+        self.assertEqual(self.code, 1, self.output)
+        for path in [pending, *changes]:
+            self.assertIn(str(path), self.output)
+            self.assertTrue(path.exists())
+        self.assertIn('run the same removal command', self.output)
+
+    def test_missing_inventory_does_not_restore_through_a_linked_codex_home(self):
+        self._remove(selected=True)
+        config_dir = self.home / '.codex'
+        outside = self.home / 'other-settings'
+        outside.mkdir()
+        config = outside / 'config.toml'
+        config.write_text('[features]\nhooks = true\n')
+        config_dir.symlink_to(outside, target_is_directory=True)
+        change = self.manifest.with_name('codex-hook-feature-change.json')
+        change.write_text(json.dumps(dict(schema_version='codex-hook-feature-change.v1', kind='codex_hooks_feature_flag',
+            path=(config_dir / 'config.toml').as_posix(), before_state='false', after_state='true')))
+        for selected in (True, False):
+            self._remove(selected=selected)
+            self.assertTrue(self.incomplete, self.items)
+            self.assertTrue(change.is_file())
+            self.assertEqual(config.read_text(), '[features]\nhooks = true\n')
+
+    def test_file_record_replaced_by_a_directory_is_preserved_by_both_removals(self):
+        events = self.manifest.with_name('codex-events.jsonl')
+        events.mkdir()
+        personal = events / 'personal'
+        personal.write_text('my file')
+        for selected in (True, False):
+            self._remove(selected=selected)
+            self.assertTrue(self.incomplete, self.items)
+            self.assertTrue(self.manifest.is_file())
+            self.assertTrue(personal.is_file())
+            self.assertEqual(personal.read_text(), 'my file')
+            row = next(item for item in self.items if item.get('path') == str(events))
+            self.assertEqual(row['reason'], 'support-artifact-not-regular-file')
+
+    def test_selected_retry_cleans_only_its_restored_final_boundary(self):
+        import install_transaction
+        manifest = json.loads(self.manifest.read_text())
+        manifest['targets'] = [dict(target_name=self.command.name, dest_path=str(self.command), install_mode='copy')]
+        self.manifest.write_text(json.dumps(manifest))
+        other = install_transaction.Journal.begin(dict(ghost_root=str(self.ghost), host='installer'), [])
+        other.preserve_metadata(self.manifest.with_name('claude.json'))
+        other.mark('restored')
+        unrelated = (other.folder / 'journal.json').read_bytes()
+        unlink = Path.unlink
+        def denied(path, *args, **kwargs):
+            if path == self.manifest:
+                raise PermissionError('selected inventory unlink denied')
+            return unlink(path, *args, **kwargs)
+        with mock.patch.object(Path, 'unlink', denied):
+            self._remove(selected=True)
+        self.assertTrue(self.incomplete)
+        previous = next(Path(row['path']) for row in self.items if row.get('reason') == 'support-reference-recovery-retained')
+        self.assertEqual(install_transaction.Journal.load(self.ghost, previous.name).phase, 'restored')
+        self._remove(selected=True)
+        self.assertFalse(self.incomplete, self.items)
+        self.assertFalse(self.manifest.exists())
+        self.assertFalse(previous.exists(), self.items)
+        self.assertEqual((other.folder / 'journal.json').read_bytes(), unrelated)
+
+    def test_selected_retains_inventory_with_unregistered_target_for_full_removal(self):
+        orphan = self.home / '.codex/skills/legacy-skill'
+        orphan.mkdir(parents=True)
+        (orphan / 'SKILL.md').write_text('personal skill')
+        manifest = json.loads(self.manifest.read_text())
+        manifest['targets'] = [dict(target_name='legacy-skill', dest_path=str(orphan), install_mode='copy')]
+        self.manifest.write_text(json.dumps(manifest))
+        self._remove(selected=True)
+        self.assertTrue(self.manifest.is_file(), self.items)
+        self.assertTrue(any(row.get('path') == str(self.manifest) and row['action'] == 'manual-review'
+                            for row in self.items), self.items)
+        self._remove()
+        self.assertEqual(self.code, 1, self.output)
+        self.assertIn(str(orphan), self.output)
+        self.assertEqual((orphan / 'SKILL.md').read_text(), 'personal skill')
+
+    def _interrupt_final_cleanup(self, stage):
+        import install_transaction
+        clean, unlink, rmdir = install_transaction.cleanup_completed, Path.unlink, Path.rmdir
+        def stopped(root, **kwargs):
+            if not kwargs.get('txids'):
+                return clean(root, **kwargs)
+            folder = self.ghost / 'rollbacks' / kwargs['txids'][0]
+            if stage == 'done':
+                raise KeyboardInterrupt('stopped after final done mark')
+            def interrupt_unlink(path, *args, **options):
+                if stage == 'copies' and path == folder / 'journal.json':
+                    raise KeyboardInterrupt('stopped after deleting the saved copies')
+                return unlink(path, *args, **options)
+            def interrupt_rmdir(path):
+                if stage == 'empty' and path == folder:
+                    raise KeyboardInterrupt('stopped after deleting journal.json')
+                return rmdir(path)
+            with mock.patch.object(Path, 'unlink', interrupt_unlink), mock.patch.object(Path, 'rmdir', interrupt_rmdir):
+                return clean(root, **kwargs)
+        with mock.patch.object(install_transaction, 'cleanup_completed', stopped), self.assertRaises(KeyboardInterrupt):
+            self._remove()
+        self.assertFalse(self.manifest.exists())
+        self.assertFalse(any(path.exists() for path in self.commands))
+
+    def test_full_retry_after_final_done_removes_journal_and_root(self):
+        self._interrupt_final_cleanup('done')
+        self._remove()
+        self.assertEqual(self.code, 0, self.output)
+        self.assertFalse((self.ghost / 'rollbacks').exists())
+
+    def test_full_retry_after_final_copy_deletion_removes_journal_and_root(self):
+        self._interrupt_final_cleanup('copies')
+        self._remove()
+        self.assertEqual(self.code, 0, self.output)
+        self.assertFalse((self.ghost / 'rollbacks').exists())
+
+    def test_full_retry_after_final_journal_unlink_removes_empty_transaction_folder(self):
+        self._interrupt_final_cleanup('empty')
+        root = self.ghost / 'rollbacks'
+        folder, = root.iterdir()
+        self._remove()
+        self.assertEqual(self.code, 0, self.output)
+        self.assertFalse(root.exists())
+        row = next(item for item in self.items if item.get('path') == str(root))
+        self.assertTrue((Path(row['backup_path']) / folder.name).is_dir(), row)
+
+    def test_selected_journal_cleanup_leaves_empty_root_for_full_removal(self):
+        self._interrupt_final_cleanup('done')
+        root = self.ghost / 'rollbacks'
+        self._remove(selected=True)
+        self.assertFalse(self.incomplete, self.items)
+        self.assertEqual(list(root.iterdir()), [], self.items)
+        self._remove()
+        self.assertEqual(self.code, 0, self.output)
+        self.assertFalse(root.exists())
+
+    def test_missing_manifest_keeps_unknown_empty_directory_in_publish_root(self):
+        self._interrupt_final_cleanup('empty')
+        root = self.ghost / 'rollbacks'
+        (root / 'personal').mkdir()
+        self._remove()
+        self.assertEqual(self.code, 1, self.output)
+        self.assertTrue((root / 'personal').is_dir())
+
+    def test_reappeared_command_blocks_committed_journal_cleanup(self):
+        self._interrupt_final_cleanup('copies')
+        folder, = (self.ghost / 'rollbacks').iterdir()
+        self.command.write_text('user command')
+        self._remove()
+        self.assertEqual(self.code, 1, self.output)
+        self.assertIn(str(self.command), self.output)
+        self.assertTrue((folder / 'journal.json').is_file())
+        self.assertEqual(self.command.read_text(), 'user command')
+
+    def test_other_hosts_inventory_cannot_identify_this_hosts_completed_journal(self):
+        self._interrupt_final_cleanup('done')
+        folder, = (self.ghost / 'rollbacks').iterdir()
+        file = folder / 'journal.json'
+        data = json.loads(file.read_text())
+        inventory = next(item for item in data['metadata_records'] if item['path'] == str(self.manifest.resolve()))
+        inventory['path'] = str(self.manifest.with_name('claude.json').resolve())
+        file.write_text(json.dumps(data))
+        self._remove()
+        self.assertEqual(self.code, 1, self.output)
+        self.assertTrue(file.is_file())
+
+    def test_already_removed_host_has_no_manifest_missing_retry_loop(self):
+        self._remove()
+        self.assertFalse(self.incomplete, self.items)
+        self._remove()
+        self.assertEqual(self.code, 0, self.items)
+        self.assertFalse(self.incomplete, self.items)
+        self.assertNotIn('run the same removal command again', self.output)
+
+    def test_already_retired_selected_management_has_no_manifest_missing_retry_loop(self):
+        self._remove(selected=True)
+        self.assertFalse(self.incomplete, self.items)
+        self._remove(selected=True)
+        self.assertFalse(self.incomplete, self.items)
+
+    def test_missing_inventory_with_owned_command_is_still_incomplete(self):
+        self.manifest.unlink()
+        self._remove()
+        self.assertEqual(self.code, 1)
+        self.assertTrue(self.incomplete)
+        self.assertEqual({path: (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+                          for path in self.commands}, self.command_state)
+
+
+class AddonHookProgressTest(unittest.TestCase):
+    def test_later_codex_hook_write_failure_preserves_exact_completed_and_pending_rows(self):
+        import addon_uninstall
+        import install_hooks
+        import tomllib
+        from test_codex_hook_removal_trust import CodexHookRemovalTrustTest
+        fixture = CodexHookRemovalTrustTest()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        named = [fixture.addon(name) for name in ('first', 'second', 'untouched')]
+        fixture.seed([entry for _, entry in named])
+        record = dict(addon_id='demo', provided=[], hooks=[dict(hook_id=name)
+                      for name in ('first', 'second', 'untouched')])
+        result = dict(addon_id='demo', status='dry-run', items=addon_uninstall._managed_executable_items(
+            record, [], platform='codex', apply_changes=False))
+        write = install_hooks._write_settings
+        def fail_second(path, settings, **kwargs):
+            if settings['hooks']['Stop'] == [named[2][1]]:
+                raise OSError('second hook settings write denied')
+            return write(path, settings, **kwargs)
+        with mock.patch.object(install_hooks, '_write_settings', side_effect=fail_second):
+            with self.assertRaisesRegex(OSError, 'second hook settings write denied'):
+                addon_uninstall.detach_addon_references(record, result,
+                    addons_dir=fixture.root / 'addons', platform='codex')
+        self.assertEqual(json.loads(fixture.hooks.read_text())['hooks']['Stop'], [entry for _, entry in named[1:]])
+        self.assertEqual({row['marker']: row['action'] for row in result['items']}, {
+            named[0][0]: 'removed', named[1][0]: 'manual-review', named[2][0]: 'manual-review'})
+        self.assertEqual(json.loads(fixture.hooks.read_text())['user'], 'preserve')
+        self.assertEqual(tomllib.loads(fixture.config.read_text())['user'], {'keep': 'precious'})
+        addon_uninstall.detach_addon_references(record, result, addons_dir=fixture.root / 'addons', platform='codex')
+        self.assertEqual(json.loads(fixture.hooks.read_text())['hooks']['Stop'], [])
+        self.assertEqual({row['marker']: row['action'] for row in result['items']}, {
+            named[0][0]: 'missing', named[1][0]: 'removed', named[2][0]: 'removed'})
 
 
 class ConfigurationRecoveryTest(unittest.TestCase):
@@ -412,6 +1282,551 @@ class ConfigurationRecoveryTest(unittest.TestCase):
 
 
 class SupportArtifactLifecycleTest(unittest.TestCase):
+    def test_distinct_host_runtime_and_command_paths_do_not_become_unowned_after_retry(self):
+        import content_digest
+        import install_lock
+        import installed_payload
+        x_runtime = self.ghost / 'runtime/current/_shared'
+        y_runtime = self.ghost / 'runtime/claude/_shared'
+        shared_command = self.ghost / 'bin/ghost-alice'
+        x_command = self.ghost / 'bin/ghost-alice-codex'
+        y_command = self.ghost / 'bin/ghost-alice-claude'
+        for path in (x_runtime, y_runtime):
+            path.mkdir(parents=True)
+            (path / 'module.py').write_text('runtime')
+        shared_command.parent.mkdir()
+        for path in (shared_command, x_command, y_command):
+            path.write_text('management')
+        y_manifest = self.manifest.with_name('claude.json')
+        y_manifest.write_text(json.dumps(dict(platform='claude', targets=[])))
+        entries = [(x_runtime, 'runtime', ['codex']), (y_runtime, 'runtime', ['claude']),
+            (shared_command, 'command', ['claude', 'codex']), (x_command, 'command', ['codex']),
+            (y_command, 'command', ['claude'])]
+        with install_lock.command_lock(self.ghost / 'install.lock', owner='distinct-host-support-fixture'):
+            installed_payload.update(self.ghost, {'targets': {str(path): dict(name=path.name, kind=kind,
+                provider='core', mode='copy', baseline='recorded', used_by=owners, files=content_digest.tree(path))
+                for path, kind, owners in entries}})
+        copy = shutil.copytree
+        def denied(source, *args, **kwargs):
+            if Path(source) == self.pending:
+                raise PermissionError('pending original copy denied')
+            return copy(source, *args, **kwargs)
+        with mock.patch.object(shutil, 'copytree', side_effect=denied):
+            self._support()
+        self.assertEqual(self.cleanup_code, 1)
+        self.assertTrue(self.cleanup_report['hooks_detached'])
+        y_report = self.root / 'claude-report.json'
+        y_binding = destination_fixture(self.root, platform_dir=str(self.root / '.claude'),
+            skills_dir=str(self.root / '.claude/skills'), ghost_root=str(self.ghost), runtime_shared_dir=str(y_runtime))
+        with install_destination.use(y_binding), mock.patch.object(gateway_participant, 'removal',
+                side_effect=lambda *args, **kwargs: dict(kind='context-gateway', action='missing')), contextlib.redirect_stdout(io.StringIO()):
+            code = cleanup.main(['--platform', 'claude', '--install-state-manifest', str(y_manifest),
+                                 '--report-path', str(y_report), '--apply'])
+        self.assertEqual(code, 0, y_report.read_text())
+        self.assertFalse(y_runtime.exists())
+        self.assertFalse(y_command.exists())
+        targets = installed_payload.read(self.ghost)['targets']
+        for path in (x_runtime, x_command, shared_command):
+            self.assertTrue(path.exists(), path)
+            self.assertEqual(targets[str(path)]['used_by'], ['codex'])
+        self._support()
+        self.assertEqual(self.cleanup_code, 0, self.cleanup_report)
+        self.assertFalse(self.manifest.exists())
+        self.assertFalse(y_manifest.exists())
+        self.assertFalse(any(path.exists() for path, _, _ in entries))
+
+    def _hook_record_source(self, source, configured=None):
+        from install_hooks import install_hook
+        bound = destination_fixture(self.root, platform_dir=str(self.root / '.codex'),
+                                    skills_dir=str(self.root / '.agents/skills'), ghost_root=str(self.ghost),
+                                    ledger_root=str(source), project_root=str(self.root / 'repo'))
+        with contextlib.redirect_stdout(io.StringIO()):
+            install_hook('codex', destination=bound)
+        config = self.ghost / 'config.json'
+        saved = json.loads(config.read_text())
+        saved['install_locations'] = {'codex': dict(ledger_root=str(configured))} if configured else {}
+        config.write_text(json.dumps(saved))
+        return self.root / '.codex/hooks.json', Path(install_destination.InstallDestination.parse(bound).runtime_shared_dir)
+
+    def _check_unusable_record_journal(self, kind):
+        source, destination = self._completed_record_source()
+        hooks, runtime = self._hook_record_source(source, configured=destination)
+        original = {path: path.read_bytes() for root in (source, destination) for path in root.iterdir()}
+        hook_bytes = hooks.read_bytes()
+        journal_path = next(path for path in (self.ghost / 'rollbacks').glob('*/journal.json')
+                            if 'source_cleanup' in json.loads(path.read_text()))
+        data = json.loads(journal_path.read_text())
+        if kind == 'missing':
+            shutil.rmtree(journal_path.parent)
+        elif kind == 'json':
+            journal_path.write_text('{broken')
+        else:
+            data.update({'schema': {'schema_version': 99}, 'targets': {'targets': 'not-a-list'},
+                         'metadata': {'metadata_records': [{}]}}[kind])
+            journal_path.write_text(json.dumps(data))
+        events = self.manifest.with_name('codex-events.jsonl')
+        events.write_text('obsolete install event\n')
+        independent = _write_managed_skill(self.root, 'independent-skill')
+        self.manifest.write_text(json.dumps(dict(platform='codex', targets=[dict(
+            target_name=independent.name, dest_path=str(independent), install_mode='copy')])))
+        self._support()
+        self.assertEqual(self.cleanup_code, 1, self.cleanup_report)
+        if kind == 'json':
+            self.assertEqual(self.cleanup_report, {}, 'Unreadable unfinished publication stops before removal')
+            self.assertEqual(hooks.read_bytes(), hook_bytes)
+            self.assertTrue(runtime.is_dir())
+            self.assertTrue(events.exists())
+            self.assertTrue(independent.exists())
+            self.assertEqual({path: path.read_bytes() for path in original}, original)
+            self.assertIn(str(journal_path.parent), self.cleanup_output)
+            return
+        self.assertFalse(self.cleanup_report['hooks_detached'])
+        self.assertEqual(hooks.read_bytes(), hook_bytes)
+        self.assertTrue(runtime.is_dir(), 'The retained hooks must keep their runtime')
+        self.assertEqual({path: path.read_bytes() for path in original}, original)
+        self.assertFalse(events.exists(), 'Independent event removal must still run')
+        self.assertFalse(independent.exists(), 'A skill unused by the retained hooks must still be removed')
+        self.assertTrue(self.cleanup_report['removal_incomplete'])
+        self.assertIn(str(source.resolve()), self.cleanup_output)
+
+    def test_uninstall_retains_hook_and_runtime_when_retired_source_journal_is_missing(self):
+        self._check_unusable_record_journal('missing')
+
+    def test_uninstall_reports_invalid_json_without_losing_retired_hook_relationship(self):
+        self._check_unusable_record_journal('json')
+
+    def test_uninstall_reports_unsupported_schema_without_losing_retired_hook_relationship(self):
+        self._check_unusable_record_journal('schema')
+
+    def test_uninstall_reports_invalid_targets_without_losing_retired_hook_relationship(self):
+        self._check_unusable_record_journal('targets')
+
+    def test_uninstall_reports_invalid_metadata_before_detaching_or_deleting(self):
+        self._check_unusable_record_journal('metadata')
+
+    def test_unrelated_broken_journal_cannot_archive_pending_source_writer_references(self):
+        from installer import hosts
+        source, destination = self._completed_record_source()
+        self._hook_record_source(source, configured=destination)
+        (self.publish_rollbacks / 'journal.json').write_text('{broken')
+        self._support()
+        self.assertEqual(self.cleanup_code, 1)
+        self.assertEqual(self.cleanup_report, {}, 'Recovery must decide an unreadable publish before removal')
+        self.assertTrue(source.exists())
+        journals = list((self.ghost / 'rollbacks').glob('*/journal.json'))
+        self.assertTrue(any('source_cleanup' in p.read_text() for p in journals),
+                        'The next cleanup must still find the saved writer scope')
+        shutil.rmtree(self.publish_rollbacks)
+        seen = []
+        def observe(platforms):
+            seen.extend(platforms)
+            return {host: hosts.WriterObservation('running', pids=(43123,)) for host in platforms}
+        with mock.patch.object(hosts, 'observe_writers', side_effect=observe):
+            self._support()
+        self.assertIn('codex', seen)
+        self.assertEqual(self.cleanup_code, 1)
+        self.assertTrue(source.exists())
+        with mock.patch.object(hosts, 'observe_writers', side_effect=lambda platforms: {
+                host: hosts.WriterObservation('absent') for host in platforms}):
+            self._support()
+        self.assertEqual(self.cleanup_code, 0)
+        self.assertFalse(source.exists())
+
+    def test_failed_journal_save_does_not_block_a_relationship_preserved_in_configuration(self):
+        import install_transaction
+        source, _ = self._completed_record_source()
+        self._hook_record_source(source, configured=source)
+        save = install_transaction.Journal.save
+        def fail_scope_save(journal):
+            if journal.data.get('source_cleanup', {}).get('writer_hosts'):
+                raise PermissionError('scope-save-failed')
+            return save(journal)
+        with mock.patch.object(install_transaction.Journal, 'save', fail_scope_save):
+            self._support()
+        self.assertEqual(self.cleanup_code, 1)
+        self.assertTrue(self.cleanup_report['hooks_detached'])
+        self.assertTrue(source.exists())
+        self.assertIn('scope-save-failed', '\n'.join(self.cleanup_report['errors']))
+        config = json.loads((self.ghost / 'config.json').read_text())
+        self.assertEqual(config['install_locations']['codex']['ledger_root'], str(source))
+
+    def test_uninstall_detaches_current_record_hooks_without_a_cleanup_journal(self):
+        source = self.root / 'current-records'
+        source.mkdir()
+        proof = source / 'keep.txt'
+        proof.write_text('current user records')
+        hooks, _ = self._hook_record_source(source)
+        self._support()
+        self.assertEqual(self.cleanup_code, 0, self.cleanup_report)
+        self.assertTrue(self.cleanup_report['hooks_detached'])
+        self.assertFalse(any(json.loads(hooks.read_text()).get('hooks', {}).values()))
+        self.assertEqual(proof.read_text(), 'current user records')
+
+    def test_uninstall_can_detach_when_configuration_preserves_the_retired_source_relationship(self):
+        source, _ = self._completed_record_source()
+        hooks, _ = self._hook_record_source(source, configured=source)
+        shutil.rmtree(self.ghost / 'rollbacks')
+        before = (source / 'session.json').read_bytes()
+        self._support()
+        self.assertEqual(self.cleanup_code, 0, self.cleanup_report)
+        self.assertTrue(self.cleanup_report['hooks_detached'])
+        self.assertFalse(any(json.loads(hooks.read_text()).get('hooks', {}).values()))
+        self.assertEqual((source / 'session.json').read_bytes(), before)
+        config = json.loads((self.ghost / 'config.json').read_text())
+        self.assertEqual(config['install_locations']['codex']['ledger_root'], str(source))
+
+    def test_standalone_recovers_real_staging_before_removing_publish_targets(self):
+        import install_lock
+        import install_transaction
+        import installed_payload
+        import content_digest
+        source, destination = self._completed_record_source()
+        before = {path: path.read_bytes() for path in destination.iterdir()}
+        command = self.ghost / 'bin/ghost-alice'
+        command.parent.mkdir()
+        command.write_text('original command')
+        candidate = self.root / 'candidate-command'
+        candidate.write_text('replacement command')
+        with install_lock.command_lock(self.ghost / 'install.lock', owner='unfinished-fixture'):
+            installed_payload.update(self.ghost, {'targets': {str(command): dict(kind='command', name='ghost-alice',
+                provider='core', used_by=['codex'], mode='copy', baseline='recorded', source=str(self.root),
+                files=content_digest.tree(command))}})
+            change = dict(name='ghost-alice', kind='command', mode='copy', source=str(candidate), dest=str(command))
+            journal = install_transaction.Journal.begin(dict(ghost_root=str(self.ghost), host='codex'), [change])
+            batch = install_transaction.ReplacementBatch([(candidate, command, 'copy')], rollback_root=journal.folder)
+            batch.stage()
+            journal.record_staged(batch)
+        self._support()
+        self.assertEqual(self.cleanup_code, 0, self.cleanup_report)
+        self.assertFalse(command.exists())
+        self.assertEqual(install_transaction.unfinished(self.ghost), [])
+        self.assertFalse(source.exists())
+        self.assertFalse(self.manifest.exists())
+        self.assertEqual({path: path.read_bytes() for path in destination.iterdir()}, before)
+
+    def test_failure_without_pending_source_prints_actual_support_path_and_cause(self):
+        import install_transaction
+        with mock.patch.object(install_transaction, 'cleanup_completed', side_effect=OSError('cleanup-input-denied')):
+            self._support()
+        self.assertEqual(self.cleanup_code, 1)
+        self.assertIn(str(self.ghost / 'rollbacks'), self.cleanup_output)
+        self.assertIn('cleanup-input-denied', self.cleanup_output)
+
+    def _check_absent_source_with_rejected_finished_journal(self, *, invalid_inactive_host=False):
+        source, destination = self._completed_record_source()
+        shutil.rmtree(source)
+        config = self.ghost / 'config.json'
+        if invalid_inactive_host:
+            data = json.loads(config.read_text()) if config.exists() else {}
+            data.setdefault('install_locations', {})['claude'] = 'invalid-inactive'
+            config.write_text(json.dumps(data))
+        config_before = config.read_bytes() if invalid_inactive_host else None
+        before = {path: path.read_bytes() for path in destination.iterdir()}
+        journal = self.publish_rollbacks / 'journal.json'
+        data = json.loads(journal.read_text())
+        data['schema_version'] = 99
+        journal.write_text(json.dumps(data))
+        original = journal.read_bytes()
+        support = self._support()
+        self.assertEqual(self.cleanup_code, 0, self.cleanup_report)
+        self.assertTrue(self.cleanup_report['hooks_detached'])
+        self.assertFalse(self.manifest.exists())
+        self.assertFalse(self.record.exists())
+        self.assertEqual({path: path.read_bytes() for path in destination.iterdir()}, before)
+        archived = Path(support['publish-rollbacks']['backup_path']) / self.publish_rollbacks.name / 'journal.json'
+        self.assertEqual(archived.read_bytes(), original)
+        self.assertIn(str(archived.parent), self.cleanup_output)
+        if invalid_inactive_host:
+            self.assertEqual(config.read_bytes(), config_before)
+
+    def test_absent_retired_source_and_unrelated_rejected_finished_journal_do_not_block_removal(self):
+        self._check_absent_source_with_rejected_finished_journal()
+
+    def test_inactive_invalid_host_with_absent_source_and_rejected_finished_journal_does_not_block_removal(self):
+        self._check_absent_source_with_rejected_finished_journal(invalid_inactive_host=True)
+
+    def test_cleanup_failure_before_source_policy_reports_known_pending_paths(self):
+        import install_transaction
+        source, _ = self._completed_record_source()
+        with mock.patch.object(install_transaction, 'cleanup_completed', side_effect=OSError('cleanup-input-denied')):
+            support = self._support()
+        self.assertEqual(self.cleanup_code, 1)
+        item = support['publish-rollbacks']
+        self.assertIn(str(source.resolve()), item.get('pending_record_sources', {}).values())
+        self.assertIn('cleanup-input-denied', self.cleanup_output)
+        self.assertIn(str(source.resolve()), self.cleanup_output)
+        self.assertTrue(self.manifest.is_file())
+        self.assertFalse(any(row.get('kind') == 'record-source' for row in self.cleanup_report['items']))
+
+    def test_held_hook_keeps_addon_sidecar_and_reports_only_actual_reference_outcomes(self):
+        import addon_registry
+        import install_hooks
+        from hash_utils import hash_target
+        source, destination = self._completed_record_source()
+        hook_file, _ = self._hook_record_source(source, configured=destination)
+        shutil.rmtree(self.ghost / 'rollbacks')
+        shared = _write_managed_skill(self.root, '_shared')
+        referenced = _write_managed_skill(self.root, 'session-intent-analyzer')
+        independent = _write_managed_skill(self.root, 'independent')
+        entries = [dict(target_name=path.name, dest_path=str(path), install_mode='copy')
+                   for path in (shared, referenced, independent)]
+        self.manifest.write_text(json.dumps(dict(platform='codex', targets=entries)))
+        self.manifest.with_name('claude.json').write_text(json.dumps(dict(platform='claude', targets=[entries[0]])))
+        settings = json.loads(hook_file.read_text())
+        settings['hooks'].setdefault('PostToolUse', []).append(dict(matcher='', hooks=[dict(
+            type='command', command=f'cat "{referenced / "SKILL.md"}" # {install_hooks.IO_TRACE_MARKER}')]))
+        hook_file.write_text(json.dumps(settings))
+        hook_bytes = hook_file.read_bytes()
+        directory = self.ghost / 'addons/codex'
+        addon_command = self.root / '.agents/skills/addon-command'
+        addon_command.write_text('addon command\n')
+        record = dict(schema_version='1.0', addon_id='fixture', addon_version='1', source=str(self.root),
+                      platform='codex', owner='addon', origin='addon:fixture', depends_on_core=[],
+                      min_core_version='0.0.0', installed_at='fixture', provided=[dict(
+                          kind='command', name='addon-command', target=str(addon_command), ownership='managed',
+                          install_mode='copy', content_hash=hash_target(addon_command, 'copy'), marker='', metadata={})])
+        addon_registry.write_record(record, addons_dir=directory)
+        addon_registry.write_record(dict(record, platform='claude'), addons_dir=self.ghost / 'addons/claude')
+        sidecar = addon_registry.sidecar_path('fixture', addons_dir=directory)
+        before = sidecar.read_bytes()
+        self._support()
+        self.assertFalse(self.cleanup_report['hooks_detached'])
+        self.assertTrue(sidecar.exists(), 'Unattempted reference detach cannot retire its addon ownership')
+        self.assertEqual(sidecar.read_bytes(), before)
+        self.assertEqual(self.cleanup_code, 1)
+        self.assertEqual(hook_file.read_bytes(), hook_bytes)
+        reference_items = [row for row in self.cleanup_report['items'] if row.get('kind') in {'hook-config', 'permission'}]
+        self.assertTrue(reference_items)
+        target_items = {row['target_name']: row for row in self.cleanup_report['items']
+                        if row.get('kind') == 'install-target'}
+        addon_item = next(row for row in self.cleanup_report['items'] if row.get('kind') == 'addon-target')
+        self.assertEqual({
+            'held references': [row for row in reference_items if row.get('action', '').startswith('would-')
+                                or row.get('action') == 'hook-uninstall-dry-run' or row.get('result') == 'removed'],
+            'referenced file': referenced.exists(), 'shared file': shared.exists(),
+            'independent file': independent.exists(), 'addon file': addon_command.exists(),
+            'shared action': target_items['_shared']['action'],
+            'referenced action': target_items['session-intent-analyzer']['action'],
+            'addon action': addon_item['action'],
+            'inventory': {row['target_name'] for row in json.loads(self.manifest.read_text())['targets']},
+        }, {'held references': [], 'referenced file': True, 'shared file': True, 'independent file': False,
+            'addon file': True, 'shared action': 'manual-review', 'referenced action': 'manual-review',
+            'addon action': 'manual-review', 'inventory': {'_shared', 'session-intent-analyzer'}})
+
+    def _completed_record_source(self):
+        import content_digest
+        import install_lock
+        import install_transaction
+        source = self.root / 'repo/.tmp/session-intent'
+        destination = self.ghost / 'session-intent'
+        source.mkdir(parents=True)
+        destination.mkdir(parents=True)
+        (source / 'session.json').write_bytes(b'{"records":["before move"]}\n')
+        shutil.copyfile(source / 'session.json', destination / 'session.json')
+        (destination / 'new-session.json').write_bytes(b'{"records":["after move"]}\n')
+        (destination / 'ghost-state.sqlite3').write_bytes(b'destination database fixture\n')
+        config = self.ghost / 'config.json'
+        saved = json.loads(config.read_text()) if config.exists() else {}
+        saved['retired_ledger_roots'] = [str(source.resolve())]
+        config.write_text(json.dumps(saved))
+        with install_lock.command_lock(self.ghost / 'install.lock', owner='record-source-fixture'):
+            journal = install_transaction.Journal.begin(dict(ghost_root=str(self.ghost), host='codex'), [])
+            journal.data['source_cleanup'] = dict(path=str(source.resolve()), destination=str(destination.resolve()),
+                                                  baseline=content_digest.state(source, include_generated=True))
+            journal.mark('done')
+        return source, destination
+
+    def _addon_command(self, *, hook_id=None):
+        import addon_registry
+        from hash_utils import hash_target
+        target = self.root / '.agents/skills/addon-fixture-command'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('addon command\n')
+        entry = dict(kind='command', name='fixture-command', target=str(target), ownership='managed',
+                     install_mode='copy', content_hash=hash_target(target, 'copy'), marker='', metadata={})
+        record = dict(schema_version='1.0', addon_id='fixture', addon_version='1', source=str(self.root),
+                      platform='codex', owner='addon', origin='addon:fixture', depends_on_core=[],
+                      min_core_version='0.0.0', installed_at='fixture', provided=[entry])
+        if hook_id is not None:
+            record['hooks'] = [dict(hook_id=hook_id)]
+        directory = self.ghost / 'addons/codex'
+        addon_registry.write_record(record, addons_dir=directory)
+        return target, addon_registry.sidecar_path('fixture', addons_dir=directory)
+
+    def test_skipped_addon_detach_with_absent_core_hooks_retains_files_and_ownership(self):
+        target, sidecar = self._addon_command()
+        config = self.root / '.codex/config.toml'
+        config.mkdir(parents=True)
+        self._support()
+        self.assertEqual(self.cleanup_code, 1)
+        self.assertTrue(self.cleanup_report['hooks_detached'])
+        self.assertTrue(sidecar.is_file(), 'No Core hooks does not establish that addon references were detached')
+        self.assertTrue(target.is_file())
+        self.assertTrue(self.manifest.is_file())
+
+    def test_addon_marker_failure_does_not_report_preview_reference_changes_as_applied(self):
+        target, sidecar = self._addon_command(hook_id='fixture-hook')
+        marker = sidecar.with_name(sidecar.name + '.removing')
+        marker.mkdir()
+        self._support()
+        self.assertEqual(self.cleanup_code, 1)
+        self.assertTrue(sidecar.is_file())
+        self.assertTrue(target.is_file())
+        self.assertFalse([item for item in self.cleanup_report['items']
+                          if item.get('addon_id') == 'fixture' and item.get('action', '').startswith('would-')])
+
+    def test_gateway_refusal_retains_addon_and_reports_no_planned_reference_changes(self):
+        target, sidecar = self._addon_command(hook_id='fixture-hook')
+        report_path = self.root / 'gateway-refusal.json'
+        with mock.patch.object(gateway_participant, 'removal', side_effect=ValueError('gateway-binding-unreadable')), \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = cleanup.main(['--platform', 'codex', '--install-state-manifest', str(self.manifest),
+                                 '--report-path', str(report_path), '--apply'])
+        result = json.loads(report_path.read_text())
+        self.assertEqual(code, 1)
+        self.assertTrue(sidecar.is_file())
+        self.assertTrue(target.is_file())
+        self.assertFalse([item for item in result['items'] if item.get('action', '').startswith('would-')])
+
+    def test_uninstall_removes_completed_record_source_and_reports_its_path_without_changing_destination(self):
+        from installer import report
+        source, destination = self._completed_record_source()
+        before = {path: path.read_bytes() for path in destination.iterdir()}
+        previous_state = report.state()
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_INSTALL_LOCALE': 'ko_KR.UTF-8'}), \
+                mock.patch.object(report, '_state', previous_state):
+            self._support()
+        self.assertIs(report.state(), previous_state)
+        self.assertFalse(source.exists(), source)
+        self.assertEqual({path: path.read_bytes() for path in destination.iterdir()}, before)
+        self.assertEqual(self.cleanup_code, 0, self.cleanup_report)
+        rows = [item for item in self.cleanup_report['items'] if item.get('kind') == 'record-source']
+        self.assertEqual(len(rows), 1, self.cleanup_report)
+        self.assertEqual((rows[0]['path'], rows[0]['destination'], rows[0]['action'], rows[0]['reason']),
+                         (str(source.resolve()), str(destination.resolve()), 'removed', 'completed-record-move'))
+        self.assertIn(str(source.resolve()), self.cleanup_output)
+        self.assertIn('옛 기록 폴더를 삭제했습니다', self.cleanup_output)
+
+    def _check_changed_record_source(self, filename):
+        source, destination = self._completed_record_source()
+        changed = source / filename
+        changed.write_bytes(b'user records after the saved cleanup baseline\n')
+        source_before = {path: path.read_bytes() for path in source.iterdir()}
+        destination_before = {path: path.read_bytes() for path in destination.iterdir()}
+        self._support()
+        self.assertEqual({path: path.read_bytes() for path in source.iterdir()}, source_before)
+        self.assertEqual({path: path.read_bytes() for path in destination.iterdir()}, destination_before)
+        rows = [item for item in self.cleanup_report['items'] if item.get('kind') == 'record-source']
+        self.assertEqual(len(rows), 1, self.cleanup_report)
+        row = rows[0]
+        self.assertEqual((row['path'], row['destination'], row['action'], row['reason']),
+                         (str(source.resolve()), str(destination.resolve()), 'manual-review', 'record-source-cleanup-failed'))
+        self.assertIn(str(changed.resolve()), '\n'.join(row['errors']))
+        self.assertIn(str(source.resolve()), self.cleanup_output)
+        self.assertIn(str(changed.resolve()), self.cleanup_output)
+
+    def test_uninstall_preserves_new_record_source_file_and_reports_its_path(self):
+        self._check_changed_record_source('extra.json')
+
+    def test_uninstall_preserves_changed_record_source_file_and_reports_its_path(self):
+        self._check_changed_record_source('session.json')
+
+    def test_uninstall_keeps_hook_only_record_source_for_running_writer_after_detaching_hooks(self):
+        import install_transaction
+        from install_hooks import install_hook
+        from installer import hosts, transaction
+        source, destination = self._completed_record_source()
+        source_before = {path: path.read_bytes() for path in source.iterdir()}
+        before = {path: path.read_bytes() for path in destination.iterdir()}
+        bound = destination_fixture(self.root, platform_dir=str(self.root / '.codex'),
+                                    skills_dir=str(self.root / '.agents/skills'), ghost_root=str(self.ghost),
+                                    ledger_root=str(source), project_root=str(self.root / 'repo'))
+        with contextlib.redirect_stdout(io.StringIO()):
+            status = install_hook('codex', destination=bound)
+        self.assertIn(status.legacy_status, ('installed', 'already'))
+        # Remove the configuration relation so only the actual managed hook carries A's binding.
+        config = self.ghost / 'config.json'
+        saved = json.loads(config.read_text())
+        saved.pop('install_locations', None)
+        config.write_text(json.dumps(saved))
+        observed = transaction.installed_ledger_locations()
+        self.assertIn('codex', observed.roots[source.resolve()]['hosts'])
+        hooks = self.root / '.codex/hooks.json'
+        before_hooks = hooks.read_bytes()
+        save = install_transaction.Journal.save
+        def fail_scope_save(journal, *args, **kwargs):
+            if journal.data.get('source_cleanup', {}).get('writer_hosts'):
+                raise PermissionError('fixture writer scope save denied')
+            return save(journal, *args, **kwargs)
+        output = io.StringIO()
+        with mock.patch.object(install_transaction.Journal, 'save', autospec=True, side_effect=fail_scope_save), \
+                mock.patch.object(gateway_participant, 'removal',
+                                  side_effect=lambda *args, **kwargs: dict(kind='context-gateway', action='missing')), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            code = cleanup.main(['--platform', 'codex', '--install-state-manifest', str(self.manifest),
+                                 '--report-path', str(self.root / 'scope-save-failed.json'), '--apply'])
+        self.assertEqual(code, 1)
+        self.assertIn('fixture writer scope save denied', output.getvalue())
+        failed = json.loads((self.root / 'scope-save-failed.json').read_text())
+        self.assertFalse(failed['hooks_detached'])
+        self.assertTrue(failed['removal_incomplete'])
+        self.assertIn('fixture writer scope save denied', '\n'.join(failed['errors']))
+        self.assertEqual(hooks.read_bytes(), before_hooks)
+        self.assertEqual({path: path.read_bytes() for path in source.iterdir()}, source_before)
+        self.assertEqual({path: path.read_bytes() for path in destination.iterdir()}, before)
+        with mock.patch.object(hosts, 'observe_writers', side_effect=lambda platforms: {
+                host: hosts.WriterObservation('running', pids=(43123,), programs=((43123, 'codex'),))
+                for host in platforms}):
+            for attempt in (1, 2):
+                self._support()
+                self.assertTrue(source.exists(), f'Uninstall attempt {attempt} must keep A while its writer still runs')
+                self.assertEqual(self.cleanup_code, 1, self.cleanup_report)
+                self.assertEqual({path: path.read_bytes() for path in source.iterdir()}, source_before)
+                self.assertEqual({path: path.read_bytes() for path in destination.iterdir()}, before)
+                self.assertNotEqual(hooks.read_bytes(), before_hooks)
+                self.assertFalse(any(json.loads(hooks.read_text()).get('hooks', {}).values()))
+                self.assertTrue(self.cleanup_report['hooks_detached'])
+                row = next(item for item in self.cleanup_report['items'] if item.get('kind') == 'record-source')
+                self.assertEqual((row['action'], row['reason']), ('manual-review', 'record-source-cleanup-failed'))
+                self.assertIn('codex', '\n'.join(row['errors']))
+                self.assertIn(str(source.resolve()), self.cleanup_output)
+        with mock.patch.object(hosts, 'observe_writers', side_effect=lambda platforms: {
+                host: hosts.WriterObservation('absent') for host in platforms}):
+            self._support()
+        self.assertEqual(self.cleanup_code, 0, self.cleanup_report)
+        self.assertFalse(source.exists())
+        self.assertEqual({path: path.read_bytes() for path in destination.iterdir()}, before)
+        self.assertFalse(any(json.loads(hooks.read_text()).get('hooks', {}).values()))
+
+    def test_uninstall_rechecks_a_previously_unavailable_writer_scope_until_absent(self):
+        from installer import hosts, transaction
+        source, destination = self._completed_record_source()
+        source_before = {path: path.read_bytes() for path in source.iterdir()}
+        destination_before = {path: path.read_bytes() for path in destination.iterdir()}
+        installed_locations = transaction.installed_ledger_locations
+        first = True
+        def locations(*args, **kwargs):
+            nonlocal first
+            if first:
+                first = False
+                return transaction.LedgerLocations({}, unavailable_hosts={'codex': 'fixture binding unreadable'})
+            return installed_locations(*args, **kwargs)
+        with mock.patch.object(transaction, 'installed_ledger_locations', side_effect=locations), \
+                mock.patch.object(hosts, 'observe_writers', side_effect=lambda platforms: {
+                    host: hosts.WriterObservation('running', pids=(43123,)) for host in platforms}):
+            for attempt in (1, 2):
+                self._support()
+                self.assertTrue(source.exists(), f'Uninstall attempt {attempt} must retain the unavailable writer scope')
+                self.assertEqual(self.cleanup_code, 1)
+                self.assertEqual({path: path.read_bytes() for path in source.iterdir()}, source_before)
+                self.assertEqual({path: path.read_bytes() for path in destination.iterdir()}, destination_before)
+        with mock.patch.object(hosts, 'observe_writers', side_effect=lambda platforms: {
+                host: hosts.WriterObservation('absent') for host in platforms}):
+            self._support()
+        self.assertEqual(self.cleanup_code, 0, self.cleanup_report)
+        self.assertFalse(source.exists())
+        self.assertEqual({path: path.read_bytes() for path in destination.iterdir()}, destination_before)
+
     def test_obsolete_copy_cleanup_removes_confirmed_copy_and_keeps_unmatched_contents(self):
         import content_digest
         from installer_assets import write_ownership_marker
@@ -506,7 +1921,7 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
                 ghost, original, unused, live, completed = self._original_with_live_reference(record_kind, mode, host)
                 before = (live / 'SKILL.md').read_bytes()
                 link = os.readlink(live) if mode == 'link' else None
-                self.assertEqual(cleanup._platforms_referencing_target(original,
+                self.assertEqual(cleanup.platforms_referencing_target(original,
                     current_manifest=ghost / 'install-state/codex.json', current_platform='codex', include_current=True), [])
                 rows = cleanup.cleanup_obsolete_copies(root=ghost, platform='codex', completed=completed)
                 self.assertTrue(original.exists())
@@ -614,6 +2029,7 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
         self.enterContext(mock.patch.dict(os.environ, installer_env(self.root), clear=True))
+        self.enterContext(installer_observations())
         self.ghost = self.root / ".ghost-alice"
         self.enterContext(install_destination.use(destination_fixture(
             self.root, platform_dir=str(self.root / '.codex'), skills_dir=str(self.root / '.agents/skills'),
@@ -635,12 +2051,13 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
         (self.rollbacks / "previous-copy.txt").write_text(value, encoding="utf-8")
         self.dispatcher = self.ghost / "hooks"
         self.dispatcher.mkdir(parents=True, exist_ok=True)
-        (self.dispatcher / "dispatcher.mjs").write_text("shared", encoding="utf-8")
+        shutil.copy2(REPO_ROOT / '_shared/ghost-alice-hook.mjs', self.dispatcher)
         self.record = self.ghost / "installed-payload.json"
         self.record.write_text('{"schema_version": 1, "targets": {}}', encoding="utf-8")
         self.publish_rollbacks = self.ghost / "rollbacks" / "20261020T000000Z-1-aaaaaaaa"
         self.publish_rollbacks.mkdir(parents=True, exist_ok=True)
-        (self.publish_rollbacks / "journal.json").write_text('{"phase": "done"}', encoding="utf-8")
+        (self.publish_rollbacks / "journal.json").write_text(json.dumps({
+            'schema_version': 1, 'txid': self.publish_rollbacks.name, 'phase': 'done', 'targets': []}), encoding="utf-8")
         (self.publish_rollbacks / "rollback-task-router").mkdir(exist_ok=True)
         (self.publish_rollbacks / "rollback-task-router" / "SKILL.md").write_text(value, encoding="utf-8")
 
@@ -651,21 +2068,26 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
             '--report-path', str(report_path),
             *(["--apply"] if apply_changes else []),
         ]
+        output = io.StringIO()
         with mock.patch.object(gateway_participant, 'removal',
                                side_effect=lambda *args, **kwargs: dict(kind='context-gateway', action='missing')), \
-                contextlib.redirect_stdout(io.StringIO()):
+                contextlib.redirect_stdout(output):
             self.cleanup_code = cleanup.main(args)
-        self.cleanup_report = json.loads(report_path.read_text())
-        return {item['target_name']: item for item in self.cleanup_report['items'] if item.get('kind') == 'support-artifact'}
+        self.cleanup_output = output.getvalue()
+        self.cleanup_report = json.loads(report_path.read_text()) if report_path.exists() else {}
+        return {item['target_name']: item for item in self.cleanup_report.get('items', []) if item.get('kind') == 'support-artifact'}
 
     def test_other_platform_retains_shared_dispatcher_and_rollbacks(self):
         other = self.manifest.with_name("claude.json")
-        other.write_text('{"platform":"claude","targets":[]}', encoding="utf-8")
+        managed = _write_managed_skill(self.root, 'claude-live-skill')
+        other.write_text(json.dumps(dict(platform='claude', targets=[dict(
+            target_name=managed.name, dest_path=str(managed), install_mode='copy')])))
         original_other = other.read_bytes()
         report = self._support()
         self.assertEqual(self.cleanup_code, 0)
         self.assertFalse(self.cleanup_report['removal_incomplete'])
-        self.assertEqual((self.dispatcher / "dispatcher.mjs").read_text(), "shared")
+        self.assertEqual((self.dispatcher / "ghost-alice-hook.mjs").read_bytes(),
+                         (REPO_ROOT / "_shared/ghost-alice-hook.mjs").read_bytes())
         self.assertEqual((self.rollbacks / "previous-copy.txt").read_text(), "original")
         self.assertEqual(other.read_bytes(), original_other)
         for name in ["hook-dispatcher-assets", "install-rollbacks", "install-record", "publish-rollbacks"]:
@@ -693,8 +2115,8 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
         self.assertEqual(self.cleanup_code, 0)
         self.assertFalse(self.cleanup_report['removal_incomplete'])
         self.assertFalse(self.manifest.exists())
-        self.assertTrue(self.record.exists())
-        self.assertTrue(self.dispatcher.exists())
+        self.assertFalse(self.record.exists())
+        self.assertFalse(self.dispatcher.exists())
 
     def test_invalid_current_target_row_keeps_retry_records_until_repaired(self):
         self.manifest.write_text(json.dumps(dict(platform='codex', targets=['invalid row'])))
@@ -866,6 +2288,27 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
         self.assertNotEqual(first_copy, second_copy)
         self.assertEqual(first_copy.read_text(), "original")
         self.assertEqual(second_copy.read_text(), "next original")
+
+    def test_partial_removal_reports_the_completed_recovery_copy(self):
+        remove = cleanup._remove_path
+        (self.pending / 'second.txt').write_text('second original')
+
+        def deny_after_one(path):
+            if path == self.pending:
+                (path / 'second.txt').unlink()
+                raise PermissionError('cannot delete remaining file')
+            return remove(path)
+
+        with mock.patch.object(cleanup, '_remove_path', deny_after_one):
+            item = self._support()['pending-merges']
+        self.assertEqual(self.cleanup_code, 1)
+        self.assertFalse((self.pending / 'second.txt').exists())
+        self.assertTrue((self.pending / 'user-original.txt').exists())
+        self.assertIn('backup_path', item)
+        archive = Path(item['backup_path'])
+        self.assertEqual((archive / 'second.txt').read_text(), 'second original')
+        self.assertEqual((archive / 'user-original.txt').read_text(), 'original')
+        self.assertIn(str(archive), self.cleanup_output)
 
     def test_dry_run_keeps_recovery_material_and_creates_no_archive(self):
         before = {p: p.read_bytes() for p in self.ghost.rglob("*") if p.is_file()}
@@ -1419,10 +2862,12 @@ class UninstallCleanupTest(unittest.TestCase):
             events = root / ".ghost-alice" / "install-state" / "codex-events.jsonl"
             events.write_text('{"event":"copy_replace_failure"}\n', encoding="utf-8")
             feature_change = root / ".ghost-alice" / "install-state" / "codex-hook-feature-change.json"
-            feature_change.write_text('{"kind":"codex_hooks_feature_flag"}\n', encoding="utf-8")
+            feature_change.write_text(json.dumps(dict(schema_version='codex-hook-feature-change.v1',
+                kind='codex_hooks_feature_flag', path=(root / '.codex/config.toml').as_posix(),
+                before_state='false', after_state='true')), encoding='utf-8')
             hooks_dir = root / ".ghost-alice" / "hooks"
             hooks_dir.mkdir(parents=True)
-            (hooks_dir / "ghost-alice-hook.mjs").write_text("// managed dispatcher\n", encoding="utf-8")
+            shutil.copy2(REPO_ROOT / '_shared/ghost-alice-hook.mjs', hooks_dir)
             rollback_dir = root / ".ghost-alice" / "install-rollbacks"
             rollback_dir.mkdir(parents=True)
             (rollback_dir / "rollback-task-router").write_text("previous copy\n", encoding="utf-8")
@@ -1571,7 +3016,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertIsNone(self._hook_path(git, repo))
             self.assertEqual(self._source_hook_item(report)["action"], "removed-source-repo-hook-path")
 
-    def test_apply_restores_previous_source_repo_hook_path_from_change_record(self) -> None:
+    def test_source_hook_keeps_unknown_other_host_then_releases_empty_inventory_on_retry(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             git, repo = self._hook_path_repo(root, None)
@@ -1586,6 +3031,14 @@ class UninstallCleanupTest(unittest.TestCase):
             )
             report = root / "uninstall-report.json"
 
+            other = manifest.with_name('claude.json')
+            other.write_text('{broken')
+            held = self.run_cleanup(root, manifest, report, apply_changes=True)
+            self.assertEqual(held.returncode, 1, held.stdout + held.stderr)
+            self.assertEqual(self._hook_path(git, repo), (repo / 'hooks').as_posix())
+            self.assertTrue(manifest.exists())
+            other.write_text(json.dumps(dict(platform='claude', targets=[])))
+
             result = self.run_cleanup(root, manifest, report, apply_changes=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
@@ -1593,6 +3046,32 @@ class UninstallCleanupTest(unittest.TestCase):
             source_hook = self._source_hook_item(report)
             self.assertEqual(source_hook["action"], "restored-source-repo-hook-path")
             self.assertEqual(source_hook["restored_to"], "custom-hooks")
+
+    @unittest.skipIf(os.name == 'nt', 'Requires POSIX directory write permissions')
+    def test_source_hook_stays_for_current_host_target_after_real_removal_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            git, repo = self._hook_path_repo(root, None)
+            hooks = (repo / 'hooks').as_posix()
+            subprocess.run([git, '-C', str(repo), 'config', '--local', 'core.hooksPath', hooks], check=True)
+            held = _write_managed_skill(root, 'task-router')
+            independent = _write_managed_skill(root, 'skill-evolution')
+            manifest = _write_manifest(root, [dict(target_name=path.name, dest_path=path.as_posix(), install_mode='copy')
+                for path in (held, independent)], source_root=repo,
+                system_env_changes=[self._hook_change(repo, before='custom-hooks')])
+            held.chmod(0o555)
+            try:
+                result = self.run_cleanup(root, manifest, root / 'report.json', apply_changes=True)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertTrue((held / 'SKILL.md').exists())
+                self.assertFalse(independent.exists())
+                self.assertEqual(self._hook_path(git, repo), hooks)
+            finally:
+                held.chmod(0o755)
+            retry = self.run_cleanup(root, manifest, root / 'retry.json', apply_changes=True)
+            self.assertEqual(retry.returncode, 0, retry.stdout + retry.stderr)
+            self.assertFalse(held.exists())
+            self.assertEqual(self._hook_path(git, repo), 'custom-hooks')
 
     def test_apply_leaves_a_hook_path_that_changed_after_the_install(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1627,8 +3106,10 @@ class UninstallCleanupTest(unittest.TestCase):
                 source_root=repo,
                 system_env_changes=[self._hook_change(repo, before=None)],
             )
-            (manifest.parent / "claude.json").write_text(json.dumps({"schema_version": 1, "platform": "claude"}),
-                                                         encoding="utf-8")
+            other_target = _write_managed_skill(root, 'other-live-skill')
+            (manifest.parent / "claude.json").write_text(json.dumps(dict(schema_version=1, platform='claude',
+                targets=[dict(target_name=other_target.name, dest_path=str(other_target), install_mode='copy')])),
+                encoding="utf-8")
             report = root / "uninstall-report.json"
 
             result = self.run_cleanup(root, manifest, report, apply_changes=True)
@@ -1656,8 +3137,10 @@ class UninstallCleanupTest(unittest.TestCase):
                                               "after": (root / "repo" / "hooks").as_posix(),
                                               "applied_at": "2026-10-21T00:00:00Z"}), encoding="utf-8")
                 if other_host:
+                    other_target = _write_managed_skill(root, 'other-live-skill')
                     (manifest.parent / "claude.json").write_text(
-                        json.dumps({"schema_version": 1, "platform": "claude"}), encoding="utf-8")
+                        json.dumps(dict(schema_version=1, platform='claude', targets=[dict(
+                            target_name=other_target.name, dest_path=str(other_target), install_mode='copy')])), encoding="utf-8")
                 report = root / "uninstall-report.json"
 
                 result = self.run_cleanup(root, manifest, report, apply_changes=True)

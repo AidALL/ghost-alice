@@ -32,7 +32,7 @@ from text_lines import committed_length, split_lines
 
 MB = 1024 * 1024
 DAY = 86400
-METHODS = ("size-rotation", "keep-newest", "age", "line-count", "overwrite", "user-kept", "owner-completed")
+METHODS = ("size-rotation", "keep-newest", "install-runs", "age", "line-count", "overwrite", "user-kept", "owner-completed")
 FAILURES = "state-retention-failures.jsonl"
 
 
@@ -41,7 +41,7 @@ class Policy(NamedTuple):
 
     `patterns` place the entry under the roots of `default_roots` (`{ghost}/io-trace.jsonl`); `*` matches within one
     folder name and `**` spans folders. `target` is the name the path given to `apply` must have. `limit` is bytes
-    for a size rotation, entries for keep-newest, days for age and lines for a line count.
+    for a size rotation, entries for keep-newest, unsuccessful runs for install-runs, days for age and lines for a line count.
     """
 
     name: str
@@ -71,14 +71,14 @@ _TABLE = (
            target="service.log", limit=5 * MB, copy_truncate=True),
     Policy("gateway-config-backups", "keep-newest", ("{gateway}/backups/*", "{gateway}/backups/*/**"),
            target="backups", limit=5, group=r"^(?P<key>\d{8}T\d{6}\d*Z)-"),
-    Policy("install-logs", "keep-newest", ("{record}/install/*.log", "{record}/install/*.events.jsonl"),
-           target="install", limit=30,
+    Policy("install-logs", "install-runs", ("{record}/install/*.log", "{record}/install/*.events.jsonl"),
+           target="install", limit=30, order="mtime",
            group=r"^(?P<key>\d{4}-\d{2}-\d{2}-\d{6}(?:-[0-9a-f]{32})?)\.(?:log|events\.jsonl)$",
            files_only=True),
     Policy("uninstall-reports", "keep-newest", ("{record}/uninstall-reports/*.json",), target="uninstall-reports",
            limit=30, order="mtime", members="*.json", files_only=True),
     Policy("install-record", "overwrite",
-           (*("{record}/" + name for name in installed_payload.RECORD_FILENAMES),
+           (*("{record}/" + name for name in installed_payload.INSTALL_RECORD_FILES),
             "{record}/install.lock", "{record}/install.lock.guard",
             "{record}/install-state/*.json", "{record}/install-state/source-repo-hook-path.json.guard")),
     Policy("install-state-events", "size-rotation",
@@ -218,7 +218,7 @@ def apply(name: str, path: Path | str, *, protect: Iterable[Path | str] = (),
             return _size_rotation(path, policy)
         if policy.method == "line-count":
             return _line_count(path, policy)
-        if policy.method == "keep-newest":
+        if policy.method in ("keep-newest", "install-runs"):
             return _keep_newest(path, policy, _protected_forms(protect), eligible)
         if policy.method == "age":
             return _age(path, policy, _protected_forms(protect))
@@ -351,12 +351,55 @@ def _keep_newest(path: Path, policy: Policy, protected: list[Path],
         ordered = sorted(groups.items())
     if eligible is not None:
         ordered = [(key, group) for key, group in ordered if all(eligible(entry) for entry in group)]
+    obsolete = (_obsolete_install_runs(folder, ordered, policy.limit) if policy.method == "install-runs"
+                else ordered[:max(0, len(ordered) - policy.limit)])
     removed = []
-    for _, group in ordered[:max(0, len(ordered) - policy.limit)]:
+    for _, group in obsolete:
         if any(_is_protected(entry, protected) for entry in group):
             continue
         removed.extend(_remove_each(policy.name, group))
     return tuple(removed)
+
+
+def _obsolete_install_runs(folder: Path, ordered: list[tuple[str, list[Path]]],
+                           limit: int) -> list[tuple[str, list[Path]]]:
+    """Keep the latest completed success per saved package and bound every other run separately."""
+    unsuccessful = []
+    obsolete = []
+    successes: dict[str, tuple[int, str, list[Path]]] = {}
+    for key, group in ordered:
+        event_file = next((entry for entry in group if entry.name.endswith(".events.jsonl")), None)
+        result = None
+        if event_file is not None:
+            try:
+                last = b""
+                with event_file.open("rb") as stream:
+                    for line in stream:
+                        if committed_length(line) == len(line) and line.strip():
+                            last = line
+                result = json.loads(last)
+            except (OSError, ValueError):
+                pass  # Missing, malformed and incomplete results remain unsuccessful runs.
+        if (not any(entry.name.endswith('.log') for entry in group)
+                or not isinstance(result, dict) or result.get("type") != "install-result"
+                or type(result.get("returncode")) is not int or result["returncode"] != 0
+                or not isinstance(result.get("source_digest"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", result["source_digest"]) is None):
+            unsuccessful.append((key, group))
+            continue
+        digest = result["source_digest"]
+        if not (folder.parent / "versions" / digest / "version.json").is_file():
+            obsolete.append((key, group))
+            continue
+        current = (_mtime(event_file), key, group)
+        previous = successes.get(digest)
+        if previous is None or current[:2] > previous[:2]:
+            if previous is not None:
+                obsolete.append((previous[1], previous[2]))
+            successes[digest] = current
+        else:
+            obsolete.append((key, group))
+    return obsolete + unsuccessful[:max(0, len(unsuccessful) - limit)]
 
 
 def _age(path: Path, policy: Policy, protected: list[Path]) -> tuple[Path, ...]:

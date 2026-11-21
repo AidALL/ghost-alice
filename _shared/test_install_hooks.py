@@ -1044,11 +1044,21 @@ class TempHomeTestCase(unittest.TestCase):
 
 
 class TestObservedInstallation(TempHomeTestCase):
-    def _write_legacy_roots(self, platform, *roots):
+    def test_dangling_hook_settings_are_unknown_to_cleanup_not_absent(self):
+        from installer import transaction
+        path = install_hooks.PLATFORMS['codex']['hook_file']()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to(path.with_name('missing-hooks.json'))
+        with self.assertRaises(FileNotFoundError):
+            install_hooks.installed_hook_ledger_roots('codex')
+        observed = transaction.installed_ledger_locations()
+        self.assertIn('codex', observed.unavailable_hosts)
+
+    def _write_legacy_roots(self, platform, *roots, flag="--root"):
         commands = []
         for root in roots:
             payload = base64.urlsafe_b64encode(
-                f'python3 ledger.py --root {shlex.quote(str(root))}'.encode()).decode()
+                f'python3 ledger.py {flag} {shlex.quote(str(root))}'.encode()).decode()
             commands.append({"type": "command", "command":
                 f'python3 {shlex.quote(str(Path(install_hooks.__file__).with_name("hook_profile_gate.py")))} '
                 f'run session-intent {platform} {payload}'})
@@ -1058,16 +1068,21 @@ class TestObservedInstallation(TempHomeTestCase):
         configured = {"project_root": str(self.fake_home / "project"),
                       "ledger_root": str(self.fake_home / "configured-ledger")}
         install_hooks.runtime_config.save_config({"install_locations": {"codex": configured}})
-        self._write_legacy_roots("codex", self.fake_home / "old-one", self.fake_home / "old-two")
         with patch.dict(os.environ, {"GHOST_ALICE_SESSION_INTENT_ROOT": str(self.fake_home / "override"),
                                      "GHOST_ALICE_CORE_ROOT": str(self.fake_home / "source")}):
-            self.assertEqual(install_hooks.observed_installation("codex"), configured)
+            for roots in (("old-one",), ("old-one", "old-two")):
+                with self.subTest(roots=roots):
+                    actual_roots = {str(self.fake_home / root) for root in roots}
+                    self._write_legacy_roots("codex", *actual_roots)
+                    self.assertEqual(install_hooks.observed_installation("codex"), configured)
+                    self.assertEqual(install_hooks.installed_hook_ledger_roots("codex"), actual_roots)
 
     def test_managed_hook_supplies_only_the_missing_ledger_field(self):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 root = str(self.fake_home / platform / "legacy ledger")
                 self._write_legacy_roots(platform, root)
+                self.assertEqual(install_hooks.installed_hook_ledger_roots(platform), {root})
                 self.assertEqual(install_hooks.observed_installation(platform), {"ledger_root": root})
                 configured = {"core_source_root": str(self.fake_home / "source")}
                 install_hooks.runtime_config.save_config({"install_locations": {platform: configured}})
@@ -1079,7 +1094,158 @@ class TestObservedInstallation(TempHomeTestCase):
     def test_absent_installation_remains_empty_despite_explicit_environment(self):
         with patch.dict(os.environ, {"GHOST_ALICE_SESSION_INTENT_ROOT": str(self.fake_home / "override"),
                                      "GHOST_ALICE_CORE_ROOT": str(self.fake_home / "source")}):
+            self.assertEqual(install_hooks.installed_hook_ledger_roots("codex"), set())
             self.assertEqual(install_hooks.observed_installation("codex"), {})
+
+    def test_hook_roots_include_legacy_and_bound_managed_commands_only(self):
+        legacy_root = str(self.fake_home / "legacy ledger")
+        bound_root = str(self.fake_home / "bound" / "ledger")
+        self._write_legacy_roots("codex", legacy_root, flag="--session-intent-root")
+        settings = self._read_settings("codex")
+        commands = settings["hooks"]["UserPromptSubmit"][0]["hooks"]
+        binding = install_destination.encode_binding({"schema_version": "ghost-alice-hook-binding.v1",
+            "destination": destination_fixture(self.fake_home / "bound", ledger_root=bound_root)})
+        args = hook_definitions.encode_hook_runner_args("session-receipt",
+            f'python3 ledger.py --root {shlex.quote(str(self.fake_home / "payload-root"))}', "codex", binding)
+        commands.extend([
+            {"type": "command", "command": shlex.join([
+                "python3", str(Path(install_hooks.__file__).with_name("hook_profile_gate.py")), *args])},
+            {"type": "command", "command": f'python3 ledger.py --root {shlex.quote(str(self.fake_home / "unmanaged"))}'}])
+        self._write_settings("codex", settings)
+        self.assertEqual(install_hooks.installed_hook_ledger_roots("codex"), {legacy_root, bound_root})
+
+    def test_hook_root_read_failures_are_not_reported_as_absence(self):
+        path = self._write_settings("codex", {})
+        for content in ('{', '[]', '{"hooks": []}'):
+            with self.subTest(content=content):
+                path.write_text(content)
+                with self.assertRaises(ValueError) as caught:
+                    install_hooks.installed_hook_ledger_roots("codex")
+                self.assertIn(str(path), str(caught.exception))
+        path.write_bytes(b'\xff')
+        with self.assertRaises(UnicodeError) as caught:
+            install_hooks.installed_hook_ledger_roots('codex')
+        self.assertIn(str(path), str(caught.exception))
+        self.assertEqual(install_hooks.installed_hook_ledger_roots('codex', strict=False), set())
+        path.write_text('[]')
+        with self.assertRaises(ValueError):
+            install_hooks.installed_hook_ledger_roots('codex', strict=False)
+        path.write_text('{')
+        self.assertEqual(install_hooks.observed_installation("codex", strict=False), {})
+        path.unlink()
+        path.mkdir()
+        with self.assertRaises(OSError) as caught:
+            install_hooks.installed_hook_ledger_roots("codex")
+        self.assertIn(str(path), str(caught.exception))
+        self.assertEqual(install_hooks.observed_installation("codex", strict=False), {})
+
+    def test_bad_config_does_not_hide_actual_fixed_or_nonfixed_hooks(self):
+        from installer import transaction
+        import install_transaction
+        ghost = install_destination.ghost_root(self.fake_home)
+        ghost.mkdir(parents=True, exist_ok=True)
+        fixed, nonfixed = (ghost / 'session-intent').resolve(), (self.fake_home / 'old-ledger').resolve()
+        self._write_legacy_roots('codex', fixed)
+        self._write_legacy_roots('claude', nonfixed)
+        config = ghost / 'config.json'
+        for contents in ('{', '{"retired_ledger_roots": null}', '{"retired_ledger_roots": [7]}',
+                         '{"install_locations": []}', '{"install_locations": {"claude": {"ledger_root": []}}}'):
+            with self.subTest(contents=contents):
+                config.write_text(contents)
+                observed = transaction.installed_ledger_locations(ghost_root=ghost)
+                self.assertEqual(set(observed.roots), {fixed, nonfixed})
+                self.assertEqual(observed.roots[fixed]['state'], 'fixed')
+                self.assertEqual(observed.unavailable_hosts, {})
+                whole_file = contents != '{"install_locations": {"claude": {"ledger_root": []}}}'
+                self.assertEqual(bool(observed.observation_errors), whole_file)
+                self.assertEqual(set(observed.host_config_errors), set() if whole_file else {'claude'})
+                with patch.object(install_transaction, '_require_lock'):
+                    retained = transaction.retain_record_source_writers(ghost, observed)
+                self.assertNotIn('codex', retained.blocked_hosts)
+                self.assertIn(str(nonfixed), retained.blocked_hosts['claude'])
+                self.assertEqual(bool(retained.errors), whole_file)
+
+    def test_inactive_host_config_error_keeps_independent_fixed_hooks_detachable(self):
+        from installer import transaction
+        import install_lock
+        ghost = install_destination.ghost_root(self.fake_home)
+        fixed = (ghost / 'session-intent').resolve()
+        self._write_legacy_roots('claude', fixed)
+        install_hooks.runtime_config.save_config({'install_locations': {'codex': 'not-an-object'}})
+        observed = transaction.installed_ledger_locations(ghost_root=ghost)
+        self.assertEqual(observed.observation_errors, {})
+        self.assertEqual(observed.unavailable_hosts, {})
+        self.assertEqual(set(observed.host_config_errors), {'codex'})
+        self.assertEqual(observed.hook_roots['codex'], ())
+        self.assertEqual(observed.active_config_errors, {})
+        with install_lock.command_lock(ghost / 'install.lock', owner='installer:test'):
+            retained = transaction.retain_record_source_writers(ghost, observed)
+        self.assertEqual(retained.errors, {})
+        self.assertEqual(retained.blocked_hosts, {})
+
+    def test_host_config_and_hook_errors_keep_separate_causes_and_hold_only_that_host(self):
+        from installer import transaction
+        import install_lock
+        ghost = install_destination.ghost_root(self.fake_home)
+        install_hooks.runtime_config.save_config({'install_locations': {'codex': 'not-an-object'}})
+        path = self._write_settings('codex', {'hooks': None})
+        observed = transaction.installed_ledger_locations(ghost_root=ghost)
+        self.assertEqual(observed.observation_errors, {})
+        self.assertIn('must be an object', observed.host_config_errors['codex'])
+        self.assertIn(str(path), observed.unavailable_hosts['codex'])
+        with install_lock.command_lock(ghost / 'install.lock', owner='installer:test'):
+            retained = transaction.retain_record_source_writers(ghost, observed)
+        self.assertEqual(retained.errors, {})
+        self.assertEqual(set(retained.blocked_hosts), {'codex'})
+        self.assertIn('must be an object', '; '.join(retained.blocked_hosts['codex'].values()))
+        self.assertIn(str(path), '; '.join(retained.blocked_hosts['codex'].values()))
+
+    def test_whole_config_failure_leaves_hook_classification_unconfirmed(self):
+        from installer import transaction
+        import installed_payload
+        import install_lock
+        ghost = install_destination.ghost_root(self.fake_home)
+        old = (self.fake_home / 'old-source').resolve()
+        ledger = old / 'session-intent'
+        self._write_legacy_roots('claude', ledger)
+        with install_lock.command_lock(ghost / 'install.lock', owner='installer:test'):
+            installed_payload.update(ghost, {'source': {'root': str(old), 'commit': 'old'}})
+        (ghost / 'config.json').write_text('{')
+        observed = transaction.installed_ledger_locations(ghost_root=ghost)
+        self.assertEqual(observed.roots[ledger]['state'], 'unconfirmed')
+        self.assertEqual(observed.roots[ledger]['source_root'], old)
+
+    def test_bad_config_and_unreadable_hooks_keep_both_original_causes(self):
+        from installer import transaction
+        import install_transaction
+        ghost = install_destination.ghost_root(self.fake_home)
+        ghost.mkdir(parents=True, exist_ok=True)
+        config = ghost / 'config.json'
+        config.write_text('{')
+        path = self._write_settings('codex', {'hooks': None})
+        observed = transaction.installed_ledger_locations(ghost_root=ghost)
+        with patch.object(install_transaction, '_require_lock'):
+            retained = transaction.retain_record_source_writers(ghost, observed)
+        self.assertIn(str(config), retained.errors)
+        self.assertIn(str(path), '; '.join(retained.blocked_hosts['codex'].values()))
+        self.assertNotIn('claude', retained.blocked_hosts)
+
+    def test_unreadable_explicit_legacy_roots_identify_the_selected_hook_file(self):
+        from installer import transaction
+        for inner, detail in (('python3 ledger.py --root', '--root'),
+                              ('python3 ledger.py --session-intent-root relative', '--session-intent-root'),
+                              ("python3 ledger.py --root '/bad", 'quotation')):
+            with self.subTest(inner=inner):
+                payload = base64.urlsafe_b64encode(inner.encode()).decode()
+                command = (f'python3 {shlex.quote(str(Path(install_hooks.__file__).with_name("hook_profile_gate.py")))} '
+                           f'run session-intent codex {payload}')
+                path = self._write_settings('codex', {'hooks': {'UserPromptSubmit': [
+                    {'hooks': [{'type': 'command', 'command': command}]}]}})
+                observed = transaction.installed_ledger_locations()
+                self.assertIn('codex', observed.unavailable_hosts)
+                cause = observed.unavailable_hosts['codex']
+                self.assertIn(str(path), cause)
+                self.assertIn(detail, cause)
 
     def test_conflicting_hooks_are_observed_unless_fallback_is_disabled(self):
         self._write_legacy_roots("codex", self.fake_home / "one", self.fake_home / "two")

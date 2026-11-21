@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import re
@@ -66,6 +67,8 @@ def _default_report_path(platform: str, *, apply_changes: bool) -> Path:
 
 
 def _load_manifest(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    if _linked_under(path, _ghost_alice_root()):
+        return None, "manifest-invalid:linked-path"
     if not path.exists():
         return None, "manifest-missing"
     try:
@@ -103,6 +106,10 @@ def _is_under(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _linked_under(path: Path, root: Path) -> bool:
+    return any((part.is_symlink() or _is_junction(part)) for part in (path, *path.parents) if _is_under(part, root))
 
 
 def _platform_target_roots(platform: str) -> list[Path]:
@@ -146,9 +153,10 @@ def _same_path(left: Path, right: Path) -> bool:
     return _lexical_absolute(left) == _lexical_absolute(right)
 
 
-def _platforms_referencing_target(path: Path | None, *, current_manifest: Path,
+def platforms_referencing_target(path: Path | None, *, current_manifest: Path,
                                   current_platform: str, include_current: bool = False,
-                                  source_tree: bool = False, include_current_addons: bool = False) -> list[str]:
+                                  source_tree: bool = False, include_current_addons: bool = False,
+                                  include_current_management: bool = True) -> list[str]:
     """Confirm other hosts' live references; None asks about all shared support.
 
     Obsolete-copy cleanup also checks live targets' sources inside the copy.
@@ -186,8 +194,17 @@ def _platforms_referencing_target(path: Path | None, *, current_manifest: Path,
             continue
         entry = installed_payload._check_entry(dest, entry)
         hosts = set(entry['used_by']) - (set() if include_current else {current_platform})
+        if not include_current_management and entry['provider'] == 'core' and entry['kind'] in {'runtime', 'command'}:
+            hosts.discard(current_platform)
         if not hosts or not os.path.lexists(dest):
             continue
+        # A current host's held target remains a consumer even when its bytes
+        # prevent removal. Its recorded, present reference is enough to retain support.
+        if current_platform in hosts:
+            platforms.add(current_platform)
+            hosts.discard(current_platform)
+            if not hosts:
+                continue
         if (entry['baseline'] == 'unknown' or
                 (entry['mode'] == 'copy' and not isinstance(entry.get('files'), dict)) or
                 any(content_digest.compare(entry, dest).values())):
@@ -207,14 +224,15 @@ def _platforms_referencing_target(path: Path | None, *, current_manifest: Path,
         if manifest is not None:
             if _manifest_platform(manifest) not in {'', host}:
                 raise ValueError(f'other host inventory platform mismatch: {candidate}')
-            if path is None:
-                platforms.add(host)
             for target in manifest.get('targets', []):
                 if not isinstance(target, dict) or not isinstance(target.get('dest_path'), str):
                     raise ValueError(f'invalid target in {candidate}')
                 dest = Path(target['dest_path']).expanduser()
                 if (not references(dest, target.get('source_path')) or
                         target.get('install_mode') == 'missing' or not os.path.lexists(dest)):
+                    continue
+                if host == current_platform:
+                    platforms.add(host)
                     continue
                 classification = classify_skill_root(dest, expected_asset_id=target.get('target_name'),
                                                      repo_root=_manifest_repo_root(manifest, target))
@@ -234,6 +252,9 @@ def _platforms_referencing_target(path: Path | None, *, current_manifest: Path,
                 if (target.get('kind') == 'adapter' or mode == 'missing' or not dest or
                         not references(Path(dest), addon.get('source')) or not os.path.lexists(dest)):
                     continue
+                if host == current_platform:
+                    platforms.add(host)
+                    continue
                 fingerprint = target.get('content_hash')
                 if not fingerprint or hash_utils.hash_target(dest, mode, recorded_hash=fingerprint) != fingerprint:
                     raise ValueError(f'other host addon target cannot be confirmed: {dest}')
@@ -243,7 +264,7 @@ def _platforms_referencing_target(path: Path | None, *, current_manifest: Path,
 
 def release_target_records(*, root: Path, platform: str, destination: Path,
                            kind: str, provider: str = 'core', state_path: Path | None = None) -> None:
-    """Deliver a confirmed removal to each record owner; keep inventory until last.
+    """Deliver a confirmed removal to each record owner; keep the discovery owner until last.
 
     The caller owns file/host attribution. If a record write fails, its caller
     keeps that attribution so a rerun can finish after the file is already absent.
@@ -259,17 +280,24 @@ def release_target_records(*, root: Path, platform: str, destination: Path,
             '--prune-target', kind, str(destination), capture=True)
         if not result.ok:
             raise ValueError(f'snapshot cleanup failed for {destination}: {result.stderr or result.stdout}')
+    state = state_path or root/'install-state'/f'{platform}.json'
+    # The payload owns support destinations that do not occur in the host inventory.
+    # Keep its reference until all other record owners finish, so a failed write
+    # cannot make a retained file disappear from the next attempt's enumeration.
+    if kind in {'command', 'runtime'}:
+        install_state_writer.remove_targets(state, destinations=[destination])
     record = installed_payload.read(root)
     if str(destination) in (record or {}).get('targets', {}):
         installed_payload.release_target(root, destination=destination, provider=provider, platform=platform)
-    install_state_writer.remove_targets(state_path or root/'install-state'/f'{platform}.json',
-                                       destinations=[destination])
+    if kind not in {'command', 'runtime'}:
+        install_state_writer.remove_targets(state, destinations=[destination])
 
 
-def _pending_original_entries(root: Path, platform: str) -> list[dict]:
+def _pending_original_entries(root: Path, platform: str, *, require_platform: bool = False) -> list[dict]:
     pending = root/'pending-merges'/platform/'manifest.json'
     data = json.loads(pending.read_text()) if pending.exists() else {'entries': []}
-    if (not isinstance(data, dict) or not isinstance(data.get('entries'), list) or
+    if (not isinstance(data, dict) or (require_platform and data.get('platform') != platform)
+            or not isinstance(data.get('entries'), list) or
             any(not isinstance(entry, dict) for entry in data['entries'])):
         raise ValueError(f'invalid pending manifest: {pending}')
     return data['entries']
@@ -286,7 +314,7 @@ def _original_dependency_reason(copy: Path, *, root: Path, platform: str,
             (entry.get('backup_path') and (_is_under(copy, Path(entry['backup_path'])) or
              _is_under(Path(entry['backup_path']), copy)))) for entry in entries):
         return 'pending-original-review'
-    if _platforms_referencing_target(copy, current_manifest=root/'install-state'/f'{platform}.json',
+    if platforms_referencing_target(copy, current_manifest=root/'install-state'/f'{platform}.json',
                                      current_platform=platform, include_current=True, source_tree=True):
         return 'live-host-uses-original'
     record = installed_payload.read(root) or {}
@@ -543,12 +571,13 @@ def _source_repo_hook_item_from_change(change: dict[str, Any], *, apply_changes:
 
 
 def _source_repo_hook_items(
-    manifest: dict[str, Any], *, apply_changes: bool, other_platforms: list[str]
+    manifest: dict[str, Any], *, apply_changes: bool, other_platforms: list[str] | None = None,
+    state_path: Path | None = None, platform: str | None = None, current_items: Sequence[dict] = (),
 ) -> list[dict[str, Any]]:
-    """The source repository's shared `core.hooksPath`, restored only by the full removal of the last host.
+    """Restore shared `core.hooksPath` when full or final selected removal releases its last consumer.
 
-    Every host installs from the one install source, so while another host's install-state remains the hook path
-    stays for it. The last host restores the value the install-state records from before Ghost-ALICE wrote one,
+    Every host installs from the one install source, so while another host has live targets the hook path
+    stays for it. The last consumer restores the value the install-state records from before Ghost-ALICE wrote one,
     when the value is still the one the install wrote. Without a record of the change the value stays: a value alone
     does not say that this install wrote it.
     """
@@ -566,7 +595,23 @@ def _source_repo_hook_items(
             "reason": "source-repo-hook-path-unrecorded",
         }]
     items: list[dict[str, Any]] = []
+    reference_error = None
+    if other_platforms is None:
+        try:
+            other_platforms = platforms_referencing_target(None, current_manifest=state_path, current_platform=platform,
+                include_current=apply_changes, include_current_management=False)
+        except (OSError, ValueError) as error:
+            other_platforms, reference_error = [], str(error)
+    if not apply_changes and any(item.get('kind') in {'install-target', 'addon-target'} and item.get('action')
+            not in {'would-remove', 'would-quarantine-remove', 'would-release-reference', 'missing'}
+            for item in current_items):
+        other_platforms = sorted(set(other_platforms) | {platform})
     for change in changes:
+        if reference_error:
+            items.append(dict(kind='source-repo-hook-config', target_name='source-repo-core-hooks-path',
+                path=str(change.get('repo_root') or ''), action='manual-review',
+                reason='other-host-references-unresolved', errors=[reference_error]))
+            continue
         if other_platforms:
             items.append({
                 "kind": "source-repo-hook-config",
@@ -574,7 +619,8 @@ def _source_repo_hook_items(
                 "path": str(change.get("repo_root") or ""),
                 "expected_current": change.get("after"),
                 "action": "unchanged",
-                "reason": "source-repo-hook-path-in-use-by-other-platform",
+                "reason": ("source-repo-hook-path-in-use-by-current-platform" if platform in other_platforms
+                           else "source-repo-hook-path-in-use-by-other-platform"),
                 "shared_platforms": other_platforms,
             })
             continue
@@ -625,7 +671,7 @@ def _restore_codex_project_trust_content(
 
 
 def _is_allowed_codex_config_path(path: Path) -> bool:
-    return _same_path(path, _codex_home() / "config.toml")
+    return _same_path(path, _codex_home() / "config.toml") and not _linked_under(path, _codex_home())
 
 
 def _codex_hooks_json_has_remaining_entries() -> bool:
@@ -712,16 +758,6 @@ def _codex_hook_feature_item_from_change(change: dict[str, Any], *, apply_change
     return item
 
 
-def _codex_hook_feature_items(manifest: dict[str, Any], *, apply_changes: bool, backup_sources=None) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    for change in manifest.get("system_env_changes", []):
-        if isinstance(change, dict) and change.get("kind") == "codex_hooks_feature_flag":
-            item = _codex_hook_feature_item_from_change(change, apply_changes=apply_changes, backup_sources=backup_sources)
-            if item is not None:
-                items.append(item)
-    return items
-
-
 def _codex_project_trust_item_from_change(change: dict[str, Any], *, apply_changes: bool,
                                         backup_sources=None) -> dict[str, Any] | None:
     raw_path = change.get("path")
@@ -803,19 +839,100 @@ def _codex_project_trust_item_from_change(change: dict[str, Any], *, apply_chang
     return item
 
 
-def _codex_project_trust_items(manifest: dict[str, Any], *, apply_changes: bool, backup_sources=None) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
+_CODEX_SETTINGS = {
+    'codex-hook-feature-change': ('codex_hooks_feature_flag', _codex_hook_feature_item_from_change),
+    'codex-project-trust-change': ('codex_project_trust', _codex_project_trust_item_from_change),
+}
+
+
+def _codex_settings_items(platform: str, manifest: dict, *, apply_changes: bool, backup_sources=None) -> list[dict]:
+    if platform != 'codex':
+        return []
+    owners = dict(_CODEX_SETTINGS.values())
+    items = []
     for change in manifest.get("system_env_changes", []):
-        if isinstance(change, dict) and change.get("kind") == "codex_project_trust":
-            item = _codex_project_trust_item_from_change(change, apply_changes=apply_changes, backup_sources=backup_sources)
+        if isinstance(change, dict) and isinstance(change.get('kind'), str) and (owner := owners.get(change['kind'])):
+            item = owner(change, apply_changes=apply_changes, backup_sources=backup_sources)
             if item is not None:
                 items.append(item)
     return items
 
 
-def _apply_remove_action(item: dict[str, Any], path: Path, *, reason: str) -> dict[str, Any]:
+def _retired_host_evidence(platform: str, support: list[dict], record: dict | None,
+                           manifest: dict | None = None) -> tuple[dict, set[Path]]:
+    """Read independently attributable settings and support left by earlier final skill removal."""
+    from installer import source
+
+    changes, confirmed = [], set()
+    for item in support:
+        name, path = item['target_name'], Path(item['path'])
+        if item['action'] not in {'would-remove', 'would-quarantine-remove'} or _linked_under(path, _ghost_alice_root()):
+            continue
+        try:
+            if name == 'pending-merges':
+                manifest_path = path / 'manifest.json'
+                if not manifest_path.is_file() or _linked_under(manifest_path, path):
+                    continue
+                _pending_original_entries(_ghost_alice_root(), platform, require_platform=True)
+            elif name == 'source-repo-hook-path-record':
+                change = json.loads(path.read_text(encoding='utf-8'))
+                if (not isinstance(change, dict) or change.get('kind') != source.HOOK_PATH_CHANGE or
+                        type(change.get('before_present')) is not bool):
+                    continue
+                before = change.get('before')
+                if (change['before_present'] and not isinstance(before, str)) or (not change['before_present'] and before is not None):
+                    continue
+                origin = ((record or {}).get('source', {}).get('root') or (manifest or {}).get('source_root')
+                          or source.input_record()['root'])
+                after = Path(change.get('after') or '')
+                if change.get('after') == source.HOOKS_DIR:
+                    if not source.relative_hook_path_matches_repository(change, Path(origin)):
+                        continue
+                elif change not in (manifest or {}).get('system_env_changes', []):
+                    package_hooks = (after.name == source.HOOKS_DIR and after.parent.name == 'core'
+                                     and after.parent.parent.parent == _ghost_alice_root() / 'versions')
+                    if change.get('repo_root') != Path(origin).as_posix() or (after != Path(origin) / source.HOOKS_DIR and not package_hooks):
+                        continue
+                changes.append(change)
+            elif platform == 'codex' and name in _CODEX_SETTINGS:
+                change = json.loads(path.read_text(encoding='utf-8'))
+                kind, owner = _CODEX_SETTINGS[name]
+                config = _codex_home() / 'config.toml'
+                if (not isinstance(change, dict) or (change.get('schema_version') != name + '.v1'
+                        and change not in (manifest or {}).get('system_env_changes', []))
+                        or change.get('kind') != kind or change.get('path') != config.as_posix()
+                        or not _is_allowed_codex_config_path(config) or
+                        (kind == 'codex_project_trust' and not Path(change.get('project_path') or '').is_absolute())
+                        or owner(change, apply_changes=False) is None):
+                    continue
+                changes.append(change)
+            elif name != 'hook-dispatcher-assets':  # The scoped dispatcher item already verified its bytes.
+                continue
+        except (OSError, ValueError, TypeError):
+            continue  # The missing-inventory check keeps this unconfirmed path for review.
+        confirmed.add(path)
+    return {'system_env_changes': changes}, confirmed
+
+
+def _manifest_settings(platform: str, manifest: dict, support: list[dict], record: dict | None) -> dict:
+    """Restore attributed sidecar changes that the inventory writer did not incorporate."""
+    from install_state_writer import merge_system_env_changes
+    receipts = [item for item in support if item['target_name'] in {*_CODEX_SETTINGS, 'source-repo-hook-path-record'}
+                and item['action'] == 'would-remove']
+    recovered, valid = _retired_host_evidence(platform, receipts, record, manifest)
+    for item in receipts:
+        if Path(item['path']) not in valid:
+            item.update(action='manual-review', reason='invalid-setting-change-record', removal_incomplete=True)
+    return dict(manifest, system_env_changes=merge_system_env_changes(
+        recovered['system_env_changes'], manifest.get('system_env_changes', [])))
+
+
+def _apply_remove_action(item: dict[str, Any], path: Path, *, reason: str,
+                         backup_path: Path | None = None) -> dict[str, Any]:
+    if backup_path is not None:
+        item['backup_path'] = backup_path.as_posix()
     _remove_path(path)
-    item.update(action="removed", reason=reason)
+    item.update(action="quarantined-removed" if backup_path is not None else "removed", reason=reason)
     return item
 
 
@@ -848,9 +965,7 @@ def _quarantine_then_remove(
         shutil.copytree(path, target_backup, symlinks=True)
     else:
         shutil.copy2(path, target_backup)
-    _remove_path(path)
-    item.update(action="quarantined-removed", reason=reason, backup_path=target_backup.as_posix())
-    return item
+    return _apply_remove_action(item, path, reason=reason, backup_path=target_backup)
 
 
 def _target_item(
@@ -903,7 +1018,7 @@ def _target_item(
 
     if classification.ownership in REMOVABLE_TARGET_OWNERSHIPS | {OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED}:
         try:
-            shared = _platforms_referencing_target(path, current_manifest=manifest_path, current_platform=platform)
+            shared = platforms_referencing_target(path, current_manifest=manifest_path, current_platform=platform)
         except (OSError, ValueError) as error:
             item.update(action='manual-review', reason='other-host-references-unresolved', detail=str(error))
             return item
@@ -970,8 +1085,14 @@ def _support_artifact_item(
     if not _is_allowed_support_path(path):
         item.update(action="manual-review", reason="outside-ghost-alice-root")
         return item
+    if _linked_under(path.parent, _ghost_alice_root()):
+        item.update(action='manual-review', reason='linked-support-parent', removal_incomplete=True)
+        return item
     if not path.exists() and not path.is_symlink():
         item.update(action="missing", reason="support-artifact-absent")
+        return item
+    if name in _SUPPORT_RECORD_FILES and (not path.is_file() or path.is_symlink() or _is_junction(path)):
+        item.update(action='manual-review', reason='support-artifact-not-regular-file', removal_incomplete=True)
         return item
     if shared_platforms:
         item.update(action="manual-review", reason="shared-support-in-use-by-other-platform",
@@ -991,14 +1112,18 @@ def _support_artifact_item(
     return item
 
 
-def _apply_support_artifact_item(item):
+_SUPPORT_RECORD_FILES = {'install-state-manifest', 'install-record', 'install-state-events',
+                         'source-repo-hook-path-record', *_CODEX_SETTINGS}
+
+
+def _apply_support_artifact_item(item, *, state_path: Path | None = None):
     if item.get('target_name') == 'runtime-core' and item.get('recorded_runtime') and item.get('action') in {'would-remove', 'missing'}:
-        item.update(_runtime_artifact_item(Path(item['path']), item['platform'], other_consumers=item.get('shared_platforms', [])))
+        item.update(_runtime_artifact_item(Path(item['path']), item['platform'], state_path=state_path))
     if item.get('action') not in {'would-remove', 'would-quarantine-remove'}:
         return
     path = Path(item['path'])
     if item['target_name'] == 'management-command':
-        item.update(_management_command_item(path, item['platform'], other_consumers=item.get('shared_platforms', [])))
+        item.update(_management_command_item(path, item['platform'], state_path=state_path))
         if item['action'] != 'would-remove':
             return
     if not _is_allowed_support_path(path) and not item.get('recorded_runtime'):
@@ -1006,6 +1131,12 @@ def _apply_support_artifact_item(item):
         return
     if not path.exists() and not path.is_symlink():
         item.update(action='missing', reason='support-artifact-absent')
+        return
+    if item['target_name'] in _SUPPORT_RECORD_FILES:
+        item.update(_support_artifact_item(item['target_name'], path))
+        if item['action'] == 'would-remove':
+            path.unlink()
+            item.update(action='removed', reason='trace-backed-support-artifact')
         return
     if item['action'] == 'would-quarantine-remove':
         junction, original_links = _recovery_layout(path)
@@ -1034,57 +1165,60 @@ def _apply_support_artifact_item(item):
                 item.update(action="manual-review", reason="recovery-link-time-not-preserved",
                             backup_path=target_backup.as_posix(), link_path=(path / relative).as_posix())
                 return
-        _remove_path(path)
-        item.update(action="quarantined-removed", reason="preserve-original-recovery-material",
-                    backup_path=target_backup.as_posix())
+        _apply_remove_action(item, path, reason="preserve-original-recovery-material", backup_path=target_backup)
         return
-    _apply_remove_action(item, path, reason="trace-backed-support-artifact")
+    if item['target_name'] == 'publish-rollbacks':
+        path.rmdir()  # The completed-journal owner has confirmed that this root is empty.
+        item.update(action='removed', reason='trace-backed-support-artifact')
+    else:
+        _apply_remove_action(item, path, reason="trace-backed-support-artifact")
 
 
-def _other_platform_install_states(manifest_path: Path, current_platform: str) -> list[str]:
-    """Platforms (other than current) that still have an install-state manifest.
-
-    A platform install-state manifest is exactly ``<platform>.json``; suffixed
-    sidecars such as ``<platform>-hook-feature-change.json`` are not manifests.
-    """
-    install_state_dir = manifest_path.parent
-    if not install_state_dir.is_dir():
-        return []
-    others: list[str] = []
-    for candidate in locations.install_state_manifests(install_state_dir):
-        if candidate == manifest_path:
-            continue
-        stem = candidate.stem
-        if stem != current_platform:
-            others.append(stem)
-    return others
-
-
-def _management_command_item(path: Path, platform: str, *, other_consumers: list[str]) -> dict:
+def _management_command_item(path: Path, platform: str, *, state_path: Path | None = None) -> dict:
     """Use this command's recorded owners and bytes before removing its registered executable."""
     root = _ghost_alice_root()
     entry = (installed_payload.read(root) or {}).get('targets', {}).get(str(path), {})
+    try:
+        actual = platforms_referencing_target(path,
+            current_manifest=state_path or root / 'install-state' / f'{platform}.json', current_platform=platform)
+    except (OSError, ValueError) as error:
+        return dict(kind='support-artifact', target_name='management-command', path=str(path), platform=platform,
+                    action='manual-review', reason='other-host-references-unresolved', detail=str(error))
     item = _support_artifact_item('management-command', path,
-        shared_platforms=sorted((set(entry.get('used_by', [])) - {platform}) | set(other_consumers)))
+        shared_platforms=sorted((set(entry.get('used_by', [])) - {platform}) | set(actual)))
     item.update(platform=platform, provider=entry.get('provider', 'core'))
     if path.parent != root / 'bin' or entry.get('kind') != 'command':
         item.update(action='manual-review', reason='management-command-record-mismatch')
     elif item['action'] == 'would-remove' and any(content_digest.compare(entry, path).values()):
         item.update(action='manual-review', reason='management-command-externally-modified')
+    elif item.get('shared_platforms'):
+        item['action'] = 'would-release-reference'
     return item
 
 
 def _apply_managed_support(item: dict, platform: str, state_path: Path) -> None:
     """Apply one support removal and release only the references its result confirms."""
     root = _ghost_alice_root()
-    targets = (installed_payload.read(root) or {}).get('targets', {}) if item['target_name'] == 'runtime-core' else {}
-    _apply_support_artifact_item(item)
-    if item['target_name'] == 'management-command' and (item['action'] in {'removed', 'missing'} or
-            item.get('reason') == 'shared-support-in-use-by-other-platform'):
+    if item['target_name'] == 'hook-dispatcher-assets':
+        if item['action'] == 'would-remove':
+            item.update(_dispatcher_item(platform, [], require_detached=True))
+            if item['action'] == 'would-remove':
+                dispatcher = Path(item['path'])
+                dispatcher.unlink()
+                item.update(action='removed', reason='trace-backed-support-artifact')
+                try:
+                    dispatcher.parent.rmdir()
+                except OSError as error:
+                    if error.errno not in {errno.ENOTEMPTY, errno.EEXIST}:
+                        raise
+        return
+    targets = _read_removal_targets()[1] if item['target_name'] == 'runtime-core' else {}
+    _apply_support_artifact_item(item, state_path=state_path)
+    releasing = item['action'] == 'would-release-reference'
+    if item['target_name'] == 'management-command' and item['action'] in {'removed', 'missing', 'would-release-reference'}:
         release_target_records(root=root, platform=platform, destination=Path(item['path']),
                                kind='command', provider=item['provider'], state_path=state_path)
-    if item['target_name'] == 'runtime-core' and (item['action'] in {'removed', 'missing'} or
-            item.get('reason') == 'shared-runtime-in-use-by-other-platform'):
+    if item['target_name'] == 'runtime-core' and item['action'] in {'removed', 'missing', 'would-release-reference'}:
         for dest, entry in targets.items():
             if (entry.get('kind') == 'runtime' and platform in entry.get('used_by', [])
                     and _is_under(Path(dest), Path(item['path']))):
@@ -1098,9 +1232,11 @@ def _apply_managed_support(item: dict, platform: str, state_path: Path) -> None:
             except OSError:
                 break
             parent = parent.parent
+    if releasing:
+        item.update(action='reference-released', file_state='present' if os.path.lexists(item['path']) else 'absent')
 
 
-def _runtime_artifact_item(path: Path, platform: str, *, other_consumers: list[str]) -> dict:
+def _runtime_artifact_item(path: Path, platform: str, *, state_path: Path | None = None) -> dict:
     """Classify one recorded runtime destination through the existing baseline cleanup owner."""
     import install_transaction
     record = installed_payload.read(_ghost_alice_root()) or {}
@@ -1109,22 +1245,231 @@ def _runtime_artifact_item(path: Path, platform: str, *, other_consumers: list[s
                 recorded_runtime=True)
     if entry.get('kind') != 'runtime' or entry.get('provider') != 'core' or platform not in entry.get('used_by', []):
         return dict(item, action='manual-review', reason='runtime-record-mismatch')
-    others = sorted((set(entry['used_by']) - {platform}) | set(other_consumers))
+    try:
+        actual = platforms_referencing_target(path,
+            current_manifest=state_path or _ghost_alice_root() / 'install-state' / f'{platform}.json',
+            current_platform=platform, source_tree=True)
+    except (OSError, ValueError) as error:
+        return dict(item, action='manual-review', reason='other-host-references-unresolved', detail=str(error))
+    others = sorted((set(entry['used_by']) - {platform}) | set(actual))
     if others:
-        return dict(item, action='manual-review', reason='shared-runtime-in-use-by-other-platform', shared_platforms=others)
+        return dict(item, action='would-release-reference', reason='shared-runtime-in-use-by-other-platform', shared_platforms=others)
     if not os.path.lexists(path):
         return dict(item, action='missing', reason='support-artifact-absent')
-    reason = install_transaction._original_cleanup_reason(path, {'dest': str(path), 'kind': 'runtime'}, record)
+    if entry.get('mode') == 'copy' and entry.get('baseline') in ('recorded', 'migrated') and isinstance(entry.get('files'), dict):
+        reason = install_transaction.recorded_copy_cleanup_reason(path, entry, allow_missing=True)
+    else:
+        reason = install_transaction._original_cleanup_reason(path, {'dest': str(path), 'kind': 'runtime'}, record)
     return dict(item, action='manual-review' if reason else 'would-remove', reason=reason or 'recorded-runtime')
 
 
-def _runtime_artifact_items(platform: str, others: list[str]) -> list[dict]:
-    record = installed_payload.read(_ghost_alice_root())
+def _release_shared_support(items: list[dict], platform: str, state_path: Path, *, selected: bool = False) -> list[dict]:
+    """Finalize command files, remaining shared references and discovery records together.
+
+    Earlier file removal and hook/service detach stay completed. A normal failure in
+    this final boundary restores only the command, binding and records needed to retry.
+    Shared-only release keeps its existing committed-journal cleanup semantics.
+    """
+    import install_transaction
+    root = _ghost_alice_root()
+    commands = [item for item in items if item.get('target_name') == 'management-command'
+                and item.get('action') in {'would-remove', 'missing', 'would-release-reference'}]
+    references = [item for item in items if item.get('target_name') == 'runtime-core'
+                  and item.get('action') == 'would-release-reference']
+    records = [item for item in items if item.get('target_name') in {'install-state-manifest', 'install-record'}
+               and item.get('action') == 'would-remove']
+    if not commands and not references and not records:
+        return []
+    pending = [(item, dict(item)) for item in [*commands, *references, *records]]
+    physical_commands = []
+    journal = None
+    try:
+        for _, candidate in pending:
+            if candidate.get('target_name') != 'management-command':
+                continue
+            candidate.update(_management_command_item(Path(candidate['path']), platform, state_path=state_path))
+            if candidate['action'] == 'manual-review':
+                raise ValueError(f"{candidate['path']}: {candidate['reason']}")
+            if candidate['action'] == 'would-remove':
+                path = Path(candidate['path'])
+                if path.is_symlink() or _is_junction(path) or not path.is_file():
+                    raise ValueError(f'{path}: management-command-not-regular-file')
+                physical_commands.append(path)
+        final_cleanup = bool(physical_commands) or not any(
+            candidate.get('action') == 'would-release-reference' for _, candidate in pending)
+        with install_transaction.record_update(root, cleanup_on_commit=final_cleanup) as journal:
+            for record_item in records:
+                file = Path(record_item['path'])
+                if file.name == installed_payload.PENDING_SOURCE_FILENAME:
+                    installed_payload.preserve_pending_source(file, journal)
+            for path in physical_commands:
+                journal.preserve_metadata(path, restore_if_absent=True)
+            journal.preserve_metadata(state_path)
+            snapshot = root / 'pending-merges' / platform / 'snapshot.json'
+            if snapshot.exists():
+                journal.preserve_metadata(snapshot)
+            for _, candidate in pending:
+                if selected and candidate.get('target_name') == 'install-state-manifest':
+                    manifest, error = _load_manifest(state_path)
+                    if error and error != 'manifest-missing':
+                        raise ValueError(f'{state_path}: {error}')
+                    if manifest and manifest.get('targets'):
+                        candidate.update(action='manual-review', reason='install-state-targets-remain', removal_incomplete=True)
+                        continue
+                if candidate.get('target_name') in {'install-state-manifest', 'install-record'}:
+                    _apply_support_artifact_item(candidate)
+                else:
+                    _apply_managed_support(candidate, platform, state_path)
+                    if candidate.get('action') not in {'removed', 'missing', 'reference-released'}:
+                        raise ValueError(f"{candidate['path']}: {candidate.get('reason', 'support-removal-unresolved')}")
+            record = installed_payload.read(root)
+            if record and not record.get('targets') and not record.get('service') and record.get('installer', {}).get('active_root'):
+                installed_payload.update(root, {'installer': {'active_root': None}}, journal=journal)
+        for item, completed in pending:
+            item.update(completed)
+    except (OSError, ValueError, RuntimeError) as error:
+        from installer.report import exception_lines
+        for item, _ in pending:
+            item.update(action='manual-review', reason='support-reference-update-failed',
+                        errors=exception_lines(error), removal_incomplete=True,
+                        file_state='present' if os.path.lexists(item['path']) else 'absent')
+        if journal is not None and os.path.lexists(journal.folder):
+            return [dict(kind='support-artifact', target_name='publish-rollbacks', path=str(journal.folder),
+                        action='manual-review', reason='support-reference-recovery-retained',
+                        removal_incomplete=True, file_state='present')]
+        return []
+    if final_cleanup:
+        return _retry_completed_reference_cleanup(platform, state_path, apply_changes=True)
+    # This shared-only journal protects metadata only, and its transaction is committed.
+    # Keep cleanup outside the restore boundary and select only this journal:
+    # final selected removal must not broaden into unrelated old-record cleanup.
+    outcome = _completed_reference_cleanup_item(journal, apply_changes=True)
+    return [outcome] if outcome.get('removal_incomplete') else []
+
+
+def _completed_reference_cleanup_item(journal, *, apply_changes: bool) -> dict:
+    """Apply the existing cleanup owner to one committed reference journal and report its result."""
+    import install_transaction
+    outcome = dict(kind='support-artifact', target_name='publish-rollbacks', path=str(journal.folder),
+                   action='would-remove', reason='completed-reference-journal-cleanup')
+    if not apply_changes:
+        return outcome
+    try:
+        retained = install_transaction.cleanup_completed(_ghost_alice_root(), txids=(journal.txid,))
+        if retained:
+            outcome.update(action='manual-review', reason='completed-reference-journal-cleanup-pending',
+                           retained_originals=list(retained), detail='; '.join(retained), removal_incomplete=True)
+        else:
+            outcome.update(action='removed', file_state='absent')
+    except (OSError, ValueError, RuntimeError) as error:
+        from installer.report import exception_lines
+        outcome.update(action='manual-review', reason='completed-reference-journal-cleanup-failed',
+                       errors=exception_lines(error), removal_incomplete=True,
+                       file_state='present' if os.path.lexists(journal.folder) else 'absent')
+    return outcome
+
+
+def _read_removal_targets() -> tuple[dict | None, dict, list[dict]]:
+    """Use the record owner's validation before any removal reader interprets ownership."""
+    root = _ghost_alice_root()
+    record = installed_payload.read(root)
+    targets, invalid, causes = {}, [], []
+    for path, raw in (record or {}).get('targets', {}).items():
+        try:
+            targets[path] = installed_payload._check_entry(path, raw)
+        except installed_payload.RecordError as error:
+            causes.append(str(error))
+            kind = raw.get('kind') if isinstance(raw, dict) else None
+            invalid.append(dict(kind='support-artifact',
+                target_name={'command': 'management-command', 'runtime': 'runtime-core'}.get(kind, 'installed-target'),
+                path=path, action='manual-review', reason='installed-target-ownership-unresolved',
+                removal_incomplete=True, file_state='present' if os.path.lexists(path) else 'absent'))
+    if causes:
+        invalid.insert(0, dict(kind='support-artifact', target_name='install-record',
+            path=str(installed_payload.read_path(root)), action='manual-review', reason='invalid-installed-target',
+            errors=causes, removal_incomplete=True))
+    return record, targets, invalid
+
+
+def _retry_completed_reference_cleanup(platform: str, state_path: Path, *, apply_changes: bool) -> list[dict]:
+    """Clean completed reference transactions identified by their exact retired host inventory.
+
+    The final inventory deletion belongs to the reference transaction. Its journal
+    keeps that identity if cleanup has already removed the saved inventory. This
+    never authorizes restoring committed references or cleaning another publication.
+    """
+    import addon_registry
+    import install_hooks
+    import install_transaction
+    root = _ghost_alice_root()
+    if os.path.lexists(state_path):
+        return []
+    _, targets, invalid = _read_removal_targets()
+    if invalid:
+        return []  # The normal removal path reports invalid ownership and observes hooks.
+    if any(platform in entry['used_by'] for entry in targets.values()):
+        return []
+    records, skipped = addon_registry.scan_records(addons_dir=root / 'addons' / platform)
+    if records or skipped:
+        return []
+    rollbacks = install_transaction.rollbacks_root(root)
+    if not rollbacks.is_dir() or rollbacks.is_symlink():
+        return []
+    expected = str(state_path.resolve())
+    allowed = {expected, str((root / 'pending-merges' / platform / 'snapshot.json').resolve())}
+    command_dir = root.resolve() / 'bin'
+    candidates = []
+    for folder in sorted(rollbacks.iterdir()):
+        try:
+            journal = install_transaction.Journal.load(root, folder.name)
+        except install_transaction.InstallTransactionError:
+            continue
+        if (journal.phase not in install_transaction.FINISHED_PHASES or journal.data.get('host') not in {platform, 'installer'}
+                or journal.data.get('targets')
+                or journal.data.get('participants') or journal.data.get('source_cleanup') is not None
+                or journal.data.get('preparation_dir') is not None):
+            continue
+        metadata = journal.data.get('metadata_records', [])
+        inventory = [item for item in metadata if item['path'] == expected and item['copy'] is not None]
+        # Only final retirement records a saved regular command directly in bin with restore_if_absent.
+        command_rows = [item for item in metadata if Path(item['path']).parent == command_dir
+                        and item.get('restore_if_absent') and item['copy'] is not None]
+        commands = {item['path'] for item in command_rows}
+        if len(inventory) != 1 or any(item['path'] not in allowed and item['path'] not in commands for item in metadata):
+            continue
+        if (command_rows or journal.phase == 'restored') and journal.data.get('host') != 'installer':
+            continue
+        removed = metadata if command_rows and journal.phase == 'done' else command_rows
+        if any(os.path.lexists(item['path']) for item in removed):
+            continue
+        inventory_commands = {Path(path) for path in commands} | {root / 'bin' / Path(path).name for path in commands}
+        saved, error = _load_manifest(folder / inventory[0]['copy'])
+        if error == 'manifest-missing' and journal.phase == 'done':
+            pass  # Cleanup may already have deleted this copy; its exact inventory path retains the identity.
+        elif (error or saved.get('platform') != platform or not isinstance(saved.get('targets'), list)
+              or any(not isinstance(row, dict) or not isinstance(row.get('dest_path'), str)
+                     or Path(row['dest_path']) not in inventory_commands for row in saved['targets'])):
+            continue
+        candidates.append(journal)
+    if not candidates:
+        return []
+    try:
+        _, detached, _ = install_hooks._read_hook_references(platform)
+    except (OSError, ValueError, UnicodeError):
+        return []
+    if not detached:
+        return []
+    return [_completed_reference_cleanup_item(journal, apply_changes=apply_changes) for journal in candidates]
+
+
+def _runtime_artifact_items(platform: str, others: list[str], *, state_path: Path | None = None,
+                            observation: tuple | None = None) -> list[dict]:
+    record, targets, invalid = _read_removal_targets() if observation is None else observation
     if record is not None:
-        runtimes = {path: entry for path, entry in record.get('targets', {}).items()
+        runtimes = {path: entry for path, entry in targets.items()
                     if entry.get('kind') == 'runtime' and entry.get('provider') == 'core'}
-        return [_runtime_artifact_item(Path(path), platform, other_consumers=others)
-                for path, entry in runtimes.items() if platform in entry.get('used_by', [])]
+        return [*invalid, *(_runtime_artifact_item(Path(path), platform, state_path=state_path)
+                for path, entry in runtimes.items() if platform in entry['used_by'])]
     # Only recordless installations use the older default support trace. An empty
     # recorded runtime set also represents a removal that already released its rows.
     item = _support_artifact_item('runtime-core', _ghost_alice_root() / 'runtime', shared_platforms=others)
@@ -1133,30 +1478,79 @@ def _runtime_artifact_items(platform: str, others: list[str]) -> list[dict]:
     return [item]
 
 
-def retire_unused_management(platform: str, state_path: Path) -> list[dict]:
+def retire_unused_management(platform: str, state_path: Path, *, apply_changes: bool = True,
+                             backup_sources=None) -> list[dict]:
     """After selected removal, retire shared management only when no current consumer needs it."""
     root = _ghost_alice_root()
-    record = installed_payload.read(root) or {}
-    if not record or record.get('service') or any(platform in entry.get('used_by', []) and
-            (entry.get('provider') != 'core' or entry.get('kind') not in {'runtime', 'command'})
-            for entry in record.get('targets', {}).values()):
-        return []
-    others = _platforms_referencing_target(None, current_manifest=state_path, current_platform=platform,
-                                         include_current_addons=True)
-    if platform in others:
-        return []
+    record, targets, invalid = _read_removal_targets()
+    record = record or {}
     manifest, error = _load_manifest(state_path)
-    if error:
+    if invalid:
+        retained = [*invalid, _support_artifact_item('install-state-manifest', state_path)]
+        retained.extend(dict(kind='support-artifact',
+            target_name='management-command' if entry['kind'] == 'command' else 'runtime-core', path=path,
+            action='manual-review', reason='other-host-references-unresolved', removal_incomplete=True)
+            for path, entry in targets.items() if entry.get('provider') == 'core'
+            and entry['kind'] in {'runtime', 'command'} and platform in entry['used_by'])
+        for item in retained:
+            if item.get('action', '').startswith('would-'):
+                item.update(action='manual-review', reason='other-host-references-unresolved', removal_incomplete=True)
+        return retained
+    missing = error == 'manifest-missing'
+    if not missing and (not record or record.get('service') or any(platform in entry['used_by'] and
+            (entry.get('provider') != 'core' or entry.get('kind') not in {'runtime', 'command'})
+            for entry in targets.values())):
+        return []
+    others = platforms_referencing_target(None, current_manifest=state_path, current_platform=platform,
+                                         include_current_addons=True)
+    if not missing and platform in others:
+        return []
+    if error and not missing:
         raise ValueError(error)
-    settings = _source_repo_hook_items(manifest or {}, apply_changes=True, other_platforms=others)
-    if any(item.get('action') == 'manual-review' or item.get('errors') for item in settings):
-        for item in settings:
-            item['removal_incomplete'] = True
-        return settings
-    items = _runtime_artifact_items(platform, others)
-    items.extend(_management_command_item(Path(path), platform, other_consumers=others) for path, entry in record.get('targets', {}).items()
-                 if entry.get('kind') == 'command' and entry.get('provider') == 'core' and platform in entry.get('used_by', []))
+    if manifest is not None:
+        retiring = {path for path, entry in targets.items() if platform in entry['used_by']
+                    and entry['provider'] == 'core' and entry['kind'] in {'runtime', 'command'}}
+        if any(not isinstance(row, dict) or not isinstance(row.get('dest_path'), str) or row['dest_path'] not in retiring
+               for row in manifest.get('targets', [])):
+            state = _support_artifact_item('install-state-manifest', state_path)
+            state.update(action='manual-review', reason='install-state-targets-remain', removal_incomplete=True)
+            return [state]
+    support = _support_artifact_items(platform, state_path, observation=(record, targets, invalid))
+    retry = []
+    if missing:
+        retry = _retry_completed_reference_cleanup(platform, state_path, apply_changes=apply_changes)
+        confirmed = set()
+        if platform not in others and not record.get('service') and not any(platform in entry['used_by'] for entry in targets.values()):
+            manifest, confirmed = _retired_host_evidence(platform, support, record)
+        remaining = _missing_inventory_residue(platform, record, targets, support, retry, selected=True, confirmed=confirmed)
+        if remaining or not confirmed:
+            return [*retry, *remaining]
+        items = [item for item in support if Path(item['path']) in confirmed]
+    else:
+        items = [item for item in support if item['target_name'] in {
+            'pending-merges', 'hook-dispatcher-assets', 'source-repo-hook-path-record', 'install-state-events',
+            'codex-hook-feature-change', 'codex-project-trust-change', 'runtime-core', 'management-command'}]
+        manifest = _manifest_settings(platform, manifest, items, record)
+    settings = _codex_settings_items(platform, manifest, apply_changes=apply_changes, backup_sources=backup_sources)
+    settings.extend(_source_repo_hook_items(manifest, apply_changes=apply_changes, other_platforms=others))
+    if not apply_changes or any(item.get('action') == 'manual-review' or item.get('errors') for item in settings):
+        items.append(_support_artifact_item('install-state-manifest', state_path))
+        if record.get('installer', {}).get('active_root'):
+            items.append(dict(kind='install-binding', path=str(installed_payload.read_path(root)),
+                              action='manual-review', reason='active-installer-binding-retained'))
+        for item in [*settings, *items]:
+            if item.get('action', '').startswith('would-'):
+                item.update(action='manual-review', reason='earlier-removal-unresolved')
+            if item.get('action') == 'manual-review':
+                item['removal_incomplete'] = True
+        return [*settings, *items]
+    state = _support_artifact_item('install-state-manifest', state_path)
     for item in items:
+        if item.get('action') == 'manual-review' and not item.get('shared_platforms'):
+            item['removal_incomplete'] = True
+    for item in items:
+        if item.get('target_name') == 'management-command' or item.get('action') in {'would-release-reference', 'manual-review'}:
+            continue
         if any(previous.get('removal_incomplete') for previous in items):
             item.update(action='manual-review', reason='file-removal-unresolved', removal_incomplete=True)
             continue
@@ -1167,55 +1561,181 @@ def retire_unused_management(platform: str, state_path: Path) -> list[dict]:
                         detail=str(error), removal_incomplete=True)
         if item['action'] == 'manual-review' and not item.get('shared_platforms'):
             item['removal_incomplete'] = True
-    record = installed_payload.read(root) or {}
-    if not any(item.get('removal_incomplete') for item in items):
-        if not others and not record.get('targets') and record.get('installer', {}).get('active_root'):
-            installed_payload.update(root, {'installer': {'active_root': None}})
-        # This command has detached integrations and released the host's final targets.
-        # An older empty inventory alone does not establish those facts for another host.
-        if manifest is not None and not manifest.get('targets'):
-            state = _support_artifact_item('install-state-manifest', state_path)
-            _apply_support_artifact_item(state)
-            items.append(state)
-    return [*settings, *items]
+    if any(item.get('removal_incomplete') for item in items):
+        for item in [*items, state]:
+            if item.get('action') in {'would-remove', 'would-release-reference'}:
+                item.update(action='manual-review', reason='file-removal-unresolved', removal_incomplete=True)
+        reference_cleanup = []
+    else:
+        reference_cleanup = _release_shared_support([*items, state], platform, state_path, selected=True)
+    if state.get('action') != 'missing':
+        items.append(state)
+    items.extend(reference_cleanup)
+    return [*retry, *settings, *items]
 
 
-def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
-    manifest = args.install_state_manifest
+def _empty_publish_folders(path: Path, retiring: set[Path]) -> list[Path] | None:
+    """Recognize empty transaction directories besides the journals already selected for cleanup."""
+    if path.is_symlink() or _is_junction(path) or not path.is_dir():
+        return None
+    folders = [folder for folder in path.iterdir() if folder not in retiring]
+    if all(re.fullmatch(r'[0-9]{8}T[0-9]{12}Z-[0-9]+-[0-9a-f]{8}', folder.name)
+           and not folder.is_symlink() and not _is_junction(folder) and folder.is_dir()
+           and not any(folder.iterdir()) for folder in folders):
+        return folders
+    return None
+
+
+def _missing_inventory_residue(platform: str, record: dict | None, targets: dict, items: list[dict],
+                               retry: list[dict], *, selected: bool = False,
+                               confirmed: set[Path] = frozenset()) -> list[dict]:
+    """Report this host's remaining references or unconfirmed ownership when its inventory is absent."""
+    import install_hooks
+    record = record or {}
+    owned = {Path(path) for path, entry in targets.items() if platform in entry['used_by']}
+    listed = {Path(item['path']) for item in items if item.get('path')}
+    for path in sorted(owned - listed):
+        items.append(dict(kind='support-artifact', target_name='installed-target', path=str(path),
+                          action='manual-review', reason='host-install-reference-remains'))
+    for name in locations.MANAGEMENT_COMMANDS:
+        path = _ghost_alice_root() / 'bin' / name
+        if os.path.lexists(path) and str(path) not in targets and path not in listed:
+            items.append(dict(kind='support-artifact', target_name='management-command', path=str(path),
+                              action='manual-review', reason='management-command-record-mismatch'))
+    retiring = {Path(item['path']) for item in retry if item['action'] == 'would-remove'}
+    inactive = not targets and not record.get('service') and not record.get('installer', {}).get('active_root')
+    # Removing skills leaves a separately registered gateway and the records needed to manage it.
+    service_root = None
+    if selected and record.get('service'):
+        try:
+            service_root = Path(installed_payload._check_service(record['service'])['runtime_root'])
+        except installed_payload.RecordError:
+            pass
+    remaining = []
+    for item in items:
+        action = item.get('action', '')
+        if service_root is not None and action in ('would-remove', 'would-quarantine-remove'):
+            if item['target_name'] in ('install-record', 'publish-rollbacks'):
+                continue
+            if item.get('recorded_runtime') and Path(item['path']).is_relative_to(service_root):
+                continue
+        if Path(item['path']) not in owned:
+            if Path(item['path']) in confirmed:
+                continue
+            if action == 'missing' or item.get('reason') in {'dispatcher-in-use',
+                    'shared-support-in-use-by-other-platform', 'shared-runtime-in-use-by-other-platform'}:
+                continue
+            if item.get('target_name') == 'install-record' and inactive and action == 'would-remove':
+                item.update(action='unchanged', reason='inactive-install-record')
+                continue
+            if item.get('target_name') == 'publish-rollbacks' and action == 'would-quarantine-remove':
+                folders = _empty_publish_folders(Path(item['path']), retiring)
+                if folders is not None:
+                    if not folders:
+                        item.update(action='would-remove', reason='trace-backed-support-artifact')
+                    continue
+        if action != 'manual-review':
+            item.update(action='manual-review', reason='install-state-unavailable-recovery-retained')
+        item['removal_incomplete'] = True
+        remaining.append(item)
+    try:
+        _, detached, _ = install_hooks._read_hook_references(platform)
+    except (OSError, ValueError, UnicodeError) as error:
+        detached, errors = False, [str(error)]
+    else:
+        errors = []
+    if not detached:
+        hooks = dict(kind='hook-config', path=str(install_hooks.PLATFORMS[platform]['hook_file']()),
+                     action='manual-review', reason='hook-detach-unresolved', errors=errors, removal_incomplete=True)
+        items.append(hooks)
+        remaining.append(hooks)
+    return remaining
+
+
+def _installed_dispatcher_matches(path: Path, platform: str) -> bool:
+    import install_hooks
+    import install_transaction
+    from installer import source
+    record = installed_payload.read(_ghost_alice_root()) or {}
+    package = record.get('installer', {}).get('active_root')
+    if not package:
+        package = install_hooks.observed_installation(platform, hook_fallback=False).get('core_source_root')
+    if package:
+        folder = Path(package).parent
+        if Path(package).name == 'core' and _same_path(folder.parent, _ghost_alice_root() / 'versions'):
+            version = folder / 'version.json'
+            if _linked_under(version, _ghost_alice_root()):
+                return False
+            files = source._version_metadata(folder)['files']
+            return files.get('core/_shared/' + path.name) == install_transaction._file_hash(path)
+    return install_hooks._hook_dispatcher_current(install_hooks._resolve_source_hook_dispatcher(), path)
+
+
+def _dispatcher_item(platform: str, others: list[str], *, require_detached: bool = False) -> dict:
+    import install_hooks
+    path = install_hooks._resolve_installed_hook_dispatcher()
+    item = _support_artifact_item('hook-dispatcher-assets', path, shared_platforms=others)
+    if item['action'] != 'would-remove':
+        return item
+    try:
+        if not path.is_file() or _linked_under(path, _ghost_alice_root()) or not _installed_dispatcher_matches(path, platform):
+            item.update(action='manual-review', reason='dispatcher-ownership-unresolved', removal_incomplete=True)
+            return item
+        for host in locations.PLATFORMS:
+            settings, detached, _ = install_hooks._read_hook_references(host, peer=host != platform)
+            registrations = settings.get('hooks', {})
+            if host == platform and not detached:
+                if require_detached:
+                    item.update(action='manual-review', reason='hook-detach-unresolved', removal_incomplete=True)
+                    return item
+                install_hooks._remove_managed_hook_entries(host, registrations)
+            if any(path.as_posix() in command.replace('\\', '/') for command in install_hooks._hook_commands(registrations)):
+                item.update(action='unchanged', reason='dispatcher-in-use')
+                return item
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        item.update(action='manual-review', reason='dispatcher-ownership-unresolved', errors=[str(error)], removal_incomplete=True)
+    return item
+
+
+def _support_artifact_items(platform: str, manifest: Path, *, observation: tuple | None = None) -> list[dict[str, Any]]:
     root = _ghost_alice_root()
     reference_error = None
     try:
-        others = _platforms_referencing_target(None, current_manifest=manifest, current_platform=args.platform)
+        others = platforms_referencing_target(None, current_manifest=manifest, current_platform=platform)
     except (OSError, ValueError) as error:
         others, reference_error = [], str(error)
+    observation = _read_removal_targets() if observation is None else observation
+    record, targets, _ = observation
     items = [
-        _support_artifact_item('pending-merges', root / 'pending-merges' / args.platform,
-                               recovery_platform=args.platform),
-        _support_artifact_item('hook-dispatcher-assets', root / 'hooks', shared_platforms=others),
+        _support_artifact_item('pending-merges', root / 'pending-merges' / platform,
+                               recovery_platform=platform),
+        _dispatcher_item(platform, others),
         _support_artifact_item('install-rollbacks', root / 'install-rollbacks',
-                               shared_platforms=others, recovery_platform=args.platform),
+                               shared_platforms=others, recovery_platform=platform),
         _support_artifact_item('publish-rollbacks', root / 'rollbacks',
-                               shared_platforms=others, recovery_platform=args.platform),
+                               shared_platforms=others, recovery_platform=platform),
         *(_support_artifact_item('install-record', root / name, shared_platforms=others)
-          for name in installed_payload.RECORD_FILENAMES),
+          for name in installed_payload.INSTALL_RECORD_FILES if os.path.lexists(root / name)),
         _support_artifact_item('source-repo-hook-path-record', manifest.parent / 'source-repo-hook-path.json',
                                shared_platforms=others),
-        _support_artifact_item('addon-sidecars', root / 'addons' / args.platform),
-        *_runtime_artifact_items(args.platform, others),
-        _support_artifact_item('install-state-events', manifest.parent / f'{args.platform}-events.jsonl'),
-        _support_artifact_item('codex-hook-feature-change', manifest.parent / f'{args.platform}-hook-feature-change.json'),
-        _support_artifact_item('codex-project-trust-change', manifest.parent / f'{args.platform}-project-trust-change.json'),
+        _support_artifact_item('addon-sidecars', root / 'addons' / platform),
+        *_runtime_artifact_items(platform, others, state_path=manifest, observation=observation),
+        _support_artifact_item('install-state-events', manifest.parent / f'{platform}-events.jsonl'),
+        _support_artifact_item('codex-hook-feature-change', manifest.parent / f'{platform}-hook-feature-change.json'),
+        _support_artifact_item('codex-project-trust-change', manifest.parent / f'{platform}-project-trust-change.json'),
         _support_artifact_item('install-state-manifest', manifest),
     ]
-    record = installed_payload.read(root) or {}
-    for path, entry in record.get('targets', {}).items():
+    for path, entry in targets.items():
         if (entry.get('kind') != 'command' or entry.get('provider') != 'core'
-                or args.platform not in entry.get('used_by', [])):
+                or platform not in entry.get('used_by', [])):
             continue
-        items.append(_management_command_item(Path(path), args.platform, other_consumers=others))
+        items.append(_management_command_item(Path(path), platform, state_path=manifest))
     for item in items:
+        if item['target_name'] == 'publish-rollbacks' and others:
+            # Even an absent root can be created by the final reference transaction.
+            item['shared_platforms'] = others
         if reference_error and item['target_name'] in {'hook-dispatcher-assets', 'install-rollbacks',
-                'publish-rollbacks', 'install-record', 'source-repo-hook-path-record', 'runtime-core'}:
+                'publish-rollbacks', 'install-record', 'source-repo-hook-path-record', 'runtime-core'} and not item.get('recorded_runtime') and not item.get('errors') and not item.get('removal_incomplete'):
             if item['action'] != 'missing':
                 item.update(action='manual-review', reason='other-host-references-unresolved', detail=reference_error)
         if item['target_name'] == 'runtime-core' and item.get('shared_platforms'):
@@ -1318,7 +1838,7 @@ def _retain_dependencies(items, targets, addons, hooks, *, applied, manifest_ava
     unknown = details.get('settings_state') in {'unreadable', 'unknown'}
     commands = details.get('remaining_commands', [])
     unresolved = [(record, result) for record, result in addons
-                  if result.get('errors') or any(item.get('action') in {'manual-review', 'refused'}
+                  if result.get('status') in {'partial', 'error'} or result.get('errors') or any(item.get('action') in {'manual-review', 'refused'}
                                                 for item in result['items'])]
     unreadable = any(record is None for record, _ in unresolved)
     names = {'_shared', 'merge-companion'} if unresolved else set()
@@ -1336,23 +1856,25 @@ def _retain_dependencies(items, targets, addons, hooks, *, applied, manifest_ava
             reason = 'hook-detach-unresolved'
         elif unreadable or target.get('target_name') in names or target.get('dest_path') in paths:
             reason = 'addon-removal-unresolved'
-        if reason and item.get('action') in {'would-remove', 'would-quarantine-remove'}:
+        if reason and item.get('action') in {'would-remove', 'would-quarantine-remove', 'would-release-reference'}:
             item.update(action='manual-review', reason=reason)
     for record, result in addons if hook_unresolved else unresolved:
         for item in result['items']:
-            if item.get('kind') == 'addon-target' and item.get('action') == 'would-remove':
+            if item.get('kind') == 'addon-target' and item.get('action') in {'would-remove', 'would-release-reference'}:
                 item.update(action='manual-review',
                             reason='hook-detach-unresolved' if hook_unresolved else 'addon-removal-unresolved')
     recovery_unresolved = [item for item in items if
         item.get('kind') == 'obsolete-copy' and item.get('action') == 'manual-review' or
         item.get('kind') == 'support-artifact' and (
-        item.get('errors') or item.get('reason') in {'recovery-junction-needs-review', 'recovery-link-time-not-preserved'})
+        item.get('errors') or item.get('pending_record_sources') or
+        item.get('reason') in {'recovery-junction-needs-review', 'recovery-link-time-not-preserved'})
     ]
     classification_unresolved = [item for item in items if
         item.get('kind') in {'install-target', 'install-state'} and (
             item.get('action') in {'manual-review', 'refused'} or item.get('errors')) or
-        item.get('kind') == 'support-artifact' and (item.get('reason') == 'other-host-references-unresolved' or
-            item.get('target_name') in {'management-command', 'runtime-core'} and item.get('action') == 'manual-review' and
+        item.get('kind') == 'support-artifact' and (item.get('reason') in {
+            'other-host-references-unresolved', 'invalid-setting-change-record', 'support-artifact-not-regular-file'} or
+            item.get('target_name') in {'management-command', 'runtime-core', 'hook-dispatcher-assets'} and item.get('action') == 'manual-review' and
             not item.get('shared_platforms'))
     ]
     for item in [*recovery_unresolved, *classification_unresolved]:
@@ -1365,20 +1887,20 @@ def _retain_dependencies(items, targets, addons, hooks, *, applied, manifest_ava
                         and (item.get('action') == 'manual-review' or item.get('errors'))}
     effect_errors = any(item.get('errors') for item in items)
     for item in items:
-        if item.get('kind') != 'support-artifact' or item.get('action') not in {'would-remove', 'would-quarantine-remove'}:
+        if item.get('kind') != 'support-artifact' or (
+                item.get('action') not in {'would-remove', 'would-quarantine-remove', 'would-release-reference'}):
             continue
-        reason = ('install-state-unavailable-recovery-retained' if not manifest_available else
-                  'hook-detach-unresolved' if hook_unresolved else
+        reason = ('hook-detach-unresolved' if hook_unresolved else
                   'addon-removal-unresolved' if unresolved else None)
         if item.get('target_name') == 'install-state-events' and manifest_available:
             reason = None
         if recovery_unresolved and (item.get('target_name') in {
-                'install-state-manifest', 'install-record', 'pending-merges'} or any(
+                'install-state-manifest', 'install-record', 'pending-merges', 'management-command', 'runtime-core'} or any(
                 pending.get('path') and _is_under(Path(pending['path']), Path(item['path']))
                 for pending in recovery_unresolved)):
             reason = 'recovery-removal-pending'
         if item.get('target_name') in retained_records or (
-                retained_records and item.get('target_name') == 'install-state-manifest'):
+                retained_records and item.get('target_name') in {'install-state-manifest', 'management-command', 'runtime-core'}):
             reason = 'config-restoration-unresolved'
         if (effect_errors or classification_unresolved) and item.get('target_name') in {
                 'install-state-manifest', 'install-record', 'pending-merges', 'addon-sidecars', 'management-command', 'runtime-core'}:
@@ -1393,10 +1915,14 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     import addon_registry
     import addon_uninstall
     import install_hooks
-    from installer import gateway_participant
+    from installer import gateway_participant, transaction
     from installer.report import exception_lines
 
     manifest, manifest_error = _load_manifest(args.install_state_manifest)
+    retry = []
+    if manifest_error == 'manifest-missing':
+        retry = _retry_completed_reference_cleanup(args.platform, args.install_state_manifest,
+                                                   apply_changes=args.apply_changes)
     items = []
     addons = []
     targets = []
@@ -1427,15 +1953,60 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                                 platform=args.platform, purge_modified=getattr(args, 'purge_modified', False))
             items.append(item)
             targets.append((target, item))
-    items.extend(_support_artifact_items(args))
-    if manifest is None:
+    observation = _read_removal_targets()
+    support = _support_artifact_items(args.platform, args.install_state_manifest, observation=observation)
+    settings = _manifest_settings(args.platform, manifest, support, observation[0]) if manifest is not None else {}
+    confirmed = set()
+    if (manifest_error == 'manifest-missing' and not addons and not observation[2]
+            and not any(args.platform in entry['used_by'] for entry in observation[1].values())
+            and not (observation[0] or {}).get('service')):
+        settings, confirmed = _retired_host_evidence(args.platform, support, observation[0])
+    absent_without_artifacts = manifest_error == 'manifest-missing' and not _missing_inventory_residue(
+        args.platform, observation[0], observation[1], support, retry, confirmed=confirmed) and not addons
+    items.extend(support)
+    if manifest is None and not absent_without_artifacts:
         items.append(dict(kind='install-state', path=str(args.install_state_manifest), action='manual-review',
                           reason=manifest_error or 'manifest-unavailable'))
         for item in items:
-            if item.get('kind') == 'support-artifact' and item.get('action', '').startswith('would-'):
+            if (item.get('kind') == 'support-artifact' and item.get('action', '').startswith('would-')
+                    and Path(item['path']) not in confirmed):
                 item.update(action='manual-review', reason='install-state-unavailable-recovery-retained')
     with contextlib.redirect_stdout(io.StringIO()):
         hooks = uninstall_hook(args.platform, dry_run=True)
+    # Hook fallback can be the only evidence of a host's old record location.
+    # Save that relation before detach so a failed cleanup and the next attempt retain it.
+    record_locations, record_locations_error = None, None
+    record_retention = transaction.RecordSourceRetention()
+    if args.apply_changes:
+        try:
+            record_locations = transaction.installed_ledger_locations(ghost_root=_ghost_alice_root())
+        except (OSError, ValueError) as error:
+            record_locations_error = error
+        record_retention = transaction.retain_record_source_writers(
+            _ghost_alice_root(), record_locations, record_locations_error)
+        for path, cause in record_retention.errors.items():
+            items.append(dict(kind='record-source-references', path=path, action='manual-review',
+                              reason='record-source-reference-retention-failed', errors=[cause], removal_incomplete=True))
+        if args.platform in record_retention.blocked_hosts:
+            hooks.details.update(hooks_detached=False)
+            for path, cause in record_retention.blocked_hosts[args.platform].items():
+                hooks.details['items'].append(dict(kind='record-source-references', path=path,
+                    target_name=f'{args.platform}-hooks', action='manual-review',
+                    reason='record-source-reference-retention-failed', errors=[cause], removal_incomplete=True))
+
+    def cleanup_record_source(ghost, removal):
+        result = dict(kind='record-source', path=removal.get('path') if isinstance(removal, dict) else None,
+                      destination=removal.get('destination') if isinstance(removal, dict) else None)
+        items.append(result)
+        try:
+            if record_locations_error is not None:
+                raise ValueError(f'Cannot confirm pre-removal record references: {record_locations_error}')
+            result.update(action=transaction.cleanup_record_source(ghost, removal, prior_locations=record_locations),
+                          reason='completed-record-move')
+        except (OSError, ValueError, RuntimeError) as error:
+            result.update(action='manual-review', reason='record-source-cleanup-failed',
+                          errors=exception_lines(error), removal_incomplete=True)
+            raise
     gateway_item = None
     blocked = False
     try:
@@ -1443,12 +2014,12 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             remove_codex=args.platform == 'codex', apply_changes=False)
     except (ValueError, OSError, RuntimeError) as error:
         gateway_item = dict(kind='context-gateway', action='manual-review',
-                            reason='gateway-detach-unresolved', detail=str(error))
+                            reason='gateway-detach-unresolved', detail=str(error), removal_incomplete=True)
         blocked = True
     if gateway_item['action'] != 'missing':
         items.insert(0, gateway_item)
 
-    if args.apply_changes and not blocked and not errors:
+    if args.apply_changes and not blocked and not errors and args.platform not in record_retention.blocked_hosts:
         pending_owner = hooks.details.get('pending_owner')
         core_first = pending_owner == 'core'
         if core_first:
@@ -1471,14 +2042,19 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             except (OSError, ValueError, UnicodeError) as error:
                 hooks.details.update(hooks_detached=False, settings_state='unreadable')
                 hooks.details.setdefault('errors', []).extend(exception_lines(error))
+    elif args.apply_changes:
+        # The preview is useful for planning, but none of these reference changes ran.
+        for item in hooks.details['items']:
+            if item.get('action', '').startswith('would-') or item.get('action') == 'hook-uninstall-dry-run':
+                item.update(action='manual-review', reason='hook-detach-not-attempted')
+                item.pop('result', None)
 
     # Dependency retention needs the hook owner's errors before support records can be removed.
     reference_index = 1 if items and items[0] is gateway_item else 0
     items[reference_index:reference_index] = hooks.details['items']
     hook_unresolved = not hooks.details.get('hooks_detached' if args.apply_changes else 'would_detach', False)
-    if manifest is not None and not blocked and not errors and not hook_unresolved:
-        items.extend(_codex_hook_feature_items(manifest, apply_changes=args.apply_changes, backup_sources=backups))
-        items.extend(_codex_project_trust_items(manifest, apply_changes=args.apply_changes, backup_sources=backups))
+    if not blocked and not errors and not hook_unresolved:
+        items.extend(_codex_settings_items(args.platform, settings, apply_changes=args.apply_changes, backup_sources=backups))
     _retain_dependencies(items, targets, addons, hooks, applied=args.apply_changes,
                          manifest_available=manifest is not None)
     if not blocked:
@@ -1491,14 +2067,16 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 items.insert(0, gateway_item)
         except (ValueError, OSError, RuntimeError) as error:
             gateway_item.update(kind='context-gateway', action='manual-review',
-                                reason='gateway-detach-unresolved', detail=str(error))
+                                reason='gateway-detach-unresolved', detail=str(error), removal_incomplete=True)
             if not any(item is gateway_item for item in items):
                 items.insert(0, gateway_item)
             blocked = True
 
     if blocked:
+        for _, result in addons:
+            addon_uninstall.retain_addon_removal(result, 'gateway-detach-unresolved')
         for item in items:
-            if item.get('action') in {'would-remove', 'would-quarantine-remove'}:
+            if item.get('action', '').startswith('would-'):
                 item.update(action='manual-review', reason='gateway-detach-unresolved')
     elif args.apply_changes:
         for record, result in addons:
@@ -1506,7 +2084,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 continue
             try:
                 addon_uninstall.finalize_addon_removal(record, result, addons_dir=addons_dir,
-                                                       allowed_roots=allowed_roots, platform=args.platform)
+                                                       allowed_roots=allowed_roots, platform=args.platform,
+                                                       core_hooks=hooks)
             except (OSError, ValueError, ExceptionGroup) as error:
                 result.update(status='error', errors=exception_lines(error))
         _retain_dependencies(items, targets, addons, hooks, applied=True, manifest_available=manifest is not None)
@@ -1540,25 +2119,44 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 item.update(action='manual-review', reason='target-removal-or-record-cleanup-failed', errors=failure,
                             file_state='present' if os.path.lexists(target['dest_path']) else 'absent')
         items.extend(_global_rule_items(args.platform, apply_changes=True))
-        if manifest is not None:
-            items.extend(_source_repo_hook_items(manifest, apply_changes=True,
-                other_platforms=_other_platform_install_states(args.install_state_manifest, args.platform)))
+        if settings:
+            items.extend(_source_repo_hook_items(settings, apply_changes=True,
+                state_path=args.install_state_manifest, platform=args.platform))
         _retain_dependencies(items, targets, addons, hooks, applied=True, manifest_available=manifest is not None)
-        # Retire physical support before deleting the records needed to retry it.
+        # Retire ordinary support before the final command and discovery-record boundary.
         support_items = [item for item in items if item.get('kind') == 'support-artifact']
-        support_items.sort(key=lambda item: (item['target_name'] in {
-            'pending-merges', 'install-record', 'install-state-manifest'}, item['target_name'] == 'management-command'))
+        support_items.sort(key=lambda item: 3 if item['target_name'] in {'install-record', 'install-state-manifest'}
+                           else 2 if item['target_name'] in {'management-command', 'runtime-core'}
+                           or item.get('action') == 'would-release-reference'
+                           else 1 if item['target_name'] == 'pending-merges' else 0)
         for item in support_items:
             if item.get('kind') == 'support-artifact':
-                if errors and item['target_name'] == 'install-state-manifest':
-                    if item.get('action', '').startswith('would-'):
-                        item.update(action='manual-review', reason='file-removal-unresolved')
+                if item['target_name'] in {'management-command', 'install-record', 'install-state-manifest'} or item.get('action') == 'would-release-reference':
+                    continue
                 try:
                     if item['target_name'] == 'publish-rollbacks' and item['action'] == 'would-quarantine-remove':
                         import install_transaction
-                        item['retained_originals'] = list(install_transaction.cleanup_completed(_ghost_alice_root()))
                         path = Path(item['path'])
-                        if not path.is_symlink() and path.is_dir() and not any(path.iterdir()):
+                        if absent_without_artifacts:
+                            folders = _empty_publish_folders(path, set())
+                            if folders is None:
+                                raise ValueError(f'Publish recovery contents changed: {path}')
+                            # Preserve empty txids without journal identities in the recovery archive.
+                            if not folders:
+                                item['action'] = 'would-remove'
+                            _apply_support_artifact_item(item)
+                            continue
+                        try:
+                            item['retained_originals'] = list(install_transaction.cleanup_completed(_ghost_alice_root(),
+                                record_source_cleanup=cleanup_record_source))
+                        finally:
+                            item['pending_record_sources'] = {str(journal): str(source)
+                                for journal, source in record_retention.cleanup_sources.items()
+                                if os.path.lexists(source)}
+                        if item['pending_record_sources']:
+                            item.update(action='manual-review', reason='record-source-cleanup-pending',
+                                        removal_incomplete=True)
+                        elif not path.is_symlink() and path.is_dir() and not any(path.iterdir()):
                             item['action'] = 'would-remove'
                     _apply_managed_support(item, args.platform, args.install_state_manifest)
                 except (OSError, ValueError, RuntimeError) as error:
@@ -1566,17 +2164,35 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                     item.update(action='manual-review', reason='support-removal-or-record-cleanup-failed', errors=failure,
                                 file_state='present' if os.path.lexists(item['path']) else 'absent')
                 _retain_dependencies(items, targets, addons, hooks, applied=True, manifest_available=manifest is not None)
+        if errors:
+            for item in support_items:
+                if item.get('action', '').startswith('would-'):
+                    item.update(action='manual-review', reason='file-removal-unresolved', removal_incomplete=True)
+        reference_cleanup = _release_shared_support(support_items, args.platform, args.install_state_manifest)
+        items.extend(reference_cleanup)
+        for publish in support_items:
+            if (publish.get('target_name') != 'publish-rollbacks' or not os.path.lexists(publish['path'])
+                    or publish['action'] not in {'removed', 'quarantined-removed', 'missing'}):
+                continue
+            if publish.get('shared_platforms'):
+                publish.update(action='manual-review', reason='shared-support-in-use-by-other-platform',
+                               file_state='present')
+            else:
+                publish.update(action='manual-review', reason='support-reference-recovery-retained',
+                               removal_incomplete=True, file_state='present')
+        _retain_dependencies(items, targets, addons, hooks, applied=True, manifest_available=manifest is not None)
     elif not blocked:
         items.extend(_global_rule_items(args.platform, apply_changes=False))
-        if manifest is not None:
-            items.extend(_source_repo_hook_items(manifest, apply_changes=False,
-                other_platforms=_other_platform_install_states(args.install_state_manifest, args.platform)))
+        if settings:
+            items.extend(_source_repo_hook_items(settings, apply_changes=False,
+                state_path=args.install_state_manifest, platform=args.platform, current_items=items))
 
     for record, result in addons:
         items.extend(item for item in result['items'] if item.get('kind') != 'addon-target')
         if result.get('errors') or any(item.get('action') in {'manual-review', 'refused'} for item in result['items']):
             items.append(dict(kind='addon', addon_id=result['addon_id'], action='manual-review',
                               reason='addon-removal-unresolved', status=result['status'], errors=result.get('errors', [])))
+    items.extend(retry)
     errors.extend(message for item in items for message in item.get('errors', []))
     return dict(schema_version=2, platform=args.platform, mode='apply' if args.apply_changes else 'dry-run',
         generated_at=_now(), install_state_manifest=str(args.install_state_manifest), items=items,
@@ -1612,25 +2228,37 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    import install_lock
+    from installer import lock, report as installer_report
+    from installer.runner import InstallerExit
+    installer_report.configure()
     args = build_parser().parse_args(argv)
     if args.report_path is None:
         args.report_path = _default_report_path(args.platform, apply_changes=args.apply_changes)
         # The reports folder keeps the last 30 reports before this one (`state_retention` uninstall-reports).
         state_retention.apply("uninstall-reports", args.report_path.parent)
+    handle = None
     try:
-        with install_lock.command_lock(_ghost_alice_root()/'install.lock', owner=f'uninstall:{args.platform}:{os.getpid()}',
-                                       enabled=args.apply_changes):
-            prepare_report_path(args.report_path)
-            report = build_report(args)
-            write_report(report, args.report_path)
+        if args.apply_changes:
+            handle = lock.acquire('uninstall', args.platform, _ghost_alice_root()/'install.lock', inherit=True)
+        prepare_report_path(args.report_path)
+        report = build_report(args)
+        write_report(report, args.report_path)
+    except InstallerExit as error:
+        return error.code
     except (OSError, ValueError, RuntimeError) as error:
         print(f'Uninstall cleanup failed: {error}', file=sys.stderr)
         return 1
+    finally:
+        lock.release(handle)
     mode = "APPLY" if args.apply_changes else "DRY-RUN"
     print(f"Uninstall cleanup {mode}: {args.platform}")
     print(f"Report: {args.report_path}")
     print(json.dumps(report["summary"], ensure_ascii=False, sort_keys=True))
+    for item in report['items']:
+        for _, line in installer_report.removal_item_lines(item):
+            print(line)
+    if report.get('removal_incomplete') or report.get('errors'):
+        print(installer_report.message('removal_retry'))
     if report.get('hook_error'):
         print('partial: hook removal or permission finalization failed; review retained items')
     elif report.get('addon_error'):

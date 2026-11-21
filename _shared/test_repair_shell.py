@@ -28,6 +28,7 @@ RICH = REPO_ROOT / "_shared" / "tests" / "fixtures" / "rich-addon"
 if str(REPO_ROOT / "_shared") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "_shared"))
 from installer_testing import checkout_copy, installer_env  # noqa: E402
+import installed_payload  # noqa: E402
 
 
 def _python_311() -> bool:
@@ -56,6 +57,86 @@ class RepairTest(unittest.TestCase):
             [self.bash, str(self.source / "install.sh"), *args], cwd=self.source,
             env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=180, check=False)
+
+    def test_source_reinstall_and_repair_recover_only_the_matching_manager(self):
+        with tempfile.TemporaryDirectory() as home:
+            env = installer_env(home)
+            env["GHOST_ALICE_INSTALL_LOCALE"] = "en"
+            ghost = Path(home) / ".ghost-alice"
+            def run(option, code):
+                result = self._run(env, "--platform", "codex", "--skip-source-health", option)
+                output = result.stdout + result.stderr
+                self.assertEqual(result.returncode, code, output)
+                return output
+            run("task-router", 0)
+            record = installed_payload.read_path(ghost)
+            active = Path(installed_payload.read(ghost)["installer"]["active_root"])
+            entry = active / "_shared/installer/cli.py"
+            source_bytes = (self.source / "_shared/installer/cli.py").read_bytes()
+            version = self.source / "VERSION"
+            version_bytes = version.read_bytes()
+            for command in ("task-router", "--repair"):
+                before = record.read_bytes()
+                if active.exists():
+                    shutil.rmtree(active)
+                version.write_bytes(version_bytes + b"\n")
+                with self.subTest(command=command, source="different"):
+                    output = run(command, 1)
+                    self.assertFalse(active.exists())
+                    self.assertEqual(record.read_bytes(), before)
+                    self.assertIn(str(active), output)
+                    self.assertNotIn(str(ghost / "bin/ghost-alice"), output)
+                version.write_bytes(version_bytes)
+                with self.subTest(command=command, source="matching"):
+                    run(command, 0)
+                    self.assertEqual(entry.read_bytes(), source_bytes)
+                    self.assertEqual(Path(installed_payload.read(ghost)["installer"]["active_root"]), active)
+            entry.unlink()
+            (active / "VERSION").write_bytes(b"modified archive")
+            for command in ("task-router", "--repair"):
+                before = record.read_bytes()
+                run(command, 1)
+                self.assertEqual(record.read_bytes(), before)
+                self.assertFalse(entry.exists())
+                self.assertEqual((active / "VERSION").read_bytes(), b"modified archive")
+            # The record still identifies this content hash when the entire version was lost.
+            shutil.rmtree(active.parent)
+            before = record.read_bytes()
+            output = run("--repair", 1)
+            self.assertIn("entire saved version", output)
+            self.assertIn("install.sh", output)
+            self.assertEqual(record.read_bytes(), before)
+            run("task-router", 0)
+            self.assertEqual(entry.read_bytes(), source_bytes)
+
+    def test_changed_checkout_requires_the_incomplete_active_manager_to_load(self):
+        with tempfile.TemporaryDirectory() as home:
+            env = installer_env(home)
+            env["GHOST_ALICE_INSTALL_LOCALE"] = "en"
+            args = ("--platform", "codex", "--skip-source-health", "task-router")
+            result = self._run(env, *args)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            ghost = Path(home) / ".ghost-alice"
+            detail = installed_payload.read_path(ghost)
+            original = detail.read_bytes()
+            active = Path(installed_payload.read(ghost)["installer"]["active_root"])
+            versions = set(active.parent.parent.iterdir())
+            dependency = active / "_shared/installer/runner.py"
+            dependency.unlink()
+            version = self.source / "VERSION"
+            version.write_bytes(version.read_bytes() + b"\n")
+            refused = self._run(env, *args)
+            output = refused.stdout + refused.stderr
+            self.assertEqual(refused.returncode, 1, output)
+            self.assertIn(str(active), output)
+            self.assertFalse(dependency.exists())
+            self.assertEqual(detail.read_bytes(), original)
+            self.assertEqual(set(active.parent.parent.iterdir()), versions)
+            shutil.copy2(self.source / "_shared/installer/runner.py", dependency)
+            (active / "_shared/context_lifecycle.md").unlink()
+            updated = self._run(env, *args)
+            self.assertEqual(updated.returncode, 0, updated.stdout + updated.stderr)
+            self.assertNotEqual(installed_payload.read(ghost)["installer"]["active_root"], str(active))
 
     def test_repair_reprovisions_missing_and_preserves_unclaimed_slot(self):
         with tempfile.TemporaryDirectory() as home:
@@ -121,10 +202,14 @@ class RepairTest(unittest.TestCase):
             skill.unlink()
             command.unlink()
             resource.unlink()
+            active = Path(installed_payload.read(Path(home) / ".ghost-alice")["installer"]["active_root"])
+            entry = active / "_shared/installer/cli.py"
+            entry.unlink()
 
             repair = self._run(env, "--platform", "claude", "--repair")
 
             self.assertEqual(repair.returncode, 0, msg=repair.stderr + repair.stdout)
+            self.assertEqual(entry.read_bytes(), (self.source / "_shared/installer/cli.py").read_bytes())
             self.assertTrue(os.path.lexists(skill), msg="repair left addon skill missing: " + repair.stdout)
             self.assertTrue(command.exists(), msg="repair left addon command missing: " + repair.stdout)
             self.assertTrue(resource.exists(), msg="repair left addon resource missing: " + repair.stdout)

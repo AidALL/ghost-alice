@@ -89,16 +89,25 @@ def is_semantic_path(path: Path) -> bool:
 def iter_semantic_paths(root: Path, *, exclude_roots: Sequence[Path | str] = ()) -> Iterable[Path]:
     root = root.resolve()
     resolved_excludes = [Path(exclude).resolve() for exclude in exclude_roots]
-    for path in root.rglob("*"):
-        resolved_path = path.resolve()
-        if any(resolved_path.is_relative_to(excluded) for excluded in resolved_excludes):
-            continue
-        if any(part in EXCLUDED_DIRS for part in path.relative_to(root).parts[:-1]):
-            continue
-        if not path.is_file():
-            continue
-        if is_semantic_path(path):
-            yield path
+
+    def excluded(path: Path) -> bool:
+        if not resolved_excludes:
+            return False
+        resolved = path.resolve()
+        return any(resolved.is_relative_to(parent) for parent in resolved_excludes)
+
+    if excluded(root) or not root.is_dir():
+        return
+    directories = [root]
+    while directories:
+        for path in directories.pop().glob("*"):
+            if path.name in EXCLUDED_DIRS or excluded(path):
+                continue
+            if path.is_dir():
+                if not path.is_symlink():
+                    directories.append(path)
+            elif is_semantic_path(path) and path.is_file():
+                yield path
 
 
 def _decode_utf8(path: Path, raw: bytes) -> tuple[str | None, EncodingIssue | None]:

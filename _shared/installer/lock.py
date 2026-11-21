@@ -53,14 +53,14 @@ def restore_unfinished_publishes(root: Path | None = None) -> None:
     and stop the command with exit 1; acquire() releases the lock before propagating that exit.
     """
     root = locations.record_root() if root is None else Path(root)
-    for txid in install_transaction.unfinished(root):
-        try:
+    try:
+        for txid in install_transaction.unfinished(root):
             for line in install_transaction.recover(root, txid,
                     participant_factory=gateway_participant.recovery_participants):
                 print(line)
-        except install_transaction.InstallTransactionError as exc:
-            report.error(install_transaction.failure_message(exc))
-            raise InstallerExit(1) from exc
+    except install_transaction.InstallTransactionError as exc:
+        report.error(install_transaction.failure_message(exc))
+        raise InstallerExit(1) from exc
 
 
 def release(handle: tuple[Path, str] | None) -> None:

@@ -9,12 +9,13 @@ import ntpath
 import os
 import re
 import shlex
+import signal
 import sys
 from typing import TYPE_CHECKING
 
 import hook_definitions
 import ledger_access
-from installer import locations, report, runner, source
+from installer import locations, report, runner, source, terminal
 
 if TYPE_CHECKING:
     from installer.cli import Context
@@ -36,6 +37,9 @@ class WriterObservation:
     state: str
     detail: str = ''
     pids: tuple[int, ...] = ()
+    programs: tuple[tuple[int, str], ...] = ()
+    ancestor_pids: tuple[int, ...] = ()
+    manual_pids: tuple[int, ...] = ()
 
 
 def _process_argv(pid: int, platform: str) -> list[str]:
@@ -75,40 +79,58 @@ def observe_writers(platforms, *, platform: str | None = None) -> dict[str, Writ
         if platform == 'win32':
             command = ('$session = (Get-Process -Id $PID).SessionId; '
                        'Get-CimInstance Win32_Process | Where-Object {$_.SessionId -eq $session} | '
-                       'Select-Object ProcessId,Name,ExecutablePath,CommandLine | ConvertTo-Json -Compress')
+                       'ForEach-Object {$row = $_; $handle = $null; $failure = $null; '
+                       'try {$handle = (Get-Process -Id $row.ProcessId -ErrorAction Stop).MainWindowHandle.ToInt64()} '
+                       'catch {$failure = $_.Exception.Message}; '
+                       '[pscustomobject]@{ProcessId=$row.ProcessId; ParentProcessId=$row.ParentProcessId; '
+                       'Name=$row.Name; ExecutablePath=$row.ExecutablePath; CommandLine=$row.CommandLine; '
+                       'MainWindowHandle=$handle; WindowLookupError=$failure}} | ConvertTo-Json -Compress')
             result = runner.run_command(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command], capture=True)
             if not result.ok:
                 raise ValueError(result.stderr or 'Windows process discovery failed')
             rows = json.loads(result.stdout or '')
             rows = [rows] if isinstance(rows, dict) else rows
-            processes = [(int(row['ProcessId']),
+            processes = [(int(row['ProcessId']), int(row['ParentProcessId']),
                           row.get('ExecutablePath') or row['Name'], row.get('CommandLine')) for row in rows]
+            windows = {int(row['ProcessId']) for row in rows if isinstance(row.get('MainWindowHandle'), int)
+                       and row['MainWindowHandle'] != 0}
+            window_details = {int(row['ProcessId']):
+                              'No main window was observed' if row.get('MainWindowHandle') == 0
+                              else 'Main-window lookup unavailable: ' + (row.get('WindowLookupError') or 'no result')
+                              for row in rows if int(row['ProcessId']) not in windows}
         elif platform in ('darwin', 'linux'):
-            result = runner.run_command(['ps', '-ww', '-U', str(os.getuid()), '-o', 'pid=,comm='], capture=True)
+            result = runner.run_command(['ps', '-ww', '-U', str(os.getuid()), '-o', 'pid=,ppid=,comm='], capture=True)
             if not result.ok:
                 raise ValueError(result.stderr or 'POSIX process discovery failed')
             processes = []
             for line in (result.stdout or '').splitlines():
-                pid, executable = line.strip().split(None, 1)
-                processes.append((int(pid), executable, None))
+                pid, parent, executable = line.strip().split(None, 2)
+                processes.append((int(pid), int(parent), executable, None))
         else:
             raise ValueError(f'Process observation is unavailable on {platform}')
         if not processes:
             raise ValueError('The process inventory is empty')
-        if any(not isinstance(executable, str) or not executable for _, executable, _ in processes):
+        if any(not isinstance(executable, str) or not executable for _, _, executable, _ in processes):
             raise ValueError('A process executable identity is unavailable')
     except (OSError, ValueError, TypeError, KeyError) as exc:
         return {host: WriterObservation('unknown', str(exc)) for host in selected}
 
     running = {host: set() for host in selected}
+    programs = {pid: ntpath.basename(executable) for pid, _, executable, _ in processes}
+    parents = {pid: parent for pid, parent, _, _ in processes}
+    ancestors = {os.getpid()}
+    parent = parents.get(os.getpid())
+    while parent and parent not in ancestors:
+        ancestors.add(parent)
+        parent = parents.get(parent)
     unknown = []
-    for pid, executable, _ in processes:
+    for pid, _, executable, _ in processes:
         name = ntpath.basename(executable).lower().removesuffix('.exe')
         for host in hook_definitions.SUPPORTED_PLATFORMS:
             if name == host or name.startswith((host + ' helper', host + ' (')):
                 if host in running:
                     running[host].add(pid)
-    for pid, executable, command in processes:
+    for pid, _, executable, command in processes:
         name = ntpath.basename(executable).lower().removesuffix('.exe')
         if not re.fullmatch(r'python(?:w|3(?:\.[0-9]+)?)?|node', name):
             continue
@@ -163,31 +185,73 @@ def observe_writers(platforms, *, platform: str | None = None) -> dict[str, Writ
             continue
         if host in running:
             running[host].add(pid)
+            programs[pid] = f'{ntpath.basename(executable)} ({ntpath.basename(script)})'
         elif host not in hook_definitions.SUPPORTED_PLATFORMS:
             unknown.append(f'PID {pid}: the ledger CLI host binding is unavailable')
-    return {host: WriterObservation('running', 'Observed host or ledger CLI processes', tuple(sorted(pids))) if pids
+    return {host: WriterObservation('running',
+                                   '; '.join(f'PID {pid}: {window_details[pid]}' for pid in sorted(pids - windows))
+                                   if platform == 'win32' else 'Observed host or ledger CLI processes', tuple(sorted(pids)),
+                                   tuple((pid, programs[pid]) for pid in sorted(pids)),
+                                   tuple(sorted(pids & ancestors)),
+                                   tuple(sorted(pids - windows)) if platform == 'win32' else ()) if pids
             else WriterObservation('unknown', f'The {host} host adapter is unavailable') if host not in hook_definitions.SUPPORTED_PLATFORMS
             else WriterObservation('unknown', '; '.join(unknown)) if unknown
             else WriterObservation('absent', 'No host or participating ledger CLI process was observed')
             for host, pids in running.items()}
 
 
-def confirm_project_trust(platforms: list[str]) -> str:
+def request_writer_termination(pids, *, platform: str | None = None) -> dict[int, str]:
+    """Request normal termination of approved PIDs and return per-PID request failures.
+
+    The caller owns confirmation and subsequent observation. An empty result does not prove exit.
+    """
+    selected = tuple(pids)
+    if any(type(pid) is not int or pid <= 0 for pid in selected):
+        raise ValueError('Termination requests require positive integer PIDs')
+    platform = sys.platform if platform is None else platform
+    if platform not in ('darwin', 'linux', 'win32'):
+        raise ValueError(f'Process termination requests are unavailable on {platform}')
+    failures = {}
+    for pid in dict.fromkeys(selected):
+        try:
+            if platform == 'win32':
+                command = (f'try {{$process = Get-Process -Id {pid} -ErrorAction Stop}} '
+                           'catch {if ($_.FullyQualifiedErrorId -like "NoProcessFoundForGivenId*") {exit 0}; '
+                           'Write-Error $_; exit 1}; '
+                           'try {if (-not $process.CloseMainWindow()) {'
+                           'Write-Error "No main window accepted a close request; close this program manually"; exit 1}} '
+                           'catch {Write-Error $_; exit 1}')
+                result = runner.run_command(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command], capture=True)
+                if not result.ok:
+                    failures[pid] = ((result.stderr or '').strip() or (result.stdout or '').strip()
+                                     or f'Window close request exited with code {result.returncode}')
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass  # This process exited after the caller's observation.
+        except OSError as exc:
+            failures[pid] = str(exc) or type(exc).__name__
+    return failures
+
+
+def confirm_project_trust(platforms: list[str], *, project_root: Path | None = None) -> str:
     """Ask once in the interactive parent before changing an existing Codex untrusted project."""
     if 'codex' not in platforms:
         return ''
     from install_hooks import _default_destination, _codex_project_trust_state_in_content, _read_text_file
-    project = str(Path(_default_destination('codex', project_root=source.resolve_source().root).project_root).resolve())
+    fallback = project_root if project_root is not None else source.resolve_source().root
+    project = str(Path(_default_destination('codex', project_root=fallback).project_root).resolve())
     config = locations.codex_home() / 'config.toml'
     if _codex_project_trust_state_in_content(_read_text_file(config), project) != 'untrusted':
         return ''
     report.info(f'Codex project {project} is untrusted in {config}.')
     if source.interactive():
         try:
-            if input('Change this project to trusted? [y/N]: ').strip().lower() in ('y', 'yes'):
+            answer = terminal.read_answer('Change this project to trusted? [y/N]: ')
+            if answer is not None and answer.strip().lower() in ('y', 'yes'):
                 return project
-        except EOFError:
-            pass
+        except (OSError, ValueError) as exc:
+            report.warn(report.message('terminal_input_unavailable', cause=exc))
     report.info('The installer will keep the untrusted project setting.')
     return ''
 

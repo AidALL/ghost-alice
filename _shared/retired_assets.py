@@ -184,7 +184,7 @@ def _restore_no_replace(source, destination):
 
 def _retire(path, *, ownership, backup_root, platform, source_root, pending_root, baseline=None,
             link_target=None, kind='skill', evidence=None):
-    from uninstall_cleanup import _platforms_referencing_target, release_target_records
+    from uninstall_cleanup import platforms_referencing_target, release_target_records
 
     path = Path(path).absolute()
     pending_root = Path(pending_root)
@@ -192,7 +192,7 @@ def _retire(path, *, ownership, backup_root, platform, source_root, pending_root
     if previous:
         work_path, work = previous
     else:
-        others = _platforms_referencing_target(path,
+        others = platforms_referencing_target(path,
             current_manifest=pending_root/'install-state'/f'{platform}.json', current_platform=platform)
         if others:
             release_target_records(root=pending_root, platform=platform, destination=path, kind=kind, provider='core')
@@ -235,7 +235,7 @@ def _retire(path, *, ownership, backup_root, platform, source_root, pending_root
     if source_present:
         if work['phase'] != 'prepared':
             return dict(result, action='retired-incomplete', reason='retirement-original-recreated')
-        others = _platforms_referencing_target(path,
+        others = platforms_referencing_target(path,
             current_manifest=pending_root/'install-state'/f'{platform}.json', current_platform=platform)
         if others:
             release_target_records(root=pending_root, platform=platform, destination=path, kind=kind, provider='core')

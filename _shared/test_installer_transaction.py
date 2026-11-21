@@ -440,23 +440,206 @@ class InstalledLedgerLocationTests(TransactionCase):
         return transaction.copy_target(self.ctx, Target("alpha", self.source / "alpha"),
                                        self.ctx.skills_dir / "alpha")
 
-    def legacy_hook(self):
+    def legacy_hook(self, platform='codex'):
         # One root-only legacy fixture exercises observation before config is normalized.
         script = Path(__file__).with_name("hook_profile_gate.py")
         payload = base64.urlsafe_b64encode(
             f'python3 ledger.py --root {shlex.quote(str(self.old_ledger))}'.encode()).decode()
-        settings = self.home / ".codex" / "hooks.json"
+        settings = self.home / f'.{platform}' / ('hooks.json' if platform == 'codex' else 'settings.json')
         settings.parent.mkdir(parents=True, exist_ok=True)
         settings.write_text(json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [{
             "type": "command", "command":
-            f'python3 {shlex.quote(str(script))} run session-intent codex {payload}'}]}]}}))
+            f'python3 {shlex.quote(str(script))} run session-intent {platform} {payload}'}]}]}}))
         return settings
+
+    def test_inactive_other_host_config_error_allows_independent_publish(self):
+        self.seed_source()
+        runtime_config.save_config({'install_locations': {'claude': 'not-an-object'}})
+        before = (self.ghost / 'config.json').read_bytes()
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)['source']['root'], str(self.source))
+        self.assertEqual((self.ghost / 'config.json').read_bytes(), before)
+
+    def test_requested_host_config_error_refuses_publish_before_changes(self):
+        self.seed_source()
+        runtime_config.save_config({'install_locations': {'codex': 'not-an-object'}})
+        before = installed_payload.path(self.ghost).read_bytes()
+        with self.assertRaisesRegex(ValueError, 'codex'):
+            self.publish_alpha()
+        self.assertEqual(installed_payload.path(self.ghost).read_bytes(), before)
+        self.assertFalse((self.ctx.skills_dir / 'alpha').exists())
+
+    def test_inactive_host_error_preserves_unattributed_legacy_fact_without_blocking_source_change(self):
+        fixed = (self.ghost / 'session-intent').resolve()
+        for restored in (self.old_ledger, fixed):
+            with self.subTest(restored=restored):
+                self.seed_source(relationships={str(self.old_ledger): str(self.old_source)})
+                runtime_config.save_config({'install_locations': {'claude': 'not-an-object'}})
+                before = (self.ghost / 'config.json').read_bytes()
+                self.assertTrue(self.publish_alpha())
+                self.assertEqual((self.ghost / 'config.json').read_bytes(), before)
+                uncertain = {str(self.old_ledger): str(self.old_source)}
+                self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'], uncertain)
+                runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(restored)}}})
+                if restored == self.old_ledger:
+                    observed = transaction.installed_ledger_locations()
+                    self.assertEqual(observed.roots[self.old_ledger]['state'], 'unknown')
+                    self.assertIsNone(observed.roots[self.old_ledger]['source_root'])
+                self.assertTrue(self.publish_alpha())
+                record = installed_payload.read(self.ghost)
+                self.assertEqual(record['source']['root'], str(self.source))
+                expected = uncertain if restored == self.old_ledger else {}
+                self.assertEqual(record['source']['ledger_source_roots'], expected)
+
+    def test_same_source_publish_keeps_unattributed_legacy_relationship_until_config_repair(self):
+        self.seed_source(relationships={str(self.old_ledger): str(self.old_source)})
+        self.ctx.record_source['root'] = str(self.old_source)
+        runtime_config.save_config({'install_locations': {'claude': 'not-an-object'}})
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'],
+                         {str(self.old_ledger): str(self.old_source)})
+
+    def test_invalid_target_host_references_cannot_make_bad_config_look_inactive(self):
+        self.seed_source()
+        self.assertTrue(self.publish_alpha())
+        runtime_config.save_config({'install_locations': {'claude': 'not-an-object'}})
+        self.legacy_hook('claude').write_text('{"hooks": null}')
+        record = installed_payload.read(self.ghost)
+        existing = str(self.ctx.skills_dir / 'alpha')
+        target = record['targets'][existing]
+        destination = self.ctx.skills_dir / 'other'
+        for hosts in (None, ['claude', 1]):
+            with self.subTest(used_by=hosts):
+                record['targets'][existing] = dict(target, used_by=hosts)
+                installed_payload.path(self.ghost).write_text(json.dumps(record))
+                before = installed_payload.path(self.ghost).read_bytes()
+                observed = transaction.installed_ledger_locations()
+                record_path = str(installed_payload.path(self.ghost))
+                self.assertEqual(set(observed.observation_errors), {record_path})
+                self.assertIn(existing, observed.observation_errors[record_path])
+                self.assertEqual(set(observed.host_config_errors), {'claude'})
+                retained = transaction.retain_record_source_writers(self.ghost, observed)
+                self.assertEqual(set(retained.errors), {record_path})
+                self.assertEqual(set(retained.blocked_hosts['claude']),
+                                 {record_path, str(self.ghost / 'config.json')})
+                self.assertIn(existing, retained.blocked_hosts['claude'][record_path])
+                with self.assertRaises(ValueError) as caught:
+                    transaction.copy_target(self.ctx, Target('alpha', self.source / 'alpha'), destination)
+                self.assertIn(existing, str(caught.exception))
+                self.assertIn(record_path, str(caught.exception))
+                self.assertEqual(installed_payload.path(self.ghost).read_bytes(), before)
+                self.assertFalse(destination.exists())
+
+    def test_observed_inactive_host_relationship_survives_config_repair_after_source_change(self):
+        self.seed_source()
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(self.old_ledger)}}})
+        self.ctx.record_source['root'] = str(self.old_source)
+        self.assertTrue(self.publish_alpha())
+        runtime_config.save_config({'install_locations': {'claude': 'not-an-object'}})
+        self.ctx.record_source['root'] = str(self.source)
+        self.assertTrue(self.publish_alpha())
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(self.old_ledger)}}})
+        observed = transaction.installed_ledger_locations()
+        self.assertEqual(observed.roots[self.old_ledger]['state'], 'source-bound')
+        self.assertEqual(observed.roots[self.old_ledger]['source_root'], self.old_source)
+
+    def test_legacy_unattributed_source_does_not_bind_a_later_host(self):
+        self.seed_source(root=self.source,
+                         relationships={str(self.old_ledger): str(self.old_source)})
+        runtime_config.save_config({'install_locations': {'codex': {'ledger_root': str(self.old_ledger)}}})
+        observed = transaction.installed_ledger_locations()
+        self.assertEqual(observed.roots[self.old_ledger]['state'], 'unknown')
+        self.assertIsNone(observed.roots[self.old_ledger]['source_root'])
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'],
+                         {str(self.old_ledger): str(self.old_source)})
+
+    def test_hidden_relationship_cannot_supply_the_source_of_a_different_host_binding(self):
+        self.seed_source()
+        fixed = (self.ghost / 'session-intent').resolve()
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(self.old_ledger)}}})
+        self.ctx.record_source['root'] = str(self.old_source)
+        self.assertTrue(self.publish_alpha())
+        hooks = self.legacy_hook('claude')
+        hooks.write_text('{"hooks": null}')
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(fixed)}}})
+        self.ctx.record_source['root'] = str(self.source)
+        self.assertTrue(self.publish_alpha())
+        hooks.write_text('{"hooks": {}}')
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(fixed)},
+                                                        'codex': {'ledger_root': str(self.old_ledger)}}})
+        observed = transaction.installed_ledger_locations()
+        self.assertEqual(observed.roots[self.old_ledger]['state'], 'unknown')
+        self.assertIsNone(observed.roots[self.old_ledger]['source_root'])
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'], {})
+
+    def test_changed_binding_discards_its_saved_source_before_the_host_becomes_unreadable(self):
+        self.seed_source()
+        fixed = (self.ghost / 'session-intent').resolve()
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(self.old_ledger)}}})
+        self.assertTrue(self.publish_alpha())
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(fixed)}}})
+        self.assertTrue(self.publish_alpha())
+        runtime_config.save_config({'install_locations': {'claude': 'not-an-object'}})
+        self.assertTrue(self.publish_alpha())
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(self.old_ledger)}}})
+        self.assertEqual(transaction.installed_ledger_locations().roots[self.old_ledger]['state'], 'unknown')
+
+    def test_observation_accepts_supported_legacy_and_current_target_records(self):
+        self.seed_source()
+        self.assertTrue(self.publish_alpha())
+        record = installed_payload.read(self.ghost)
+        for version in (1, installed_payload.SCHEMA_VERSION):
+            with self.subTest(schema_version=version):
+                record['schema_version'] = version
+                installed_payload.path(self.ghost).write_text(json.dumps(record))
+                self.assertEqual(transaction.installed_ledger_locations().installed_hosts, ('codex',))
+
+    def assert_other_host_source_survives_config_repair(self, hook_state):
+        self.seed_source()
+        if hook_state == 'absent-with-target':
+            self.ctx.platform = 'claude'
+            self.ctx.record_source['root'] = str(self.old_source)
+            self.assertTrue(self.publish_alpha())
+            self.ctx.platform = 'codex'
+            self.ctx.record_source['root'] = str(self.source)
+        else:
+            hooks = self.legacy_hook('claude')
+            if hook_state == 'unreadable':
+                hooks.write_text('{"hooks": null}')
+        runtime_config.save_config({'install_locations': {'claude': 'not-an-object'}})
+        before = installed_payload.path(self.ghost).read_bytes()
+        with self.assertRaisesRegex(ValueError, 'claude'):
+            self.publish_alpha()
+        self.assertEqual(installed_payload.path(self.ghost).read_bytes(), before)
+        runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(self.old_ledger)}}})
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'],
+                         {str(self.old_ledger): {'source_root': str(self.old_source), 'hosts': ['claude']}})
+
+    def test_other_host_config_error_cannot_erase_source_for_installed_targets(self):
+        self.assert_other_host_source_survives_config_repair('absent-with-target')
+
+    def test_other_host_config_error_cannot_erase_source_for_nonfixed_hooks(self):
+        self.assert_other_host_source_survives_config_repair('nonfixed')
+
+    def test_other_host_config_error_cannot_erase_source_for_unreadable_hooks(self):
+        self.assert_other_host_source_survives_config_repair('unreadable')
+
+    def test_same_source_publish_preserves_relationships_hidden_by_host_config_error(self):
+        expected = {str(self.old_ledger): {'source_root': str(self.old_source), 'hosts': ['claude']}}
+        self.seed_source(root=self.source, relationships=expected)
+        runtime_config.save_config({'install_locations': {'claude': 'not-an-object'}})
+        self.legacy_hook('claude').write_text('{"hooks": null}')
+        self.assertTrue(self.publish_alpha())
+        self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'], expected)
 
     def test_legacy_relationship_is_saved_on_first_publish_and_retained_until_config_normalization(self):
         self.seed_source()
         hooks = self.legacy_hook()
         original_hooks = hooks.read_bytes()
-        expected = {str(self.old_ledger): str(self.old_source)}
+        expected = {str(self.old_ledger): {'source_root': str(self.old_source), 'hosts': ['codex']}}
         for _ in range(2):
             self.assertTrue(self.publish_alpha())
             saved = installed_payload.read(self.ghost)["source"]
@@ -484,8 +667,9 @@ class InstalledLedgerLocationTests(TransactionCase):
 
     def test_observation_groups_hosts_by_normalized_root_and_retains_missing_original_source(self):
         second = self.old_source / "second-ledger"
-        self.seed_source(root=self.source, relationships={str(self.old_ledger): str(self.old_source),
-                                                        str(second): str(self.old_source)})
+        self.seed_source(root=self.source, relationships={
+            str(self.old_ledger): {'source_root': str(self.old_source), 'hosts': ['claude', 'codex']},
+            str(second): {'source_root': str(self.old_source), 'hosts': ['future-host']}})
         bindings = {"claude": {"ledger_root": str(self.old_ledger)},
                     "codex": {"ledger_root": str(self.old_ledger / ".." / self.old_ledger.name)},
                     "future-host": {"ledger_root": str(second)}}
@@ -510,7 +694,7 @@ class InstalledLedgerLocationTests(TransactionCase):
             "future-host": {"ledger_root": str(retired)}}, "retired_ledger_roots": [str(retired)]})
         self.assertTrue(self.publish_alpha())
         self.assertEqual(installed_payload.read(self.ghost)["source"]["ledger_source_roots"],
-                         {str(self.old_ledger): str(self.old_source)})
+                         {str(self.old_ledger): {'source_root': str(self.old_source), 'hosts': ['claude']}})
         runtime_config.save_config({"install_locations": {"claude": {"ledger_root": str(fixed)}}})
         self.assertTrue(self.publish_alpha())
         self.assertEqual(installed_payload.read(self.ghost)["source"]["ledger_source_roots"], {})
@@ -535,8 +719,10 @@ class InstalledLedgerLocationTests(TransactionCase):
 
     def test_unreadable_other_host_preserves_observed_and_previously_known_relationships(self):
         remembered = self.old_source / 'unreadable-host-ledger'
-        expected = {str(self.old_ledger): str(self.old_source), str(remembered): str(self.old_source)}
-        self.seed_source(relationships={str(remembered): str(self.old_source)})
+        remembered_relation = {'source_root': str(self.old_source), 'hosts': ['codex']}
+        expected = {str(self.old_ledger): {'source_root': str(self.old_source), 'hosts': ['claude']},
+                    str(remembered): remembered_relation}
+        self.seed_source(relationships={str(remembered): remembered_relation})
         runtime_config.save_config({'install_locations': {'claude': {'ledger_root': str(self.old_ledger)}}})
         hooks = self.home / '.codex/hooks.json'
         hooks.parent.mkdir(parents=True, exist_ok=True)
@@ -549,7 +735,7 @@ class InstalledLedgerLocationTests(TransactionCase):
         hooks.write_text('{"hooks": {}}')
         self.assertTrue(self.publish_alpha())
         self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'],
-                         {str(self.old_ledger): str(self.old_source)})
+                         {str(self.old_ledger): {'source_root': str(self.old_source), 'hosts': ['claude']}})
 
     def test_unreadable_host_does_not_invent_a_source_relationship(self):
         self.seed_source()

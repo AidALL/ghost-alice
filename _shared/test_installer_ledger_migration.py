@@ -17,7 +17,7 @@ import installed_payload
 import ledger_access
 import runtime_config
 from installer import gateway_participant, transaction
-from installer_testing import destination_fixture
+from installer_testing import destination_fixture, installer_env, installer_observations
 
 
 class LedgerMigrationTests(unittest.TestCase):
@@ -26,10 +26,8 @@ class LedgerMigrationTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.home = Path(temporary.name).resolve()
         self.reg = gateway_testing.registered_home(self, self.home)
-        self.enterContext(mock.patch.dict(os.environ, {
-            'HOME': str(self.home), 'GHOST_ALICE_GHOST_ROOT': str(self.reg.ghost),
-            'CODEX_HOME': str(self.reg.codex), 'CLAUDE_CONFIG_DIR': str(self.reg.claude),
-        }))
+        self.enterContext(mock.patch.dict(os.environ, installer_env(self.home), clear=True))
+        self.enterContext(installer_observations())
         self.a, self.b = self.reg.ledger, self.reg.ghost / 'session-intent'
         self.ledger = ledger_access.load_ledger()
         self.ledger.record_turn(root=self.a, platform='claude', session_id='same-session', raw_input='before migration')
@@ -49,6 +47,10 @@ class LedgerMigrationTests(unittest.TestCase):
         return transaction.migrate_ledger(self.a, writers_stopped=kwargs.pop('writers_stopped', True), **kwargs)
 
     def test_migration_preserves_history_then_next_same_session_input_uses_b(self):
+        import source_reference
+        proof = self.a / 'original-proof.txt'
+        proof.write_text('Original evidence retained through the move')
+        reference = source_reference.reference_source(str(proof))
         for root in (self.a, self.b):
             self.ledger.write_current_session_pointer(root, 'claude', 'same-session')
         original_start = self.effects.start
@@ -71,7 +73,10 @@ class LedgerMigrationTests(unittest.TestCase):
                     parsed = hook_definitions.parse_hook_runner_command(handler['command'])
                     bound = install_destination.decode_binding(parsed['binding'])['destination']
                     self.assertEqual(bound['ledger_root'], str(self.b))
-        shutil.rmtree(self.a)
+        self.assertFalse(self.a.exists(), 'The installer must remove the old record folder')
+        self.assertEqual(source_reference.source_text(reference, storage_root=self.b),
+                         'Original evidence retained through the move')
+        self.assertEqual(reference['locator'], str(proof))
         receipt_command = next(handler['command'] for group in settings['hooks']['SessionStart']
                                for handler in group['hooks']
                                if hook_definitions.parse_hook_runner_command(handler['command'])['hook_id'] == 'session-receipt')
@@ -96,6 +101,23 @@ class LedgerMigrationTests(unittest.TestCase):
         self.assertEqual(self.reg.state_path.read_bytes(), original)
         self.assertEqual(self.effects.calls, [])
 
+    def test_new_move_does_not_delete_source_changes_after_snapshot_validation(self):
+        snapshot = self.ledger.snapshot_roots
+        proof = self.a / 'changed-after-snapshot.txt'
+        def mutate_after_snapshot(*args, **kwargs):
+            baseline = snapshot(*args, **kwargs)
+            proof.write_text('not copied to B')
+            return baseline
+        for initially_present in (False, True):
+            with self.subTest(initially_present=initially_present):
+                if initially_present:
+                    proof.write_text('copied content')
+                with mock.patch.object(self.ledger, 'snapshot_roots', side_effect=mutate_after_snapshot):
+                    result = self.migrate()
+                self.assertEqual(result.status, 'restored', result)
+                self.assertEqual(proof.read_text(), 'not copied to B')
+                self.assertEqual(runtime_config.load_config(strict=True)['install_locations']['claude']['ledger_root'], str(self.a))
+
     def test_fixed_destination_symlink_cannot_redirect_record_publication(self):
         external = self.home / 'unrelated'
         external.mkdir()
@@ -110,14 +132,265 @@ class LedgerMigrationTests(unittest.TestCase):
         self.assertEqual({path: path.read_bytes() for path in before}, before)
         self.assertEqual(self.effects.calls, [])
 
+    def _assert_destination_change_after_snapshot_is_preserved(self, initially_present):
+        snapshot = self.ledger.snapshot_roots
+        self.b.mkdir()
+        proof = self.b / 'changed-after-snapshot.txt'
+        def mutate_after_snapshot(*args, **kwargs):
+            baselines = snapshot(*args, **kwargs)
+            proof.write_text('B content not copied to the snapshot')
+            return baselines
+        if initially_present:
+            proof.write_text('original B content')
+        with mock.patch.object(self.ledger, 'snapshot_roots', side_effect=mutate_after_snapshot):
+            result = self.migrate()
+        self.assertTrue(proof.exists(), 'B content added after validation must survive the move attempt')
+        self.assertEqual(proof.read_text(), 'B content not copied to the snapshot')
+        self.assertEqual(result.status, 'restored', result)
+        self.assertIn('destination changed', result.detail)
+        self.assertTrue(self.a.is_dir())
+        self.assertEqual(runtime_config.load_config(strict=True)['install_locations']['claude']['ledger_root'], str(self.a))
+
+    def test_new_move_preserves_destination_addition_after_snapshot_validation(self):
+        self._assert_destination_change_after_snapshot_is_preserved(False)
+
+    def test_new_move_preserves_destination_change_after_snapshot_validation(self):
+        self._assert_destination_change_after_snapshot_is_preserved(True)
+
+    def test_move_preserves_a_regular_file_at_the_ledger_destination(self):
+        data = b'original bytes at the fixed path'
+        self.b.write_bytes(data)
+        result = self.migrate()
+        self.assertTrue(self.b.is_file(), result)
+        self.assertEqual(self.b.read_bytes(), data)
+        self.assertEqual(result.status, 'restored', result)
+        self.assertTrue(self.a.is_dir())
+
+    def test_move_preserves_a_regular_file_created_during_the_snapshot(self):
+        data = b'bytes created after enumeration'
+        snapshot_files = self.ledger._snapshot_files
+
+        def create_after_enumeration(root):
+            files = snapshot_files(root)
+            if root == self.b and not self.b.exists():
+                self.b.write_bytes(data)
+            return files
+
+        with mock.patch.object(self.ledger, '_snapshot_files', side_effect=create_after_enumeration):
+            result = self.migrate()
+        self.assertTrue(self.b.is_file(), result)
+        self.assertEqual(self.b.read_bytes(), data)
+        self.assertEqual(result.status, 'restored', result)
+        self.assertTrue(self.a.is_dir())
+
+    def test_retention_keeps_multiple_host_causes_out_of_shared_errors(self):
+        another = self.home / 'another-retired-ledger'
+        another.mkdir()
+        observed = transaction.LedgerLocations(
+            {root: dict(hosts={'claude': {}}) for root in (self.a, another)},
+            retired_roots=(self.a, another))
+        retained = transaction.retain_record_source_writers(self.reg.ghost, observed)
+        self.assertEqual(retained.errors, {})
+        self.assertEqual(set(retained.blocked_hosts['claude']), {str(self.a), str(another)})
+        self.assertNotIn('codex', retained.blocked_hosts)
+        for cause in retained.blocked_hosts['claude'].values():
+            self.assertIn('No completed cleanup journal', cause)
+
+    def test_retention_ignores_ordinary_files_but_reports_broken_journal_candidates(self):
+        root = install_transaction.rollbacks_root(self.reg.ghost)
+        root.mkdir(exist_ok=True)
+        ordinary = root / '.DS_Store'
+        ordinary.write_text('unrelated')
+        missing = root / 'missing-journal'
+        missing.mkdir()
+        protected = self.home / 'private-journal-target'
+        protected.mkdir()
+        linked = root / 'linked-journal'
+        linked.symlink_to(protected / 'missing-target')
+        observed = transaction.LedgerLocations({self.a: dict(hosts={'claude': {}})}, retired_roots=(self.a,))
+        protected.chmod(0)
+        try:
+            retained = transaction.retain_record_source_writers(self.reg.ghost, observed)
+        finally:
+            protected.chmod(0o700)
+        self.assertNotIn(str(ordinary / install_transaction.JOURNAL_FILENAME), retained.errors)
+        self.assertIn(str(missing / install_transaction.JOURNAL_FILENAME), retained.errors)
+        self.assertIn(str(linked / install_transaction.JOURNAL_FILENAME), retained.errors)
+        self.assertEqual(ordinary.read_text(), 'unrelated')
+
+    @unittest.skipUnless(os.name == 'posix' and os.geteuid() != 0, 'requires POSIX directory permissions')
+    def test_inaccessible_journal_entries_report_each_path_and_preserve_host_holds(self):
+        root = install_transaction.rollbacks_root(self.reg.ghost)
+        entries = [root / 'first', root / 'second']
+        for entry in entries:
+            entry.mkdir(parents=True)
+        observed = transaction.LedgerLocations({self.a: dict(hosts={'claude': {}})}, retired_roots=(self.a,))
+        root.chmod(0o400)
+        try:
+            retained = transaction.retain_record_source_writers(self.reg.ghost, observed)
+        finally:
+            root.chmod(0o700)
+        for entry in entries:
+            self.assertIn(str(entry), retained.errors[str(entry / install_transaction.JOURNAL_FILENAME)])
+        self.assertIn(str(self.a), retained.blocked_hosts['claude'])
+
+    def test_retention_saves_unknown_hosts_separately_from_observed_writers(self):
+        journal = install_transaction.Journal.begin(dict(ghost_root=str(self.reg.ghost), host='installer'), [])
+        journal.data['source_cleanup'] = dict(path=str(self.a), destination=str(self.b), baseline={})
+        journal.mark('done')
+        observed = transaction.LedgerLocations({self.a: dict(hosts={'claude': {}})},
+            unavailable_hosts={'codex': 'actual hooks unreadable'}, retired_roots=(self.a,))
+        retained = transaction.retain_record_source_writers(self.reg.ghost, observed)
+        saved = install_transaction.Journal.load(self.reg.ghost, journal.txid).data['source_cleanup']
+        self.assertEqual(saved['writer_hosts'], ['claude'])
+        self.assertEqual(saved['unavailable_writer_hosts'], {'codex': 'actual hooks unreadable'})
+        self.assertEqual(retained.blocked_hosts, {})
+
+    def test_regular_publish_rejects_unavailable_config_before_changing_provenance(self):
+        from types import SimpleNamespace
+        config = runtime_config.config_path()
+        config.write_text('{')
+        context = SimpleNamespace(platform='claude', record_source=dict(
+            root=str(self.home), commit='fixture', dirty='clean', hooks_path='hooks'))
+        with mock.patch.object(install_transaction, 'publish', return_value='not-published') as publish:
+            with self.assertRaisesRegex(ValueError, 'config.json'):
+                transaction.publish(context, [])
+        publish.assert_not_called()
+
+    def test_inactive_other_host_config_error_does_not_block_shared_move(self):
+        for destination in installed_payload.read(self.reg.ghost)['targets']:
+            installed_payload.release_target(self.reg.ghost, destination=destination, provider='core', platform='codex')
+        runtime_config.save_config({'install_locations': {'codex': 'not-an-object'}})
+        result = self.migrate()
+        self.assertEqual(result.status, 'complete', result)
+        self.assertFalse(self.a.exists())
+        self.assertTrue((self.b / 'ghost-state.sqlite3').is_file())
+        self.assertEqual(runtime_config.load_config()['install_locations']['codex'], 'not-an-object')
+
+    def test_active_other_host_config_error_defers_shared_move(self):
+        runtime_config.save_config({'install_locations': {'claude': 'not-an-object'}})
+        before = runtime_config.config_path().read_bytes()
+        result = self.migrate()
+        self.assertEqual(result.status, 'deferred', result)
+        self.assertIn('claude', result.detail)
+        self.assertEqual(runtime_config.config_path().read_bytes(), before)
+        self.assertTrue(self.a.exists())
+
     def test_completed_migration_removes_redundant_originals_and_preparation(self):
+        self.ledger.record_turn(root=self.a, platform='claude', session_id='same-session', raw_input='last writer closed')
+        self.assertFalse((self.a / 'ghost-state.sqlite3-wal').exists())
         self.b.mkdir()
         (self.b / 'existing.txt').write_text('existing B')
         self.assertEqual(self.migrate().status, 'complete')
         self.assertEqual((self.b / 'existing.txt').read_text(), 'existing B')
-        self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session'), self.before)
+        self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session')['latest_input_digest'],
+                         self.ledger.text_digest('last writer closed'))
         self.assertEqual(list(install_transaction.rollbacks_root(self.reg.ghost).iterdir()), [])
         self.assertEqual(list(self.reg.ghost.glob('ledger-migration-*')), [])
+        self.assertFalse(self.a.exists())
+
+    def test_partial_source_deletion_retries_without_reverting_new_records(self):
+        remove = install_transaction._remove_path
+        def fail_after_database_delete(path):
+            if Path(path) == self.a:
+                (self.a / 'ghost-state.sqlite3').unlink()
+                raise PermissionError('old record folder deletion denied')
+            return remove(path)
+        with mock.patch.object(install_transaction, '_remove_path', side_effect=fail_after_database_delete):
+            result = self.migrate()
+        self.assertEqual(result.status, 'cleanup_failed')
+        self.assertTrue(self.a.exists())
+        self.assertFalse((self.a / 'ghost-state.sqlite3').exists())
+        self.assertEqual(runtime_config.load_config(strict=True)['install_locations']['claude']['ledger_root'], str(self.b))
+        self.ledger.record_turn(root=self.b, platform='claude', session_id='same-session', raw_input='after cleanup failure')
+        self.assertEqual(install_transaction.cleanup_completed(self.reg.ghost,
+            record_source_cleanup=transaction.cleanup_record_source), ())
+        self.assertFalse(self.a.exists())
+        self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session')['latest_input_digest'],
+                         self.ledger.text_digest('after cleanup failure'))
+
+    def test_next_install_cleans_source_left_by_previous_migration_without_a_journal(self):
+        import contextlib
+        import io
+        from installer import record_move
+        with mock.patch.object(install_transaction, 'cleanup_completed', return_value=()):
+            self.assertEqual(self.migrate().status, 'cleanup_failed')
+        for folder in install_transaction.rollbacks_root(self.reg.ghost).iterdir():
+            shutil.rmtree(folder)
+        import sqlite3
+        with sqlite3.connect(self.a / 'ghost-state.sqlite3') as connection:
+            connection.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        connection.close()
+        self.assertFalse((self.a / 'ghost-state.sqlite3-wal').exists())
+        self.ledger.record_turn(root=self.b, platform='claude', session_id='same-session', raw_input='new B input')
+        import install_lock
+        lock_path = self.reg.ghost / 'install.lock'
+        install_lock.release_lock(lock_path, json.loads(lock_path.read_text())['generation'])
+        extra = self.a / 'not-moved.txt'
+        extra.write_text('not in B')
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), mock.patch.object(record_move.source, 'interactive', return_value=False):
+            self.assertEqual(record_move.run('install'), 1)
+        self.assertEqual(extra.read_text(), 'not in B')
+        self.assertIn(str(self.a), output.getvalue())
+        self.assertIn(extra.name, output.getvalue())
+        extra.unlink()
+        with contextlib.redirect_stdout(io.StringIO()), mock.patch.object(record_move.source, 'interactive', return_value=False):
+            self.assertEqual(record_move.run('install'), 0)
+        self.assertFalse(self.a.exists())
+        self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session')['latest_input_digest'],
+                         self.ledger.text_digest('new B input'))
+
+    def test_changed_source_or_rebound_host_prevents_completed_journal_deletion(self):
+        with mock.patch.object(install_transaction, 'cleanup_completed', return_value=()):
+            self.assertEqual(self.migrate().status, 'cleanup_failed')
+        extra = self.a / 'not-moved.txt'
+        extra.write_text('Only the retired location contains this file')
+        with self.assertRaisesRegex(install_transaction.InstallTransactionError, 'source changed'):
+            install_transaction.cleanup_completed(self.reg.ghost, record_source_cleanup=transaction.cleanup_record_source)
+        self.assertEqual(extra.read_text(), 'Only the retired location contains this file')
+        extra.unlink()
+        install_hooks.install_hook('claude', destination=self.value)
+        with self.assertRaisesRegex(install_transaction.InstallTransactionError, 'retired record source'):
+            install_transaction.cleanup_completed(self.reg.ghost, record_source_cleanup=transaction.cleanup_record_source)
+        self.assertTrue(self.a.exists())
+        self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session'), self.before)
+
+    def test_shared_publish_cleanup_requires_the_callers_record_deletion_policy(self):
+        with mock.patch.object(install_transaction, 'cleanup_completed', return_value=()):
+            self.assertEqual(self.migrate().status, 'cleanup_failed')
+        journal, = (path for path in install_transaction.rollbacks_root(self.reg.ghost).iterdir()
+                    if install_transaction.Journal.load(self.reg.ghost, path.name).data.get('source_cleanup'))
+        with self.assertRaisesRegex(install_transaction.InstallTransactionError, 'record source cleanup policy'):
+            install_transaction.cleanup_completed(self.reg.ghost)
+        self.assertTrue(self.a.is_dir())
+        self.assertTrue(journal.is_dir())
+        self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session'), self.before)
+
+    def test_source_created_after_retained_history_check_is_not_deleted(self):
+        with mock.patch.object(install_transaction, 'cleanup_completed', return_value=()):
+            self.assertEqual(self.migrate().status, 'cleanup_failed')
+        for folder in install_transaction.rollbacks_root(self.reg.ghost).iterdir():
+            shutil.rmtree(folder)
+        self.ledger.record_turn(root=self.b, platform='claude', session_id='same-session', raw_input='new B input')
+        config = runtime_config.config_path().read_bytes()
+        service = self.reg.state_path.read_bytes()
+        extra = self.a / 'not-moved.txt'
+        relocate = self.ledger.relocate_moved_links
+
+        def changed_after_verification(source, current):
+            extra.write_text('Only the retired location contains this file')
+            return relocate(source, current)
+
+        with mock.patch.object(self.ledger, 'relocate_moved_links', side_effect=changed_after_verification):
+            with self.assertRaisesRegex(install_transaction.InstallTransactionError, 'source changed'):
+                transaction.cleanup_retired_ledgers()
+        self.assertEqual(extra.read_text(), 'Only the retired location contains this file')
+        self.assertFalse((self.b / extra.name).exists())
+        self.assertEqual(runtime_config.config_path().read_bytes(), config)
+        self.assertEqual(self.reg.state_path.read_bytes(), service)
+        self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session')['latest_input_digest'],
+                         self.ledger.text_digest('new B input'))
 
     def test_unreadable_other_host_prevents_shared_destination_move_without_changing_records(self):
         codex = self.home / '.codex'
@@ -220,7 +493,8 @@ class LedgerMigrationTests(unittest.TestCase):
             if patches.get('service', {}).get('state_digest') != self.reg.service()['state_digest']:
                 raise OSError('record failure')
             return update(root, patches, **kwargs)
-        with mock.patch.object(installed_payload, 'update', side_effect=failed):
+        with mock.patch.object(installed_payload, 'update', side_effect=failed), \
+                mock.patch.object(install_transaction, 'cleanup_completed', return_value=()):
             result = self.migrate()
         self.assertEqual(result.status, 'restored')
         self.assertIn('record failure', result.detail)
@@ -228,6 +502,15 @@ class LedgerMigrationTests(unittest.TestCase):
         self.assertEqual({path: path.read_bytes() for path in originals}, originals)
         self.assertEqual(sorted(path.name for path in self.b.iterdir()), ['retained.txt'])
         self.assertTrue(self.effects.running)
+
+        journal, = (install_transaction.Journal.load(self.reg.ghost, path.name)
+                    for path in install_transaction.rollbacks_root(self.reg.ghost).iterdir()
+                    if install_transaction.Journal.load(self.reg.ghost, path.name).data.get('source_cleanup'))
+        self.assertEqual(journal.phase, 'restored')
+        self.assertEqual(transaction.cleanup_retired_ledgers(), ())
+        self.assertEqual(self.ledger.read_session_state(root=self.a, platform='claude', session_id='same-session'), self.before)
+        self.assertEqual(self.migrate().status, 'complete')
+        self.assertEqual((self.b / 'retained.txt').read_text(), 'existing B')
 
     def test_restart_failure_keeps_committed_b_and_new_records(self):
         original_start = self.effects.start

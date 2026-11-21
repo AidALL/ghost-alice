@@ -180,6 +180,26 @@ class UnfinishedPublishTests(unittest.TestCase):
         self.assertTrue(handle[0].is_file())
         lock.release(handle)
 
+    def test_inherited_lock_does_not_repeat_parent_publish_recovery(self):
+        self.journal('20261020T000000Z-1-aaaaaaaa', 'prepare')
+        handle = lock.acquire('uninstall', 'codex')
+        try:
+            with mock.patch.object(install_transaction, 'unfinished', side_effect=AssertionError('duplicate recovery')):
+                self.assertIsNone(lock.acquire('uninstall', 'codex', inherit=True))
+            self.assertTrue(handle[0].exists())
+        finally:
+            lock.release(handle)
+
+    def test_unfinished_listing_failure_stops_command_and_releases_lock(self):
+        failure = install_transaction.InstallTransactionError(f'cannot list {self.ghost / "rollbacks"}')
+        out = io.StringIO()
+        with mock.patch.object(install_transaction, 'unfinished', side_effect=failure), \
+                contextlib.redirect_stdout(out), self.assertRaises(runner.InstallerExit) as stop:
+            lock.acquire('uninstall', 'codex')
+        self.assertEqual(stop.exception.code, 1)
+        self.assertIn(str(self.ghost / 'rollbacks'), out.getvalue())
+        self.assertFalse((self.ghost / 'install.lock').exists())
+
     def test_unfinished_publishes_are_restored_newest_first_while_the_lock_is_held(self):
         self.journal("20261020T000000Z-1-aaaaaaaa", "prepare")
         self.journal("20261020T000002Z-1-cccccccc", "done")

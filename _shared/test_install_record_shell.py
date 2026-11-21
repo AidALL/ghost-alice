@@ -63,9 +63,9 @@ class InstallRecordShellTest(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def run_installer(self, *args):
-        env = {key: value for key, value in os.environ.items() if key not in ("CLAUDE_CONFIG_DIR", "CODEX_HOME")}
-        env.update(HOME=str(self.home), GHOST_ALICE_INSTALL_PROGRESS="off")
+    def run_installer(self, *args, **env_overrides):
+        env = installer_env(self.home)
+        env.update(env_overrides)
         result = subprocess.run([self.bash, str(self.source / "install.sh"), *args], cwd=self.source, env=env,
                                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
                                 check=False)
@@ -164,17 +164,17 @@ class InstallRecordShellTest(unittest.TestCase):
         sibling.parent.mkdir()
         sibling.write_text('user data')
         (self.home / '.claude').mkdir()
-        with mock.patch.dict(os.environ, {'GHOST_ALICE_RUNTIME_SHARED_DIR': str(runtime)}):
-            self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router')
-            env = installer_env(self.home)
-            env['GHOST_ALICE_RUNTIME_SHARED_DIR'] = str(runtime)
-            shutil.rmtree(self.source)
-            command = [self.bash, str(self.ghost / 'bin/ghost-alice')]
-            removal = ['--platform', 'claude', '--uninstall', *([] if full else ['task-router'])]
-            for args in (['--status'], removal):
-                result = subprocess.run([*command, *args], env=env, cwd=self.home,
-                                        capture_output=True, text=True, timeout=180)
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router',
+                           GHOST_ALICE_RUNTIME_SHARED_DIR=str(runtime))
+        env = installer_env(self.home)
+        env['GHOST_ALICE_RUNTIME_SHARED_DIR'] = str(runtime)
+        shutil.rmtree(self.source)
+        command = [self.bash, str(self.ghost / 'bin/ghost-alice')]
+        removal = ['--platform', 'claude', '--uninstall', *([] if full else ['task-router'])]
+        for args in (['--status'], removal):
+            result = subprocess.run([*command, *args], env=env, cwd=self.home,
+                                    capture_output=True, text=True, timeout=180)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse(runtime.exists())
         self.assertFalse((runtime.parent / COMPANION).exists())
         self.assertEqual(sibling.read_text(), 'user data')
@@ -280,7 +280,7 @@ raise SystemExit(cli.main(sys.argv[1:]))
             shutil.rmtree(target)
             target.symlink_to(self.source / relative)
         for name in installed_payload.RECORD_FILENAMES:
-            (self.ghost / name).unlink()
+            (self.ghost / name).unlink(missing_ok=True)
         (self.ghost / "install-state" / "claude.json").unlink()
         self.run_installer("--platform", "claude", "--skip-source-health")
         targets = self.record()["targets"]
@@ -438,7 +438,7 @@ raise SystemExit(cli.main(sys.argv[1:]))
         (self.home / ".codex").mkdir()
         self.run_installer("--platform", "codex", "--skip-source-health")
         for name in installed_payload.RECORD_FILENAMES:
-            (self.ghost / name).unlink()
+            (self.ghost / name).unlink(missing_ok=True)
         shutil.rmtree(install_transaction.rollbacks_root(self.ghost))
         names = _target_names()
         out = self.run_installer("--platform", "codex", "--skip-source-health", "--verbose", "task-router")

@@ -26,7 +26,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import context_gateway  # noqa: E402
 import state_retention  # noqa: E402
-from installer_testing import checkout_copy  # noqa: E402
+from installer_testing import checkout_copy, installer_env  # noqa: E402
 
 HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop")
 
@@ -58,11 +58,8 @@ class RetentionInvariantTest(unittest.TestCase):
             (self.home / host).mkdir(parents=True)
         (self.root / "tmp").mkdir()
         self.checkout = checkout_copy(self)
-        self.env = {"HOME": str(self.home), "PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8",
-                    "TMPDIR": str(self.root / "tmp")}
-        for key in ("SYSTEMROOT", "PYTHONUSERBASE"):
-            if key in os.environ:
-                self.env[key] = os.environ[key]
+        self.env = installer_env(self.home)
+        self.env.update(LANG="C.UTF-8", TMPDIR=str(self.root / "tmp"))
         # The in-process gateway of forward_one_request writes where a registration beside this home would; a
         # real registration would make the uninstall stop the account's gateway service.
         service = {"state_path": str(self.home / ".ghost-alice" / "context-gateway" / "state.json"),

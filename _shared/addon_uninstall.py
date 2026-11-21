@@ -163,9 +163,9 @@ def _process_target(entry: dict[str, Any], *, allowed_roots: list[Path],
         item["action"] = "manual-review"
         item["reason"] = "modified-since-install (preserved)"
         return item
-    from uninstall_cleanup import _platforms_referencing_target
+    from uninstall_cleanup import platforms_referencing_target
     try:
-        shared = _platforms_referencing_target(Path(dest),
+        shared = platforms_referencing_target(Path(dest),
             current_manifest=_ghost_alice_root_for_addons(addons_dir)/'install-state'/f'{platform}.json',
             current_platform=platform)
     except (OSError, ValueError) as error:
@@ -273,7 +273,7 @@ def _mark_pending_manifest_deleted_entries(addon_id: str, *, addons_dir: str | o
 
 
 def _addon_hook_items(record: dict[str, Any], *, platform: str, apply_changes: bool,
-                     backup_sources=None) -> list[dict[str, Any]]:
+                     backup_sources=None, completed=None) -> list[dict[str, Any]]:
     """Remove (or, in dry-run, preview) the addon's observational hooks by exact marker.
 
     Hook markers are recorded top-level in the sidecar (kind not in provided[]); each
@@ -286,7 +286,7 @@ def _addon_hook_items(record: dict[str, Any], *, platform: str, apply_changes: b
     addon_id = record.get("addon_id")
     if not isinstance(addon_id, str) or not addon_registry.ADDON_ID_RE.fullmatch(addon_id):
         return []
-    out: list[dict[str, Any]] = []
+    out: list[dict[str, Any]] = [] if completed is None else completed
     remover = None
     for spec in specs:
         if not isinstance(spec, dict):
@@ -349,14 +349,30 @@ def _managed_executable_items(
     platform: str,
     apply_changes: bool,
     backup_sources=None,
+    completed=None,
 ) -> list[dict[str, Any]]:
-    permissions = _skill_permission_items(record, platform=platform, apply_changes=apply_changes,
-                                         backup_sources=backup_sources)
+    items = [] if completed is None else completed
+    try:
+        permissions = _skill_permission_items(record, platform=platform, apply_changes=apply_changes,
+                                              backup_sources=backup_sources)
+    except (OSError, ValueError, ExceptionGroup):
+        if apply_changes:
+            # The permission owner may have committed settings before its receipt
+            # finalization failed. Its read-only view distinguishes that recorded
+            # effect from a pending write without attempting the detach again.
+            try:
+                items.extend(_skill_permission_items(record, platform=platform, apply_changes=False))
+            except (OSError, ValueError, ExceptionGroup):
+                pass
+        raise
+    items.extend(permissions)
     if any(item.get('settings_state') in {'preserved', 'unreadable'} for item in permissions):
-        return permissions
-    return permissions + _addon_hook_items(record, platform=platform, apply_changes=apply_changes,
-                                            backup_sources=backup_sources) + _retired_hook_items(
-        provided, platform=platform, apply_changes=apply_changes, backup_sources=backup_sources)
+        return items
+    _addon_hook_items(record, platform=platform, apply_changes=apply_changes,
+                      backup_sources=backup_sources, completed=items)
+    items.extend(_retired_hook_items(provided, platform=platform, apply_changes=apply_changes,
+                                     backup_sources=backup_sources))
+    return items
 
 
 def _skill_permission_items(record, *, platform, apply_changes, backup_sources=None):
@@ -375,6 +391,7 @@ def _skill_permission_items(record, *, platform, apply_changes, backup_sources=N
         prepared = addon_skill_permissions.prepare_addon(record, settings_file, settings, core_names)
     except (OSError, ValueError, UnicodeError) as error:
         return [dict(kind='permission', addon_id=record['addon_id'], action='manual-review',
+                     path=str(settings_file),
                      reason='permission-attribution-unresolved', settings_state='readable', detail=str(error))]
     def write(path, updated, **kwargs):
         install_hooks._write_settings(path, updated, backup_sources=backup_sources, **kwargs)
@@ -409,25 +426,57 @@ def _prepare_uninstall(addon_id, *, addons_dir, allowed_roots, platform):
                         has_pending_marker=marker.exists())
 
 
+def retain_addon_removal(result, reason):
+    """Replace unexecuted plans with the actual hold, preserving completed item outcomes."""
+    for item in result['items']:
+        if item.get('action', '').startswith('would-'):
+            item.update(action='manual-review', reason=reason)
+    if result['status'] != 'error':
+        result['status'] = 'partial'
+
+
 def detach_addon_references(record, result, *, addons_dir, platform, backup_sources=None):
     """Begin the existing recovery unit and detach references; retain every file."""
     if record is None:
+        if result['status'] != 'error':
+            result['status'] = 'references-detached'
         return
     provided = record['provided']
-    _write_marker(_removing_marker_path(record['addon_id'], addons_dir=addons_dir), record['addon_id'], provided)
-    references = _managed_executable_items(record, provided, platform=platform, apply_changes=True,
-                                           backup_sources=backup_sources)
+    references = []
+    try:
+        _write_marker(_removing_marker_path(record['addon_id'], addons_dir=addons_dir), record['addon_id'], provided)
+        references = _managed_executable_items(record, provided, platform=platform, apply_changes=True,
+                                               backup_sources=backup_sources, completed=references)
+    except (OSError, ValueError, ExceptionGroup):
+        # A later reference owner may fail after an earlier owner committed.
+        # Replace only the exact completed reference. Two hooks of the same kind
+        # have separate writes, so the next hook's unexecuted preview must remain.
+        completed = {}
+        for item in references:
+            item['addon_id'] = record['addon_id']
+            completed[(item.get('kind'), item.get('name'), item.get('marker'))] = item
+        result['items'][:] = [completed.pop((item.get('kind'), item.get('name'), item.get('marker')), item)
+                             for item in result['items']] + list(completed.values())
+        retain_addon_removal(result, 'addon-reference-detach-failed')
+        raise
     for item in references:
         item['addon_id'] = record['addon_id']
     result['items'][:] = [item for item in result['items'] if item.get('kind') == 'addon-target'] + references
+    result['status'] = 'references-detached'
     blocked = [item for item in result['items'] if item['action'] in _BLOCKED_ACTIONS]
     if blocked:
         result['status'] = ('permissions-retained' if all(item.get('kind') == 'permission'
             and item.get('settings_state') == 'readable' for item in blocked) else 'partial')
 
 
-def finalize_addon_removal(record, result, *, addons_dir, allowed_roots, platform):
+def finalize_addon_removal(record, result, *, addons_dir, allowed_roots, platform, core_hooks=None):
     """Apply the scheduled file items, then retire only this addon's records."""
+    if result['status'] == 'dry-run':
+        retain_addon_removal(result, 'addon-reference-detach-not-attempted')
+        return
+    if core_hooks is not None and not core_hooks.details.get('hooks_detached', False):
+        retain_addon_removal(result, 'hook-detach-unresolved')
+        return
     addon_id = result['addon_id']
     marker = _removing_marker_path(addon_id, addons_dir=addons_dir)
     if record is None:

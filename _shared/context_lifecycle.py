@@ -134,6 +134,35 @@ def _schema(connection):
         PRIMARY KEY(platform, session_id))''')
 
 
+def moved_current_preserved(table, columns, original, retained, connection):
+    """Read whether moved context heads still name retained dispositions.
+
+    The ledger owner separately checks schema and every immutable original row.
+    Only this owner's current projection may replace those exact row values.
+    """
+    if table != 'core_context_current' or columns != ('platform', 'session_id', 'reference'):
+        return False
+    heads = {row[:2]: row[-1] for row in retained}
+    for platform, session, reference in original:
+        after = heads.get((platform, session))
+        if after is None:
+            return False
+        for value in (reference, after):
+            row = connection.execute('SELECT payload_json FROM core_context_dispositions WHERE reference=?',
+                                     (value,)).fetchone()
+            if row is None:
+                return False
+            try:
+                payload = json.loads(row[0])
+            except (TypeError, ValueError):
+                return False
+            binding = payload.get('input_binding') if isinstance(payload, dict) else None
+            if (not isinstance(binding, dict)
+                    or (binding.get('platform'), binding.get('session_id')) != (platform, session)):
+                return False
+    return True
+
+
 def _current_input(core, root, owner, connection):
     state = core.read_session_state(root=root, **owner, transaction=connection)
     if state.get('pending_audit_event') or not core._canonical_input_bound(connection, root, state):

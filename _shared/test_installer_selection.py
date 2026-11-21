@@ -192,7 +192,7 @@ class CleanupTests(SelectionCase):
             calls.append((args, kwargs))
             return runner.ToolResult(retired_assets.main(list(args[1:])))
         with mock.patch("installer.runner.run_tool", side_effect=invoke), \
-                mock.patch('uninstall_cleanup._platforms_referencing_target', return_value=[]), \
+                mock.patch('uninstall_cleanup.platforms_referencing_target', return_value=[]), \
                 mock.patch('uninstall_cleanup.release_target_records', create=True) as release:
             out = io.StringIO()
             with contextlib.redirect_stdout(out):

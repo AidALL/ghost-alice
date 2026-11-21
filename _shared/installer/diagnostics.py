@@ -132,6 +132,49 @@ def report_install_record(ctx: "Context") -> None:
         report.ok("Installed targets match the install record")
 
 
+def report_record_cleanup() -> int:
+    """Report remaining sources in completed journals without judging or executing cleanup."""
+    import install_transaction
+
+    ghost = locations.record_root()
+    root = install_transaction.rollbacks_root(ghost)
+    try:
+        if root.is_symlink():
+            raise ValueError('Journal root is a symbolic link')
+        if not root.exists():
+            return 0
+        folders = sorted(root.iterdir())
+    except (OSError, ValueError) as exc:
+        report.warn(report.message('move_cleanup_journal_unreadable', journal_path=root, cause=exc))
+        return 1
+    rc = 0
+    for folder in folders:
+        journal_path = folder / install_transaction.JOURNAL_FILENAME
+        try:
+            if not install_transaction.is_journal_candidate(folder):
+                continue
+            journal = install_transaction.Journal.load(ghost, folder.name)
+            if journal.phase != 'done' or 'source_cleanup' not in journal.data:
+                continue
+            removal = journal.data['source_cleanup']
+            if (not isinstance(removal, dict) or not isinstance(removal.get('baseline'), dict)
+                    or any(not isinstance(removal.get(key), str) or not Path(removal[key]).is_absolute()
+                           for key in ('path', 'destination'))):
+                raise ValueError('Completed journal has an invalid source cleanup record')
+            try:
+                Path(removal['path']).lstat()
+            except FileNotFoundError:
+                continue
+        except (OSError, ValueError, install_transaction.InstallTransactionError) as exc:
+            report.warn(report.message('move_cleanup_journal_unreadable', journal_path=journal_path, cause=exc))
+            rc = 1
+            continue
+        report.warn(report.message('move_cleanup_pending', current_path=removal['path'],
+                                   new_path=removal['destination'], journal_path=journal_path))
+        rc = 1
+    return rc
+
+
 def check_status(ctx: "Context") -> int:
     """Target listing, doctor in status mode, hook status."""
     from installer import selection
@@ -152,21 +195,24 @@ def check_status(ctx: "Context") -> int:
         for target in targets:
             print_target_status(target.name, skills_dir / target.name, "    ")
     report_install_record(ctx)
+    report_record_cleanup()
     run_install_doctor(ctx, "status", skills_dir)
     return 1 if hosts.install_hooks(ctx, "status", ctx.platform).legacy_status == 'error' else 0
 
 
 def run_doctor(ctx: "Context") -> int:
-    """Leftover `.removing` markers → warning and rc 1; then doctor strict and hook status (without the resume)."""
+    """Pending cleanup and `.removing` markers → rc 1; then strict doctor and hook status, without resuming."""
     skills_dir = Path(ctx.skills_dir)
     report.emit(f"Installer doctor ({skills_dir}):")
     report_install_record(ctx)
-    rc = 0
+    rc = report_record_cleanup()
     observed = record_move.read_locations()
     for root, value in (observed.roots if observed is not None else {}).items():
-        if value['state'] == 'fixed':
+        if value['state'] in ('fixed', 'retired'):
             continue
-        report.emit(report.message('move_doctor' if value['state'] == 'source-bound' else 'move_relation_unknown',
+        key = ('move_location_unconfirmed' if value['state'] == 'unconfirmed' else
+               'move_doctor' if value['state'] == 'source-bound' else 'move_relation_unknown')
+        report.emit(report.message(key,
                                    current_path=root, entry_command=locations.management_command()))
     addons_dir = locations.addons_dir(ctx.platform)
     if addons_dir.is_dir() and any(addons_dir.glob("*.json.removing")):

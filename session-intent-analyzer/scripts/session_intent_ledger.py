@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import Counter
 from contextlib import closing, contextmanager
 from copy import deepcopy
 from pathlib import Path
@@ -672,6 +673,8 @@ def list_session_states(root: Path) -> list[dict[str, Any]]:
 
 def _snapshot_files(root: Path) -> dict[str, tuple[str, str]]:
     """Compare whole databases logically and companion files by bytes, without retaining bodies."""
+    if os.path.lexists(root) and (root.is_symlink() or not root.is_dir()):
+        raise ValueError(f'Ledger snapshot requires a directory at {root}')
     result = {}
     _require_database_if_initialized(root)
     for path in sorted(root.rglob('*')):
@@ -701,8 +704,38 @@ class LedgerSnapshotConflict(ValueError):
     """Two existing ledger histories or retained files cannot be combined."""
 
 
-def snapshot_roots(source: Path, existing: Path, destination: Path, *, writers_stopped: bool) -> None:
-    """Stage A and existing B after their writers stop; never merge distinct SQLite histories."""
+def _moved_link_target(source: Path, current: Path, relative: str, target: str, *, origin: Path | None = None) -> str:
+    """Move named A targets into B; resolve only parent traversals that change the actual endpoint."""
+    origin = source if origin is None else origin
+    original = (origin / relative).parent / target
+    absolute = Path(os.path.abspath(original))
+    resolved = original.resolve(strict=False)
+    corrected = absolute.resolve(strict=False) != resolved
+    if corrected:
+        absolute = resolved
+    relocated = current / absolute.relative_to(source) if absolute.is_relative_to(source) else absolute
+    if Path(target).is_absolute() and not absolute.is_relative_to(source):
+        return str(absolute) if corrected or original.is_relative_to(source) else target
+    try:
+        return os.path.relpath(relocated, (current / relative).parent)
+    except ValueError:
+        # Different Windows drives have no relative spelling.
+        return str(relocated)
+
+
+def _moved_link_matches(source: Path, current: Path, relative: str, original: str, retained: str) -> bool:
+    """An original A-owned link or an equivalent relocated link, never an ambiguous external copy."""
+    before = os.path.abspath((source / relative).parent / _moved_link_target(source, source, relative, original))
+    expected = os.path.abspath((current / relative).parent / _moved_link_target(source, current, relative, original))
+    actual = os.path.abspath((current / relative).parent / _moved_link_target(current, current, relative, retained))
+    return actual == expected or (original == retained and before != expected)
+
+
+def snapshot_roots(source: Path, existing: Path, destination: Path, *, writers_stopped: bool) -> tuple[dict | None, dict | None]:
+    """Stage stopped A/B inputs and return their validated physical baselines to the installer.
+
+    Distinct SQLite histories never merge. The installer retains A's cleanup baseline and checks B's before replacement.
+    """
     if not writers_stopped:
         raise ValueError('Ledger writers must be stopped before taking the migration snapshot')
     source, existing, destination = (Path(path).resolve() for path in (source, existing, destination))
@@ -711,6 +744,13 @@ def snapshot_roots(source: Path, existing: Path, destination: Path, *, writers_s
     roots = (source, existing)
     snapshots = [_snapshot_files(root) for root in roots]
     for name in snapshots[0].keys() & snapshots[1].keys():
+        if all(snapshot[name][0] == 'link' for snapshot in snapshots):
+            if (os.path.abspath((existing / name).parent /
+                        _moved_link_target(source, existing, name, snapshots[0][name][1])) ==
+                    os.path.abspath((existing / name).parent /
+                        _moved_link_target(source, existing, name, snapshots[1][name][1], origin=existing))):
+                continue
+            raise LedgerSnapshotConflict(f'Ledger migration conflict: {name}')
         if snapshots[0][name] != snapshots[1][name]:
             parts = Path(name).parts
             if (len(parts) == 2 and Path(name) == current_session_pointer_path(Path(), parts[0])
@@ -750,8 +790,181 @@ def snapshot_roots(source: Path, existing: Path, destination: Path, *, writers_s
     # Import only legacy sessions absent from the copied DB, using the existing authentication path.
     for state in list_session_states(destination):
         migrate_session(root=destination, platform=state['platform'], session_id=state['session_id'])
+    # Include sidecars created by earlier SQLite reads, then bind both physical
+    # baselines to the same input contents that the staged snapshot preserves.
+    baselines = tuple(_shared_module('content_digest').state(root, include_generated=True) for root in roots)
     if any(_snapshot_files(root) != before for root, before in zip(roots, snapshots)):
         raise ValueError('Ledger input changed during snapshot; stop its writers before retrying')
+    # Validate the original inputs before changing link spellings. Targets refer
+    # to final B, whose location can differ from this private staging directory.
+    for relative, (kind, target) in (snapshots[1] | snapshots[0]).items():
+        if kind == 'link':
+            origin = source if relative in snapshots[0] else existing
+            relocated = _moved_link_target(source, existing, relative, target, origin=origin)
+            if relocated != target:
+                path = destination / relative
+                path.unlink()
+                path.symlink_to(relocated)
+    return baselines
+
+
+def _verify_moved_database(source: Path, current: Path) -> None:
+    """Keep every original row; only the current projections owned by Core may advance."""
+    def fail(table):
+        raise ValueError(f'Moved ledger does not retain source database content: {source.name}/{table}')
+
+    with closing(sqlite3.connect(source.as_uri() + '?mode=ro', uri=True)) as old, \
+            closing(sqlite3.connect(current.as_uri() + '?mode=ro', uri=True)) as new:
+        old.execute('BEGIN')
+        new.execute('BEGIN')
+        schema = 'SELECT type,name,tbl_name,sql FROM sqlite_master'
+        if not set(old.execute(schema)).issubset(set(new.execute(schema))):
+            fail('schema')
+        if source.name == 'ghost-state.sqlite3':
+            _check_database(old)
+            _check_database(new)
+        for (table,) in old.execute("SELECT name FROM sqlite_master WHERE type='table'"):
+            quoted = '"' + table.replace('"', '""') + '"'
+            columns = tuple(row[1] for row in old.execute(f'PRAGMA table_info({quoted})'))
+            original = list(old.execute(f'SELECT * FROM {quoted}'))
+            retained = list(new.execute(f'SELECT * FROM {quoted}'))
+            # SQLite returns distinct Python types for its storage classes;
+            # Python equality alone would collapse INTEGER 1 and REAL 1.0.
+            counts = [Counter(tuple((type(value), value) for value in row) for row in rows)
+                      for rows in (original, retained)]
+            if not counts[0] - counts[1]:
+                continue
+            if source.name == 'ghost-state.sqlite3':
+                if table == 'sessions' and columns == ('platform', 'session_id', 'revision', 'input_event_id', 'state_json'):
+                    for platform, session, *_ in original:
+                        before, after = (_stored_state(db, platform, session) for db in (old, new))
+                        events = [list(db.execute('SELECT sequence,mutation_id,event_json FROM intent_events '
+                            'WHERE platform=? AND session_id=? ORDER BY sequence', (platform, session))) for db in (old, new)]
+                        if (after is None or after['ledger_revision'] < before['ledger_revision']
+                                or events[0] != events[1][:len(events[0])]
+                                or (after['ledger_revision'] == before['ledger_revision'] and after != before)
+                                or (after['ledger_revision'] > before['ledger_revision'] and len(events[1]) <= len(events[0]))):
+                            fail(table)
+                    continue
+                if table == 'canonical_intakes' and columns == (
+                        'platform', 'session_id', 'input_event_id', 'input_digest', 'input_char_count', 'event_sequence'):
+                    heads = {row[:2]: row for row in retained}
+                    for row in original:
+                        after = heads.get(row[:2])
+                        if after is None or after[-1] < row[-1]:
+                            fail(table)
+                        for observation in (row, after):
+                            event = new.execute('SELECT event_json FROM intent_events WHERE platform=? AND session_id=? '
+                                'AND sequence=?', (*observation[:2], observation[-1])).fetchone()
+                            if event is None or not _observation_matches(json.loads(event[0]), *observation[:-1]):
+                                fail(table)
+                    continue
+                if table == 'session_discovery' and columns == ('platform', 'session_id'):
+                    heads = dict(retained)
+                    for platform, session in original:
+                        if (_stored_state(new, platform, session) is None or platform not in heads
+                                or _stored_state(new, platform, heads[platform]) is None):
+                            fail(table)
+                    continue
+                if (_shared_module('context_lifecycle').moved_current_preserved(table, columns, original, retained, new)
+                        or _shared_module('response_context_use').moved_current_preserved(table, columns, original, retained, new)):
+                    continue
+            elif (source.name == 'session-checks.sqlite3'
+                    and _shared_module('session_check_cache').moved_current_preserved(table, columns, original, retained)):
+                continue
+            fail(table)
+
+
+def verify_moved_source(source: Path, current: Path) -> dict:
+    """Verify retained source data and return its physical baseline for installer cleanup.
+
+    This check neither retires nor deletes a root. Unknown tables and original companion files retain
+    exact contents; current Core projections and discovery pointers may advance while history remains.
+    The final source comparison authenticates the captured baseline; callers must not recapture it.
+    """
+    source, current = (Path(path).expanduser().absolute() for path in (source, current))
+    if any(path.is_symlink() or not path.is_dir() for path in (source, current)):
+        raise ValueError('Moved ledger verification needs existing unlinked directories')
+    source, current = source.resolve(), current.resolve()
+    if source.is_relative_to(current) or current.is_relative_to(source):
+        raise ValueError('Moved ledger verification needs separate source and current roots')
+    try:
+        original, retained = (_snapshot_files(root) for root in (source, current))
+        for relative, value in original.items():
+            if value[0] == 'sqlite':
+                paths = (source / relative, current / relative)
+                if retained.get(relative, (None,))[0] != 'sqlite' or any(path.is_symlink() for path in paths):
+                    raise ValueError(f'Moved ledger does not retain source database: {relative}')
+                _verify_moved_database(*paths)
+            elif value[0] == 'link':
+                if (retained.get(relative, (None,))[0] != 'link'
+                        or not _moved_link_matches(source, current, relative, value[1], retained[relative][1])):
+                    raise ValueError(f'Moved ledger does not retain source companion: {relative}')
+            elif retained.get(relative) != value:
+                parts = Path(relative).parts
+                if (len(parts) == 2 and Path(relative) == current_session_pointer_path(Path(), parts[0])
+                        and value[0] == 'file' and retained.get(relative, (None,))[0] == 'file'):
+                    selected = read_current_session_pointer(source, parts[0])
+                    if selected and read_session_state(root=current, platform=parts[0], session_id=selected):
+                        # The reader owns discovery meaning; its old selected history
+                        # remains even when another session is now current.
+                        continue
+                raise ValueError(f'Moved ledger does not retain source companion: {relative}')
+        # Legacy sources remain byte-identical companions after import; comparing
+        # their normalized live state would mistake the intake reset for data loss.
+        # Earlier SQLite reads may create WAL/SHM files. Capture their physical
+        # state before the final logical check, so later source changes cannot
+        # become an unverified deletion baseline after this function returns.
+        baseline = _shared_module('content_digest').state(source, include_generated=True)
+        if _snapshot_files(source) != original:
+            raise ValueError('Ledger source changed during moved-source verification')
+        return baseline
+    except sqlite3.Error as exc:
+        raise ValueError(f'Moved ledger database cannot be compared: {exc}') from exc
+
+
+def relocate_moved_links(source: Path, current: Path) -> None:
+    """Relocate copied links after verification, under the installer's existing lock.
+
+    Each replacement is atomic. An interrupted call leaves A and any completed replacements intact;
+    verify_moved_source accepts that mixture before the installer retries this handoff.
+    """
+    source, current = (Path(path).expanduser().absolute() for path in (source, current))
+    if any(path.is_symlink() or not path.is_dir() for path in (source, current)):
+        raise ValueError('Moved link relocation needs existing unlinked directories')
+    source, current = source.resolve(), current.resolve()
+    if source.is_relative_to(current) or current.is_relative_to(source):
+        raise ValueError('Moved link relocation needs separate source and current roots')
+    originals = {path.relative_to(source).as_posix(): os.readlink(path)
+                 for path in source.rglob('*') if path.is_symlink()}
+    replacements = []
+    for path in sorted(current.rglob('*')):
+        if not path.is_symlink():
+            continue
+        relative, target = path.relative_to(current).as_posix(), os.readlink(path)
+        original = originals.pop(relative, None)
+        if original is None:
+            if not Path(os.path.abspath(path.parent / target)).is_relative_to(source):
+                continue
+            expected = _moved_link_target(source, current, relative, target, origin=current)
+        else:
+            expected = _moved_link_target(source, current, relative, original)
+            if not _moved_link_matches(source, current, relative, original, target):
+                raise ValueError(f'Copied ledger link changed before relocation: {relative}')
+        if target != expected:
+            replacements.append((path, target, path.lstat(), expected, original))
+    if originals:
+        raise ValueError('Copied ledger links are unavailable: ' + ', '.join(sorted(originals)))
+    for path, target, identity, expected, original in replacements:
+        temporary = path.with_name(f'.{path.name}.ledger-move-{uuid.uuid4().hex}.tmp')
+        try:
+            temporary.symlink_to(expected)
+            if (path.lstat() != identity or os.readlink(path) != target
+                    or (original is not None and os.readlink(source / path.relative_to(current)) != original)):
+                raise ValueError(f'Ledger link changed during relocation: {path.relative_to(current)}')
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def export_session(*, root: Path | None = None, platform: str, session_id: str, destination: Path) -> dict[str, Path]:

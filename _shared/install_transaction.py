@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -56,10 +57,14 @@ ROLLBACKS_DIRNAME = "rollbacks"
 JOURNAL_FILENAME = "journal.json"
 FINISHED_PHASES = ("done", "restored")
 TARGET_STATUSES = ("current", "updated", "new")
+_BSD_FILE_LOCK_FLAGS = (stat.UF_IMMUTABLE | stat.SF_IMMUTABLE | stat.UF_APPEND | stat.SF_APPEND
+                        | stat.UF_NOUNLINK | stat.SF_NOUNLINK)
 
 
 class InstallTransactionError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, journal_reason: str | None = None):
+        super().__init__(message)
+        self.journal_reason = journal_reason
 
 
 def _unique_path(root: Path, prefix: str, name: str) -> Path:
@@ -400,6 +405,32 @@ def _write_json(path: Path, data: dict) -> None:
             pass
 
 
+def _copy_metadata_stat(source: Path, destination: Path) -> None:
+    """Preserve file attributes without transferring a deletion or write lock."""
+    attributes = source.stat()
+    flags = getattr(attributes, 'st_flags', 0)
+    if not flags & _BSD_FILE_LOCK_FLAGS and (os.name != 'nt' or attributes.st_mode & stat.S_IWRITE):
+        shutil.copystat(source, destination)
+        return
+    mode = stat.S_IMODE(attributes.st_mode)
+    destination.chmod(mode | stat.S_IWRITE if os.name == 'nt' else mode)
+    os.utime(destination, ns=(attributes.st_atime_ns, attributes.st_mtime_ns))
+    if flags & ~_BSD_FILE_LOCK_FLAGS:
+        os.chflags(destination, flags & ~_BSD_FILE_LOCK_FLAGS)
+
+
+def _unlock_old_metadata_copy(snapshot: Path) -> None:
+    """An older journal may have copied its source's immutable or read-only attribute."""
+    attributes = snapshot.lstat()
+    if attributes.st_nlink != 1 or not stat.S_ISREG(attributes.st_mode):
+        return
+    flags = getattr(attributes, 'st_flags', 0)
+    if flags & _BSD_FILE_LOCK_FLAGS:
+        os.chflags(snapshot, flags & ~_BSD_FILE_LOCK_FLAGS)
+    if os.name == 'nt' and not attributes.st_mode & stat.S_IWRITE:
+        snapshot.chmod(stat.S_IMODE(attributes.st_mode) | stat.S_IWRITE)
+
+
 class Journal:
     """`rollbacks/<txid>/journal.json`: the targets one publish replaces and how far it got.
 
@@ -426,33 +457,65 @@ class Journal:
         name = self.data.get("record_copy")
         return self.folder / name if name else None
 
-    def restore_record(self, ghost_root) -> None:
-        # Old journals saved only the v1 filename. New journals save both files,
-        # including absence, so an interrupted schema migration restores exactly.
-        names = self.data.get("record_files", [self.data.get("record_copy")])
-        installed_payload.restore(
-            ghost_root,
-            self.folder / installed_payload.FILENAME if installed_payload.FILENAME in names else None,
-            legacy_saved=(self.folder / installed_payload.LEGACY_FILENAME
-                          if installed_payload.LEGACY_FILENAME in names else None),
-        )
+    def restore_record(self, ghost_root, *, metadata_first: bool = False) -> None:
+        # Each saved filename and each absence belongs to the pre-publication record.
+        def restore_payload():
+            names = self.data.get("record_files", [self.data.get("record_copy")])
+            installed_payload.restore(
+                ghost_root,
+                self.folder / installed_payload.FILENAME if installed_payload.FILENAME in names else None,
+                attributed_saved=(self.folder / installed_payload.ATTRIBUTED_FILENAME
+                                  if installed_payload.ATTRIBUTED_FILENAME in names else None),
+                legacy_saved=(self.folder / installed_payload.LEGACY_FILENAME
+                              if installed_payload.LEGACY_FILENAME in names else None),
+            )
+        failures = []
+        steps = (self.restore_metadata, restore_payload) if metadata_first else (restore_payload, self.restore_metadata)
+        for restore in steps:
+            try:
+                restore()
+            except (OSError, ValueError, RuntimeError) as error:
+                failures.append(str(error))
+        if failures:
+            raise InstallTransactionError('; '.join(failures))
+
+    def restore_metadata(self) -> None:
+        """Restore the saved regular files in their caller's dependency order."""
+        failures = []
         for item in self.data.get('metadata_records', []):
             destination = Path(item['path'])
-            if item['copy'] is None:
-                destination.unlink(missing_ok=True)
-            else:
+            try:
+                if item.get('restore_if_absent') and os.path.lexists(destination):
+                    continue
+                if item['copy'] is None:
+                    destination.unlink(missing_ok=True)
+                    continue
                 snapshot = self.folder / item['copy']
-                installed_payload._write(destination, snapshot.read_bytes())
-                shutil.copystat(snapshot, destination)
+                saved = snapshot.read_bytes()
+                try:
+                    if stat.S_ISREG(destination.lstat().st_mode) and destination.read_bytes() == saved:
+                        continue
+                except (FileNotFoundError, PermissionError):
+                    pass
+                installed_payload._write(destination, saved)
+                _copy_metadata_stat(snapshot, destination)
+            except (OSError, ValueError, RuntimeError) as error:
+                failures.append(f'{destination}: {error}')
+        if failures:
+            raise InstallTransactionError('; '.join(failures))
 
-    def preserve_metadata(self, file: Path) -> None:
+    def preserve_metadata(self, file: Path, *, restore_if_absent: bool = False) -> None:
         """Save an owner's metadata before it changes alongside this publication."""
         file = file.resolve()
         records = self.data.setdefault('metadata_records', [])
         name = f'metadata-{len(records)}' if file.exists() else None
         if name:
-            shutil.copy2(file, self.folder / name)
+            snapshot = self.folder / name
+            shutil.copyfile(file, snapshot)
+            _copy_metadata_stat(file, snapshot)
         records.append(dict(path=str(file), copy=name))
+        if restore_if_absent:
+            records[-1]['restore_if_absent'] = True
         self.save()
 
     def record_staged(self, batch: ReplacementBatch) -> None:
@@ -499,77 +562,238 @@ class Journal:
 
     @classmethod
     def load(cls, ghost_root, txid: str) -> "Journal":
-        folder = rollbacks_root(ghost_root) / txid
+        """Read a supported journal without following linked journal material.
+
+        ``journal_reason`` distinguishes unsupported versions from unreadable or malformed records.
+        Callers decide which phases they consume and how a recognition failure affects their work.
+        Schema 1 journals that saved only ``record_copy`` remain readable.
+        """
+        root = rollbacks_root(ghost_root)
+        folder = root / txid
+        if not txid or txid in ('.', '..') or Path(txid).name != txid:
+            raise InstallTransactionError(f"invalid publish transaction id {txid!r}; review {root}",
+                                          journal_reason='invalid-journal')
         try:
+            for path, reason in ((root, 'linked-publish-root'), (folder, 'linked-publish-entry'),
+                                 (folder / JOURNAL_FILENAME, 'linked-publish-journal')):
+                if path.is_symlink():
+                    raise InstallTransactionError(f"journal of publish {txid} uses a symbolic link: {path}",
+                                                  journal_reason=reason)
             data = json.loads((folder / JOURNAL_FILENAME).read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, ValueError) as exc:
-            raise InstallTransactionError(f"journal of publish {txid} cannot be read ({exc}); review {folder}") from exc
-        if not isinstance(data, dict) or not isinstance(data.get("targets", []), list):
-            raise InstallTransactionError(f"journal of publish {txid} is not a journal; review {folder}")
+            raise InstallTransactionError(f"journal of publish {txid} cannot be read ({exc}); review {folder}",
+                                          journal_reason='unreadable-journal') from exc
+        if not isinstance(data, dict) or type(data.get('schema_version')) is not int:
+            raise InstallTransactionError(f"journal of publish {txid} has no valid schema version; review {folder}",
+                                          journal_reason='invalid-journal')
+        if data['schema_version'] != JOURNAL_SCHEMA_VERSION:
+            raise InstallTransactionError(
+                f"journal of publish {txid} has unsupported schema version {data['schema_version']}; review {folder}",
+                journal_reason='unsupported-journal-schema')
+        if (data.get('txid') != txid or not isinstance(data.get('targets'), list)
+                or any(not isinstance(target, dict) for target in data['targets'])):
+            raise InstallTransactionError(f"journal of publish {txid} has an invalid transaction id or targets; review {folder}",
+                                          journal_reason='invalid-journal')
+
+        def invalid(field: str) -> None:
+            raise InstallTransactionError(f"journal of publish {txid} has invalid {field}; review {folder}",
+                                          journal_reason='invalid-journal')
+
+        def path_string(value) -> bool:
+            return isinstance(value, str) and bool(value) and '\0' not in value
+
+        if not isinstance(data.get('phase'), str):
+            invalid('phase')
+        if 'host' in data and not isinstance(data['host'], str):
+            invalid('host')
+        if 'participants' in data and not isinstance(data['participants'], dict):
+            invalid('participant recovery facts')
+        for target in data['targets']:
+            if not path_string(target.get('dest')):
+                invalid('target destination')
+            for key in ('source', 'logical_dest', 'stage', 'rollback'):
+                if key in target and not (key in ('stage', 'rollback') and target[key] is None):
+                    if not path_string(target[key]):
+                        invalid(f'target {key}')
+            for key in ('kind', 'name', 'mode'):
+                if key in target and not isinstance(target[key], str):
+                    invalid(f'target {key}')
+            # These are opaque content_digest states; their owner defines the comparison.
+            for key in ('before', 'candidate'):
+                if target.get(key) is not None and not isinstance(target[key], dict):
+                    invalid(f'target {key} state')
+        metadata = data.get('metadata_records', [])
+        if not isinstance(metadata, list):
+            invalid('metadata records')
+        for index, item in enumerate(metadata):
+            if (not isinstance(item, dict) or not path_string(item.get('path'))
+                    or not Path(item['path']).is_absolute() or 'copy' not in item
+                    or item['copy'] not in (None, f'metadata-{index}')):
+                invalid('metadata records')
+            if 'restore_if_absent' in item and not isinstance(item['restore_if_absent'], bool):
+                invalid('metadata restoration condition')
+            # preserve_metadata resolves the destination and names each saved copy by its index.
+            if item['copy'] is not None and (folder / item['copy']).is_symlink():
+                raise InstallTransactionError(f"journal of publish {txid} has linked metadata copies; review {folder}",
+                                              journal_reason='linked-publish-metadata')
+        if data.get('preparation_dir') not in (None, 'input'):
+            invalid('preparation directory')
+        if data.get('preparation_dir') is not None and (folder / data['preparation_dir']).is_symlink():
+            raise InstallTransactionError(f"journal of publish {txid} has a linked preparation directory; review {folder}",
+                                          journal_reason='linked-preparation-directory')
         copies = data.get("record_files", [data["record_copy"]] if data.get("record_copy") else [])
         if (not isinstance(copies, list) or any(name not in installed_payload.RECORD_FILENAMES for name in copies)
                 or data.get("record_copy") not in (None, *copies)):
-            raise InstallTransactionError(f"journal of publish {txid} has invalid record copies; review {folder}")
+            raise InstallTransactionError(f"journal of publish {txid} has invalid record copies; review {folder}",
+                                          journal_reason='invalid-journal')
+        if any((folder / name).is_symlink() for name in copies):
+            raise InstallTransactionError(f"journal of publish {txid} has linked record copies; review {folder}",
+                                          journal_reason='linked-installed-baseline')
         return cls(folder, data)
 
 
 @contextlib.contextmanager
-def record_update(ghost_root, *, version_file: Path | None = None):
-    """Commit install records and optional existing version metadata in the same recovery boundary."""
+def record_update(ghost_root, *, version_file: Path | None = None, cleanup_on_commit: bool = False):
+    """Commit records and saved regular files; optionally retain recovery through final journal cleanup.
+
+    Final management removal opts in because a cleanup error still needs its removed
+    command. Keep only this journal's small existing copies in memory until cleanup
+    returns, then discard them. Ordinary publication keeps its committed effects.
+    """
     _require_lock(ghost_root)
+    root = rollbacks_root(ghost_root)
+    created_root = cleanup_on_commit and not os.path.lexists(root)
     journal = Journal.begin({"ghost_root": str(ghost_root), "host": "installer"}, [])
     if version_file is not None:
         journal.preserve_metadata(Path(version_file))
+    copies = None
     try:
         yield journal
+        if cleanup_on_commit:
+            if journal.data.get('targets') or journal.data.get('participants'):
+                raise InstallTransactionError('Final record cleanup only supports metadata and saved regular files')
+            names = {*journal.data.get('record_files', []),
+                     *(item['copy'] for item in journal.data.get('metadata_records', []) if item['copy'])}
+            copies = {name: ((journal.folder / name).read_bytes(), (journal.folder / name).stat())
+                      for name in names}
         journal.mark("done")
-    except Exception as exc:
+        if cleanup_on_commit:
+            retained = cleanup_completed(ghost_root, txids=(journal.txid,))
+            if retained:
+                raise InstallTransactionError('Final record cleanup pending: ' + '; '.join(retained))
+            if created_root and root.is_dir() and not any(root.iterdir()):
+                root.rmdir()
+    except (Exception, KeyboardInterrupt) as exc:
+        # After the durable commit a later removal only has journal cleanup to finish.
+        if isinstance(exc, KeyboardInterrupt) and (not cleanup_on_commit or _journal_phase(journal.folder) != "prepare"):
+            raise
+        prepare_error = None
         try:
-            journal.restore_record(ghost_root)
-            journal.mark("restored")
+            if copies is not None:
+                # cleanup_completed may have deleted any prefix of the saved copies,
+                # including every copy before a final rmdir failure. Reconstitute the
+                # same journal before restoring; never create another recovery owner.
+                journal.folder.mkdir(parents=True, exist_ok=True)
+                for name, (data, metadata) in copies.items():
+                    saved = journal.folder / name
+                    if not saved.exists():
+                        installed_payload._write(saved, data)
+                        saved.chmod(stat.S_IMODE(metadata.st_mode))
+                        os.utime(saved, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+                try:
+                    journal.mark('prepare')
+                except Exception as error:
+                    # A journal write failure must not prevent restoring readable
+                    # saved commands and records to independently writable paths.
+                    prepare_error = error
+            # The removed management entry must be restored even if the install
+            # record cannot yet be written. Its next invocation reads this pending
+            # journal's active binding before the lock retries record recovery.
+            journal.restore_record(ghost_root, metadata_first=cleanup_on_commit)
         except Exception as recovery:
+            phase_detail = f'; recovery prepare mark failed ({prepare_error})' if prepare_error else ''
             raise InstallTransactionError(
-                f"install record update failed ({exc}); restore failed ({recovery}); review {journal.folder}"
+                f"install record update failed ({exc}); restore failed ({recovery}){phase_detail}; review {journal.folder}"
             ) from recovery
+        exc.add_note('saved files and records were restored')
+        if prepare_error is not None:
+            exc.add_note(f'Recovery prepare mark failed ({prepare_error}); review {journal.folder}')
+        try:
+            journal.mark('restored')
+        except Exception as mark_error:
+            exc.add_note(f'Could not write the restored phase ({mark_error}); review {journal.folder}')
         raise
 
 
+_ABSENT_JOURNAL = object()
+
+
 def _journal_phase(folder: Path):
-    """The phase a publish folder's journal says; "absent" without a journal, None when it cannot be read."""
+    """Read the stored phase; distinguish a missing file from every value the file can contain."""
     file = folder / JOURNAL_FILENAME
-    if not os.path.lexists(file):
-        return "absent"
     try:
+        if stat.S_ISLNK(file.lstat().st_mode):
+            return None
         data = json.loads(file.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return _ABSENT_JOURNAL
     except (OSError, UnicodeDecodeError, ValueError):
         return None
     return data.get("phase") if isinstance(data, dict) else None
 
 
+def is_journal_candidate(path: Path) -> bool:
+    """Recognize entries the journal reader must inspect, including broken linked entries."""
+    mode = path.lstat().st_mode
+    return stat.S_ISLNK(mode) or stat.S_ISDIR(mode)
+
+
 def unfinished(ghost_root) -> list[str]:
-    """Transaction ids whose journal says neither done nor restored, newest first; an unreadable journal counts."""
+    """Unfinished transaction ids, newest first; unreadable journals count and traversal failures raise.
+
+    An absent root or vanished entry has no recovery work. Linked entries are not recovery targets;
+    linked journal files remain unfinished so the journal reader can refuse them without following them.
+    """
     root = rollbacks_root(ghost_root)
     try:
-        folders = [path for path in root.iterdir() if path.is_dir() and not path.is_symlink()]
-    except OSError:
+        if stat.S_ISLNK(root.lstat().st_mode):
+            raise InstallTransactionError(f"cannot inspect linked publish root: {root}",
+                                          journal_reason='linked-publish-root')
+        entries = list(root.iterdir())
+    except FileNotFoundError:
         return []
+    except OSError as exc:
+        raise InstallTransactionError(f"cannot inspect publish journals under {root}: {exc}") from exc
+    folders = []
+    for path in entries:
+        try:
+            mode = path.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise InstallTransactionError(f"cannot inspect publish entry {path}: {exc}") from exc
+        if stat.S_ISDIR(mode):
+            folders.append(path)
     return [folder.name for folder in sorted(folders, key=lambda path: path.name, reverse=True)
-            if _journal_phase(folder) not in (*FINISHED_PHASES, "absent")]
+            if _journal_phase(folder) not in (*FINISHED_PHASES, _ABSENT_JOURNAL)]
 
 
-def record_after_recovery(ghost_root) -> dict | None:
-    """Read the oldest rollback-capable publish's saved record, else the current record.
+def record_path_after_recovery(ghost_root) -> Path | None:
+    """Select the oldest rollback-capable publish's saved detail, else the current record's path.
 
     Committed ledger migrations resume services without restoring the old record.
-    An unreadable record or unfinished journal raises its owner's error.
     """
     pending = unfinished(ghost_root)
     for txid in reversed(pending):
         journal = Journal.load(ghost_root, txid)
         if journal.phase != 'committed':
             copy = journal.record_copy()
-            return installed_payload.read(copy.parent) if copy is not None else None
-    return installed_payload.read(ghost_root)
+            return installed_payload.read_path(copy.parent) if copy is not None else None
+    return installed_payload.read_path(ghost_root)
+
+
+def record_after_recovery(ghost_root) -> dict | None:
+    return installed_payload.read_file(record_path_after_recovery(ghost_root))
 
 
 def _record_key(dest) -> str:
@@ -770,10 +994,20 @@ def _reference_reason(path: Path, references: list[tuple[Path, str]], *, ghost_r
         for candidate in (reference.absolute(), reference.resolve()):
             if candidate == original or original in candidate.parents or candidate in original.parents:
                 return reason
-    from uninstall_cleanup import _platforms_referencing_target
-    hosts = _platforms_referencing_target(path, current_manifest=ghost_root/'install-state'/f'{platform}.json',
+    from uninstall_cleanup import platforms_referencing_target
+    hosts = platforms_referencing_target(path, current_manifest=ghost_root/'install-state'/f'{platform}.json',
                                          current_platform=platform, include_current=True, source_tree=True)
     return 'live-host-source-reference:' + ','.join(hosts) if hosts else None
+
+
+def recorded_copy_cleanup_reason(path: Path, entry: dict, *, allow_missing: bool = False) -> str | None:
+    differences = content_digest.compare(entry, path)
+    if allow_missing and path.is_dir() and "." not in entry["files"]:
+        # A removed file may be absent, but a directory or link at its path is a replacement.
+        differences["missing"] = [name for name in differences["missing"] if os.path.lexists(path / name)]
+    if any(differences.values()):
+        return "installed-content-changed"
+    return installer_assets.unrecorded_copy_content(path, entry["files"])
 
 
 def _original_cleanup_reason(original: Path, target: dict, record: dict) -> str | None:
@@ -785,9 +1019,7 @@ def _original_cleanup_reason(original: Path, target: dict, record: dict) -> str 
         if entry.get("mode") == "link" and isinstance(entry.get("link_target"), str):
             return "installed-link-changed" if content_digest.compare(entry, original)["link_target_differs"] else None
         if entry.get("mode") == "copy" and isinstance(entry.get("files"), dict):
-            if any(content_digest.compare(entry, original).values()):
-                return "installed-content-changed"
-            return installer_assets.unrecorded_copy_content(original, entry["files"])
+            return recorded_copy_cleanup_reason(original, entry)
     if target.get("kind") in ("skill", "support") and not original.is_symlink():
         classified = installer_assets.classify_skill_root(original, expected_asset_id=target.get("name"), whole_copy=True)
         if classified.ownership == installer_assets.OWNERSHIP_GHOST_ALICE_MANAGED:
@@ -796,12 +1028,16 @@ def _original_cleanup_reason(original: Path, target: dict, record: dict) -> str 
     return "no-installed-baseline"
 
 
-def cleanup_completed(ghost_root: Path | str) -> tuple[str, ...]:
+def cleanup_completed(ghost_root: Path | str, *,
+                      record_source_cleanup: Callable[[Path, dict], object] | None = None,
+                      txids: Sequence[str] | None = None) -> tuple[str, ...]:
     """Discard redundant managed publish originals under the install lock after installation or target removal.
 
     Return retained paths with their reasons. An unreadable dependency or failed deletion raises outside
     publish's restore boundary; cleanup never reverts the caller's file changes. Successful source versions have
-    their own owner and retention policy. This function neither creates backups nor rewrites journals.
+    their own owner and retention policy. The caller supplies the policy for a completed record move.
+    This function creates no backups. A failed final directory deletion restores the completed journal identity.
+    A caller can limit cleanup to its completed transaction ids without selecting unrelated source journals.
     """
     ghost_root = Path(ghost_root)
     _require_lock(ghost_root)
@@ -817,27 +1053,30 @@ def cleanup_completed(ghost_root: Path | str) -> tuple[str, ...]:
             return tuple(f"{root / txid}: unfinished-publish" for txid in active)
         references = _cleanup_references(ghost_root)
         for folder in sorted(root.iterdir()):
-            if folder.is_symlink() or not folder.is_dir():
+            if txids is not None and folder.name not in txids:
+                continue
+            try:
+                candidate = is_journal_candidate(folder)
+            except FileNotFoundError:
+                continue
+            if not candidate:
                 retained.append(f"{folder}: unrecognized-publish-entry")
                 continue
-            if _journal_phase(folder) not in FINISHED_PHASES:
+            try:
+                journal = Journal.load(ghost_root, folder.name)
+            except InstallTransactionError as exc:
+                retained.append(f"{folder}: {exc.journal_reason}: {exc}")
+                continue
+            if journal.phase not in FINISHED_PHASES:
                 retained.append(f"{folder}: no-finished-journal")
                 continue
-            if (folder / JOURNAL_FILENAME).is_symlink():
-                retained.append(f"{folder}: linked-publish-journal")
-                continue
-            journal = Journal.load(ghost_root, folder.name)
-            if (journal.data.get("schema_version") != JOURNAL_SCHEMA_VERSION
-                    or journal.data.get("txid") != folder.name
-                    or journal.data.get("record_copy") not in (None, *installed_payload.RECORD_FILENAMES)
-                    or any(not isinstance(target, dict) for target in journal.data.get("targets", []))):
-                retained.append(f"{folder}: unrecognized-journal")
-                continue
+            removal = journal.data.get('source_cleanup')
+            if removal is not None and journal.phase == 'done':
+                if record_source_cleanup is None:
+                    raise InstallTransactionError(f'{folder}: record source cleanup policy is required')
+                record_source_cleanup(ghost_root, removal)
             record_files = journal.data.get("record_files", [journal.data["record_copy"]]
                                             if journal.data.get("record_copy") else [])
-            if any((folder / name).is_symlink() for name in record_files):
-                retained.append(f"{folder}: linked-installed-baseline")
-                continue
             try:
                 before = installed_payload.read(folder) if journal.record_copy() is not None else None
             except installed_payload.RecordError as exc:
@@ -865,9 +1104,6 @@ def cleanup_completed(ghost_root: Path | str) -> tuple[str, ...]:
                 continue
             preparation = journal.data.get('preparation_dir')
             if preparation is not None:
-                if preparation != 'input':
-                    retained.append(f'{folder}: unrecognized-preparation-directory')
-                    continue
                 prepared = folder / preparation
                 if os.path.lexists(prepared):
                     reason = _reference_reason(prepared, references, ghost_root=ghost_root,
@@ -878,7 +1114,8 @@ def cleanup_completed(ghost_root: Path | str) -> tuple[str, ...]:
                     _remove_path(prepared)
             metadata = {JOURNAL_FILENAME}
             metadata.update(record_files)
-            metadata.update(item['copy'] for item in journal.data.get('metadata_records', []) if item['copy'])
+            saved_metadata = {item['copy'] for item in journal.data.get('metadata_records', []) if item['copy']}
+            metadata.update(saved_metadata)
             remaining = [path for path in folder.iterdir() if path.name not in metadata]
             if remaining:
                 known = {target.get("rollback") for target in journal.data.get("targets", [])}
@@ -891,9 +1128,25 @@ def cleanup_completed(ghost_root: Path | str) -> tuple[str, ...]:
             if any(path.is_symlink() or not path.is_file() for path in folder.iterdir()):
                 retained.append(f"{folder}: unrecognized-publish-metadata")
                 continue
-            for path in folder.iterdir():
+            # Remove the legacy pointer before its detailed record, and the journal last.
+            # Every interrupted prefix still has a readable record (or none) and an operation identity.
+            for path in sorted(folder.iterdir(), key=lambda path: (
+                    path.name == JOURNAL_FILENAME, path.name != installed_payload.LEGACY_FILENAME, path.name)):
+                if path.name in saved_metadata:
+                    _unlock_old_metadata_copy(path)
                 path.unlink()
-            folder.rmdir()
+            try:
+                folder.rmdir()
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                try:
+                    journal.save()
+                except OSError as save_error:
+                    raise InstallTransactionError(
+                        f'{folder}: directory deletion failed ({error}); completed journal could not be retained ({save_error})'
+                    ) from save_error
+                raise
     except (OSError, ValueError, RuntimeError, TypeError) as exc:
         if isinstance(exc, InstallTransactionError):
             raise
@@ -1031,8 +1284,6 @@ def recover(ghost_root, txid: str, *,
                                  + tuple(Path(item['path']) for item in journal.data.get('metadata_records', [])))
         copy = journal.record_copy()
         states = journal.data.get("participants")
-        if "participants" in journal.data and not isinstance(states, dict):
-            raise InstallTransactionError("Invalid participant recovery facts; review the journal with the installer")
         if journal.phase == 'committed':
             # A resumed writer may have changed ledger data. Only immutable bindings
             # and service ownership constrain resumption; committed data never rolls back.

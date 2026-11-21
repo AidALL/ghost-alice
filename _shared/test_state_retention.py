@@ -59,7 +59,7 @@ class PolicyTableTests(unittest.TestCase):
             "gateway-usage": ("size-rotation", 20 * MB, None),
             "gateway-service-log": ("size-rotation", 5 * MB, None),
             "gateway-config-backups": ("keep-newest", 5, None),
-            "install-logs": ("keep-newest", 30, None),
+            "install-logs": ("install-runs", 30, None),
             "uninstall-reports": ("keep-newest", 30, None),
             "install-state-events": ("size-rotation", 5 * MB, None),
             "retention-failures": ("line-count", 500, 500),
@@ -206,6 +206,157 @@ class LineCountTests(RetentionTestCase):
         path.write_bytes(b"1\n2\n")
         state_retention.apply("io-trace", path)
         self.assertEqual(path.read_bytes(), b"1\n2\n")
+
+
+class InstallRunTests(RetentionTestCase):
+    def setUp(self):
+        super().setUp()
+        self.logs = self.root / "install"
+        self.logs.mkdir()
+
+    def package(self, digit):
+        digest = digit * 64
+        folder = self.root / "versions" / digest
+        folder.mkdir(parents=True)
+        (folder / "version.json").write_text('{"status":"successful"}\n')
+        return digest
+
+    def run_files(self, number, *, digest=None, returncode=0, events=None):
+        name = f"2026-11-16-120000-{number:032x}"
+        log = self.logs / f"{name}.log"
+        event_file = self.logs / f"{name}.events.jsonl"
+        log.write_text(f"details for run {number}\n")
+        if digest is not None:
+            events = json.dumps(dict(type="install-result", source_digest=digest, returncode=returncode)) + "\n"
+        if events is not None:
+            event_file.write_text(events)
+        return log, event_file
+
+    def test_successes_keep_latest_completion_per_retained_package_and_remove_obsolete_pairs(self):
+        first, second = self.package("a"), self.package("b")
+        latest = self.run_files(1, digest=first)
+        older = self.run_files(2, digest=first)
+        other = self.run_files(3, digest=second)
+        obsolete = self.run_files(4, digest="c" * 64)
+        os.utime(latest[1], (2000, 2000))
+        os.utime(older[1], (1000, 1000))
+        os.utime(older[0], (3000, 3000))
+        versions = {path: path.read_bytes() for path in (self.root / "versions").rglob("version.json")}
+
+        removed = state_retention.apply("install-logs", self.logs)
+
+        self.assertEqual(set(self.logs.iterdir()), {*latest, *other})
+        self.assertEqual(set(removed), {*older, *obsolete})
+        self.assertEqual({path: path.read_bytes() for path in versions}, versions)
+        self.assertEqual(self.failures(), [])
+
+    def test_thirty_unsuccessful_or_unknown_runs_do_not_displace_success(self):
+        digest = self.package("a")
+        success = self.run_files(0, digest=digest)
+        runs = []
+        for number in range(1, 33):
+            if number % 3 == 0:
+                pair = self.run_files(number, digest=digest, returncode=1)
+            else:
+                pair = self.run_files(number, events="{broken\n" if number % 3 == 1 else "")
+            runs.append(pair)
+
+        state_retention.apply("install-logs", self.logs)
+
+        self.assertEqual(set(self.logs.iterdir()), {*success, *(path for pair in runs[-30:] for path in pair)})
+        self.assertEqual(self.failures(), [])
+
+    def test_recent_failed_run_is_ordered_by_write_time_not_random_filename_suffix(self):
+        recent = self.run_files(1, digest='a' * 64, returncode=1)
+        earlier = self.run_files(2, digest='a' * 64, returncode=1)
+        for path in recent:
+            os.utime(path, (2000, 2000))
+        for path in earlier:
+            os.utime(path, (1000, 1000))
+
+        state_retention.apply('install-logs', self.logs, limit=1, protect=[recent[0]])
+
+        self.assertEqual(set(self.logs.iterdir()), set(recent))
+
+    def test_only_a_final_committed_success_can_replace_the_prior_success(self):
+        digest = self.package("a")
+        previous = self.run_files(0, digest=digest)
+        valid = json.dumps(dict(type="install-result", source_digest=digest, returncode=0))
+        for number, events in enumerate((
+            None,
+            valid,
+            valid + "\n{broken\n",
+            valid + '\n{"type":"target-result"}\n',
+            valid + '\n{"type":"install-result","source_digest":"' + digest + '","returncode":1}\n',
+            json.dumps(dict(type="install-result", source_digest=digest, returncode=False)) + "\n",
+            json.dumps(dict(type="install-result", source_digest=digest, returncode="0")) + "\n",
+            json.dumps(dict(type="install-result", source_digest=digest.upper(), returncode=0)) + "\n",
+            '["install-result", 0]\n',
+        ), 1):
+            with self.subTest(events=events):
+                self.run_files(number, events=events)
+                state_retention.apply("install-logs", self.logs, limit=0)
+                self.assertEqual(set(self.logs.iterdir()), set(previous))
+
+    def test_unfinished_tail_does_not_hide_the_last_committed_result(self):
+        digest = self.package("a")
+        previous = self.run_files(0, digest=digest)
+        current = self.run_files(1, digest=digest)
+        with current[1].open("ab") as handle:
+            handle.write(b'{"unfinished":"\xe2')
+        os.utime(previous[1], (1000, 1000))
+        os.utime(current[1], (2000, 2000))
+
+        state_retention.apply("install-logs", self.logs, limit=0)
+
+        self.assertEqual(set(self.logs.iterdir()), set(current))
+
+    def test_orphaned_success_event_cannot_replace_an_intact_detail_log(self):
+        digest = self.package('a')
+        previous = self.run_files(0, digest=digest)
+        orphan = self.run_files(1, digest=digest)
+        orphan[0].unlink()
+        os.utime(previous[1], (1000, 1000))
+        os.utime(orphan[1], (2000, 2000))
+
+        state_retention.apply('install-logs', self.logs)
+
+        self.assertEqual(set(self.logs.iterdir()), {*previous, orphan[1]})
+        state_retention.apply('install-logs', self.logs, limit=0)
+        self.assertEqual(set(self.logs.iterdir()), set(previous))
+
+    def test_protected_run_pairs_and_unrelated_entries_survive(self):
+        digest = self.package("a")
+        previous = self.run_files(0, digest=digest)
+        current = self.run_files(1, digest=digest)
+        unfinished = self.run_files(2, events="")
+        unrelated = self.logs / "user-notes.log"
+        unrelated.write_text("keep me\n")
+        folder = self.logs / "2026-11-16-120000.log"
+        folder.mkdir()
+        os.utime(previous[1], (1000, 1000))
+        os.utime(current[1], (2000, 2000))
+
+        state_retention.apply("install-logs", self.logs, protect=[previous[0], unfinished[1]], limit=0)
+
+        self.assertEqual(set(self.logs.iterdir()), {*previous, *current, *unfinished, unrelated, folder})
+        self.assertEqual(unrelated.read_text(), "keep me\n")
+
+    @unittest.skipIf(os.name == "nt", "fixture requires symlink creation")
+    def test_symbolic_links_are_not_read_as_completed_runs_or_removed(self):
+        digest = self.package("a")
+        success = self.run_files(0, digest=digest)
+        external = self.root / "external.events.jsonl"
+        external.write_text(json.dumps(dict(type="install-result", source_digest=digest, returncode=0)) + "\n")
+        linked = self.logs / "2026-11-16-120000.events.jsonl"
+        linked.symlink_to(external)
+        before = external.read_bytes()
+
+        state_retention.apply("install-logs", self.logs, limit=0)
+
+        self.assertEqual(set(self.logs.iterdir()), {*success, linked})
+        self.assertTrue(linked.is_symlink())
+        self.assertEqual(external.read_bytes(), before)
 
 
 class KeepNewestTests(RetentionTestCase):
@@ -391,7 +542,7 @@ class AppendTests(RetentionTestCase):
         pending.mkdir()
         (pending / "install-state").write_text("", encoding="utf-8")  # the audit log's folder cannot be created
         with mock.patch('uninstall_cleanup.release_target_records', create=True), \
-                mock.patch('uninstall_cleanup._platforms_referencing_target', return_value=[]), \
+                mock.patch('uninstall_cleanup.platforms_referencing_target', return_value=[]), \
                 self.assertRaises(OSError):
             retired_assets._retire(asset, ownership=retired_assets.OWNERSHIP_GHOST_ALICE_MANAGED,
                                    backup_root=self.root / "backups", platform="claude",

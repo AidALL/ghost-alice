@@ -132,6 +132,16 @@ def delivered(root: Path, platform: str, session_id: str, key: str, content: str
         return False
 
 
+def moved_current_preserved(table, columns, original, retained):
+    """Allow replacement of mechanical check values for the same session keys.
+
+    The ledger owner separately preserves schema and every check_events audit row.
+    """
+    return (table == 'checks'
+            and columns == ('platform', 'session', 'key', 'target', 'stamp', 'value', 'checked_at')
+            and {row[:3] for row in original}.issubset({row[:3] for row in retained}))
+
+
 def record_delivery(root: Path, platform: str, session_id: str, key: str, content: str,
                     *, create: bool) -> bool:
     """Record that this session received this content and return whether the record was written.

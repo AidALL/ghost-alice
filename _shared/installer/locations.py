@@ -11,6 +11,10 @@ import os
 from hook_definitions import SUPPORTED_PLATFORMS as PLATFORMS
 
 
+# Package entry point for each installed management command.
+MANAGEMENT_COMMANDS = {'ghost-alice': 'install.sh', 'ghost-alice.ps1': 'install.ps1', 'ghost-alice.cmd': 'install.cmd'}
+
+
 def management_command() -> Path:
     """The installed command users invoke for installation and updates."""
     return record_root() / 'bin' / ('ghost-alice.cmd' if os.name == 'nt' else 'ghost-alice')

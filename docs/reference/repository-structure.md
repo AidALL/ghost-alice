@@ -90,7 +90,7 @@ The platform installation supplies common governance for every project. The Code
 | --- | --- | --- |
 | `~/.ghost-alice/session-logs/<host>/<session>/` | Session folders whose hook log is older than 14 days are removed in every host folder, oldest first, at most 50 per call | The first hook log row of a new session |
 | `~/.ghost-alice/io-trace.jsonl` | Past 10,000 lines, the last 5,000 stay | Each io-trace row |
-| `~/.ghost-alice/install/` | The last 30 install runs, each a log and its event trace | The installer, before it opens a new log |
+| `~/.ghost-alice/install/` | The latest successful run per retained code package, plus a baseline of the last 30 failed, interrupted or unclassified runs. Each run pairs a log with its event trace. Final cleanup protects the current pair, so that second group may temporarily contain 31 runs. | The installer, before it opens a new log and after it records the final result |
 | `~/.ghost-alice/install-state/<host>-events.jsonl` | Past 5 MB it becomes the one previous file | Each publish failure or retirement event |
 | `~/.ghost-alice/rollbacks/` | `owner-completed`: remove unchanged managed originals without current dependencies; preserve unfinished recovery and external changes | [Completed-publish cleanup](installer-architecture.md#successful-code-versions) after a successful full or partial Core installation |
 | `~/.ghost-alice/versions/` | Three distinct successful code versions, including the current version; identify any active or modified versions retained beyond that limit | [Successful-source owner](installer-architecture.md#successful-code-versions) after completed-publish cleanup |

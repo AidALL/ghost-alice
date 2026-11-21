@@ -12,6 +12,7 @@ from dataclasses import asdict
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import content_digest  # noqa: E402
 import install_lock  # noqa: E402
+import install_transaction  # noqa: E402
 import installed_payload  # noqa: E402
 from installer import diagnostics, hosts, preservation, selection  # noqa: E402
 from installer.runner import ToolResult  # noqa: E402
@@ -62,9 +64,19 @@ class HostCase(unittest.TestCase):
 
 
 class WriterObservationTests(unittest.TestCase):
+    def test_observation_preserves_program_names_and_installer_ancestor(self):
+        rows = '10 1 /Applications/Claude.app/Contents/MacOS/Claude\n20 10 /bin/zsh\n30 20 /usr/bin/python3\n'
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, rows)), \
+                mock.patch.object(hosts.os, 'getpid', return_value=30), \
+                mock.patch.object(hosts, '_process_argv', return_value=['python3', '-c', 'pass']):
+            seen = hosts.observe_writers(['claude'], platform='darwin')['claude']
+        self.assertEqual(seen.state, 'running')
+        self.assertEqual(seen.programs, ((10, 'Claude'),))
+        self.assertEqual(seen.ancestor_pids, (10,))
+
     def test_posix_native_identity_and_surviving_ledger_cli_are_distinct_from_argument_mentions(self):
-        processes = ('10 /Applications/Codex.app/Contents/MacOS/Codex\n'
-                     '11 /usr/bin/python3\n12 /bin/echo\n')
+        processes = ('10 1 /Applications/Codex.app/Contents/MacOS/Codex\n'
+                     '11 1 /usr/bin/python3\n12 1 /bin/echo\n')
         argv = ['/usr/bin/python3', '/tmp/path with spaces/session_intent_ledger.py', '--platform', 'claude']
         for platform in ('darwin', 'linux'):
             with self.subTest(platform=platform), mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, processes)), \
@@ -72,22 +84,31 @@ class WriterObservationTests(unittest.TestCase):
                 seen = hosts.observe_writers(['claude', 'codex'], platform=platform)
                 self.assertEqual((seen['codex'].state, seen['codex'].pids), ('running', (10,)))
                 self.assertEqual((seen['claude'].state, seen['claude'].pids), ('running', (11,)))
-        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '12 /bin/echo\n')):
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '12 1 /bin/echo\n')):
             self.assertEqual(hosts.observe_writers(['codex'], platform='darwin')['codex'].state, 'absent')
 
     def test_windows_native_executable_and_python_script_arguments(self):
         rows = [{'ProcessId': 10, 'ParentProcessId': 1, 'Name': 'Codex.exe',
-                 'ExecutablePath': r'C:\Program Files\Codex\Codex.exe', 'CommandLine': 'Codex.exe'},
+                 'ExecutablePath': r'C:\Program Files\Codex\Codex.exe', 'CommandLine': 'Codex.exe', 'MainWindowHandle': 123},
                 {'ProcessId': 11, 'ParentProcessId': 1, 'Name': 'python.exe', 'ExecutablePath': r'C:\Python\python.exe',
-                 'CommandLine': 'python.exe "C:\\work files\\session_intent_ledger.py" --platform claude'}]
+                 'CommandLine': 'python.exe "C:\\work files\\session_intent_ledger.py" --platform claude', 'MainWindowHandle': 0}]
         with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, json.dumps(rows))):
             seen = hosts.observe_writers(['claude', 'codex'], platform='win32')
         self.assertEqual((seen['codex'].state, seen['codex'].pids), ('running', (10,)))
         self.assertEqual((seen['claude'].state, seen['claude'].pids), ('running', (11,)))
+        self.assertEqual(seen['codex'].manual_pids, ())
+        self.assertEqual(seen['claude'].manual_pids, (11,))
+        self.assertEqual(seen['claude'].programs, ((11, 'python.exe (session_intent_ledger.py)'),))
+        self.assertIn('No main window was observed', seen['claude'].detail)
+        rows[0].update(MainWindowHandle=None, WindowLookupError='Access denied')
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, json.dumps(rows))):
+            seen = hosts.observe_writers(['codex'], platform='win32')['codex']
+        self.assertEqual((seen.state, seen.manual_pids), ('running', (10,)))
+        self.assertIn('Main-window lookup unavailable: Access denied', seen.detail)
 
     def test_node_host_launcher_and_bound_hook_runner_survive_without_native_host_parent(self):
         command = 'python3 /runtime/_shared/hook_profile_gate.py run session-intent claude eA=='
-        rows = '10 /usr/bin/node\n11 /usr/bin/python3\n'
+        rows = '10 1 /usr/bin/node\n11 1 /usr/bin/python3\n'
         argv = {10: ['node', '/usr/local/bin/codex'], 11: command.split()}
         with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, rows)), \
                 mock.patch.object(hosts, '_process_argv', side_effect=lambda pid, platform: argv[pid]):
@@ -96,7 +117,7 @@ class WriterObservationTests(unittest.TestCase):
         self.assertEqual(seen['claude'].pids, (11,))
 
     def test_unbound_writer_is_unknown_and_unrelated_python_argument_mentions_are_absent(self):
-        rows = '11 /usr/bin/python3\n'
+        rows = '11 1 /usr/bin/python3\n'
         cases = [(['python3', '/tmp/session_intent_ledger.py'], 'unknown'),
                  (['python3', '/runtime/response_route.py', '--platform', 'codex', '--candidate-json', '{}'], 'running'),
                  (['python3', '/runtime/context_lifecycle.py', '--platform=codex', '--selection-json', '[]'], 'running'),
@@ -117,8 +138,8 @@ class WriterObservationTests(unittest.TestCase):
                 self.assertEqual(hosts.observe_writers(['codex'], platform='darwin')['codex'].state, expected)
 
     def test_unbound_record_cli_is_not_attributed_to_its_native_ancestor_host(self):
-        rows = ('10 /Applications/Codex.app/Contents/MacOS/Codex\n'
-                '11 /bin/sh\n12 /usr/bin/python3\n')
+        rows = ('10 1 /Applications/Codex.app/Contents/MacOS/Codex\n'
+                '11 10 /bin/sh\n12 11 /usr/bin/python3\n')
         for platform, script in ((platform, script) for platform in ('darwin', 'linux')
                                 for script in ('session_intent_ledger.py', 'completion_assessment.py')):
             argv = ['python3', '/runtime/' + script]
@@ -131,7 +152,7 @@ class WriterObservationTests(unittest.TestCase):
                 self.assertEqual(hosts.observe_writers(['claude'], platform=platform)['claude'].state, 'unknown')
 
     def test_unavailable_process_table_or_interpreter_arguments_is_unknown(self):
-        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '12 /bin/echo\n')):
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '12 1 /bin/echo\n')):
             unsupported = hosts.observe_writers(['future-host'], platform='darwin')['future-host']
         self.assertEqual(unsupported.state, 'unknown')
         self.assertIn('adapter', unsupported.detail.lower())
@@ -140,7 +161,7 @@ class WriterObservationTests(unittest.TestCase):
                 seen = hosts.observe_writers(['codex'], platform='darwin')['codex']
                 self.assertEqual(seen.state, 'unknown')
                 self.assertTrue(seen.detail)
-        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '11 /usr/bin/python3\n')), \
+        with mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '11 1 /usr/bin/python3\n')), \
                 mock.patch.object(hosts, '_process_argv', side_effect=PermissionError('denied')):
             seen = hosts.observe_writers(['codex'], platform='darwin')['codex']
         self.assertEqual(seen.state, 'unknown')
@@ -148,7 +169,7 @@ class WriterObservationTests(unittest.TestCase):
         for platform in ('darwin', 'linux'):
             for exited in (FileNotFoundError('exited'), ProcessLookupError('exited')):
                 with self.subTest(platform=platform, exited=type(exited).__name__), \
-                        mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '11 /usr/bin/python3\n')), \
+                        mock.patch.object(hosts.runner, 'run_command', return_value=ToolResult(0, '11 1 /usr/bin/python3\n')), \
                         mock.patch.object(hosts, '_process_argv', side_effect=exited):
                     seen = hosts.observe_writers(['codex'], platform=platform)['codex']
                     self.assertEqual((seen.state, seen.pids), ('absent', ()))
@@ -171,7 +192,86 @@ class WriterObservationTests(unittest.TestCase):
             self.assertNotIn(process.pid, hosts.observe_writers(['codex'])['codex'].pids)
 
 
+class WriterTerminationTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform in ('darwin', 'linux'), 'local POSIX process termination evidence')
+    def test_normal_request_allows_own_ledger_cli_to_save_and_exit(self):
+        with tempfile.TemporaryDirectory(prefix='ghost writer ') as directory:
+            script = Path(directory) / 'session_intent_ledger.py'
+            marker = Path(directory) / 'saved.txt'
+            script.write_text('import signal, sys\nfrom pathlib import Path\n'
+                              'def stop(signum, frame):\n'
+                              '    Path(sys.argv[-1]).write_text("saved before exit")\n'
+                              '    sys.exit(0)\n'
+                              'signal.signal(signal.SIGTERM, stop)\n'
+                              'print("ready", flush=True)\nsys.stdin.read()\n')
+            process = subprocess.Popen([sys.executable, str(script), '--platform', 'codex', str(marker)],
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(process.stdout.readline().strip(), 'ready')
+                self.assertIn(process.pid, hosts.observe_writers(['codex'])['codex'].pids)
+                self.assertEqual(hosts.request_writer_termination([process.pid]), {})
+                self.assertEqual(process.wait(timeout=5), 0)
+                self.assertEqual(marker.read_text(), 'saved before exit')
+                self.assertNotIn(process.pid, hosts.observe_writers(['codex'])['codex'].pids)
+            finally:
+                process.stdin.close()
+                process.wait(timeout=5)
+                process.stdout.close()
+                process.stderr.close()
+
+    def test_posix_requests_once_per_pid_and_retains_failures_except_disappearance(self):
+        for platform in ('darwin', 'linux'):
+            with self.subTest(platform=platform), mock.patch.object(hosts.os, 'kill',
+                    side_effect=[None, ProcessLookupError('gone'), PermissionError('denied'), OSError('busy')]) as kill:
+                errors = hosts.request_writer_termination([13, 11, 13, 12, 14], platform=platform)
+                self.assertEqual(errors, {12: 'denied', 14: 'busy'})
+                self.assertEqual(kill.call_args_list, [mock.call(pid, signal.SIGTERM) for pid in (13, 11, 12, 14)])
+
+    def test_windows_requests_close_main_window_for_exact_pids_and_retains_failures(self):
+        results = [ToolResult(0), ToolResult(1, '', 'refused'), ToolResult(1, 'command failed', ''),
+                   ToolResult(1), PermissionError('denied')]
+        with mock.patch.object(hosts.runner, 'run_command', side_effect=results) as run:
+            errors = hosts.request_writer_termination([11, 12, 11, 13, 14, 15], platform='win32')
+        self.assertEqual({pid: errors[pid] for pid in (12, 13, 15)},
+                         {12: 'refused', 13: 'command failed', 15: 'denied'})
+        self.assertEqual(set(errors), {12, 13, 14, 15})
+        self.assertTrue(errors[14])
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual([command[:4] for command in commands],
+                         [['powershell.exe', '-NoProfile', '-NonInteractive', '-Command']] * 5)
+        self.assertEqual([int(command[-1].split('Get-Process -Id ', 1)[1].split()[0]) for command in commands],
+                         [11, 12, 13, 14, 15])
+        for command in commands:
+            self.assertIn('.CloseMainWindow()', command[-1])
+            self.assertNotIn('Stop-Process', command[-1])
+            self.assertNotIn('taskkill', command[-1])
+
+    def test_invalid_pid_or_unsupported_platform_rejects_entire_request_before_side_effects(self):
+        with mock.patch.object(hosts.os, 'kill') as kill, mock.patch.object(hosts.runner, 'run_command') as run:
+            for platform in ('darwin', 'linux', 'win32'):
+                for invalid in (0, -1, True, '12', 1.5, None):
+                    with self.subTest(platform=platform, invalid=invalid), self.assertRaises(ValueError):
+                        hosts.request_writer_termination([11, invalid], platform=platform)
+            with self.assertRaisesRegex(ValueError, 'unavailable'):
+                hosts.request_writer_termination([11], platform='unsupported')
+            kill.assert_not_called()
+            run.assert_not_called()
+
+
 class HookRegistrationTests(HostCase):
+    def test_downloaded_installer_confirms_the_recorded_project_or_the_original_checkout(self):
+        config = self.home / '.codex/config.toml'
+        config.parent.mkdir()
+        project = self.home / 'codex-project'
+        origin = self.home / 'original-checkout'
+        config.write_text(''.join(f'[projects.{json.dumps(str(path))}]\ntrust_level = "untrusted"\n'
+                                  for path in (origin, project)))
+        with mock.patch.object(hosts.source, 'interactive', return_value=True), mock.patch('builtins.input', return_value='y'):
+            for saved, expected in (({}, origin), ({'project_root': str(project)}, project)):
+                with self.subTest(saved=saved), mock.patch('install_hooks.observed_installation', return_value=saved):
+                    approved, _ = self.captured(hosts.confirm_project_trust, ['codex'], project_root=origin)
+                    self.assertEqual(approved, str(expected))
+
     def test_trust_confirmation_targets_original_project_during_candidate_retry(self):
         from installer import source
         config = self.home / '.codex/config.toml'
@@ -192,6 +292,13 @@ class HookRegistrationTests(HostCase):
                 self.assertEqual(approved, expected)
                 self.assertIn(project, output)
                 self.assertIn('untrusted', config.read_text())
+        before = config.read_bytes()
+        with mock.patch.object(source, 'interactive', return_value=True), \
+                mock.patch.object(hosts.terminal, '_discard_previous_input', side_effect=OSError('input failed')):
+            approved, output = self.captured(hosts.confirm_project_trust, ['codex'])
+        self.assertEqual(approved, '')
+        self.assertEqual(config.read_bytes(), before)
+        self.assertIn('input failed', output)
 
     def test_child_registration_states_remain_distinct_and_invalid_evidence_is_error(self):
         ctx = self.context('claude')
@@ -453,6 +560,19 @@ class PreservationTests(HostCase):
 
 
 class InspectTests(HostCase):
+    def test_record_source_outcomes_keep_distinct_actions_and_paths_in_each_language(self):
+        original, destination = self.home / 'A', self.home / 'B'
+        keys = ('record_source_removed', 'record_source_absent', 'record_source_failed')
+        for language, actions in (('en', ('was deleted', 'is already absent', 'could not be deleted')),
+                                  ('ko', ('삭제했습니다', '이미 없습니다', '삭제하지 못했습니다'))):
+            with mock.patch.object(diagnostics.report.state(), 'language', language):
+                for key, action in zip(keys, actions):
+                    with self.subTest(language=language, action=key):
+                        output = diagnostics.report.message(key, current_path=original, new_path=destination)
+                        self.assertIn(action, output)
+                        self.assertIn(str(original), output)
+                        self.assertIn(str(destination), output)
+
     def test_print_target_status(self):
         # uninstall.sh:142-155
         link = self.home / "linked"
@@ -560,6 +680,18 @@ class InstallRecordReportTests(HostCase):
         finally:
             install_lock.release_lock(lock, generation)
 
+    def write_cleanup_journal(self, original, destination, phase='done'):
+        lock = self.ghost / 'install.lock'
+        generation = install_lock.acquire_lock(lock, owner='test')
+        try:
+            journal = install_transaction.Journal.begin(dict(ghost_root=str(self.ghost), host='installer'), [])
+            journal.data['source_cleanup'] = dict(path=str(original), destination=str(destination),
+                                                  baseline=content_digest.state(original, include_generated=True))
+            journal.mark(phase)
+            return journal
+        finally:
+            install_lock.release_lock(lock, generation)
+
     @staticmethod
     def entry(mode, used_by, **fields):
         entry = {"name": "x", "kind": "skill", "mode": mode, "provider": "core", "source": "/src/x",
@@ -581,6 +713,138 @@ class InstallRecordReportTests(HostCase):
             with self.subTest(command=name):
                 self.assertEqual(rc, 0)
                 self.assertIn(f"[INFO] Install record: none yet; the next install writes {record}", out)
+
+    def test_doctor_does_not_describe_retired_hook_binding_as_current_location(self):
+        from installer import transaction
+        root = self.home / 'retired-A'
+        observed = transaction.LedgerLocations({root: dict(state='retired', hosts={'claude': {}}, source_root=None)})
+        with mock.patch.object(diagnostics.record_move, 'read_locations', return_value=observed):
+            runner = FakeRunner()
+            with runner.patch():
+                rc, output = self.captured(diagnostics.run_doctor, self.context('claude'))
+        self.assertEqual(rc, 0)
+        self.assertNotIn(str(root), output)
+
+    def test_unconfirmed_hook_location_is_not_presented_as_current_or_retired(self):
+        from installer import lifecycle, report, transaction
+        root = self.home / 'observed-hook-records'
+        observed = transaction.LedgerLocations({root: dict(state='unconfirmed', hosts={'claude': {}},
+                                                          source_root=self.source)})
+        for language, expected, incorrect in (
+                ('en', 'could not confirm whether it is current or retired', 'The current work record location'),
+                ('ko', '현재 사용 중인지 사용이 종료됐는지 확인하지 못했습니다', '현재 작업 기록 위치는')):
+            for command in (diagnostics.run_doctor, lifecycle.run_full_uninstall):
+                with self.subTest(language=language, command=command.__name__), \
+                        mock.patch.object(report.state(), 'language', language), \
+                        mock.patch.object(diagnostics.record_move, 'read_locations', return_value=observed), \
+                        FakeRunner().patch():
+                    _, output = self.captured(command, self.context('claude'))
+                    self.assertIn(str(root), output)
+                    self.assertIn(expected, output)
+                    self.assertNotIn(incorrect, output)
+
+    def test_bad_payload_does_not_invalidate_configured_or_retired_location(self):
+        import runtime_config
+        from installer import lifecycle, report
+        active, retired = self.home.resolve() / 'configured-records', self.home.resolve() / 'retired-records'
+        runtime_config.save_config({'install_locations': {
+            'claude': {'ledger_root': str(active)}, 'codex': {'ledger_root': str(retired)}},
+            'retired_ledger_roots': [str(retired)]})
+        record = installed_payload.path(self.ghost)
+        record.write_text('not JSON', encoding='utf-8')
+        for command in (diagnostics.run_doctor, lifecycle.run_full_uninstall):
+            for language in ('en', 'ko'):
+                with self.subTest(command=command.__name__, language=language), \
+                        mock.patch.object(report.state(), 'language', language), FakeRunner().patch():
+                    _, output = self.captured(command, self.context('claude'))
+                    self.assertIn(str(record), output)
+                    self.assertIn(report.message('move_relation_unknown', current_path=active), output)
+                    self.assertNotIn(str(retired), output)
+                    self.assertNotIn(report.message('move_location_unconfirmed', current_path=active), output)
+
+    def test_completed_record_cleanup_reports_remaining_source_without_changes(self):
+        ctx = self.context('claude')
+        original, destination = self.home / 'A', self.home / 'B'
+        original.mkdir()
+        destination.mkdir()
+        (original / 'keep.txt').write_text('original source')
+        (destination / 'new-input.txt').write_text('new B input')
+        journal = self.write_cleanup_journal(original, destination)
+        (original / 'keep.txt').write_text('source changed after the cleanup baseline')
+        removed, restored = self.home / 'already-removed', self.home / 'restored-source'
+        removed.mkdir()
+        restored.mkdir()
+        self.write_cleanup_journal(removed, destination)
+        self.write_cleanup_journal(restored, destination, 'restored')
+        removed.rmdir()
+        before = content_digest.state(self.home, include_generated=True)
+        for language, pending, retry, preserve in (
+                ('en', 'Old record folder deletion is pending', 'it can fail again', 'resolve its reported cause'),
+                ('ko', '옛 기록 폴더 삭제가 대기 중입니다', '다시 실패할 수 있습니다', '원인을 확인하고 해결')):
+            with mock.patch.object(diagnostics.report.state(), 'language', language):
+                for name, rc, output in self.run_both(ctx):
+                    with self.subTest(language=language, command=name):
+                        self.assertIn(pending, output)
+                        self.assertIn(str(original), output)
+                        self.assertIn(str(destination), output)
+                        self.assertIn(str(journal.folder / install_transaction.JOURNAL_FILENAME), output)
+                        self.assertIn(retry, output)
+                        self.assertIn(preserve, output)
+                        self.assertNotIn(str(removed), output)
+                        self.assertNotIn(str(restored), output)
+                        self.assertEqual(rc, 1 if name == 'run_doctor' else 0)
+                        self.assertEqual(content_digest.state(self.home, include_generated=True), before)
+
+    def test_cleanup_journal_inspection_rejects_links_and_malformed_records(self):
+        ctx = self.context('claude')
+        original, destination = self.home / 'A', self.home / 'B'
+        original.mkdir()
+        destination.mkdir()
+        (original / 'keep.txt').write_text('source to preserve')
+        journal = self.write_cleanup_journal(original, destination)
+        journal_path = journal.folder / install_transaction.JOURNAL_FILENAME
+        original_journal = journal_path.read_bytes()
+        for case in ('root-link', 'entry-link', 'journal-link', 'cleanup-shape', 'cleanup-path',
+                     'unsupported-schema', 'wrong-txid', 'target-element', 'record-copy'):
+            target = {'root-link': install_transaction.rollbacks_root(self.ghost),
+                      'entry-link': journal.folder, 'journal-link': journal_path}.get(case)
+            outside = self.home / ('outside-' + case)
+            if target is not None:
+                target.rename(outside)
+                target.symlink_to(outside, target_is_directory=outside.is_dir())
+            else:
+                data = json.loads(original_journal)
+                if case == 'cleanup-shape':
+                    data['source_cleanup'] = []
+                elif case == 'cleanup-path':
+                    data['source_cleanup']['path'] = 'relative-records'
+                elif case == 'unsupported-schema':
+                    data['schema_version'] = 99
+                elif case == 'wrong-txid':
+                    data['txid'] = 'another-publish'
+                elif case == 'target-element':
+                    data['targets'] = ['not-a-target']
+                else:
+                    data['record_files'] = ['../installed-payload.json']
+                journal_path.write_text(json.dumps(data))
+            try:
+                before = content_digest.state(self.home, include_generated=True)
+                for name, rc, output in self.run_both(ctx):
+                    with self.subTest(case=case, command=name):
+                        self.assertIn('Could not inspect record cleanup journal', output)
+                        self.assertIn(str(target or journal_path), output)
+                        self.assertNotIn('Old record folder deletion is pending', output)
+                        if case == 'unsupported-schema':
+                            self.assertIn('unsupported schema version 99', output)
+                            self.assertNotIn('cannot be read', output)
+                        self.assertEqual(rc, 1 if name == 'run_doctor' else 0)
+                        self.assertEqual(content_digest.state(self.home, include_generated=True), before)
+            finally:
+                if target is not None:
+                    target.unlink()
+                    outside.rename(target)
+                else:
+                    journal_path.write_bytes(original_journal)
 
     def test_doctor_reports_known_location_despite_other_host_error_without_changing_its_result(self):
         import runtime_config
