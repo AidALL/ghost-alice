@@ -99,7 +99,7 @@ class InstalledCopyTests(unittest.TestCase):
         # Without GHOST_ALICE_INSTALLED_CLAUDE_DIR the Claude copy test below skips in CI;
         # without the Claude install it fails.
         workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        self.assertIn("bash ./install.sh --platform claude --skip-source-health", workflow)
+        self.assertIn("bash ./install.sh --platform claude --local-source --skip-source-health", workflow)
         self.assertIn("GHOST_ALICE_INSTALLED_CLAUDE_DIR: ${{ runner.temp }}/ghost-alice-ci-home/.claude", workflow)
 
     def _check_installed_skill(self, skills_dir: Path) -> None:

@@ -44,6 +44,7 @@ class Options:
     platform_explicit: bool = False
     prompt_platform: bool = False
     skip_source_health: bool = False
+    local_source: bool = False
     adopt_source: bool = False
     merged_checkout: str | None = None
     update_source: bool = False
@@ -140,7 +141,7 @@ COMMAND_LINE: tuple[HelpRow, ...] = (
     HelpRow(COMMON, "--agent-visibility strict|dynamic|minimal", "Alias for --visibility"),
     Command(COMMON, "--doctor", "Run install diagnostics", names=("--doctor",),
             run=lambda ctx: diagnostics.run_doctor(ctx)),
-    Command(COMMON, "update [--remote URL --ref NAME]", "Update installed Core skills from the recorded remote/ref",
+    Command(COMMON, "update [--remote URL]", "Update installed Core skills from the remote main branch",
             names=('update',), run=lambda ctx: run_update(ctx), platform=False),
     Command(COMMON, "--repair", "Re-provision missing managed targets (never overwrites an occupied slot that is not a clean managed target)",
             names=("--repair",), run=lambda ctx: lifecycle.run_repair(ctx), lock="repair", checks_source=True),
@@ -166,7 +167,8 @@ COMMAND_LINE: tuple[HelpRow, ...] = (
     Command(ADVANCED, "--list-addons", "List addon manifest targets", names=("--list-addons",),
             run=lambda ctx: addons.list_addons(ctx), flag="list_addons"),
     HelpRow(ADVANCED, "--skip-source-health", "Skip source health gate"),
-    HelpRow(ADVANCED, "--adopt-source", "Install from this checkout and record it as the install source"),
+    HelpRow(ADVANCED, "--local-source", "Install the files in this checkout or saved package"),
+    HelpRow(ADVANCED, "--adopt-source", "Record this checkout as the development source"),
     Command(ADVANCED, "--sync-commands", "Sync workspace commands", names=("--sync-commands",),
             run=lambda ctx: hosts.sync_commands(ctx, "sync", ctx.platform)),
     Command(ADVANCED, "--check-commands", "Check workspace commands only", names=("--check-commands",),
@@ -185,6 +187,14 @@ def _fail(message: str, code: int = 1) -> None:
     raise InstallerExit(code)
 
 
+def install_release(options: Options, *, checkout_root: Path | None = None, cause: str = 'install') -> int:
+    origin = source.input_record(checkout_root)
+    origin['remote'] = origin.get('remote') or source.DEFAULT_REMOTE
+    with source.acquire_release(origin['remote']) as checkout:
+        return dispatch(options, input_root=checkout, provenance=source.release_input(checkout, origin),
+                        execution_cause=cause)
+
+
 def run_update(ctx: Context, *, acquired_from: list[str] | None = None) -> int:
     import argparse
     parser = argparse.ArgumentParser(prog='ghost-alice update', add_help=acquired_from is not None)
@@ -192,28 +202,34 @@ def run_update(ctx: Context, *, acquired_from: list[str] | None = None) -> int:
     parser.add_argument('--ref')
     arguments = ctx.options.args[1:]
     args = parser.parse_known_args(arguments)[0] if acquired_from is None else parser.parse_args(arguments)
+    if args.ref not in (None, 'main', source.RELEASE_REF) or '--local-source' in ctx.options.argv:
+        raise ValueError('Core update installs the remote main branch. To install local files, run the install script with --local-source.')
     record_path = install_transaction.record_path_after_recovery(locations.record_root())
     record = installed_payload.read_file(record_path) or {}
-    origin = dict(record.get('source', {}))
-    origin.update({key: value for key, value in vars(args).items() if value is not None})
-    coordinates = [origin.get(key) for key in ('root', 'remote', 'ref')]
+    recorded_source = record.get('source', {})
+    origin = dict(recorded_source, remote=args.remote or recorded_source.get('remote') or source.DEFAULT_REMOTE)
+    coordinates = [origin.get('root'), origin['remote'], args.ref or source.RELEASE_REF]
     if acquired_from is None:
         if not origin.get('root'):
             raise ValueError('Update found no recorded installation source')
-        with source.acquire_update(origin) as root:
+        # Older downloaded installers compare this ref to their command-line argument.
+        argv = list(ctx.options.argv)
+        if args.ref is None and recorded_source.get('ref') != source.RELEASE_REF:
+            argv.extend(['--ref', source.RELEASE_REF])
+        if args.remote is None and not recorded_source.get('remote'):
+            argv.extend(['--remote', origin['remote']])
+        with source.acquire_release(origin['remote']) as root:
             return runner.run_command([sys.executable, str(root / '_shared/installer/cli.py'),
-                                       '--install-acquired-update', *coordinates, *ctx.options.argv], inherit_stdin=True).returncode
-    if acquired_from != coordinates:
+                                       '--install-acquired-update', *coordinates, *argv], inherit_stdin=True).returncode
+    if acquired_from[:2] != coordinates[:2] or acquired_from[2] not in ('main', source.RELEASE_REF):
         raise ValueError(report.message('update_origin_changed'))
     selected = selection.installed_core_selection(record, record_path)
     if ctx.options.platform_explicit:
         selected = {host: names for host, names in selected.items() if host == ctx.platform}
     if not selected:
         raise ValueError('Update found no installed Core skills to update')
-    provenance = source.input_record(runner.REPO_ROOT)
-    provenance.update({key: origin.get(key) for key in ('root', 'remote', 'ref', 'branch', 'hooks_path')})
     return dispatch(replace(ctx.options, args=[], addon_skip=True), input_root=runner.REPO_ROOT,
-                    provenance=provenance, selections=selected, execution_cause='update')
+                    provenance=source.release_input(runner.REPO_ROOT, origin), selections=selected, execution_cause='update')
 
 
 def parse_options(argv: list[str]) -> Options:
@@ -244,6 +260,9 @@ def parse_options(argv: list[str]) -> Options:
             index += 1
         elif token == "--skip-source-health":
             options.skip_source_health = True
+            index += 1
+        elif token == "--local-source":
+            options.local_source = True
             index += 1
         elif token == "--adopt-source":
             options.adopt_source = True
@@ -563,10 +582,7 @@ def run_post_merge(ctx: Context) -> int:
     merged = Path(ctx.options.merged_checkout) if ctx.options.merged_checkout else None
     match = source.match_install_source(merged)
     if match.state == "same":
-        if match.here != runner.REPO_ROOT.resolve():
-            return runner.run_command([sys.executable, str(match.here / '_shared/installer/cli.py'),
-                                       '--post-merge', '--merged-checkout', str(match.here)]).returncode
-        return dispatch(Options(), input_root=match.here, provenance=source.input_record(match.here), execution_cause='post-merge')
+        return install_release(Options(), checkout_root=match.here, cause='post-merge')
     if match.state == "other":
         report.info(f"Post-merge: the merged checkout {match.here} is not the install source ({match.recorded}); "
                     "nothing was installed.")
@@ -731,7 +747,7 @@ def dispatch(options: Options, *, input_root: Path | None = None, provenance: di
         options.platform_explicit = True
         options.prompt_platform = False
     selected = selections if selections is not None else (request or {}).get('selections')
-    if selected is None and request is None and input_root is None and not options.args:
+    if selected is None and request is None and execution_cause != 'post-merge' and not options.args:
         selected = source.reinstall_selection()
         if selected is not None and options.platform_explicit:
             selected = {host: names for host, names in selected.items() if host == options.platform}
@@ -878,6 +894,8 @@ def main(argv: list[str] | None = None) -> int:
             if options.args[:1] != ['update'] or request:
                 raise ValueError('The acquired update entry requires an update command')
             return run_update(build_context(options), acquired_from=acquired_from)
+        if not request and find_command(options) is INSTALL and not options.local_source:
+            return install_release(options)
         return dispatch(options)
     except InstallerExit as stop:
         return stop.code

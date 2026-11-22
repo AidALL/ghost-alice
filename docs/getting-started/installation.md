@@ -43,7 +43,7 @@ cd %USERPROFILE%\ghost-alice
 .\install.cmd
 ```
 
-`bash install.sh` and `.\install.cmd` detect the agent platform. The options below select a specific platform or manage each installation separately.
+`bash install.sh` and `.\install.cmd` fetch Core from the remote Git branch `refs/heads/main`, then install for the detected agent platforms. The installer uses this checkout’s `origin`, or the Ghost-ALICE GitHub repository when no remote is configured. To install the working files in a development checkout or restore the exact files in a saved package, run its installer with `--local-source`. A later `update` fetches remote `main`. The options below select a specific platform or manage each installation separately.
 
 After a successful installation, use `~/.ghost-alice/bin/ghost-alice` (Windows: `%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd`) for status, update and removal. The Core skills this installer places, runtime and management commands execute without the development clone. The installer attempts automatic acquisition of missing Python 3.11+, Git and Node.js and explains package-manager automatic-consent flags before acquiring the first program.
 
@@ -120,7 +120,7 @@ Doctor also prints informational Core lines: `native-intake-waits`, `native-inta
 
 ## Update
 
-The fixed command downloads the selected version and passes your terminal to its installer. That installer asks the installation questions and updates the Core skills already selected for each host. It works after the development clone moves or disappears, adds no newly detected hosts or skills, and leaves existing addons unchanged.
+The fixed command downloads the remote main branch and passes your terminal to its installer. That installer asks the installation questions and updates the Core skills already selected for each host. It works after the development clone moves or disappears, adds no newly detected hosts or skills, and leaves existing addons unchanged.
 
 ```bash
 ~/.ghost-alice/bin/ghost-alice update
@@ -132,7 +132,7 @@ The fixed command downloads the selected version and passes your terminal to its
 %USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd --doctor
 ```
 
-If acquisition coordinates are missing, supply `--remote URL --ref NAME` when running update. To update the developer checkout itself, use the existing `bash install.sh --update-source` or `.\install.cmd --update-source`; that separate path stashes local changes before a fast-forward and follows [source update recovery](./troubleshooting.md#git-update-recovery). Fixed update leaves the checkout unchanged. See [installer architecture](../reference/installer-architecture.md#fixed-commands-policies-and-ledger-data) for saved-code reinstallation and ledger locations.
+Update uses the recorded remote or, if missing, the Ghost-ALICE GitHub repository. Supply `--remote URL` to select another remote hosting the release branch. To update the developer checkout itself, use the existing `bash install.sh --update-source` or `.\install.cmd --update-source`; that separate path stashes local changes before a fast-forward and follows [source update recovery](./troubleshooting.md#git-update-recovery). Fixed update leaves the checkout unchanged. See [installer architecture](../reference/installer-architecture.md#fixed-commands-policies-and-ledger-data) for saved-code reinstallation and ledger locations.
 
 If a recorded Core skill has an invalid host list (`used_by`), the installer stops and identifies the installation record and skill path.
 
@@ -155,9 +155,9 @@ When installing an older version that does not support this follow-up, the insta
 
 ### Install Source
 
-The install record `~/.ghost-alice/installed-payload-v2.json` or `~/.ghost-alice/installed-payload-v3.json` names the checkout the installation came from, the install source. Install and `--repair` compare that developer origin with the requested input origin before changing installation targets. Execution uses a fixed package; the package records its input origin separately. When the recorded checkout no longer exists, for example after a fresh clone at another path, the installer records the new checkout as the install source without asking. When both checkouts exist, such as a second clone or a git worktree, the installer shows both folders. At a terminal it asks whether this checkout replaces the install source and stops unless the answer typed at the installer's terminal question is yes (the installer does not check who typed it); elsewhere it stops with exit code 2. When the human user decides to move the installation to another checkout, run the installer there with `--adopt-source`; its first placement records that checkout as the install source. `--repair` never moves the installation: from another checkout it stops with exit code 2 and names that install command.
+The install record `~/.ghost-alice/installed-payload-v2.json` or `~/.ghost-alice/installed-payload-v3.json` names the development checkout used for Git hooks and work record locations. The source commit identifies the code that was installed. Install and `--repair` compare that developer origin with the requested input origin before changing installation targets. Execution uses a fixed package; the package records its input origin separately. When the recorded checkout no longer exists, for example after a fresh clone at another path, the installer records the new checkout as the install source without asking. When both checkouts exist, such as a second clone or a git worktree, the installer shows both folders. At a terminal it asks whether this checkout replaces the install source and stops unless the answer typed at the installer's terminal question is yes (the installer does not check who typed it); elsewhere it stops with exit code 2. When the human user decides to move the installation to another checkout, run the installer there with `--adopt-source`; its first placement records that checkout as the install source. `--repair` never moves the installation: from another checkout it stops with exit code 2 and names that install command.
 
-If the saved manager is missing files, run the installer from a checkout containing that version’s files. When the saved file list is available, installation and `--repair` can restore missing files whose contents match that list. A different version or an edited surviving file stops this recovery. If the entire saved version directory is gone, reinstall the matching version from the checkout with the original host, skills and addon sources.
+If the saved manager is missing files, run the installer from a checkout containing that version’s files. When the saved file list is available, installation and `--repair` can restore missing files whose contents match that list. A different version or an edited surviving file stops this recovery. If the entire saved version directory is gone, reinstall the matching version from the checkout with `--local-source` and the original host, skills and addon sources.
 
 ```bash
 cd /path/to/new-checkout
@@ -169,7 +169,7 @@ cd C:\path\to\new-checkout
 .\install.cmd --adopt-source
 ```
 
-The installer sets the repository's git hook path (`core.hooksPath`, which every worktree of the repository shares) to the fixed package's `hooks` folder. After a merge or pull in the install source, its post-merge hook runs the installer in the merged checkout for every detected host. It uses the local files, including commits you have not pushed. A merge or pull in another worktree of the same repository runs the same hook from the install source, never that worktree's own hook file; the hook prints one line and installs nothing. A worktree's own hook setting (`git config --worktree core.hooksPath`) still comes first. Only an install you run replaces the install source; a merge never does, and a merge never fails because of the hook. Removal of the last consumer of the management commands puts back the hook path from before the install, unless the path changed since.
+The installer sets the repository's git hook path (`core.hooksPath`, which every worktree of the repository shares) to the fixed package's `hooks` folder. After a merge or pull in the install source, its post-merge hook runs the installed package, which fetches remote `main` and installs it for every detected host. A merge or pull in another worktree of the same repository runs the same hook from the install source, never that worktree's own hook file; the hook prints one line and installs nothing. A worktree's own hook setting (`git config --worktree core.hooksPath`) still comes first. Only an install you run replaces the install source; a merge never does, and a merge never fails because of the hook. Removal of the last consumer of the management commands puts back the hook path from before the install, unless the path changed since.
 
 ## Common Commands
 

@@ -316,6 +316,7 @@ def checkout_copy(test: unittest.TestCase) -> Path:
     test.addCleanup(shutil.rmtree, parent, True)
     copy = parent / "ghost-alice"
     shutil.copytree(_template(), copy, symlinks=True)
+    git("-C", str(copy), "remote", "add", "origin", str(_template()), check=True)
 
     def hook_paths_unchanged() -> None:
         after = hook_paths(CHECKOUT)

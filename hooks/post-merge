@@ -2,8 +2,8 @@
 # post-merge: after a successful merge or pull in any worktree, run the installer step `--post-merge` of the checkout
 # that holds this file and name the checkout the merge ran in.
 #
-# The registered package checks the merged checkout against the installation record. The matching checkout's
-# installer places its local files for the detected hosts. Other worktrees skip installation. Git uses the same
+# The registered package checks the merged checkout against the installation record. For a match it fetches
+# remote main and installs it for the detected hosts. Other worktrees skip installation. Git uses the same
 # shared hooksPath across worktrees unless the worktree has its own value. The automatic install has no stdin.
 #
 # Git exports variables such as GIT_DIR for the worktree that merged. The hook clears them before it calls the

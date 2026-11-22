@@ -43,8 +43,7 @@ Common commands:
   --agent-visibility strict|dynamic|minimal
                           Alias for --visibility
   --doctor               Run install diagnostics
-  update [--remote URL --ref NAME]
-                          Update installed Core skills from the recorded remote/ref
+  update [--remote URL]  Update installed Core skills from the remote main branch
   --repair               Re-provision missing managed targets (never overwrites an occupied slot that is not a clean managed target)
   --verbose, -v          Show per-target install details
 
@@ -67,7 +66,8 @@ Advanced commands:
   --addon-skip           Disable addon installation
   --list-addons          List addon manifest targets
   --skip-source-health   Skip source health gate
-  --adopt-source         Install from this checkout and record it as the install source
+  --local-source         Install the files in this checkout or saved package
+  --adopt-source         Record this checkout as the development source
   --sync-commands        Sync workspace commands
   --check-commands       Check workspace commands only
   gateway ARGS...        Run the context gateway installer once with ARGS
@@ -303,7 +303,7 @@ class OptionTests(CliCase):
         self.assertEqual(rows, {
             "--status, -s": (None, True, None, False, False, False),
             "--doctor": (None, True, None, False, False, False),
-            "update [--remote URL --ref NAME]": (None, False, None, False, False, False),
+            "update [--remote URL]": (None, False, None, False, False, False),
             "--repair": ("repair", True, None, False, True, False),
             "--uninstall, -u": ("uninstall", True, None, False, False, False),
             "SKILL_NAMES": ("install", True, None, True, True, True),
@@ -777,6 +777,12 @@ class DispatchCase(CliCase):
         self.stub("installer.lock.acquire", (self.home / "lock", "generation"))
         self.stub("installer.lock.release")
         self.stub("installer.runner.run_tool", mock.Mock(returncode=5))
+        self.release = self.home.parent / 'downloaded-main'
+        self.release.mkdir()
+        self.patches.enter_context(mock.patch('installer.source.acquire_release',
+                                              side_effect=lambda remote: contextlib.nullcontext(self.release)))
+        self.patches.enter_context(mock.patch('installer.source.release_input',
+            side_effect=lambda checkout, origin: dict(origin, branch='main', commit='fixture-release')))
         self.dispatched_inputs = []
         def dispatch_without_candidate_process(options, **kwargs):
             self.dispatched_inputs.append(kwargs)
@@ -1112,7 +1118,7 @@ class PostMergeTests(DispatchCase):
         _, args, _ = next(call for call in self.calls if call[0] == "run_install_children")
         self.assertFalse(args[0].options.platform_explicit)
         self.assertEqual(args[1], ["claude", "codex"])
-        self.assertEqual(self.dispatched_inputs[-1]['input_root'], self.source.resolve())
+        self.assertEqual(self.dispatched_inputs[-1]['input_root'], self.release)
         self.assertEqual(self.dispatched_inputs[-1]['provenance']['root'], str(self.source.resolve()))
         # The step itself takes no lock: each platform's install takes it, and refuses while another install holds it.
         self.assertNotIn("acquire", self.names())

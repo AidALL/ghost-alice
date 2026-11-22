@@ -117,14 +117,14 @@ _MESSAGES = {
         "In installation record {file}, used_by for {target} must be a list of host names.",
         "설치 기록 {file}에서 {target}의 used_by 값은 호스트 이름의 목록이어야 합니다."),
     "active_version_mismatch": (
-        "The active installer at {package} is incomplete. From a checkout containing this version's Core files, run {command} with the original host, skills and addon sources.",
-        "현재 관리자({package})의 파일이 누락되었습니다. 이 버전과 같은 Core 파일이 있는 원본에서 기존 호스트, 스킬 및 애드온 원본을 지정해 {command}를 실행하세요."),
+        "The active installer at {package} is incomplete. From a checkout containing this version's Core files, run {command} --local-source with the original host, skills and addon sources.",
+        "현재 관리자({package})의 파일이 누락되었습니다. 이 버전과 같은 Core 파일이 있는 원본에서 기존 호스트, 스킬 및 애드온 원본을 지정해 {command} --local-source를 실행하세요."),
     "active_version_missing": (
-        "The entire saved version for {package} is missing. From a checkout containing this version's Core files, run {command} with the original host, skills and addon sources to rebuild it.",
-        "현재 관리자({package})의 보관 버전 전체가 없습니다. 이 버전과 같은 Core 파일이 있는 원본에서 기존 호스트, 스킬 및 애드온 원본을 지정해 {command}를 실행해 보관 버전을 복원하세요."),
+        "The entire saved version for {package} is missing. From a checkout containing this version's Core files, run {command} --local-source with the original host, skills and addon sources to rebuild it.",
+        "현재 관리자({package})의 보관 버전 전체가 없습니다. 이 버전과 같은 Core 파일이 있는 원본에서 기존 호스트, 스킬 및 애드온 원본을 지정해 {command} --local-source를 실행해 보관 버전을 복원하세요."),
     "active_manager_unavailable": (
-        "The active installer at {package} cannot start or cannot read the current installation record. From a checkout containing this version's Core files, run {command} with the original host, skills and addon sources.",
-        "현재 관리자({package})를 시작할 수 없거나 현재 설치 기록을 읽을 수 없습니다. 이 버전과 같은 Core 파일이 있는 원본에서 기존 호스트, 스킬 및 애드온 원본을 지정해 {command}를 실행하세요."),
+        "The active installer at {package} cannot start or cannot read the current installation record. From a checkout containing this version's Core files, run {command} --local-source with the original host, skills and addon sources.",
+        "현재 관리자({package})를 시작할 수 없거나 현재 설치 기록을 읽을 수 없습니다. 이 버전과 같은 Core 파일이 있는 원본에서 기존 호스트, 스킬 및 애드온 원본을 지정해 {command} --local-source를 실행하세요."),
     "package_record_unreadable": (
         "This installer package cannot read the current installation record: {package}. Use an installer that supports the recorded format.",
         "이 설치 패키지는 현재 설치 기록을 읽을 수 없습니다. 패키지 경로는 {package}입니다. 해당 기록 형식을 지원하는 설치 버전을 사용하세요."),
@@ -138,8 +138,8 @@ _MESSAGES = {
         "The active installer at {package} cannot read the proposed installation record. Update from the recorded source ({origin}). To switch sources while work records still use the old folder, run {command} from a terminal, accept the record move, then retry the source change.",
         "현재 관리자({package})는 갱신할 설치 기록 형식을 읽을 수 없습니다. 기존 원본({origin})에서 갱신하세요. 작업 기록이 옛 폴더에 있는 상태에서 원본을 바꾸려면 터미널에서 {command}를 실행해 기록 이동에 동의한 뒤 원본 변경을 다시 실행하세요."),
     "candidate_first_retry": (
-        "Candidate install did not finish. To retry the first installation, run {package}.",
-        "첫 설치를 완료하지 못했습니다. 다시 설치하려면 {package}를 실행하세요."),
+        "Candidate install did not finish. To retry these files, run {package} --local-source.",
+        "첫 설치를 완료하지 못했습니다. 이 파일로 다시 설치하려면 {package} --local-source를 실행하세요."),
     "removal_backup_path": ("Backup location: {path}", "보관 사본 위치: {path}"),
     "candidate_failed": (
         "Candidate install did not finish. Active installer: {active}",

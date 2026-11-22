@@ -18,6 +18,60 @@ V2_COMMIT = (Path(__file__).parent / '_fixtures/v2-manager-commit.txt').read_tex
 
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'requires the POSIX installer')
+class ReleaseSourceTests(unittest.TestCase):
+    def test_install_and_update_take_main_even_after_explicit_local_install(self):
+        checkout = checkout_copy(self)
+        remote = checkout_copy(self)
+        home = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        (home / '.claude').mkdir()
+        env = installer_env(home)
+        def run(*args, code=0):
+            result = subprocess.run(args, env=env, cwd=checkout, capture_output=True, text=True, timeout=180)
+            self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+            return result.stdout.strip()
+        run('git', 'config', 'remote.origin.url', str(remote))
+        run('git', 'switch', '-qc', 'feature')
+        skill = Path('task-router/SKILL.md')
+        release = (remote / skill).read_bytes()
+        local = release + b'\nLocal development edit.\n'
+        (checkout / skill).write_bytes(local)
+        entry = ['bash', str(checkout / 'install.sh'), '--platform', 'claude', 'task-router']
+        target = home / '.claude/skills' / skill
+        run(*entry)
+        self.assertEqual(target.read_bytes(), release)
+        ghost = home / '.ghost-alice'
+        self.assertEqual(installed_payload.read(ghost)['source']['branch'], 'main')
+        run(*entry, '--local-source')
+        self.assertEqual(target.read_bytes(), local)
+        record = installed_payload.read(ghost)
+        self.assertEqual(record['source']['branch'], 'feature')
+        self.assertEqual(record['source']['ref'], 'refs/heads/main')
+        saved = Path(record['installer']['active_root'])
+        self.assertEqual((saved / skill).read_bytes(), local)
+        # An installation made before the release policy stored its development ref here.
+        record['source']['ref'] = 'refs/heads/deleted-feature'
+        installed_payload.read_path(ghost).write_text(json.dumps(record))
+        run('bash', str(ghost / 'bin/ghost-alice'), 'update')
+        self.assertEqual(target.read_bytes(), release)
+        self.assertEqual(installed_payload.read(ghost)['source']['ref'], 'refs/heads/main')
+        run('bash', str(saved / 'install.sh'), '--local-source')
+        self.assertEqual(target.read_bytes(), local)
+        run('bash', str(saved / 'install.sh'))
+        self.assertEqual(target.read_bytes(), release)
+        detail = installed_payload.read_path(ghost)
+        before = detail.read_bytes()
+        manager = ['bash', str(ghost / 'bin/ghost-alice'), 'update']
+        self.assertIn('main', run(*manager, '--ref', 'feature', code=1))
+        self.assertIn('main', run(*manager, '--local-source', code=1))
+        run('git', '-C', str(remote), 'branch', '-m', 'other')
+        self.assertIn('refs/heads/main', run(*entry, code=1))
+        self.assertIn('refs/heads/main', run(*manager, code=1))
+        self.assertEqual(detail.read_bytes(), before)
+        self.assertEqual(target.read_bytes(), release)
+        self.assertEqual((checkout / skill).read_bytes(), local)
+
+
+@unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'requires the POSIX installer')
 class VersionHandoffTests(unittest.TestCase):
     def setUp(self):
         self.repo = checkout_copy(self)

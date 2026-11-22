@@ -222,7 +222,7 @@ cli.source.prepare_source = fail_second_host
 raise SystemExit(cli.main(sys.argv[1:]))
 '''
         result = subprocess.run([sys.executable, '-c', entry, str(self.source / '_shared'), str(config),
-                                 '--skip-source-health', 'task-router'],
+                                 '--local-source', '--skip-source-health', 'task-router'],
                                 env=installer_env(self.home), cwd=self.home, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         record = self.record()
@@ -262,7 +262,7 @@ raise SystemExit(cli.main(sys.argv[1:]))
                                           capture_output=True, text=True, timeout=180)
         self.assertEqual(previous_manager.returncode, 0, previous_manager.stdout + previous_manager.stderr)
         self.assertFalse((self.claude / 'task-router').exists())
-        retry = subprocess.run([self.bash, str(candidate / 'core/install.sh'), '--skip-source-health'],
+        retry = subprocess.run([self.bash, str(candidate / 'core/install.sh'), '--local-source', '--skip-source-health'],
                                cwd=self.home, env=installer_env(self.home), capture_output=True, text=True, timeout=180)
         self.assertEqual(retry.returncode, 0, retry.stdout + retry.stderr)
         self.assertEqual(self.record()['installer']['active_root'], str(candidate / 'core'))
@@ -297,7 +297,7 @@ raise SystemExit(cli.main(sys.argv[1:]))
         skill = self.source / 'task-router/SKILL.md'
         original = skill.read_bytes()
         skill.write_bytes(original + b'\nLater source revision.\n')
-        self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router', 'compact-handoff')
+        self.run_installer('--local-source', '--platform', 'claude', '--skip-source-health', 'task-router', 'compact-handoff')
         expected = {path for path, entry in self.record()['targets'].items() if entry['kind'] == 'skill'}
         origin_fields = ('root', 'remote', 'ref', 'branch', 'hooks_path', 'ledger_source_roots')
         expected_source = {key: self.record()['source'].get(key) for key in origin_fields}
@@ -310,7 +310,7 @@ raise SystemExit(cli.main(sys.argv[1:]))
         ledger.write_text('current history')
         shutil.rmtree(self.source)
         (self.home / '.codex').mkdir()  # A newly detected host is not an installed selection.
-        result = subprocess.run([self.bash, str(first / 'install.sh'), '--adopt-source', '--skip-source-health'],
+        result = subprocess.run([self.bash, str(first / 'install.sh'), '--local-source', '--adopt-source', '--skip-source-health'],
                                 cwd=self.home, env=installer_env(self.home), capture_output=True, text=True, timeout=180)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual({path for path, entry in self.record()['targets'].items() if entry['kind'] == 'skill'}, expected)
@@ -326,7 +326,7 @@ raise SystemExit(cli.main(sys.argv[1:]))
         (self.home / '.codex').mkdir()
         remote = self.home / 'remote.git'
         subprocess.run(['git', 'clone', '--bare', str(self.source), str(remote)], check=True, capture_output=True)
-        subprocess.run(['git', '-C', str(self.source), 'remote', 'add', 'origin', str(remote)], check=True)
+        subprocess.run(['git', '-C', str(self.source), 'remote', 'set-url', 'origin', str(remote)], check=True)
         branch = subprocess.run(['git', '-C', str(self.source), 'branch', '--show-current'],
                                 check=True, capture_output=True, text=True).stdout.strip()
         self.run_installer('--platform', 'claude', '--skip-source-health', 'task-router')
@@ -427,7 +427,7 @@ raise SystemExit(cli.main(sys.argv[1:]))
         self.assertEqual(ledger.read_text(), 'history')
         self.assertTrue(any((self.ghost / 'versions').iterdir()))
         (self.home / '.codex').mkdir()
-        restored = subprocess.run([self.bash, str(saved / 'install.sh'), '--skip-source-health'],
+        restored = subprocess.run([self.bash, str(saved / 'install.sh'), '--local-source', '--skip-source-health'],
                                  cwd=self.home, env=installer_env(self.home), capture_output=True, text=True, timeout=180)
         self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
         self.assertEqual([(row['name'], row['used_by']) for row in self.record()['targets'].values()

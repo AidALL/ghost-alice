@@ -64,12 +64,12 @@ jobs:
           HOME: ${{ runner.temp }}/ghost-alice-ci-home
         run: |
           mkdir -p "$HOME"
-          bash ./install.sh --platform codex --skip-source-health
+          bash ./install.sh --platform codex --local-source --skip-source-health
 
       - name: Install Claude skills for the Claude installed-copy comparison
         env:
           HOME: ${{ runner.temp }}/ghost-alice-ci-home
-        run: bash ./install.sh --platform claude --skip-source-health
+        run: bash ./install.sh --platform claude --local-source --skip-source-health
 
       - name: Install the Codex CLI for the native prompt-input test
         run: npm install -g @openai/codex@0.161.0

@@ -78,7 +78,7 @@ class HookPathOwnershipEndToEndTests(unittest.TestCase):
         self.assertEqual((change["before_present"], change["after"]), (False, hooks))
         # The record of the write, made in the same step as the write, for an install that stops before the end.
         write_record = self.home / ".ghost-alice" / "install-state" / "source-repo-hook-path.json"
-        self.assertEqual(json.loads(write_record.read_text(encoding="utf-8"))["after"], hooks)
+        self.assertEqual(json.loads(write_record.read_text(encoding="utf-8")), change)
 
         # A worktree whose own commit holds an older hook file: its merge runs the install source's hook, which
         # names the worktree to the install source's installer, and nothing is installed.
@@ -97,7 +97,7 @@ class HookPathOwnershipEndToEndTests(unittest.TestCase):
         self.assertFalse((self.home / "old-hook-ran").exists(), merged.stdout + merged.stderr)
         self.assertEqual(self.record.read_bytes(), record_before)
 
-        # A merge in the install source installs again from it.
+        # A merge in the registered checkout installs the published main commit.
         self.git(self.source, 'checkout', '-q', '-b', 'topic')
         skill = self.source / 'task-router/SKILL.md'
         skill.write_text(skill.read_text() + '\nLocal merge content not published to a remote.\n')
@@ -117,14 +117,15 @@ sys.addaudithook(observe_request)
 """)
         merged = self.git(self.source, "merge", "-q", "--ff-only", "topic")
         self.assertEqual(merged.returncode, 0, merged.stderr)
-        head = self.git(self.source, "rev-parse", "HEAD").stdout.strip()
+        release_repo = Path(self.git(self.source, 'remote', 'get-url', 'origin').stdout.strip())
+        head = self.git(release_repo, 'rev-parse', 'main').stdout.strip()
         record = json.loads(self.record.read_text(encoding="utf-8"))
         self.assertEqual((record["source"]["root"], record["source"]["commit"]), (str(self.source), head),
                          merged.stdout + merged.stderr)
-        self.assertIn('Local merge content not published to a remote.',
+        self.assertNotIn('Local merge content not published to a remote.',
                       (self.home / '.claude/skills/task-router/SKILL.md').read_text())
         self.assertEqual(self.shared_hook_path(), str(Path(record['installer']['active_root']) / 'hooks'))
-        self.assertEqual(Path((self.home / 'request-writer').read_text()), self.source / '_shared/installer/cli.py')
+        self.assertEqual(Path((self.home / 'request-writer').read_text()), Path(hooks).parent / '_shared/installer/cli.py')
 
         # The full uninstall of the last host puts back what was there before Ghost-ALICE: no value.
         removed = self.install("--uninstall")
