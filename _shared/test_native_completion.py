@@ -122,7 +122,9 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         self.review_report()
         changed = REJECTED_STATUS_REPORT + '\n\n방금 새 작업까지 모두 완료했습니다.'
         self.assertIsNotNone(self.assess(changed)['body_issue'])
-        assert_stop_observation(self, self.run_stop(changed), issue='response-assessment-required')
+        stopped = self.run_stop(changed)
+        assert_stop_observation(self, stopped, issue='response-assessment-required')
+        self.assertIn('this input but not this exact answer', stopped['systemMessage'])
         original = self.observation.read_text()
         self.observation.write_text('The original observation changed.')
         self.assertIsNotNone(self.assess()['body_issue'])
@@ -132,6 +134,143 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         self.assertIsNone(self.assess()['body_issue'])
         self.review_report()
         self.assertIsNone(self.assess()['body_issue'])
+
+    def review_explanation(self, text, *, verdict='supported'):
+        candidate = self.api.prepare_response_review(self.source, response_text=text,
+            source_paths=[str(self.observation)], claim_statements=[text])
+        receipt = self.api.record_response_review(self.source, candidate['candidate_reference'],
+            dict(claims=self.judgments(candidate), response=dict(
+                binding_id=candidate['response_binding']['binding_id'], verdict=verdict,
+                source_ids=[candidate['sources'][0]['source_id']], rationale='The observation supports the report.')))
+        return candidate['candidate_reference'], receipt['response_reference']
+
+    def update_criteria(self, *criteria):
+        fixtures.ledger.record_turn(**self.fixture.coords, expected_input_event_id=self.fixture.event,
+            intent_delta={'acceptance_criteria': list(criteria)})
+
+    def test_unreadable_selection_preserves_the_explanation_review_for_the_current_input(self):
+        text = 'The source records an isolated Stop observation.'
+        ledger, _, _ = ledger_access.coordinates(self.source)
+        unreadable = patch.object(ledger, 'read_response_selection', side_effect=ValueError('invalid registration'))
+        with unreadable:
+            self.assertIsNone(native_completion.assess_native_completion(self.source, text=text)['body_issue'])
+        self.review_explanation(text, verdict='unsupported')
+        with unreadable:
+            assessed = native_completion.assess_native_completion(self.source, text=text)
+        self.assertEqual(assessed['input_event_id'], self.fixture.event)
+        self.assertIsNone(assessed['response_route'])
+        self.assertIn('review-selection-unavailable:', assessed['body_issue'] or '')
+
+    def test_stop_names_the_withdrawn_criterion_for_the_same_reviewed_text(self):
+        source_report = 'The replay covers four earlier Stop responses.'
+        self.review_explanation(source_report)
+        self.review_report()
+        criterion = self.fixture.criterion(summary='Report the existing Core checks and their limits.')
+        self.update_criteria(dict(criterion, selectable=False))
+        for body in (source_report + '\n', REJECTED_STATUS_REPORT):
+            with self.subTest(body=body[:20]):
+                stopped = self.run_stop(body)
+                assert_stop_observation(self, stopped, issue='review-criterion-withdrawn')
+                self.assertIn('AC1', stopped['systemMessage'])
+                self.assertIn('first, revision 1', stopped['systemMessage'])
+                self.assertIn('no longer selectable', stopped['systemMessage'])
+        self.update_criteria(criterion)
+        for body in (source_report, REJECTED_STATUS_REPORT):
+            assert_stop_observation(self, self.run_stop(body))
+
+    def test_same_text_uses_the_current_selection_and_reports_an_unmatched_selection(self):
+        text = 'Four earlier Stop responses were replayed.'
+        self.review_explanation(text)
+        self.update_criteria(self.fixture.criterion('second'), self.fixture.criterion('third'))
+        self.fixture.record(self.fixture.candidate(units=('second',)))
+        self.review_explanation(text)
+        for unit in ('first', 'second'):
+            self.fixture.record(self.fixture.candidate(units=(unit,)))
+            assert_stop_observation(self, self.run_stop(text))
+        self.fixture.record(self.fixture.candidate(units=('third',)))
+        stopped = self.run_stop(text)
+        assert_stop_observation(self, stopped, issue='review-selection-unavailable')
+        self.assertIn('cannot be applied to the current selection', stopped['systemMessage'])
+
+    def test_withdrawal_and_changed_evidence_do_not_identify_a_single_cause(self):
+        text = 'The replay covers four earlier Stop responses.'
+        self.review_explanation(text)
+        self.review_report()
+        self.update_criteria(self.fixture.criterion(selectable=False,
+            summary='Report the existing Core checks and their limits.'))
+        self.observation.write_text('The original observation changed.')
+        for body in (text, REJECTED_STATUS_REPORT):
+            with self.subTest(body=body[:20]):
+                assert_stop_observation(self, self.run_stop(body), issue='review-selection-unavailable')
+
+    def test_withdrawal_and_unsupported_response_do_not_identify_a_single_cause(self):
+        text = 'The replay covers four earlier Stop responses.'
+        self.review_explanation(text, verdict='unsupported')
+        self.review_report(verdict='unsupported')
+        self.update_criteria(self.fixture.criterion(selectable=False,
+            summary='Report the existing Core checks and their limits.'))
+        for body in (text, REJECTED_STATUS_REPORT):
+            with self.subTest(body=body[:20]):
+                assert_stop_observation(self, self.run_stop(body), issue='review-selection-unavailable')
+
+    def test_unrecorded_candidate_stays_an_ordinary_answer_after_withdrawal(self):
+        text = 'The source records an isolated Stop observation.'
+        self.api.prepare_response_review(self.source, response_text=text,
+            source_paths=[str(self.observation)], claim_statements=[text])
+        self.update_criteria(self.fixture.criterion(selectable=False,
+            summary='Report the existing Core checks and their limits.'))
+        assert_stop_observation(self, self.run_stop(text))
+
+    def test_withdrawal_in_another_work_unit_does_not_name_a_criterion_for_the_review(self):
+        self.review_report()
+        self.update_criteria(self.fixture.criterion('second'))
+        self.fixture.record(self.fixture.candidate(units=('first', 'second')))
+        self.update_criteria(self.fixture.criterion('second', selectable=False))
+        stopped = self.run_stop(REJECTED_STATUS_REPORT)
+        assert_stop_observation(self, stopped, issue='review-selection-unavailable')
+
+    def test_stop_accounts_for_all_selected_execution_units_in_the_reviewed_registration(self):
+        first = self.fixture.criterion(summary='Report the existing Core checks and their limits.')
+        second = self.fixture.criterion('second')
+        self.update_criteria(second)
+        self.fixture.record(self.fixture.candidate(units=('first', 'second'), selected=('first',)))
+        text = 'The original observation covers this work.'
+        self.review_explanation(text)
+        self.update_criteria(dict(first, selectable=False), dict(second, selectable=False))
+        assert_stop_observation(self, self.run_stop(text), issue='review-selection-unavailable')
+        self.update_criteria(second)
+        assert_stop_observation(self, self.run_stop(text), issue='review-criterion-withdrawn')
+
+    def test_changed_review_bytes_cannot_identify_the_withdrawn_selection(self):
+        body = 'Four earlier Stop responses were replayed.'
+        self.review_explanation(body)
+        self.update_criteria(self.fixture.criterion(selectable=False,
+            summary='Report the existing Core checks and their limits.'))
+        with fixtures.ledger.storage_transaction(self.fixture.root) as connection:
+            connection.execute('DROP TRIGGER core_completion_responses_update')
+            connection.execute("""UPDATE core_completion_responses
+                SET payload_json=json_set(payload_json, '$.judgment.rationale', 'changed bytes')""")
+        stopped = self.run_stop(body)
+        assert_stop_observation(self, stopped, issue='assessment-invalid')
+        self.assertNotIn('no longer selectable', stopped['systemMessage'])
+
+    def test_superseded_review_corruption_does_not_hide_the_review_for_the_current_selection(self):
+        self.update_criteria(self.fixture.criterion('second'))
+        for table, field, index in (('core_completion_responses', 'judgment.rationale', 1),
+                                    ('core_completion_candidates', 'observed_at', 0)):
+            with self.subTest(table=table):
+                text = f'The source records the reviewed selection for {table}.'
+                self.fixture.record(self.fixture.candidate(units=('first',)))
+                refs = self.review_explanation(text)
+                self.fixture.record(self.fixture.candidate(units=('second',)))
+                self.review_explanation(text)
+                with fixtures.ledger.storage_transaction(self.fixture.root) as connection:
+                    connection.execute(f'DROP TRIGGER {table}_update')
+                    connection.execute(f"UPDATE {table} SET payload_json=json_set(payload_json, ?, ?) WHERE reference=?",
+                                       ('$.' + field, 'changed bytes', refs[index]))
+                assert_stop_observation(self, self.run_stop(text))
+                self.fixture.record(self.fixture.candidate(units=('first',)))
+                assert_stop_observation(self, self.run_stop(text), issue='assessment-invalid')
 
     def test_registered_review_owns_the_response(self):
         body = 'Existing tests cover recording, not complete business continuation.'
@@ -183,8 +322,8 @@ class UnroutedNativeWorkTests(unittest.TestCase):
         source = dict(GHOST_ALICE_CORE_ROOT=str(fixtures.ROOT),
             GHOST_ALICE_SESSION_INTENT_ROOT=str(fixture.root),
             GHOST_ALICE_PLATFORM='claude', GHOST_ALICE_SESSION_ID='current')
-        with patch.object(ledger_access.load_ledger(), 'read_response_route',
-                side_effect=ValueError('selected execution work needs a selectable owned criterion')):
+        with patch.object(ledger_access.load_ledger(), 'read_response_selection',
+                side_effect=fixtures.response_route.RouteSchemaError('stored selected criterion binding is invalid')):
             rejected_route = native_completion.assess_native_completion(source)
         self.assertEqual(rejected_route['input_event_id'], fixture.event)
         self.assertIsNone(rejected_route['response_route'])
@@ -382,13 +521,16 @@ class NativeCompletionTests(unittest.TestCase):
     def test_unencodable_answer_has_no_digest_or_accepted_review(self):
         before = fixtures.ledger.read_session_state(**self.fixture.coords)
         for text in ('Answer: \ud800', '[partial-check]\n- unverified:\n  - c1: pending \ud800'):
-            with self.subTest(text=ascii(text)), patch.object(completion_assessment, 'lookup_current_response') as lookup:
+            with (self.subTest(text=ascii(text)),
+                  patch.object(native_completion, '_recorded_review_issue') as recorded,
+                  patch.object(native_completion, '_completion_review') as completion):
                 result = native_completion.assess_native_completion(self.source, text=text)
                 self.assertIsNone(result['body_digest'])
                 self.assertTrue(result['body_issue'].startswith('response-unbound:'))
                 self.assertIn('UTF-8', result['body_issue'])
                 self.assertIsNone(result['claim_judgments'])
-                lookup.assert_not_called()
+                recorded.assert_not_called()
+                completion.assert_not_called()
         self.assertEqual(fixtures.ledger.read_session_state(**self.fixture.coords), before)
 
     def setUp(self):
@@ -533,6 +675,20 @@ class NativeProofBindingTests(unittest.TestCase):
         result = self.assess(self.proof)
         self.assertIsNotNone(result['body_issue'])
         self.assertIn('assessment-required', result['body_issue'])
+
+    def test_reviewed_completion_withdrawal_preserves_the_reason_and_never_passes_the_claim(self):
+        self.review_response(self.proof)
+        self.assertIsNone(self.assess(self.proof)['body_issue'])
+        f = self.owner.fixture
+        fixtures.ledger.record_turn(**f.coords, expected_input_event_id=f.event, intent_delta={
+            'acceptance_criteria': [f.criterion(summary=self.owner.summary, selectable=False)]})
+        issue = self.assess(self.proof)['body_issue']
+        self.assertIn('review-criterion-withdrawn:', issue)
+        self.assertIn('first, revision 1', issue)
+        self.assertIn('AC1', issue)
+        self.assertIn('route-stale:', self.assess(self.proof + '\nAn unreviewed addition.')['body_issue'])
+        self.owner.observation.write_text('The original changed as well.')
+        self.assertIn('review-selection-unavailable:', self.assess(self.proof)['body_issue'])
 
     def test_final_rejects_unreviewed_summary_borrowing_valid_proof(self):
         original = self.owner.prepare(self.proof)

@@ -38,7 +38,9 @@ ISSUE_LABELS = {
     'assessment-invalid': 'the recorded review is not valid for this answer',
     'assessment-unavailable': 'Core code could not look up a recorded review for this answer',
     'route-unavailable': 'no current response route is registered for this answer',
+    'route-stale': 'the registered selection cannot be used for this answer',
     'response-assessment-required': 'no recorded review matches this answer',
+    'review-selection-unavailable': 'the recorded review cannot be applied to the current selection',
     'response-unbound': 'the recorded review is not bound to this answer',
     'criterion-unbound': 'a reviewed claim is not bound to a criterion the current route selects',
     'response-unsupported': 'the recorded review does not support this answer',
@@ -197,6 +199,8 @@ def _remaining_work(assessment: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _issue_label(issue: Mapping[str, Any]) -> str:
+    if issue['code'] == 'review-criterion-withdrawn':
+        return issue['detail'].removeprefix('review-criterion-withdrawn: ')
     if OTHER_TEXT_REVIEW in str(issue['detail']):
         return "the response model's recorded response review covers this input but not this exact answer"
     if issue['code'] in ISSUE_LABELS:

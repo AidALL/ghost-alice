@@ -152,8 +152,8 @@ def _object(value, keys, label, optional=()):
 
 
 def _identifier(value, label):
-    if (not isinstance(value, str) or not value or len(value) > 120
-            or ledger.safe_component(value, "") != value):
+    from session_identity import is_exact
+    if not is_exact(value):
         raise RouteSchemaError(f"{label} must be an exact canonical identifier")
     return value
 
@@ -220,14 +220,13 @@ def _owned_criteria(value):
     return owned
 
 
-def _require_execution_criteria(units, selected, owned):
-    for unit_id in selected:
-        unit = units[unit_id]
-        if unit['kind'] == 'execution' and not any(
-                key[:2] == (unit_id, unit['contract_revision']) and criterion.get('selectable') is True
-                for key, criterion in owned.items()):
-            raise RouteSchemaError('selected execution work needs a selectable owned criterion; record the actual task condition before routing')
-
+def _ineligible_execution_units(units, selected, owned, eligible_owners=None):
+    if eligible_owners is None:
+        eligible_owners = {(unit_id, revision) for (unit_id, revision, _), criterion in owned.items()
+                           if criterion.get("selectable") is True}
+    execution_units = {(unit_id, units[unit_id]["contract_revision"])
+                       for unit_id in selected if units[unit_id]["kind"] == "execution"}
+    return execution_units - eligible_owners
 
 
 def _validate_declared_remaining_work(value, selected, *, resolved=False):
@@ -403,7 +402,8 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
     for unit_id in selected_ids:
         if unit_id not in units or units[unit_id]["selectable"] is not True:
             raise RouteSchemaError("selected work unit must be explicitly present and selectable")
-    _require_execution_criteria(units, selected_ids, owned)
+    if _ineligible_execution_units(units, selected_ids, owned):
+        raise RouteSchemaError('selected execution work needs a selectable owned criterion; record the actual task condition before routing')
     references = candidate["selected_criteria"]
     if not isinstance(references, list):
         raise RouteSchemaError("selected_criteria must be a list")
@@ -433,20 +433,29 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
     return projection, registry
 
 
-def project_stored_response_route(state, expected_input_event_id=None):
+def project_stored_response_route(state, expected_input_event_id=None, *, eligible_owners=None):
+    route, _ = assess_stored_response_route(state, expected_input_event_id, eligible_owners=eligible_owners)
+    return route
+
+
+def assess_stored_response_route(state, expected_input_event_id=None, *, eligible_owners=None):
+    """Return the public route and the selected criterion whose withdrawal alone made it stale, if any."""
     current = state.get("latest_input_event_id")
     if expected_input_event_id is not None and expected_input_event_id != current:
         raise RouteBindingError("read receipt does not match the current input event")
     original = state.get("response_route")
     if original is None:
-        return None
+        return None, None
     stored = route_comparison_view(original)
     if (not isinstance(stored, dict) or stored.get("schema_version") != SCHEMA_VERSION
             or stored.get("status") not in ("ready", "stale")
             or stored.get("platform") != state.get("platform") or stored.get("session_id") != state.get("session_id")):
         raise RouteSchemaError("stored response route schema or owner is invalid")
     _object(stored, CANDIDATE_KEYS | {"status", "platform", "session_id", "input_event_id", "boundary_ref"},
-            "stored response route", optional={"declared_remaining_work"})
+            "stored response route", optional={"declared_remaining_work", "registration_sequence"})
+    if "registration_sequence" in stored and (type(stored["registration_sequence"]) is not int
+            or not 1 <= stored["registration_sequence"] <= ledger.MAX_SHARED_INTEGER):
+        raise RouteSchemaError("invalid stored registration sequence")
     validate_routing_surface(stored["routing_surface"], stored=True)
     if not isinstance(stored["input_event_id"], str) or not stored["input_event_id"]:
         raise RouteSchemaError("stored route input event is invalid")
@@ -472,8 +481,6 @@ def project_stored_response_route(state, expected_input_event_id=None):
     _unique(selected, "stored selected_work_unit_ids")
     if any(u not in units or units[u]["selectable"] is not True for u in selected):
         raise RouteSchemaError("stored selected unit is not selectable")
-    owned = _owned_criteria(state.get("acceptance_criteria", []))
-    _require_execution_criteria(units, selected, owned)
     seen = set()
     for criterion in stored["selected_criteria"]:
         key = _criterion(criterion, resolved=True)
@@ -483,18 +490,26 @@ def project_stored_response_route(state, expected_input_event_id=None):
         seen.add(key)
     if 'declared_remaining_work' in stored:
         _validate_declared_remaining_work(stored['declared_remaining_work'], stored['selected_criteria'], resolved=True)
+    owned = _owned_criteria(state.get("acceptance_criteria", []))
     route = deepcopy(original)
     # canonical_input_event_id identifies the current input Core recorded; current_context_input_event_id names an SDK-started context input.
-    if (route.get("input_event_id") != current or state.get("canonical_input_event_id") != current
-        or state.get('current_context_input_event_id')
-        or route["routing_surface"]["response_mode"] in RETIRED_RESPONSE_MODES):
-        route["status"] = "stale"
+    independently_stale = (route["status"] == "stale" or route["input_event_id"] != current
+        or state.get("canonical_input_event_id") != current or state.get('current_context_input_event_id')
+        or route["routing_surface"]["response_mode"] in RETIRED_RESPONSE_MODES)
+    ineligible = _ineligible_execution_units(units, selected, owned, eligible_owners)
+    withdrawn = []
     for selected_criterion in stored["selected_criteria"]:
         criterion = owned.get(_criterion(selected_criterion, resolved=True))
-        if criterion is None or any(criterion[k] != selected_criterion[k] for k in ("summary", "source", "selectable")):
-            route["status"] = "stale"
+        if criterion is None or any(criterion[k] != selected_criterion[k] for k in ("summary", "source")):
+            independently_stale = True
+        elif not criterion["selectable"]:
+            withdrawn.append(selected_criterion)
+    if independently_stale or ineligible or withdrawn:
+        route["status"] = "stale"
     route["current_input_event_id"] = current
-    return route
+    if not independently_stale and len(withdrawn) == 1 and ineligible <= {_unit_key(withdrawn[0])}:
+        return route, withdrawn[0]
+    return route, None
 
 
 def record_response_route(root, platform, session_id, expected_input_event_id, candidate, boundary_ref, *, transaction=None,
@@ -552,6 +567,11 @@ def read_response_route(root, platform, session_id, *, expected_input_event_id=N
         expected_input_event_id=expected_input_event_id, transaction=transaction)
 
 
+def read_response_route_at(root, platform, session_id, registration_sequence, *, transaction=None):
+    return ledger.read_response_route_at(root=Path(root), platform=platform, session_id=session_id,
+        registration_sequence=registration_sequence, transaction=transaction)
+
+
 def main(argv=None):
     global ledger
     parser = argparse.ArgumentParser(description=__doc__)
@@ -559,6 +579,8 @@ def main(argv=None):
     parser.add_argument("--platform", required=True)
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--expected-input-event-id")
+    parser.add_argument("--registration-sequence", type=int,
+                        help="With --read, return the selection at this positive registration event sequence")
     parser.add_argument("--boundary-ref")
     parser.add_argument("--expected-revision", type=int, help="Current ledger revision required for ownership binding")
     parser.add_argument("--bind-legacy-criteria-json",
@@ -581,9 +603,16 @@ def main(argv=None):
                 or args.context_selection_json is not None or args.context_use_judgments_json is not None
                 or args.context_selection_mode != 'replace'):
                 raise RouteBindingError("read cannot bind criterion ownership")
-            result = read_response_route(args.root, args.platform, args.session_id,
-                                         expected_input_event_id=args.expected_input_event_id)
+            if args.registration_sequence is not None:
+                if args.expected_input_event_id is not None:
+                    raise RouteBindingError("historical lookup does not check the current input")
+                result = read_response_route_at(args.root, args.platform, args.session_id, args.registration_sequence)
+            else:
+                result = read_response_route(args.root, args.platform, args.session_id,
+                                             expected_input_event_id=args.expected_input_event_id)
         else:
+            if args.registration_sequence is not None:
+                raise RouteBindingError("registration-sequence requires --read")
             from session_identity import host_bound_session
             bound = host_bound_session(args.platform, os.environ)
             if bound and bound != args.session_id:

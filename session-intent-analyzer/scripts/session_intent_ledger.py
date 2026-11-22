@@ -21,8 +21,9 @@ import uuid
 from collections import Counter
 from contextlib import closing, contextmanager
 from copy import deepcopy
+from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 
 _SHARED_MODULE_LOAD = threading.RLock()
@@ -60,6 +61,7 @@ CONDUCT_PATTERN_CLASSES = (
 # JSON numbers must retain their exact value in the JavaScript consumers.
 MAX_SHARED_INTEGER = (1 << 53) - 1
 INPUT_ANCHOR_FIELDS = ("ledger_revision", "latest_input_event_id", "latest_input_digest", "latest_input_char_count")
+INTAKE_CONTEXT_FIELDS = ("pending_native_inputs", "current_context_input_event_id")
 
 
 def _shared_module(name):
@@ -327,7 +329,8 @@ def _check_expected(state: dict[str, Any], expected_input_event_id: str | None,
         raise ValueError("stale input event; re-evaluate against the current input that Core code recorded before writing")
 
 
-STORAGE_SCHEMA_VERSION = 1
+STORAGE_SCHEMA_VERSION = 2
+LEGACY_STORAGE_VERSION = 1
 
 
 def storage_database_path(root: Path) -> Path:
@@ -345,18 +348,22 @@ def _require_database_if_initialized(root: Path) -> None:
         raise ValueError("authoritative SQLite database is missing; restore it, do not use JSON exports as authority")
 
 
-def _check_database(connection: sqlite3.Connection) -> None:
+def _check_database(connection: sqlite3.Connection) -> int:
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version != STORAGE_SCHEMA_VERSION:
+    if version not in (LEGACY_STORAGE_VERSION, STORAGE_SCHEMA_VERSION):
         raise ValueError("unsupported Ghost state database schema; no JSON fallback is permitted")
+    return version
 
 
 def _initialize_database(connection: sqlite3.Connection) -> None:
     # Individual statements preserve the caller's transaction; executescript
     # would implicitly commit and break Core atomicity.
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, STORAGE_SCHEMA_VERSION):
+    if version not in (0, LEGACY_STORAGE_VERSION, STORAGE_SCHEMA_VERSION):
         raise ValueError("unsupported Ghost state database schema")
+    if version == 0 and connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions'").fetchone():
+        raise ValueError("unversioned session database; restore its schema version before writing")
     connection.execute("""CREATE TABLE IF NOT EXISTS sessions (
         platform TEXT NOT NULL, session_id TEXT NOT NULL,
         revision INTEGER NOT NULL CHECK(revision >= 0), input_event_id TEXT NOT NULL,
@@ -391,7 +398,10 @@ def _initialize_database(connection: sqlite3.Connection) -> None:
     connection.execute("""CREATE TABLE IF NOT EXISTS session_discovery (
         platform TEXT PRIMARY KEY, session_id TEXT NOT NULL,
         FOREIGN KEY(platform, session_id) REFERENCES sessions(platform, session_id))""")
-    connection.execute(f"PRAGMA user_version = {STORAGE_SCHEMA_VERSION}")
+    if version == 0:
+        _shared_module('ledger_criteria').create_schema(connection)
+        _shared_module('ledger_registrations').initialize(connection)
+        connection.execute(f"PRAGMA user_version = {STORAGE_SCHEMA_VERSION}")
 
 
 def _enable_wal(connection: sqlite3.Connection) -> None:
@@ -441,6 +451,7 @@ def storage_transaction(root: Path):
             write_json(marker, {"schema_version": "ghost-sqlite-authority.v1", "database": database.name})
         connection.execute("BEGIN IMMEDIATE")
         try:
+            _check_database(connection)
             yield connection
         except BaseException:
             connection.rollback()
@@ -495,21 +506,31 @@ def _read_connection(root: Path, transaction: sqlite3.Connection | None = None):
         return
     connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=10, isolation_level=None)
     try:
-        _check_database(connection)
         connection.execute("BEGIN")
+        _check_database(connection)
         yield connection
     finally:
         connection.close()
 
 
-def _stored_state(connection, platform: str, session_id: str):
+def _session_header(connection, platform: str, session_id: str, *, fields=()):
     if connection is None:
         return None
-    row = connection.execute("SELECT revision,input_event_id,state_json FROM sessions WHERE platform=? AND session_id=?",
+    columns = "state_json"
+    if fields:
+        fields = ("schema_version", "platform", "session_id", *INPUT_ANCHOR_FIELDS, *fields)
+        paths = [f"'$.{field}'" for field in fields]
+        types = ", ".join(f"json_type(state_json, {path})" for path in paths)
+        # Multi-path json_extract preserves JSON booleans. The types distinguish a missing
+        # field from a stored null, which matters for the intake and context checks below.
+        columns = f"json_extract(state_json, {', '.join(paths)}), json_array({types})"
+    row = connection.execute(f"SELECT revision,input_event_id,{columns} FROM sessions WHERE platform=? AND session_id=?",
                              (platform, session_id)).fetchone()
     if row is None:
         return None
     state = json.loads(row[2])
+    if fields:
+        state = {field: value for field, value, kind in zip(fields, state, json.loads(row[3])) if kind is not None}
     if (not isinstance(state, dict) or state.get("schema_version") not in {"session-intent-ledger.v1", SCHEMA_VERSION}
             or state.get("platform") != platform or state.get("session_id") != session_id
             or type(state.get("ledger_revision")) is not int or state["ledger_revision"] != row[0]
@@ -527,6 +548,28 @@ def _stored_state(connection, platform: str, session_id: str):
     count = state["latest_input_char_count"]
     if type(count) is not int or not 0 <= count <= MAX_SHARED_INTEGER:
         raise ValueError("ledger input character count is invalid")
+    return state
+
+
+def _expand_route(connection, state):
+    ref = state.get("response_route")
+    if not isinstance(ref, dict) or "registration_sequence" not in ref:
+        return
+    if set(ref) != {"registration_sequence", "status"} or ref["status"] not in ("ready", "stale"):
+        raise _response_route_module().RouteSchemaError("invalid latest registration reference")
+    sequence = ref["registration_sequence"]
+    original = _shared_module("ledger_registrations").ready_projection(
+        connection, state["platform"], state["session_id"], sequence)
+    state["response_route"] = dict(original, registration_sequence=sequence, status=ref["status"])
+
+
+def _stored_state(connection, platform: str, session_id: str):
+    state = _session_header(connection, platform, session_id)
+    if state is not None and _check_database(connection) == STORAGE_SCHEMA_VERSION:
+        criteria = _shared_module("ledger_criteria")
+        state["acceptance_criteria"] = criteria.read_current(connection, platform, session_id)
+        state["work_units"] = criteria.read_registry(connection, platform, session_id)
+        _expand_route(connection, state)
     return state
 
 
@@ -562,18 +605,39 @@ def _legacy_import(paths: dict[str, Path], platform: str, session_id: str):
     return state, events, None
 
 
-def _save_state(connection, state):
+def _save_state(connection, state, *, write_current=True, write_registry=True, imported=False, event=None):
+    relational = _check_database(connection) == STORAGE_SCHEMA_VERSION
+    payload = state
+    if relational:
+        payload = {k: v for k, v in state.items() if k not in ("acceptance_criteria", "work_units")}
+        route = state.get("response_route")
+        if isinstance(route, dict) and "registration_sequence" in route:
+            payload["response_route"] = {k: route[k] for k in ("registration_sequence", "status")}
     connection.execute("""INSERT INTO sessions VALUES(?,?,?,?,?)
         ON CONFLICT(platform,session_id) DO UPDATE SET revision=excluded.revision,
         input_event_id=excluded.input_event_id,state_json=excluded.state_json""",
         (state["platform"], state["session_id"], state["ledger_revision"], state["latest_input_event_id"],
-         json.dumps(state, ensure_ascii=False, sort_keys=True)))
+         json.dumps(payload, ensure_ascii=False, sort_keys=True)))
+    if relational and (write_current or write_registry):
+        criteria = _shared_module("ledger_criteria")
+        owner = state["platform"], state["session_id"]
+        if write_current:
+            criteria.write_current(connection, *owner, state["acceptance_criteria"], imported=imported, event=event)
+        if write_registry:
+            criteria.write_registry(connection, *owner, state["work_units"])
 
 
-def _append_event(connection, platform, session_id, event):
+def _next_event_sequence(connection, platform, session_id):
+    return connection.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM intent_events WHERE platform=? AND session_id=?",
+                              (platform, session_id)).fetchone()[0]
+
+
+def _append_event(connection, platform, session_id, event, sequence=None):
+    if sequence is None:
+        sequence = _next_event_sequence(connection, platform, session_id)
     connection.execute("""INSERT INTO intent_events(platform,session_id,sequence,mutation_id,event_json)
-        VALUES(?,?,(SELECT COALESCE(MAX(sequence),0)+1 FROM intent_events WHERE platform=? AND session_id=?),?,?)""",
-        (platform, session_id, platform, session_id, event.get("mutation_id") or None,
+        VALUES(?,?,?,?,?)""",
+        (platform, session_id, sequence, event.get("mutation_id") or None,
          json.dumps(event, ensure_ascii=False, sort_keys=True)))
 
 
@@ -590,6 +654,7 @@ def _load_state_for_update(connection, paths, platform, session_id):
     # fresh intake committed here can record an input as the current input that later writes bind to.
     state["canonical_input_event_id"] = ""
     if isinstance(state.get("response_route"), dict):
+        state["response_route"].pop("registration_sequence", None)
         state["response_route"]["status"] = "stale"
     # Detect source-file mutations during import; source writers
     # must be stopped during import. The originals remain a recovery source.
@@ -597,7 +662,7 @@ def _load_state_for_update(connection, paths, platform, session_id):
              for key in ("state", "events") if paths[key].exists()}
     if after != sources:
         raise ValueError("JSON source changed during import; retry after stopping its writer")
-    _save_state(connection, state)
+    _save_state(connection, state, imported=bool(sources))
     for event in events:
         _append_event(connection, platform, session_id, event)
     if sources:
@@ -614,17 +679,26 @@ def migrate_session(*, root: Path | None = None, platform: str, session_id: str,
         return _load_state_for_update(connection, session_paths(root, platform, session_id), platform, session_id)
 
 
-def _commit(connection, state: dict[str, Any], event: dict[str, Any]) -> None:
+def _commit(connection, state: dict[str, Any], event: dict[str, Any], *, registration=None) -> int:
     if state["ledger_revision"] >= MAX_SHARED_INTEGER:
         raise ValueError("ledger revision has reached the shared JSON integer limit; no mutation was applied")
     state["schema_version"] = SCHEMA_VERSION
     state["ledger_revision"] += 1
     event.update(ledger_revision=state["ledger_revision"], mutation_id=uuid.uuid4().hex)
-    _save_state(connection, state)
-    _append_event(connection, state["platform"], state["session_id"], event)
+    sequence = _next_event_sequence(connection, state["platform"], state["session_id"])
+    if registration is not None:
+        state["response_route"] = dict(registration, registration_sequence=sequence)
+    _save_state(connection, state,
+                write_current=(event["event"] == "acceptance-criteria-ownership-bound"
+                               or "acceptance_criteria" in event.get("delta_keys", ())),
+                write_registry=event["event"] == "response-route-recorded", event=event)
+    _append_event(connection, state["platform"], state["session_id"], event, sequence)
+    if registration is not None:
+        _shared_module("ledger_registrations").write_selection(connection, sequence, registration)
     if state["session_id"] != "unknown":
         connection.execute("""INSERT INTO session_discovery VALUES(?,?)
             ON CONFLICT(platform) DO UPDATE SET session_id=excluded.session_id""", (state["platform"], state["session_id"]))
+    return sequence
 
 
 def read_session_state(*, root: Path | None = None, platform: str, session_id: str,
@@ -655,10 +729,12 @@ def read_session_events(*, root: Path | None = None, platform: str, session_id: 
     root = default_root() if root is None else root
     validate_identity(platform, session_id)
     with _read_connection(root, transaction) as connection:
-        if _stored_state(connection, platform, session_id) is not None:
-            return [json.loads(row[0]) for row in connection.execute(
-                "SELECT event_json FROM intent_events WHERE platform=? AND session_id=? ORDER BY sequence",
-                (platform, session_id))]
+        if _session_header(connection, platform, session_id) is not None:
+            history = _shared_module("ledger_registrations")
+            return [history.public_event(connection, platform, session_id, sequence, json.loads(raw))
+                    for sequence, raw in connection.execute(
+                        "SELECT sequence,event_json FROM intent_events WHERE platform=? AND session_id=? ORDER BY sequence",
+                        (platform, session_id))]
         return _legacy_events(session_paths(root, platform, session_id), platform, session_id)
 
 
@@ -820,9 +896,40 @@ def _verify_moved_database(source: Path, current: Path) -> None:
         schema = 'SELECT type,name,tbl_name,sql FROM sqlite_master'
         if not set(old.execute(schema)).issubset(set(new.execute(schema))):
             fail('schema')
+        relational = False
         if source.name == 'ghost-state.sqlite3':
-            _check_database(old)
-            _check_database(new)
+            versions = (_check_database(old), _check_database(new))
+            relational = versions == (STORAGE_SCHEMA_VERSION, STORAGE_SCHEMA_VERSION)
+
+        @cache
+        def later_session_events(owner):
+            before, after = (_stored_state(db, *owner) for db in (old, new))
+            query = ('SELECT sequence,mutation_id,event_json FROM intent_events '
+                     'WHERE platform=? AND session_id=? ORDER BY sequence')
+            prior, current_events = (list(db.execute(query, owner)) for db in (old, new))
+            if (before is None or after is None or prior != current_events[:len(prior)]
+                    or after['ledger_revision'] < before['ledger_revision']
+                    or (after['ledger_revision'] == before['ledger_revision'] and after != before)
+                    or (after['ledger_revision'] > before['ledger_revision'] and len(current_events) <= len(prior))):
+                fail('sessions')
+            if not relational:
+                return ()
+            revision = before['ledger_revision']
+            last_sequence = prior[-1][0] if prior else 0
+            suffix = []
+            for sequence, mutation, body in current_events[len(prior):]:
+                event = json.loads(body)
+                revision += 1
+                if (not isinstance(event, dict) or (event.get('platform'), event.get('session_id')) != owner
+                        or sequence != last_sequence + 1 or event.get('ledger_revision') != revision
+                        or not mutation or event.get('mutation_id') != mutation):
+                    fail('intent_events')
+                suffix.append((sequence, event))
+                last_sequence = sequence
+            if revision != after['ledger_revision']:
+                fail('sessions')
+            return suffix
+
         for (table,) in old.execute("SELECT name FROM sqlite_master WHERE type='table'"):
             quoted = '"' + table.replace('"', '""') + '"'
             columns = tuple(row[1] for row in old.execute(f'PRAGMA table_info({quoted})'))
@@ -832,18 +939,18 @@ def _verify_moved_database(source: Path, current: Path) -> None:
             # Python equality alone would collapse INTEGER 1 and REAL 1.0.
             counts = [Counter(tuple((type(value), value) for value in row) for row in rows)
                       for rows in (original, retained)]
-            if not counts[0] - counts[1]:
+            missing = counts[0] - counts[1]
+            if not missing:
                 continue
             if source.name == 'ghost-state.sqlite3':
-                if table == 'sessions' and columns == ('platform', 'session_id', 'revision', 'input_event_id', 'state_json'):
-                    for platform, session, *_ in original:
-                        before, after = (_stored_state(db, platform, session) for db in (old, new))
-                        events = [list(db.execute('SELECT sequence,mutation_id,event_json FROM intent_events '
-                            'WHERE platform=? AND session_id=? ORDER BY sequence', (platform, session))) for db in (old, new)]
-                        if (after is None or after['ledger_revision'] < before['ledger_revision']
-                                or events[0] != events[1][:len(events[0])]
-                                or (after['ledger_revision'] == before['ledger_revision'] and after != before)
-                                or (after['ledger_revision'] > before['ledger_revision'] and len(events[1]) <= len(events[0]))):
+                session_header = table == 'sessions' and columns == (
+                    'platform', 'session_id', 'revision', 'input_event_id', 'state_json')
+                if session_header or (relational and table in ('current_criteria', 'work_unit_revisions')):
+                    owners = {tuple(value for _, value in row[:2]) for row in missing}
+                    for owner in owners:
+                        events = later_session_events(owner)
+                        if not session_header and not _shared_module('ledger_criteria').moved_rows_preserved(
+                                table, columns, old, new, owner, events):
                             fail(table)
                     continue
                 if table == 'canonical_intakes' and columns == (
@@ -1102,7 +1209,24 @@ def selectable_value(record: dict[str, Any]) -> Any:
     return record.get("selectable", record.get("admitted"))
 
 
-def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
+def _effective_selectable(record):
+    flag = selectable_value(record)
+    if type(flag) is bool:
+        return flag
+    return canonical_source(record.get("source"), "interpreted-as") in ACCEPTANCE_CRITERIA_SELECTABLE_SOURCES
+
+
+def _criterion_owner(row):
+    if "work_unit_id" not in row and "contract_revision" not in row:
+        return {}
+    unit, revision = row.get("work_unit_id"), row.get("contract_revision")
+    if (not _shared_module("session_identity").is_exact(unit)
+            or type(revision) is not int or not 1 <= revision <= MAX_SHARED_INTEGER):
+        raise ValueError("criterion ownership requires an exact work_unit_id and positive integer contract_revision")
+    return dict(work_unit_id=unit, contract_revision=revision)
+
+
+def normalize_acceptance_criterion(raw: Any, *, existing_keys=()) -> dict[str, Any] | None:
     if isinstance(raw, str):
         summary = raw.strip()
         if not summary:
@@ -1116,29 +1240,26 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     summary = str(raw.get("summary") or raw.get("text") or "").strip()
-    criterion_id = safe_component(str(raw.get("id") or summary.lower()), "criterion")
-    if not summary:
+    if not summary and "id" not in raw:
         return None
     source = str(raw.get("source") or "interpreted-as").strip()
     if canonical_source(source, "interpreted-as") not in ACCEPTANCE_CRITERIA_SOURCES:
         source = "interpreted-as"
-    selectable = selectable_value(raw)
-    if not isinstance(selectable, bool):
-        selectable = canonical_source(source, "interpreted-as") in ACCEPTANCE_CRITERIA_SELECTABLE_SOURCES
     criterion = {
-        "id": criterion_id,
         "summary": summary,
         "source": source,
-        "selectable": selectable,
+        "selectable": _effective_selectable(raw),
+        **_criterion_owner(raw),
     }
-    if "work_unit_id" in raw or "contract_revision" in raw:
-        unit = raw.get("work_unit_id")
-        revision = raw.get("contract_revision")
-        if (not _shared_module("session_identity").is_exact(unit)
-                or type(revision) is not int or not 1 <= revision <= MAX_SHARED_INTEGER):
-            raise ValueError("criterion ownership requires an exact work_unit_id and positive integer contract_revision")
-        criterion.update(work_unit_id=unit, contract_revision=revision)
-    return criterion
+    if "id" in raw:
+        identifier = raw["id"]
+        criterion["id"] = identifier
+        if not (isinstance(identifier, str) and (acceptance_criterion_key(criterion) in existing_keys
+                                                  or _shared_module("session_identity").is_exact(identifier))):
+            raise ValueError("explicit criterion ID must be an exact canonical identifier or an existing stored ID")
+    else:
+        criterion["id"] = safe_component(summary.lower(), "criterion")
+    return criterion if summary else None
 
 
 def acceptance_criterion_key(criterion: dict[str, Any]) -> tuple[Any, Any, str]:
@@ -1148,24 +1269,24 @@ def acceptance_criterion_key(criterion: dict[str, Any]) -> tuple[Any, Any, str]:
 
 def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, Any]]:
     merged: dict[tuple, dict[str, Any]] = {}
-    order: list[tuple] = []
-
-    def store(criterion_id: tuple[Any, Any, str], criterion: dict[str, Any]) -> None:
-        if criterion_id not in merged:
-            order.append(criterion_id)
-        merged[criterion_id] = criterion
 
     existing_items = existing if isinstance(existing, list) else [existing]
     for item in existing_items:
-        criterion = normalize_acceptance_criterion(item)
-        if criterion is None:
-            continue
-        store(acceptance_criterion_key(criterion), criterion)
+        # Existing rows already have an identity. Preserve their legacy fields and flag spelling.
+        if isinstance(item, dict) and isinstance(item.get("id"), str) and {"source", "summary"} <= item.keys():
+            if item.get("summary") or item.get("text"):
+                _criterion_owner(item)
+                selectable_value(item)
+            criterion = item
+        else:
+            criterion = normalize_acceptance_criterion(item)
+        if criterion is not None:
+            merged[acceptance_criterion_key(criterion)] = criterion
 
     # A delta can explicitly select or withdraw a criterion.
     incoming_items = incoming if isinstance(incoming, list) else [incoming]
     for item in incoming_items:
-        criterion = normalize_acceptance_criterion(item)
+        criterion = normalize_acceptance_criterion(item, existing_keys=merged)
         if criterion is None:
             continue
         criterion_id = acceptance_criterion_key(criterion)
@@ -1174,10 +1295,10 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
             incoming_selectable = selectable_value(item) if isinstance(item, dict) else None
             if not isinstance(incoming_selectable, bool):
                 # Without an explicit boolean, preserve selection or enable it from a source allowed by the contract.
-                criterion["selectable"] = bool(prior["selectable"]) or bool(criterion["selectable"])
-        store(criterion_id, criterion)
+                criterion["selectable"] = _effective_selectable(prior) or criterion["selectable"]
+        merged[criterion_id] = criterion
 
-    return [merged[criterion_id] for criterion_id in order]
+    return list(merged.values())
 
 
 def normalize_conduct_feedback(raw: Any, timestamp: str) -> dict[str, Any] | None:
@@ -1749,7 +1870,7 @@ def record_native_intake_failure(*, root: Path | None = None, platform: str, ses
         state['native_intake_failure'] = dict(error=name, detail=detail, count=count + 1, first_at=first, last_at=now)
         if count and previous.get('error') == name:
             # A persisting cause fails every PreToolUse and Stop; the count carries that, an event per repeat would not.
-            _save_state(connection, state)
+            _save_state(connection, state, write_current=False, write_registry=False)
         else:
             _commit(connection, state, dict(ts=now, event='native-intake-failed', platform=platform,
                 session_id=session_id, error=name, detail=detail, input_event_id=state['latest_input_event_id']))
@@ -2067,37 +2188,101 @@ def record_response_route(*, root: Path | None = None, platform: str, session_id
         state["response_route"] = projection
         state["work_units"] = units
         state["updated_at"] = utc_now()
-        _commit(connection, state, {
-            "ts": state["updated_at"], "event": "response-route-recorded",
-            "platform": platform, "session_id": session_id,
-            "input_event_id": expected_input_event_id,
-            "response_route_digest": json_digest(projection),
-            "selected_work_unit_ids": projection["selected_work_unit_ids"],
-            "selected_criteria": [{k: c[k] for k in ("work_unit_id", "contract_revision", "criterion_id")}
-                                  for c in projection["selected_criteria"]],
-        })
-        return deepcopy(projection)
+        if _check_database(connection) == STORAGE_SCHEMA_VERSION:
+            event = _shared_module("ledger_registrations").registration_event(projection, state["updated_at"])
+            sequence = _commit(connection, state, event, registration=projection)
+        else:
+            event = {
+                "ts": state["updated_at"], "event": "response-route-recorded",
+                "platform": platform, "session_id": session_id, "input_event_id": expected_input_event_id,
+                "response_route_digest": json_digest(projection),
+                "selected_work_unit_ids": projection["selected_work_unit_ids"],
+                "selected_criteria": [{k: c[k] for k in ("work_unit_id", "contract_revision", "criterion_id")}
+                                      for c in projection["selected_criteria"]],
+            }
+            sequence = _commit(connection, state, event)
+        return dict(projection, registration_sequence=sequence)
 
 
-def read_response_route(*, root: Path | None = None, platform: str, session_id: str,
-                        expected_input_event_id: str | None = None,
-                        transaction: sqlite3.Connection | None = None) -> dict[str, Any] | None:
-    """Read route and input anchor from one authoritative snapshot."""
-    root = default_root() if root is None else root
+class ResponseSelection(NamedTuple):
+    state: dict
+    route: dict | None
+    sole_withdrawn_criterion: dict | None
+
+
+def read_response_selection(*, root, platform, session_id, expected_input_event_id=None, transaction=None,
+                            include_contract=True):
+    """Read current input, registration and its eligibility from one SQLite snapshot."""
+    root = default_root() if root is None else Path(root)
     routes = _response_route_module()
     try:
         validate_identity(platform, session_id)
     except ValueError as exc:
         raise routes.RouteBindingError(str(exc)) from exc
     with _read_connection(root, transaction) as connection:
-        state = _stored_state(connection, platform, session_id)
-        if state is not None:
-            state["canonical_input_event_id"] = (state["latest_input_event_id"]
-                if _canonical_input_bound(connection, root, state) else "")
+        relational = connection is not None and _check_database(connection) == STORAGE_SCHEMA_VERSION
+        fields = (*INTAKE_CONTEXT_FIELDS, "response_route", "pending_audit_event")
+        if include_contract:
+            fields += ("constraints", "non_goals", "decisions", "latest_scope")
+        state = _session_header(connection, platform, session_id, fields=fields if relational else ())
         if state is None:
-            return None
-        projection = routes.project_stored_response_route(state, expected_input_event_id)
-        return None if projection is None else routes.refresh_declared_remaining_work(projection, root, connection)
+            return ResponseSelection({}, None, None)
+        state["canonical_input_event_id"] = (state["latest_input_event_id"]
+            if _canonical_input_bound(connection, root, state) else "")
+        eligible = None
+        if relational:
+            criteria = _shared_module("ledger_criteria")
+            _expand_route(connection, state)
+            stored = state.get("response_route")
+            if stored and "registration_sequence" in stored:
+                keys = [(r["work_unit_id"], r["contract_revision"], r["criterion_id"]) for r in stored["selected_criteria"]]
+                selected = set(stored["selected_work_unit_ids"])
+                units = [(u["work_unit_id"], u["contract_revision"]) for u in stored["work_units"]
+                         if u["kind"] == "execution" and u["work_unit_id"] in selected]
+                state["acceptance_criteria"] = criteria.read_current(connection, platform, session_id, criterion_keys=keys)
+                eligible = criteria.selectable_execution_units(connection, platform, session_id, units)
+            elif stored is not None:
+                # An imported route can have old field names and no native registration.
+                state["acceptance_criteria"] = criteria.read_current(connection, platform, session_id)
+        projection, withdrawn = routes.assess_stored_response_route(state, expected_input_event_id, eligible_owners=eligible)
+        if projection is not None:
+            if "registration_sequence" not in projection:
+                projection["registration_sequence"] = _shared_module("ledger_registrations").legacy_registration_sequence(
+                    connection, platform, session_id, state["response_route"])
+            projection = routes.refresh_declared_remaining_work(projection, root, connection)
+        return ResponseSelection(state, projection, withdrawn)
+
+
+def read_response_context(*, root, platform, session_id, expected_input_event_id=None, transaction=None,
+                          include_contract=True):
+    selection = read_response_selection(root=root, platform=platform, session_id=session_id,
+        expected_input_event_id=expected_input_event_id, transaction=transaction, include_contract=include_contract)
+    return selection.state, selection.route
+
+
+def read_response_route(*, root: Path | None = None, platform: str, session_id: str,
+                        expected_input_event_id: str | None = None,
+                        transaction: sqlite3.Connection | None = None) -> dict[str, Any] | None:
+    """Read route and input anchor from one authoritative snapshot."""
+    _, route = read_response_context(root=root, platform=platform, session_id=session_id,
+        expected_input_event_id=expected_input_event_id, transaction=transaction, include_contract=False)
+    return route
+
+
+def read_response_route_at(*, root: Path | None = None, platform: str, session_id: str,
+                           registration_sequence: int, transaction: sqlite3.Connection | None = None):
+    """Read a historical selection without evaluating or changing the current response."""
+    validate_identity(platform, session_id)
+    if type(registration_sequence) is not int or not 1 <= registration_sequence <= MAX_SHARED_INTEGER:
+        raise _response_route_module().RouteSchemaError("registration sequence must be a positive exact integer")
+    root = default_root() if root is None else Path(root)
+    with _read_connection(root, transaction) as connection:
+        history = _shared_module("ledger_registrations")
+        def legacy_units():
+            if _check_database(connection) == STORAGE_SCHEMA_VERSION:
+                return _shared_module("ledger_criteria").read_registry(connection, platform, session_id)
+            return _session_header(connection, platform, session_id)["work_units"]
+        return history.read_registration(connection, platform, session_id, registration_sequence, legacy_units=legacy_units)
 
 
 def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:

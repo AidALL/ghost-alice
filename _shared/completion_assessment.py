@@ -38,6 +38,13 @@ class CompletionAssessmentError(ValueError):
         self.reason = reason
 
 
+class ResponseReviewNotRecorded(CompletionAssessmentError):
+    """No whole-answer review was recorded for the current explanation's input."""
+
+    def __init__(self):
+        super().__init__('response-assessment-required', 'No response review is recorded for this input')
+
+
 def _require(condition, reason, detail):
     if not condition:
         raise CompletionAssessmentError(reason, detail)
@@ -106,16 +113,29 @@ def _stored(connection, table, reference):
 
 
 def _current_response_context(core, root, owner, connection):
-    state = core.read_session_state(root=root, **owner, transaction=connection)
-    route = core.read_response_route(root=root, **owner, transaction=connection)
+    state, route = core.read_response_context(root=root, **owner, transaction=connection)
+    _require_current_route(state, route)
+    return state, route
+
+
+def _require_current_route(state, route):
     _require(not state.get('pending_audit_event') and isinstance(route, dict) and route.get('status') == 'ready'
         and route.get('input_event_id') == state.get('latest_input_event_id')
-        and core._canonical_input_bound(connection, root, state), 'route-unavailable', 'Current owned route is required')
-    return state, route
+        and state.get('canonical_input_event_id') == route['input_event_id'],
+        'route-unavailable', 'Current owned route is required')
+
+
+def _relevant_context(state):
+    return {k: state.get(k, {} if k == 'latest_scope' else [])
+            for k in ('constraints', 'non_goals', 'decisions', 'latest_scope')}
 
 
 def _current_contract(core, root, owner, connection, work_unit_id=None):
     state, route = _current_response_context(core, root, owner, connection)
+    return _selected_contract(state, route, owner, work_unit_id)
+
+
+def _selected_contract(state, route, owner, work_unit_id):
     units = [u for u in route['work_units'] if u['work_unit_id'] in route['selected_work_unit_ids']
              and (work_unit_id is None or u['work_unit_id'] == work_unit_id)]
     _require(len(units) == 1 and units[0]['owner'] == owner, 'criterion-unbound', 'Select exactly one owned work unit')
@@ -130,8 +150,7 @@ def _current_contract(core, root, owner, connection, work_unit_id=None):
         rows.append({key: criterion_view[key] for key in _DEFINITION})
     # The response model records decisions; only each optional source records who decided, and Core does not require it.
     contract = dict(work_unit_id=unit['work_unit_id'], contract_revision=unit['contract_revision'], owner=owner,
-        criteria=rows, relevant_context={k: state.get(k, {} if k == 'latest_scope' else [])
-            for k in ('constraints', 'non_goals', 'decisions', 'latest_scope')})
+        criteria=rows, relevant_context=_relevant_context(state))
     return contract, state['latest_input_event_id'], route['selected_criteria']
 
 
@@ -214,7 +233,7 @@ def response_input_binding(source, expected_input_event_id=None, *, transaction=
         _require(connection is not None, 'input-unavailable', 'Original intake is unavailable')
         _require(isinstance(expected_input_event_id, str) and bool(expected_input_event_id),
             'input-unavailable', 'An exact original input event is required')
-        state = core._stored_state(connection, **owner)
+        state = core._session_header(connection, **owner)
         _require(state is not None, 'input-unavailable', 'Original owner is unavailable')
         rows = connection.execute('''SELECT sequence,event_json FROM intent_events
             WHERE platform=? AND session_id=? AND json_extract(event_json, '$.event_id')=?''',
@@ -279,25 +298,55 @@ def _response_review_context(route):
             key=lambda row: (row['work_unit_id'], row['contract_revision'], row['id'])))
 
 
-def reviewed_for_input(source, input_event_id, *, transaction=None):
-    """True when a recorded review already binds this owner and input."""
-    core, root, owner = _coordinates(source)
-    with core._read_connection(root, transaction) as connection:
-        if connection is None or not connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE name='core_completion_responses'").fetchone():
-            return False
-        row = connection.execute('''SELECT 1 FROM core_completion_responses r
-            JOIN core_completion_candidates c ON c.reference=json_extract(r.payload_json, '$.candidate_reference')
-            WHERE json_extract(c.payload_json, '$.intent_root')=?
-            AND (json_extract(c.payload_json, '$.input_event_id')=?
-                 OR json_extract(c.payload_json, '$.route.input_event_id')=?)
-            AND coalesce(json_extract(c.payload_json, '$.owner.platform'),
-                         json_extract(c.payload_json, '$.contract.owner.platform'))=?
-            AND coalesce(json_extract(c.payload_json, '$.owner.session_id'),
-                         json_extract(c.payload_json, '$.contract.owner.session_id'))=?
-            LIMIT 1''', (str(root), input_event_id, input_event_id,
-                         owner['platform'], owner['session_id'])).fetchone()
-        return row is not None
+def _input_response_records(connection, root, owner, event, text, context, state, *, completion):
+    """Locate reviewed candidates by exact text and selection before reading their verdicts."""
+    rows = connection.execute('''SELECT r.reference, c.reference FROM core_completion_responses r
+        JOIN core_completion_candidates c ON c.reference=json_extract(r.payload_json, '$.candidate_reference')
+        WHERE json_extract(c.payload_json, '$.intent_root')=?
+        AND coalesce(json_extract(c.payload_json, '$.input_event_id'),
+                     json_extract(c.payload_json, '$.route.input_event_id'))=?
+        AND coalesce(json_extract(c.payload_json, '$.owner.platform'),
+                     json_extract(c.payload_json, '$.contract.owner.platform'))=?
+        AND coalesce(json_extract(c.payload_json, '$.owner.session_id'),
+                     json_extract(c.payload_json, '$.contract.owner.session_id'))=?''',
+        (str(root), event, owner['platform'], owner['session_id']))
+    by_match = {}
+    invalid_candidate = None
+    compare = review_comparison_text if completion else str.strip
+    observed_text = compare(text)
+    for reference, candidate_ref in rows:
+        try:
+            candidate = _stored(connection, 'core_completion_candidates', candidate_ref)
+        except CompletionAssessmentError as exc:
+            invalid_candidate = exc
+            continue
+        same_text = compare(candidate['response_binding']['text']) == observed_text
+        same_selection = context is not None and _same_review_selection(candidate, context, state)
+        by_match.setdefault((same_text, same_selection), []).append((reference, candidate_ref, candidate))
+    # An authenticated exact candidate for the current selection is independent
+    # of a damaged historical candidate. Otherwise the damage prevents attribution.
+    if invalid_candidate and (True, True) not in by_match:
+        raise invalid_candidate
+    if not by_match:
+        raise ResponseReviewNotRecorded()
+    same_text, same_selection = max(by_match)
+    records = []
+    for reference, candidate_ref, candidate in by_match[(same_text, same_selection)]:
+        reviewed = _stored(connection, 'core_completion_responses', reference)
+        if candidate.get('kind') == _SOURCE_RESPONSE_KIND:
+            bound = (candidate.get('owner') == owner and candidate['route'].get('input_event_id') == event
+                     and reviewed.get('kind') == _SOURCE_RESPONSE_KIND)
+        else:
+            bound = (candidate.get('schema_version') == 'completion-assessment-candidate.v1'
+                     and candidate['contract'].get('owner') == owner and candidate.get('input_event_id') == event
+                     and reviewed.get('response_binding') == candidate.get('response_binding'))
+        binding = candidate['response_binding']
+        _require(bound and reviewed['candidate_reference'] == candidate_ref and candidate['intent_root'] == str(root)
+                 and _valid_judgment(reviewed['judgment'], binding['binding_id'],
+                                     {s['source_id'] for s in candidate['sources']}),
+                 'assessment-invalid', 'Stored response review has an invalid candidate binding')
+        records.append((candidate, reviewed))
+    return same_text, same_selection, records
 
 
 def _source_response_records(connection, root, owner, route, text):
@@ -446,21 +495,11 @@ def record_response_review(source, candidate_reference, review, *, context_use_j
     return result
 
 
-def _lookup_source_response(core, root, owner, connection, text):
-    _, route = _current_response_context(core, root, owner, connection)
-    rows = [(candidate, reference) for _, candidate, reference in _source_response_records(
-        connection, root, owner, route, text) if reference is not None]
-    if not rows:
-        return None
+def _lookup_source_response(root, owner, route, rows):
     current, source_issues = [], {}
-    for candidate, reference in rows:
-        reviewed = _stored(connection, 'core_completion_responses', reference)
+    for candidate, reviewed in rows:
         _validate_response_review(candidate, root, owner, route)
         _validate_claim_judgments(candidate, reviewed['judgments'])
-        _require(candidate['response_binding']['text'].strip() == text.strip()
-            and _valid_judgment(reviewed['judgment'], candidate['response_binding']['binding_id'],
-                {s['source_id'] for s in candidate['sources']}), 'response-unsupported',
-            'The recorded review must bind the exact explanation')
         issues = _source_issues(candidate,
             {sid for j in reviewed['judgments'] + [reviewed['judgment']] for sid in j['source_ids']}, storage_root=root)
         if issues:
@@ -476,6 +515,80 @@ def _lookup_source_response(core, root, owner, connection, text):
     _require(all(j['verdict'] == 'supported' for j in reviewed['judgments'] + [reviewed['judgment']]),
         'response-unsupported', 'The recorded review must support the exact explanation')
     return reviewed
+
+
+def _same_review_selection(candidate, route_context, state):
+    """Compare each authenticated candidate with the frozen selection of the latest registration."""
+    if candidate.get('kind') == _SOURCE_RESPONSE_KIND:
+        return _response_review_context(candidate['route']) == route_context
+    contract = _contract_view(candidate['contract'])
+    unit = contract['work_unit_id']
+    if not any(u['work_unit_id'] == unit and u['contract_revision'] == contract['contract_revision']
+               for u in route_context['work_units']):
+        return False
+    selected = [c for c in route_context['selected_criteria'] if c['work_unit_id'] == unit]
+    return (sorted(contract['criteria'], key=lambda c: c['id']) == selected
+            and contract['relevant_context'] == _relevant_context(state))
+
+
+def _authenticate_matching_review(source, root, owner, connection, text, selection, matching, *, completion):
+    route = selection.route
+    sourced = [(c, r) for c, r in matching if c.get('kind') == _SOURCE_RESPONSE_KIND]
+    if sourced and not completion:
+        return _lookup_source_response(root, owner, route, sourced)
+    _require(len(matching) == 1, 'review-selection-unavailable',
+             'The recorded review cannot be applied to the current selection.')
+    candidate, reviewed = matching[0]
+    _require(candidate.get('kind') != _SOURCE_RESPONSE_KIND,
+             'response-unbound', 'A completion claim requires an assessment of the original proof')
+    contract = candidate['contract']
+    if route['status'] == 'ready':
+        contract, _, _ = _selected_contract(selection.state, route, owner, contract['work_unit_id'])
+    _require(_contract_view(candidate['contract']) == _contract_view(contract), 'response-unbound',
+             'The recorded review belongs to a different work contract')
+    _require(completion or candidate.get('reuse_candidate'),
+        'response-unbound', 'The explanation must retain its owned original proof')
+    assessment = lookup_assessment(source, contract, candidate['proof'], candidate['verified_at'],
+        transaction=connection)
+    return _authenticated_proof_response(reviewed, candidate, assessment, text, root)
+
+
+def _lookup_registered_review(source, root, owner, connection, text, selection, *, completion=False):
+    """Match historical reviews to the observed selection. A stale registration can only yield a diagnostic."""
+    state, route, withdrawn = selection
+    event = state.get('latest_input_event_id')
+    bound = event and state.get('canonical_input_event_id') == event
+    if not bound or not connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='core_completion_responses'").fetchone():
+        raise ResponseReviewNotRecorded()
+    context = (_response_review_context(route) if route and route['input_event_id'] == event
+               and not state.get('pending_audit_event') else None)
+    same_text, same_selection, matching = _input_response_records(connection, root, owner, event, text, context, state,
+        completion=completion)
+    if completion and not same_text:
+        raise ResponseReviewNotRecorded()
+    if not completion and same_selection and route['status'] == 'ready':
+        if not same_text:
+            raise CompletionAssessmentError('response-assessment-required',
+                'A recorded review binds this input but not this exact answer. Review the delivered text.')
+        return _authenticate_matching_review(source, root, owner, connection, text, selection, matching, completion=False)
+    if same_text and same_selection and withdrawn and all(c.get('kind') == _SOURCE_RESPONSE_KIND
+            or c['contract']['work_unit_id'] == withdrawn['work_unit_id'] for c, _ in matching):
+        try:
+            original = _authenticate_matching_review(source, root, owner, connection, text, selection, matching,
+                completion=completion)
+        except CompletionAssessmentError as exc:
+            if exc.reason not in {'source-changed', 'source-unavailable', 'response-unsupported',
+                                  'response-unbound', 'review-selection-unavailable'}:
+                raise
+        else:
+            if not isinstance(original, VerifiedAssessment) or (not original.source_issues and
+                    all(j['verdict'] == 'supported' for j in original.judgments)):
+                raise CompletionAssessmentError('review-criterion-withdrawn',
+                    f"The criterion {withdrawn['id']} selected for this review "
+                    f"({withdrawn['work_unit_id']}, revision {withdrawn['contract_revision']}) is no longer selectable.")
+    raise CompletionAssessmentError('review-selection-unavailable',
+        'The recorded review cannot be applied to the current selection.')
 
 
 def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candidate=None,
@@ -685,97 +798,87 @@ def lookup_current_proof(source, proof, *, transaction=None, work_unit_id=None):
     core, root, owner = _coordinates(source)
     with core._read_connection(root, transaction) as connection:
         _require(connection is not None, 'assessment-required', 'Owning claim review is unavailable')
-        route = core.read_response_route(root=root, **owner, transaction=connection)
-        _require(isinstance(route, dict), 'route-unavailable', 'Current owned route is required')
-        units = [work_unit_id] if work_unit_id is not None else route.get('selected_work_unit_ids', [])
-        contracts = [_current_contract(core, root, owner, connection, unit)[0] for unit in units]
-        _require(connection.execute("SELECT 1 FROM sqlite_master WHERE name='core_completion_assessments'").fetchone(),
-                 'assessment-required', 'The response model must review the original proof and record its judgments through completion_assessment.py')
-        exact, equivalent = [], []
-        comparison = review_comparison_text(proof)
-        for contract in contracts:
-            rows = connection.execute('''SELECT a.reference FROM core_completion_assessments a
-                JOIN core_completion_candidates c ON c.reference=json_extract(a.payload_json, '$.candidate_reference')
-                WHERE json_extract(c.payload_json, '$.contract.owner.platform')=? AND
-                json_extract(c.payload_json, '$.contract.owner.session_id')=? AND
-                json_extract(c.payload_json, '$.contract.work_unit_id')=?''',
-                (owner['platform'], owner['session_id'], contract['work_unit_id']))
-            for reference, in rows:
-                assessment = _stored(connection, 'core_completion_assessments', reference)
-                candidate = _stored(connection, 'core_completion_candidates', assessment['candidate_reference'])
-                if _contract_view(candidate['contract']) != _contract_view(contract):
-                    continue
-                if candidate['proof'].strip() == proof.strip():
-                    exact.append(candidate)
-                elif review_comparison_text(candidate['proof']) == comparison:
-                    equivalent.append(candidate)
-        matches = exact or equivalent
-        _require(len(matches) == 1, 'assessment-required', 'Final block must match exactly one recorded claim review of its original proof')
-        candidate = matches[0]
-        return lookup_assessment(source, candidate['contract'], candidate['proof'], candidate['verified_at'], transaction=connection)
+        state, route = core.read_response_context(root=root, **owner, transaction=connection)
+        return _proof_for_selection(source, owner, connection, proof, state, route, work_unit_id)
+
+
+def _proof_for_selection(source, owner, connection, proof, state, route, work_unit_id=None):
+    _require_current_route(state, route)
+    units = [work_unit_id] if work_unit_id is not None else route['selected_work_unit_ids']
+    contracts = [_selected_contract(state, route, owner, unit)[0] for unit in units]
+    _require(connection.execute("SELECT 1 FROM sqlite_master WHERE name='core_completion_assessments'").fetchone(),
+             'assessment-required', 'The response model must review the original proof and record its judgments through completion_assessment.py')
+    exact, equivalent = [], []
+    comparison = review_comparison_text(proof)
+    for contract in contracts:
+        rows = connection.execute('''SELECT a.reference FROM core_completion_assessments a
+            JOIN core_completion_candidates c ON c.reference=json_extract(a.payload_json, '$.candidate_reference')
+            WHERE json_extract(c.payload_json, '$.contract.owner.platform')=? AND
+            json_extract(c.payload_json, '$.contract.owner.session_id')=? AND
+            json_extract(c.payload_json, '$.contract.work_unit_id')=?''',
+            (owner['platform'], owner['session_id'], contract['work_unit_id']))
+        for reference, in rows:
+            assessment = _stored(connection, 'core_completion_assessments', reference)
+            candidate = _stored(connection, 'core_completion_candidates', assessment['candidate_reference'])
+            if _contract_view(candidate['contract']) != _contract_view(contract):
+                continue
+            if candidate['proof'].strip() == proof.strip():
+                exact.append(candidate)
+            elif review_comparison_text(candidate['proof']) == comparison:
+                equivalent.append(candidate)
+    matches = exact or equivalent
+    _require(len(matches) == 1, 'assessment-required', 'Final block must match exactly one recorded claim review of its original proof')
+    candidate = matches[0]
+    return lookup_assessment(source, candidate['contract'], candidate['proof'], candidate['verified_at'], transaction=connection)
 
 
 def lookup_current_response(source, text, *, transaction=None):
     """Authenticate reviewed content and original sources, allowing control-marker spacing."""
     core, root, owner = _coordinates(source)
-    report_only = not looks_like_evidence_claim(text)
-    if not report_only:
-        proof = extract_original_proof(text)
-        assessment = lookup_current_proof(source, proof, transaction=transaction)
     with core._read_connection(root, transaction) as connection:
-        _require(connection is not None and connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE name='core_completion_responses'").fetchone(),
-            'response-assessment-required', 'The response model must review this complete response and record its judgment')
-        if report_only:
-            reviewed_source = _lookup_source_response(core, root, owner, connection, text)
-            if reviewed_source is not None:
-                return reviewed_source
-            _, route = _current_response_context(core, root, owner, connection)
-            rows = connection.execute('''SELECT r.reference FROM core_completion_responses r
-                JOIN core_completion_candidates c ON c.reference=json_extract(r.payload_json, '$.candidate_reference')
-                WHERE trim(json_extract(c.payload_json, '$.response_binding.text'), ?)=?
-                AND json_extract(c.payload_json, '$.response_binding.purpose')='explanation'
-                AND json_extract(c.payload_json, '$.input_event_id')=?
-                AND json_extract(c.payload_json, '$.intent_root')=?
-                AND json_extract(c.payload_json, '$.contract.owner.platform')=?
-                AND json_extract(c.payload_json, '$.contract.owner.session_id')=?
-                AND json_extract(c.payload_json, '$.contract.work_unit_id') IN (SELECT value FROM json_each(?))''',
-                (' \t\r\n', text.strip(), route['input_event_id'], str(root),
-                 owner['platform'], owner['session_id'], canonical_json(route['selected_work_unit_ids']))).fetchall()
-        else:
-            key = json_digest(dict(assessment_reference=assessment.reference, body=text.strip()))
-            rows = connection.execute('SELECT reference FROM core_completion_responses WHERE lookup_key=?', (key,)).fetchall()
-            if not rows:
-                candidates = connection.execute('''SELECT reference FROM core_completion_responses
-                    WHERE json_extract(payload_json, '$.assessment_reference')=?''', (assessment.reference,))
-                comparison = review_comparison_text(text)
-                rows = [(reference,) for reference, in candidates
-                    if review_comparison_text(_stored(connection, 'core_completion_responses', reference)
-                        ['response_binding']['text']) == comparison]
-        _require(len(rows) == 1, 'response-assessment-required', 'Complete response text must match exactly one recorded response review')
-        reviewed = _stored(connection, 'core_completion_responses', rows[0][0])
-        candidate = _stored(connection, 'core_completion_candidates', reviewed['candidate_reference'])
-        if report_only:
-            # Only a matching completion-backed review needs an execution contract.
-            contract, _, _ = _current_contract(core, root, owner, connection,
-                work_unit_id=candidate['contract']['work_unit_id'])
-            _require(_contract_view(candidate['contract']) == _contract_view(contract) and candidate.get('reuse_candidate'),
-                'response-unbound', 'The explanation must retain the current owned original proof')
-            assessment = lookup_assessment(source, contract, candidate['proof'], candidate['verified_at'],
-                transaction=connection)
-        response = candidate.get('response_binding')
-        _require(response == reviewed['response_binding']
-            and review_comparison_text(response['text']) == review_comparison_text(text)
-            and reviewed['assessment_reference'] == assessment.reference
-            and _contract_view(candidate['contract']) == _contract_view(assessment.candidate['contract'])
-            and candidate['proof'] == assessment.candidate['proof']
-            and candidate['verified_at'] == assessment.candidate['verified_at']
-            and _same_sources(candidate['sources'], assessment.candidate['sources']),
-            'response-unbound', 'Reviewed response differs from its original proof and observations')
-        _require(reviewed['judgment']['verdict'] == 'supported', 'response-unsupported',
-                 'The recorded response review does not support this complete response')
-        issues = _source_issues(candidate, set(reviewed['judgment']['source_ids']), storage_root=root)
-        _require(not issues, next(iter(issues.values()), 'source-changed'), 'Response observations changed or are unavailable')
+        if not looks_like_evidence_claim(text):
+            if connection is None:
+                raise ResponseReviewNotRecorded()
+            selection = core.read_response_selection(root=root, **owner, transaction=connection)
+            return _lookup_registered_review(source, root, owner, connection, text, selection)
+        _require(connection is not None, 'assessment-required', 'Owning claim review is unavailable')
+        state, route = core.read_response_context(root=root, **owner, transaction=connection)
+        return _lookup_completion_response(source, root, owner, connection, text, state, route)
+
+
+def _lookup_completion_response(source, root, owner, connection, text, state, route):
+    assessment = _proof_for_selection(source, owner, connection, extract_original_proof(text), state, route)
+    _require(connection.execute("SELECT 1 FROM sqlite_master WHERE name='core_completion_responses'").fetchone(),
+             'response-assessment-required', 'The response model must review this complete response and record its judgment')
+    key = json_digest(dict(assessment_reference=assessment.reference, body=text.strip()))
+    rows = connection.execute('SELECT reference FROM core_completion_responses WHERE lookup_key=?', (key,)).fetchall()
+    if not rows:
+        candidates = connection.execute('''SELECT reference FROM core_completion_responses
+            WHERE json_extract(payload_json, '$.assessment_reference')=?''', (assessment.reference,))
+        comparison = review_comparison_text(text)
+        rows = [(reference,) for reference, in candidates
+            if review_comparison_text(_stored(connection, 'core_completion_responses', reference)
+                ['response_binding']['text']) == comparison]
+    _require(len(rows) == 1, 'response-assessment-required', 'Complete response text must match exactly one recorded response review')
+    reviewed = _stored(connection, 'core_completion_responses', rows[0][0])
+    candidate = _stored(connection, 'core_completion_candidates', reviewed['candidate_reference'])
+    return _authenticated_proof_response(reviewed, candidate, assessment, text, root)
+
+
+def _authenticated_proof_response(reviewed, candidate, assessment, text, root):
+    response = candidate.get('response_binding')
+    _require(response == reviewed['response_binding']
+        and review_comparison_text(response['text']) == review_comparison_text(text)
+        and reviewed['assessment_reference'] == assessment.reference
+        and _contract_view(candidate['contract']) == _contract_view(assessment.candidate['contract'])
+        and candidate['proof'] == assessment.candidate['proof']
+        and candidate['verified_at'] == assessment.candidate['verified_at']
+        and _same_sources(candidate['sources'], assessment.candidate['sources']),
+        'response-unbound', 'Reviewed response differs from its original proof and observations')
+    _require(reviewed['judgment']['verdict'] == 'supported', 'response-unsupported',
+             'The recorded response review does not support this complete response')
+    issues = _source_issues(candidate, set(reviewed['judgment']['source_ids']), storage_root=root)
+    _require(not issues, next(iter(issues.values()), 'source-changed'), 'Response observations changed or are unavailable')
     return assessment
 
 

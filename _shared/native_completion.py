@@ -42,6 +42,73 @@ def _claim_judgments(reviewed):
             for b in reviewed.candidate['bindings']]
 
 
+def _recorded_review_issue(source, root, owner, connection, text, selection, *, completion):
+    from completion_assessment import CompletionAssessmentError, ResponseReviewNotRecorded, _lookup_registered_review
+    try:
+        _lookup_registered_review(source, root, owner, connection, text, selection, completion=completion)
+    except ResponseReviewNotRecorded:
+        pass  # A completion with no matching review still requires a current route.
+    except CompletionAssessmentError as exc:
+        if exc.reason in {'source-changed', 'source-unavailable'}:
+            return _source_status_issue([exc.reason], explanation=not completion), 'source_status'
+        if not completion and exc.reason in {'response-unbound', 'response-unsupported', 'criterion-unbound'}:
+            return (f'{exc.reason}: The response model follows verification-before-completion, section Prepare and record the response review, for this exact explanation and its original sources. '
+                    'Keep the review internal; do not submit completion controls for this explanation.'), 'response_review'
+        return f'{exc.reason}: {exc}', 'response_review'
+    return None, 'response_review'
+
+
+def _completion_review(source, root, owner, connection, text, selection):
+    issue, repair_target, claim_judgments = None, 'completion_metadata', None
+    from completion_assessment import CompletionAssessmentError, _lookup_completion_response, _proof_for_selection
+    try:
+        reviewed = _lookup_completion_response(source, root, owner, connection, text, selection.state, selection.route)
+        claim_judgments = _claim_judgments(reviewed)
+        if reviewed.source_issues:
+            issue = _source_status_issue(reviewed.source_issues.values())
+            repair_target = 'source_status'
+        elif any(j['verdict'] != 'supported' for j in reviewed.judgments):
+            issue = 'assessment-unsupported: The recorded claim review does not support every asserted claim.'
+    except (CompletionAssessmentError, ValueError, OSError, sqlite3.Error) as exc:
+        reason = getattr(exc, 'reason', 'assessment-unavailable')
+        if reason in {'source-changed', 'source-unavailable'}:
+            issue = _source_status_issue([reason])
+            repair_target = 'source_status'
+        else:
+            issue = f'{reason}: {exc}'
+        if reason == 'response-unsupported':
+            # The claim review still exists when the whole-answer judgment is unsupported.
+            try:
+                claim_judgments = _claim_judgments(_proof_for_selection(source, owner, connection,
+                    extract_original_proof(text), selection.state, selection.route))
+            except (CompletionAssessmentError, ValueError, OSError, sqlite3.Error):
+                claim_judgments = None
+    return issue, repair_target, claim_judgments
+
+
+def _assess_answer(source, root, owner, connection, selection, binding, text, marker, encoding_issue):
+    if encoding_issue:
+        return encoding_issue, 'response_review', None
+    event = selection.state.get('canonical_input_event_id') if selection else None
+    route = selection.route if selection else None
+    same_input = route and event and route['input_event_id'] == event
+    if event and text.strip() and (not marker or (same_input and binding == 'stale')):
+        issue, target = _recorded_review_issue(source, root, owner, connection, text, selection, completion=marker)
+        if issue:
+            return issue, target, None
+    if marker and binding != 'current':
+        if same_input and binding == 'stale':
+            return ('route-stale: The registered selection cannot be used for this answer. Register the current selection.',
+                    'response_route', None)
+        return ('route-unavailable: The response model must use task-router to register the current '
+                'response-route with Core code before submitting evidence. Retain existing proof; '
+                'a missing route does not invalidate the business result.', 'response_route', None)
+    issue = validate_completion_text(text)
+    if issue or not marker:
+        return issue, 'completion_metadata', None
+    return _completion_review(source, root, owner, connection, text, selection)
+
+
 def assess_native_completion(source, *, text='', transaction=None, hook_payload=None):
     """Return the canonical input/body-bound assessment without mutating proof.
 
@@ -61,100 +128,46 @@ consumers obtain it directly from this Core API and check their input binding.
         )
     source = dict(source)
     platform, session = source.get('GHOST_ALICE_PLATFORM'), source.get('GHOST_ALICE_SESSION_ID')
-    route, context, context_status, context_issue = None, {}, 'unavailable', None
+    selection, event, route = None, None, None
+    context_status, context_issue = 'unavailable', None
     input_observation = None
+    marker = looks_like_evidence_claim(text)
+    selected = select_completion_route({})
     try:
-        ledger, root, _ = ledger_access.coordinates(source)
-        # Intake identity exists independently of a selected response route.
-        # Use one authoritative snapshot and never adopt compatibility JSON.
+        ledger, root, owner = ledger_access.coordinates(source)
         with ledger._read_connection(root, transaction) as connection:
-            state = ledger._stored_state(connection, platform, session)
-            event = (state.get('latest_input_event_id') if state is not None
-                and ledger._canonical_input_bound(connection, Path(root), state) else None)
+            if connection is not None:
+                try:
+                    selection = ledger.read_response_selection(root=root, **owner, transaction=connection)
+                    state = selection.state
+                    event = state.get('canonical_input_event_id') or None
+                    route = selection.route
+                except ValueError as exc:
+                    # A damaged route does not erase its independently recorded input.
+                    context_issue = str(exc)
+                    state = ledger._session_header(connection, platform, session, fields=ledger.INTAKE_CONTEXT_FIELDS)
+                    if state is not None and ledger._canonical_input_bound(connection, Path(root), state):
+                        event = state['latest_input_event_id']
+                        state['canonical_input_event_id'] = event
+                        selection = ledger.ResponseSelection(state, None, None)
             if event is not None:
                 input_observation = dict(input_digest=state.get('latest_input_digest'),
                     input_char_count=state.get('latest_input_char_count'))
-            try:
-                route = ledger.read_response_route(root=Path(root), platform=platform,
-                    session_id=session, transaction=connection) if connection is not None else None
-            except ValueError as exc:
-                # Rejected routing must not erase independently authenticated intake.
-                # Assessment waits for repair; it cannot adopt the rejected route.
-                context_issue = str(exc)
-        context = dict(platform=platform, session_id=session, input_event_id=event,
-            response_route=route)
-        context_status = 'available'
+            selected = select_completion_route(dict(**owner, input_event_id=event, response_route=route))
+            context_status = 'available'
+            issue, repair_target, claim_judgments = _assess_answer(source, root, owner, connection, selection,
+                selected['route_binding'], text, marker, encoding_issue)
     except (ValueError, OSError, ImportError, AttributeError, TypeError, sqlite3.Error) as exc:
         context_issue = str(exc)
-    marker = looks_like_evidence_claim(text)
-    review_issue, review_target = encoding_issue, 'response_review'
-    if body_digest is not None and text.strip() and not marker and context_status == 'available':
-        # An answer without a control block is judged only when a recorded review
-        # binds this exact text; an unrecorded explanation is an ordinary answer.
-        from completion_assessment import CompletionAssessmentError, lookup_current_response
-        try:
-            lookup_current_response(source, text, transaction=transaction)
-        except (CompletionAssessmentError, ValueError, OSError, sqlite3.Error) as exc:
-            reason = getattr(exc, 'reason', None)
-            if reason in {'source-changed', 'source-unavailable'}:
-                review_issue = _source_status_issue([reason], explanation=True)
-                review_target = 'source_status'
-            elif reason in {'response-unbound', 'response-unsupported', 'criterion-unbound'}:
-                review_issue = (f'{reason}: '
-                    'The response model follows verification-before-completion, section Prepare and record the response review, for this exact explanation and its original sources. '
-                    'Keep the review internal; do not submit completion controls for this explanation.')
-            elif reason in {'response-assessment-required', 'route-unavailable'}:
-                # A review recorded for this input must cover the delivered text;
-                # an input with no recorded review is an ordinary answer.
-                from completion_assessment import reviewed_for_input
-                if event is not None and reviewed_for_input(source, event, transaction=transaction):
-                    review_issue = (f'{reason}: A recorded review binds this input but not this exact answer. '
-                        'The response model follows verification-before-completion, section Prepare and record the response review, for the delivered text.')
-            elif reason is None and context_issue is None:
-                context_issue = str(exc)
-    selected = select_completion_route(context)
-    issue, claim_judgments = None, None
-    repair_target = 'completion_metadata'
+        if context_status == 'available':
+            issue, repair_target, claim_judgments = f'assessment-unavailable: {exc}', 'response_review', None
+        else:
+            issue, repair_target, claim_judgments = _assess_answer(source, None, None, None, None,
+                'missing', text, marker, encoding_issue)
     native_activity = (native_tool_activity(platform, session, hook_payload, input_observation=input_observation)
         if hook_payload is not None else None)
-    if review_issue:
-        issue = review_issue
-        repair_target = review_target
-    # A completion or partial claim is judged against the current owned contract.
-    if issue is None and marker and selected['route_binding'] != 'current':
-        issue = ('route-unavailable: The response model must use task-router to register the current '
-            'response-route with Core code before submitting evidence. Retain existing proof; '
-            'a missing route does not invalidate the business result.')
-        repair_target = 'response_route'
-    if issue is None:
-        issue = validate_completion_text(text)
-    if issue is None and marker:
-        # lookup_current_response authenticates the recorded review of this exact response for the Stop script.
-        from completion_assessment import CompletionAssessmentError, lookup_current_proof, lookup_current_response
-        try:
-            reviewed = lookup_current_response(source, text, transaction=transaction)
-            claim_judgments = _claim_judgments(reviewed)
-            if reviewed.source_issues:
-                issue = _source_status_issue(reviewed.source_issues.values())
-                repair_target = 'source_status'
-            elif any(j['verdict'] != 'supported' for j in reviewed.judgments):
-                issue = 'assessment-unsupported: The recorded claim review does not support every asserted claim.'
-        except (CompletionAssessmentError, ValueError, OSError, sqlite3.Error) as exc:
-            reason = getattr(exc, 'reason', 'assessment-unavailable')
-            if reason in {'source-changed', 'source-unavailable'}:
-                issue = _source_status_issue([reason])
-                repair_target = 'source_status'
-            else:
-                issue = f'{reason}: {exc}'
-            if reason == 'response-unsupported':
-                # The claim review still exists when the whole-answer judgment is unsupported.
-                try:
-                    claim_judgments = _claim_judgments(lookup_current_proof(
-                        source, extract_original_proof(text), transaction=transaction))
-                except (CompletionAssessmentError, ValueError, OSError, sqlite3.Error):
-                    claim_judgments = None
     return dict(schema_version='native-completion.v1', platform=platform, session_id=session,
-        input_event_id=context.get('input_event_id'), body_digest=body_digest,
+        input_event_id=event, body_digest=body_digest,
         context_status=context_status, context_issue=context_issue,
         native_activity=native_activity,
         response_route=route, completion_route=selected, body_issue=issue,
