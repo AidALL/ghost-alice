@@ -294,9 +294,9 @@ def _template() -> Path:
             else:
                 shutil.copy2(source, copy)
         # No background maintenance: it writes into .git while a test removes the copy.
-        settings = ("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
-                    "-c", "user.name=Ghost-ALICE tests", "-c", "user.email=tests@example.invalid")
+        settings = ("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false")
         for args in (("init", "-q", "-b", "main"), ("config", "maintenance.auto", "false"), ("config", "gc.auto", "0"),
+                     ("config", "user.name", "Ghost-ALICE tests"), ("config", "user.email", "tests@example.invalid"),
                      ("add", "-A"), ("commit", "-q", "-m", "Checkout copy for tests")):
             git("-C", str(template), *settings, *args, check=True)
         _copy_template = template
