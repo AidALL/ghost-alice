@@ -7,6 +7,7 @@ import os
 from copy import deepcopy
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -18,7 +19,175 @@ import session_intent_ledger as ledger
 import response_route
 
 
+def create_v1_database(root):
+    """Use the deployed DB format for fixtures that directly edit legacy JSON projections."""
+    root.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(ledger.storage_database_path(root)) as connection:
+        connection.execute("PRAGMA user_version = 1")
+
+
 class ResponseRouteTests(unittest.TestCase):
+    def test_moved_registry_flags_require_the_registration_that_set_them(self):
+        self.event = self.setup_owned()
+        self.record(self.candidate(units=("first", "second")))
+        original = self.root.parent / "original"
+        ledger.snapshot_roots(self.root, self.root.parent / "absent", original, writers_stopped=True)
+        route = self.candidate(units=("first", "second"), selected=("first",))
+        route["selected_work_unit_ids"] = ["first"]
+        route["work_units"][1]["selectable"] = False
+        self.record(route)
+        ledger.verify_moved_source(original, self.root)
+        with ledger.storage_transaction(self.root) as db:
+            db.execute("UPDATE work_unit_revisions SET selectable=0 WHERE work_unit_id='first'")
+        with self.assertRaisesRegex(ValueError, "work_unit_revisions"):
+            ledger.verify_moved_source(original, self.root)
+
+    def test_moved_legacy_criteria_require_the_original_extra_fields_after_binding(self):
+        before = self.legacy_registered()
+        original = self.root.parent / "original"
+        ledger.snapshot_roots(self.root, self.root.parent / "absent", original, writers_stopped=True)
+        self.bind_legacy(before)
+        ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
+            "acceptance_criteria": [dict(id="extra", summary="updated", source="user-said")]})
+        ledger.verify_moved_source(original, self.root)
+        with ledger.storage_transaction(self.root) as db:
+            db.execute("UPDATE current_criteria SET legacy_fields_json=NULL WHERE criterion_id='AC1'")
+        with self.assertRaisesRegex(ValueError, "current_criteria"):
+            ledger.verify_moved_source(original, self.root)
+
+    def test_export_import_finds_only_a_uniquely_authenticated_registration(self):
+        self.event = self.setup_owned()
+        first = self.record()["registration_sequence"]
+        for attempt in range(2):
+            if attempt:
+                self.record()
+            destination = self.root.parent / str(attempt)
+            coords = dict(self.coords, root=destination)
+            ledger.export_session(**self.coords, destination=destination)
+            ledger.migrate_session(**coords)
+            history = ledger.read_response_route_at(**coords, registration_sequence=first)
+            self.assertEqual(history["digest_verification"], "verified")
+            latest = ledger.read_response_route(**coords)
+            self.assertEqual(latest["status"], "stale")
+            self.assertEqual(latest["registration_sequence"], None if attempt else first)
+
+    def test_unrelated_write_preserves_distinct_imported_local_ids_and_proof_fields(self):
+        state = ledger.default_state("codex", "current")
+        rows = [dict(id=identifier, summary=identifier, source="user-explicit", admitted=True, status="met")
+                for identifier in ("legacy condition", "legacy-condition")]
+        rows.append(dict(id="no-description", summary="", source="user-explicit", status="unmet"))
+        state["acceptance_criteria"] = rows
+        ledger.write_json(ledger.session_paths(self.root, "codex", "current")["state"], state)
+        ledger.migrate_session(**self.coords)
+        event = self.intake()
+        ledger.record_turn(**self.coords, expected_input_event_id=event,
+                           intent_delta={"acceptance_criteria": [self.criterion()]})
+        self.assertEqual(ledger.read_session_state(**self.coords)["acceptance_criteria"], [*rows, self.criterion()])
+        ledger.record_turn(**self.coords, expected_input_event_id=event, intent_delta={
+            "acceptance_criteria": [dict(id="no-description", summary="Now specified", source="interpreted-as")]})
+        updated = ledger.read_session_state(**self.coords)["acceptance_criteria"]
+        self.assertEqual(updated[:2], rows[:2])
+        self.assertEqual(updated[2], dict(id="no-description", summary="Now specified", source="interpreted-as",
+                                          selectable=True))
+        for position, original in enumerate(rows[:2]):
+            change = dict(id=original["id"], summary="updated " + original["id"], source="user-said")
+            ledger.record_turn(**self.coords, expected_input_event_id=event, intent_delta={"acceptance_criteria": [change]})
+            updated[position] = dict(change, selectable=True)
+            self.assertEqual(ledger.read_session_state(**self.coords)["acceptance_criteria"], updated)
+        before = ledger.read_session_events(**self.coords)
+        with self.assertRaisesRegex(ValueError, "criterion ID"):
+            ledger.record_turn(**self.coords, expected_input_event_id=event, intent_delta={
+                "acceptance_criteria": [dict(change, id="legacy/condition")]})
+        self.assertEqual(ledger.read_session_state(**self.coords)["acceptance_criteria"], updated)
+        self.assertEqual(ledger.read_session_events(**self.coords), before)
+
+    def test_explicit_new_id_is_exact_or_rejects_the_whole_turn(self):
+        event = self.intake()
+        def write(rows):
+            return ledger.record_turn(**self.coords, expected_input_event_id=event,
+                                      intent_delta={"acceptance_criteria": rows})
+        write([dict(id="Check_1.A", summary="named"), dict(summary="Generated from text")])
+        rows = ledger.read_session_state(**self.coords)["acceptance_criteria"]
+        self.assertEqual([row["id"] for row in rows], ["Check_1.A", "generated-from-text"])
+        history = ledger.read_session_events(**self.coords)
+        for invalid in ("a/b", " a ", "x" * 121, "", None, 7, [], {}):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "criterion ID"):
+                write([dict(id="would-be-added", summary="first"), dict(id=invalid, summary="new condition")])
+        self.assertEqual(ledger.read_session_state(**self.coords)["acceptance_criteria"], rows)
+        self.assertEqual(ledger.read_session_events(**self.coords), history)
+
+    def test_damaged_latest_reference_is_distinct_from_a_callers_unknown_sequence(self):
+        self.event = self.setup_owned()
+        self.record()
+        for seq, expected in ((9999, "registration-not-found"), (1, "not-registration")):
+            with self.subTest(seq=seq), ledger.storage_transaction(self.root) as tx:
+                tx.execute("UPDATE sessions SET state_json=json_set(state_json,'$.response_route.registration_sequence',?)",
+                           (seq,))
+                with self.assertRaises(ValueError) as explicit:
+                    self.api.read_response_route_at(**self.coords, registration_sequence=seq, transaction=tx)
+                self.assertEqual(explicit.exception.code, expected)
+                with self.assertRaises(ValueError) as latest:
+                    self.api.read_response_route(**self.coords, transaction=tx)
+                self.assertEqual(latest.exception.code, "route-schema")
+
+    def test_unversioned_database_with_existing_sessions_preserves_its_original_rows(self):
+        create_v1_database(self.root)
+        self.setup_owned()
+        with sqlite3.connect(ledger.storage_database_path(self.root)) as connection:
+            connection.execute("PRAGMA user_version=0")
+            before = list(connection.iterdump())
+        with self.assertRaisesRegex(ValueError, "unversioned"):
+            self.intake("later")
+        with sqlite3.connect(ledger.storage_database_path(self.root)) as connection:
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone(), (0,))
+            self.assertEqual(list(connection.iterdump()), before)
+
+    def test_selected_context_preserves_missing_and_invalid_null_intake_fields(self):
+        self.event = self.setup_owned()
+        self.record()
+        with ledger.storage_transaction(self.root) as tx:
+            tx.execute("UPDATE sessions SET state_json=json_remove(state_json,'$.pending_native_inputs')")
+            state, route = ledger.read_response_context(**self.coords, transaction=tx)
+            self.assertNotIn("current_goal", state)
+            self.assertNotIn("pending_native_inputs", state)
+            self.assertEqual(route["status"], "ready")
+            tx.execute("UPDATE sessions SET state_json=json_set(state_json,'$.pending_native_inputs',NULL)")
+            with self.assertRaisesRegex(ValueError, "pending native input state is invalid"):
+                ledger.read_response_route(**self.coords, transaction=tx)
+
+    def test_cli_reads_each_registration_after_reselection_withdrawal_and_new_input(self):
+        self.event = self.setup_owned()
+        cli = [sys.executable, "-B", str(ROOT / "_shared/response_route.py"), "--root", str(self.root),
+               "--platform", "codex", "--session-id", "current"]
+
+        def call(*args, ok=True):
+            result = subprocess.run([*cli, *args], capture_output=True, text=True,
+                                    env={"PATH": str(Path(sys.executable).parent), "CODEX_THREAD_ID": "current"})
+            self.assertEqual(result.returncode == 0, ok, result.stderr or result.stdout)
+            return json.loads(result.stdout if ok else result.stderr)
+
+        numbers = []
+        for unit in ("first", "second"):
+            result = call("--candidate-json", json.dumps(self.candidate(units=(unit,))),
+                          "--boundary-ref", "boundary-1", "--expected-input-event-id", self.event)
+            self.assertIn("registration_sequence", result)
+            numbers.append(result["registration_sequence"])
+        self.assertGreater(numbers[1], numbers[0])
+        self.assertEqual(call("--read")["registration_sequence"], numbers[1])
+        ledger.record_turn(**self.coords, expected_input_event_id=self.event,
+                           intent_delta={"acceptance_criteria": [self.criterion(selectable=False)]})
+        self.intake("next input")
+        before = ledger.read_session_events(**self.coords)
+        for sequence, unit in zip(numbers, ("first", "second")):
+            historical = call("--read", "--registration-sequence", str(sequence))
+            self.assertEqual(historical["input_event_id"], self.event)
+            self.assertEqual(historical["selected_criteria"][0]["summary"], "verify " + unit)
+            self.assertNotIn("status", historical)
+        self.assertEqual(call("--read")["status"], "stale")
+        for number in ("0", "-1", "1", "9999"):
+            self.assertIn("error", call("--read", "--registration-sequence", number, ok=False))
+        self.assertEqual(ledger.read_session_events(**self.coords), before)
+
     def test_legacy_and_equal_selection_aliases_write_only_current_route_names(self):
         self.event = self.setup_owned()
         candidate = self.candidate()
@@ -28,7 +197,9 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertEqual(result['schema_version'], 'response-route.v2')
         self.assertNotIn('admitted', json.dumps(result))
         candidate['work_units'][0]['selectable'] = True
-        self.assertEqual(self.record(candidate), result)
+        second = self.record(candidate)
+        self.assertGreater(second.pop("registration_sequence"), result.pop("registration_sequence"))
+        self.assertEqual(second, result)
         before = ledger.read_session_state(**self.coords)
         events = ledger.read_session_events(**self.coords)
         candidate['work_units'][0]['admitted'] = False
@@ -38,6 +209,7 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertEqual(ledger.read_session_events(**self.coords), events)
 
     def test_stored_v1_route_reads_without_rewriting_shape_or_accepting_conflicts(self):
+        create_v1_database(self.root)
         self.event = self.setup_owned()
         self.record()
         state = ledger.read_session_state(**self.coords)
@@ -50,6 +222,7 @@ class ResponseRouteTests(unittest.TestCase):
                        (json.dumps(state), 'codex', 'current'))
         before = ledger.read_session_state(**self.coords)
         result = self.api.read_response_route(**self.coords)
+        self.assertIsNone(result.pop("registration_sequence"))
         self.assertEqual({k: v for k, v in result.items() if k != 'current_input_event_id'}, route)
         self.assertEqual(ledger.read_session_state(**self.coords), before)
         route['selected_criteria'][0]['selectable'] = False
@@ -279,6 +452,7 @@ class ResponseRouteTests(unittest.TestCase):
         for fixture in (dict(duplicate=True), dict(foreign=True), dict(superseded=True), dict(collision=True)):
             with self.subTest(fixture=fixture), tempfile.TemporaryDirectory() as tmp:
                 self.root = Path(tmp) / "ledger"; self.coords["root"] = self.root
+                create_v1_database(self.root)
                 before = self.legacy_registered(**fixture)
                 events = ledger.read_session_events(**self.coords)
                 with self.assertRaises(ValueError): self.bind_legacy(before)
@@ -348,6 +522,7 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertFalse(ledger.session_paths(self.root, "codex", "current")["state"].exists())
 
     def test_a_stored_field_the_ledger_does_not_define_never_blocks_a_route(self):
+        create_v1_database(self.root)
         self.event = self.setup_owned()
         self.record()
         state = ledger.read_session_state(**self.coords)
@@ -373,6 +548,20 @@ class ResponseRouteTests(unittest.TestCase):
         with self.assertRaisesRegex(self.api.RouteSchemaError, "selectable ledger condition"):
             self.record(candidate)
 
+    def test_withdrawing_the_last_eligible_criterion_stales_the_registered_route(self):
+        self.event = self.setup_owned()
+        for selected in (("first", "second"), ("second",)):
+            with self.subTest(selected=selected):
+                candidate = self.candidate(units=("first", "second"), selected=selected)
+                self.record(candidate)
+                ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
+                    "acceptance_criteria": [self.criterion("first", selectable=False)]})
+                with self.assertRaisesRegex(self.api.RouteSchemaError, "selected execution work needs"):
+                    self.record(candidate)
+                self.assertEqual(self.api.read_response_route(**self.coords)["status"], "stale")
+            ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
+                "acceptance_criteria": [self.criterion("first")]})
+
     def test_a_changed_definition_makes_the_route_stale(self):
         self.event = self.setup_owned()
         ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
@@ -387,12 +576,9 @@ class ResponseRouteTests(unittest.TestCase):
                 ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
                     "acceptance_criteria": [self.criterion("first")]})
         self.record()
-        state = ledger.read_session_state(**self.coords)
-        state["acceptance_criteria"] = [row for row in state["acceptance_criteria"]
-                                        if (row.get("work_unit_id"), row["id"]) != ("first", "AC1")]
         with ledger.storage_transaction(self.root) as tx:
-            tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
-                       (json.dumps(state), "codex", "current"))
+            tx.execute("DELETE FROM current_criteria WHERE platform='codex' AND session_id='current' "
+                       "AND work_unit_id='first' AND contract_revision=1 AND criterion_id='AC1'")
         self.assertEqual(self.api.read_response_route(**self.coords)["status"], "stale")
 
     def test_new_input_stales_binding_and_preserves_the_unit(self):
@@ -443,6 +629,7 @@ class ResponseRouteTests(unittest.TestCase):
             self.record()
 
     def test_registration_rejects_malformed_owned_criteria_with_typed_errors(self):
+        create_v1_database(self.root)
         self.event = self.setup_owned()
         baseline = ledger.read_session_state(**self.coords)
         variants = [None, 1]
@@ -469,6 +656,7 @@ class ResponseRouteTests(unittest.TestCase):
                 self.assertEqual(ledger.read_session_events(**self.coords), events)
 
     def test_reader_uses_the_same_owned_criterion_schema(self):
+        create_v1_database(self.root)
         self.event = self.setup_owned()
         self.record()
         baseline = ledger.read_session_state(**self.coords)
@@ -562,6 +750,7 @@ class ResponseRouteTests(unittest.TestCase):
             candidate=self.candidate(), boundary_ref="boundary-1")["status"], "ready")
 
     def test_existing_canonical_sqlite_receipt_upgrades_without_new_observation(self):
+        create_v1_database(self.root)
         self.event = self.setup_owned()
         self.record()
         with ledger.storage_transaction(self.root) as tx:
@@ -580,9 +769,11 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertEqual(ledger.read_session_state(**self.coords)["canonical_input_event_id"], self.event)
 
     def test_older_native_intake_after_import_upgrades_from_attested_event_boundary(self):
+        create_v1_database(self.root)
         self.event = self.setup_owned()
         self.record()
         copied = Path(self.tmp.name) / "older-import"
+        create_v1_database(copied)
         paths = ledger.session_paths(copied, "codex", "current")
         paths["state"].parent.mkdir(parents=True)
         paths["state"].write_text(json.dumps(ledger.read_session_state(**self.coords)))
@@ -609,9 +800,11 @@ class ResponseRouteTests(unittest.TestCase):
                          observations)
 
     def test_older_import_preserved_json_stamp_cannot_authorize_current_route(self):
+        create_v1_database(self.root)
         self.event = self.setup_owned()
         self.record()
         copied = Path(self.tmp.name) / "older-preserved-stamp"
+        create_v1_database(copied)
         paths = ledger.session_paths(copied, "codex", "current")
         paths["state"].parent.mkdir(parents=True)
         exported = ledger.read_session_state(**self.coords)
@@ -741,6 +934,7 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertEqual(self.api.read_response_route(**self.coords)["status"], "stale")
 
     def test_read_rejects_wrong_input_receipt_and_unknown_stored_enum(self):
+        create_v1_database(self.root)
         self.event = self.setup_owned()
         self.record()
         with self.assertRaises(self.api.RouteBindingError):
@@ -754,6 +948,7 @@ class ResponseRouteTests(unittest.TestCase):
             self.api.read_response_route(**self.coords)
 
     def test_a_stored_route_with_a_retired_mode_reads_as_stale_and_a_new_route_cannot_use_it(self):
+        create_v1_database(self.root)
         self.event = self.setup_owned()
         self.record()
         with ledger.storage_transaction(self.root) as tx:

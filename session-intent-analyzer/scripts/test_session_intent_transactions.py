@@ -173,13 +173,14 @@ class TransactionTests(unittest.TestCase):
         state = self.state()
         for row in state["acceptance_criteria"]:
             row.update(status="met", met_completion_check_digest="a" * 64, met_at="2026-10-01T12:00:00Z")
-        self.write_database_state(state)
+        with self.ledger.storage_transaction(self.root) as connection:
+            self.ledger._save_state(connection, state)
         self.write(intent_delta={"current_goal": "next goal"})
         self.assertEqual(self.state()["current_goal"], "next goal")
         self.write(intent_delta={"acceptance_criteria": [dict(self.criterion(), summary="Validate revision two")]})
         self.assertEqual(self.state()["acceptance_criteria"], [
             {"id": "report", "summary": "Validate revision two", "source": "user-said", "selectable": True},
-            {"id": "other", "summary": "Keep the other row", "source": "user-said", "selectable": True}])
+            state["acceptance_criteria"][1]])
 
     def test_a_write_checks_the_stored_identity(self):
         self.write(raw_input="request")

@@ -64,7 +64,9 @@ class ContinuationFeedbackTests(unittest.TestCase):
         # A mixed legacy control/new container follows the same original-source authentication.
         candidate.pop('continuation_feedback')
         candidate['declared_remaining_work'] = legacy
-        self.assertEqual(self.fixture.record(candidate), recorded)
+        again = self.fixture.record(candidate)
+        self.assertGreater(again.pop("registration_sequence"), recorded.pop("registration_sequence"))
+        self.assertEqual(again, recorded)
         before = ledger.read_session_state(**self.fixture.coords)
         events = ledger.read_session_events(**self.fixture.coords)
         conflicting_container = deepcopy(current)
@@ -95,9 +97,10 @@ class ContinuationFeedbackTests(unittest.TestCase):
         legacy['schema_version'] = 'continuation-feedback.v1'
         legacy['required_unprocessed'] = legacy.pop('items')
         state['response_route'].update(schema_version='response-route.v1', continuation_feedback=legacy)
+        # Exercise an imported route whose original JSON has no local registration pointer.
+        state['response_route'].pop('registration_sequence')
         with ledger.storage_transaction(self.fixture.root) as connection:
-            connection.execute('UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?',
-                (json.dumps(state), 'codex', 'current'))
+            ledger._save_state(connection, state)
         self.original.write_text('Only the first original changed.')
         route = self.read()
         self.assertEqual(route['continuation_feedback'], legacy)

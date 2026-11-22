@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -391,6 +392,43 @@ class LedgerMigrationTests(unittest.TestCase):
         self.assertEqual(self.reg.state_path.read_bytes(), service)
         self.assertEqual(self.ledger.read_session_state(root=self.b, platform='claude', session_id='same-session')['latest_input_digest'],
                          self.ledger.text_digest('new B input'))
+
+    def test_retired_folder_cleanup_checks_the_recorded_condition_change_at_the_destination(self):
+        owner = dict(platform='claude', session_id='same-session')
+        event = self.before['latest_input_event_id']
+        first = dict(id='AC1', summary='first check', source='user-said', selectable=True,
+                     work_unit_id='work', contract_revision=1)
+        second = dict(first, id='AC2', summary='second check')
+        self.ledger.record_turn(root=self.a, **owner, expected_input_event_id=event,
+                                intent_delta={'acceptance_criteria': [first, second]})
+        # An older installer left its original folder after committing the move.
+        original = self.home / 'original-copy'
+        self.ledger.snapshot_roots(self.a, self.home / 'absent', original, writers_stopped=True)
+        self.assertEqual(self.migrate().status, 'complete')
+        original.rename(self.a)
+        self.ledger.record_turn(root=self.b, **owner, expected_input_event_id=event,
+                                intent_delta={'acceptance_criteria': [dict(first, selectable=False)]})
+        db = self.ledger.storage_database_path(self.b)
+        # Restore only the deliberately damaged test row, so the valid withdrawal stays committed.
+        with sqlite3.connect(db) as connection:
+            saved = connection.execute("SELECT * FROM current_criteria WHERE criterion_id='AC2'").fetchone()
+            connection.execute("DELETE FROM current_criteria WHERE criterion_id='AC2'")
+        with self.assertRaisesRegex(ValueError, 'current_criteria'):
+            transaction.cleanup_retired_ledgers()
+        self.assertTrue(self.a.is_dir())
+        with sqlite3.connect(db) as connection:
+            placeholders = ','.join('?' for _ in saved)
+            connection.execute(f"INSERT INTO current_criteria VALUES ({placeholders})", saved)
+            connection.execute("UPDATE current_criteria SET selectable=0 WHERE criterion_id='AC2'")
+        with self.assertRaisesRegex(ValueError, 'current_criteria'):
+            transaction.cleanup_retired_ledgers()
+        self.assertTrue(self.a.is_dir())
+        with sqlite3.connect(db) as connection:
+            connection.execute("UPDATE current_criteria SET selectable=1 WHERE criterion_id='AC2'")
+        self.assertEqual(transaction.cleanup_retired_ledgers(), (self.a,))
+        self.assertFalse(self.a.exists())
+        self.assertEqual(self.ledger.read_session_state(root=self.b, **owner)['acceptance_criteria'],
+                         [dict(first, selectable=False), second])
 
     def test_unreadable_other_host_prevents_shared_destination_move_without_changing_records(self):
         codex = self.home / '.codex'

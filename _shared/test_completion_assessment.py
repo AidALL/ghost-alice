@@ -66,6 +66,11 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_legacy_proof_contract_reuses_original_binding_and_rejects_changed_condition(self):
         api = completion_assessment
+        self.fixture.root = self.fixture.root.with_name('legacy-proof-ledger')
+        self.fixture.coords['root'] = self.fixture.root
+        self.source['GHOST_ALICE_SESSION_INTENT_ROOT'] = str(self.fixture.root)
+        fixtures.create_v1_database(self.fixture.root)
+        self.register_criterion()
         state = fixtures.ledger.read_session_state(**self.fixture.coords)
         state['schema_version'] = 'session-intent-ledger.v1'
         for criterion in state['acceptance_criteria']:
@@ -529,18 +534,20 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.fixture = fixtures.ResponseRouteTests()
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
-        self.fixture.event = self.fixture.intake()
         self.summary = 'Fix the Folders tab footer covering other content or surfaces.'
-        # The test records the response model's interpreted-as update through the existing intent_delta API.
-        fixtures.ledger.record_turn(**self.fixture.coords, expected_input_event_id=self.fixture.event,
-            intent_delta={'acceptance_criteria': [self.fixture.criterion(summary=self.summary)]})
-        self.fixture.record()
+        self.register_criterion()
         self.source = dict(GHOST_ALICE_CORE_ROOT=str(fixtures.ROOT),
             GHOST_ALICE_SESSION_INTENT_ROOT=str(self.fixture.root),
             GHOST_ALICE_PLATFORM='codex', GHOST_ALICE_SESSION_ID='current', CODEX_THREAD_ID='current')
         self.observation = Path(self.fixture.tmp.name) / 'observation.txt'
         self.observation.write_text('Folders footer no longer overlaps the list in the captured result.')
         self.time = '2026-10-10T16:20:10.253906+00:00'
+
+    def register_criterion(self):
+        self.fixture.event = self.fixture.intake()
+        fixtures.ledger.record_turn(**self.fixture.coords, expected_input_event_id=self.fixture.event,
+            intent_delta={'acceptance_criteria': [self.fixture.criterion(summary=self.summary)]})
+        self.fixture.record()
 
 
     def proof(self, claim='폴더 탭의 푸터가 목록을 더 이상 가리지 않습니다.', declaration=None):
