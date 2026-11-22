@@ -144,7 +144,8 @@ def selectable_execution_units(connection, platform, session_id, unit_keys):
     """Find one selectable current criterion per requested execution unit using its partial index."""
     eligible = set()
     for key in set(unit_keys):
-        if connection.execute("""SELECT 1 FROM current_criteria WHERE platform=? AND session_id=?
+        if connection.execute("""SELECT 1 FROM current_criteria INDEXED BY current_criteria_selectable_owner
+                WHERE platform=? AND session_id=?
                 AND work_unit_id=? AND contract_revision=? AND selectable=1 LIMIT 1""",
                 (platform, session_id, *key)).fetchone():
             eligible.add(key)
