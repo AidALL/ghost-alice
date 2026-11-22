@@ -148,6 +148,19 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         fixtures.ledger.record_turn(**self.fixture.coords, expected_input_event_id=self.fixture.event,
             intent_delta={'acceptance_criteria': list(criteria)})
 
+    def test_unreadable_selection_preserves_the_explanation_review_for_the_current_input(self):
+        text = 'The source records an isolated Stop observation.'
+        ledger, _, _ = ledger_access.coordinates(self.source)
+        unreadable = patch.object(ledger, 'read_response_selection', side_effect=ValueError('invalid registration'))
+        with unreadable:
+            self.assertIsNone(native_completion.assess_native_completion(self.source, text=text)['body_issue'])
+        self.review_explanation(text, verdict='unsupported')
+        with unreadable:
+            assessed = native_completion.assess_native_completion(self.source, text=text)
+        self.assertEqual(assessed['input_event_id'], self.fixture.event)
+        self.assertIsNone(assessed['response_route'])
+        self.assertIn('review-selection-unavailable:', assessed['body_issue'] or '')
+
     def test_stop_names_the_withdrawn_criterion_for_the_same_reviewed_text(self):
         source_report = 'The replay covers four earlier Stop responses.'
         self.review_explanation(source_report)

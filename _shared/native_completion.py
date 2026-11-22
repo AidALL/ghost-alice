@@ -148,6 +148,8 @@ consumers obtain it directly from this Core API and check their input binding.
                     state = ledger._session_header(connection, platform, session, fields=ledger.INTAKE_CONTEXT_FIELDS)
                     if state is not None and ledger._canonical_input_bound(connection, Path(root), state):
                         event = state['latest_input_event_id']
+                        state['canonical_input_event_id'] = event
+                        selection = ledger.ResponseSelection(state, None, None)
             if event is not None:
                 input_observation = dict(input_digest=state.get('latest_input_digest'),
                     input_char_count=state.get('latest_input_char_count'))
