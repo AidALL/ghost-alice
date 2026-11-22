@@ -466,10 +466,12 @@ class CompanionLifecycleTests(unittest.TestCase):
         info = self.session_info()
         browser = self.connect(info, websocket=True)
         browser.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
-        # Valid masked PING frames fill outbound buffers while this peer does
-        # not read the PONG replies. Shutdown must not wait for peer cooperation.
+        # Leave PONG replies unread. A partial send is enough to exercise shutdown
+        # when the peer's socket buffers cannot accept the whole batch.
         frame = b"\x89\xfd" + b"\x00" * 4 + b"p" * 125
-        browser.sendall(frame * 32768)
+        browser.sendall(frame)
+        browser.send(frame * 32767)
+        self.assertEqual(browser.recv(1, socket.MSG_PEEK), b"\x8a")
         reaper = threading.Thread(target=process.wait)
         reaper.start()
         result = self.stop(Path(info["state_dir"]).parent)
