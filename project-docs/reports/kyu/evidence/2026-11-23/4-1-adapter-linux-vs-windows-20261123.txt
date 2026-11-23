@@ -1,0 +1,15 @@
+4-1 adapter output: the same command on Linux (L1) and Windows (W1), 2026-11-23
+
+Command (Stop hook payload into the adapter, run folder points at a regular file):
+  echo '{"hook_event_name":"Stop"}' | GHOST_ALICE_AUTOPILOT_RUN_DIR=<tmp>/not-a-directory \
+      python addons/autopilot-mode/skill/adapters/autopilot_mode.py
+
+== L1: WSL2 Ubuntu, Autopilot checkout ad51900 (output cut at 600 characters by `head -c 600`)
+-- with GHOST_ALICE_CORE_ROOT (kit style)
+stderr: autopilot-mode adapter fell back to no-op: [Errno 20] Not a directory: '/tmp/tmp.JF2jNLFeT0/not-a-directory/approved-run.json'
+stdout: {"continue": true, "systemMessage": "[autopilot-mode adapter error]\nerror: [Errno 20] Not a directory: '/tmp/tmp.JF2jNLFeT0/not-a-directory/approved-run.json'\nGhost-ALICE Autopilot recording code cannot access recording state and parks dependent advancement. The current-session assistant preserves the original supported answer/source/time; the recording error does not justify another business check.", "completion_recording": {"status": "recording-error", "reason": "authority-unavailable", "detail": "[Errno 20] Not a directory: '/tmp/tmp.JF2jNLFeT0/not-a-directory/approved-run.json'"}, "recov
+-- without GHOST_ALICE_CORE_ROOT (official test style)
+(same output as above)
+
+== W1: Windows 11 25H2, Python 3.14.3, Autopilot 2075768 checkout, without GHOST_ALICE_CORE_ROOT
+stdout: {"continue": true, "systemMessage": "", "completion_recording": {"status": "recording-unavailable", "reason": "authority-missing"}}
