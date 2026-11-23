@@ -1,0 +1,51 @@
+A-1 jy: inputs staged vs resolved and Stop warnings per session (Langfuse TEAM export 2026-11-16 00:49 ~ 2026-11-23 07:28 UTC), script a1_check.py, 2026-11-23
+Warning codes are searched in each Stop completion record's output and metadata.
+
+session  staged resolved unresolved checks route crit assess
+7ea2b0f5     76       45         31     83    28    8      0
+648e8c65     37        7         30     46    25    1      0
+9a734b5f     20        0         20     24     8    0      0
+5487e9fc     51       51          0     44     6    0      0
+5731adc4     63       63          0     51     5    0      2
+0e60d0d2      1        1          0      2     2    0      0
+6ede1a65      3        3          0      4     2    2      0
+af5a53f9      1        1          0      2     2    0      0
+44f5ee8d      1        0          1      2     2    0      0
+68a7f862     40       40          0     38     0    0      0
+3e05d34f     15       15          0     17     0    2      0
+80facb7c     26       26          0     25     0    0      2
+65343343     20       20          0     18     0    0      0
+cf929dc4     17       17          0     14     0    0      0
+d64f4c03      2        2          0      2     0    0      0
+10245035      1        0          1      1     0    0      0
+b13c115c     16       16          0     15     0    0      0
+41f92387     10       10          0      9     0    0      2
+
+sessions: 18
+route-unavailable total: 80
+  in sessions with unresolved inputs > 0: 63
+  in sessions with all inputs resolved   : 17
+criterion-unbound total: 13  / with unresolved>0: 9
+checks total: 397  / with unresolved>0: 156
+
+== kyu PC: real response-review tool calls (completion_assessment.py prepare-response/record-response) per session, script cp949_sessions.py
+3 ('06be5345', 'UTF8', 'ok/other')
+1 ('06be5345', 'default', 'cp949-error')
+33 ('0bda1fdb', 'UTF8', 'ok/other')
+1 ('0bda1fdb', 'default', 'ok/other')
+13 ('4a0fff20', 'UTF8', 'ok/other')
+2 ('4a0fff20', 'default', 'cp949-error')
+4 ('8ae8df84', 'UTF8', 'cp949-error')
+1 ('8ae8df84', 'default', 'cp949-error')
+11 ('8f601ab0', 'UTF8', 'ok/other')
+2 ('8f601ab0', 'default', 'cp949-error')
+33 ('95c6673a', 'UTF8', 'ok/other')
+1 ('95c6673a', 'default', 'ok/other')
+31 ('a18b4c79', 'UTF8', 'ok/other')
+1 ('a18b4c79', 'default', 'ok/other')
+33 ('b0d68717', 'UTF8', 'ok/other')
+1 ('b0d68717', 'default', 'ok/other')
+3 ('bad4a5c3', 'UTF8', 'ok/other')
+1 ('bad4a5c3', 'default', 'ok/other')
+
+Note: 8ae8df84 is the verification session that reproduced 4-3 on purpose (its 'UTF8 cp949-error' rows are tool results that print the reproduced error text), so the report does not count it as an accidental failure.
