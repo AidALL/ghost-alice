@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import installed_payload  # noqa: E402
 import install_lock  # noqa: E402
 import install_transaction  # noqa: E402
-from installer import report  # noqa: E402
+from installer import cli, report  # noqa: E402
 from installer import runner  # noqa: E402
 from installer import source  # noqa: E402
 from installer_testing import checkout_copy, installer_env, make_context, use_source  # noqa: E402
@@ -552,6 +552,26 @@ class SuccessfulSourceReinstallTests(unittest.TestCase):
 
 
 class SourceHealthTests(SourceCase):
+    @unittest.skipUnless(os.name == 'posix', 'requires a POSIX package-manager fixture')
+    def test_default_install_bootstraps_git_before_reading_the_release_remote(self):
+        remote = init_repo(self.root / 'release')
+        checkout = init_repo(self.root / 'development', upstream=remote)
+        expected = git(remote, 'rev-parse', 'main')
+        tools = self.root / 'tools'
+        tools.mkdir()
+        brew = tools / 'brew'
+        brew.write_text('#!/bin/sh\n[ "$1" = install ] && [ "$2" = git ] && '
+                        'exec /bin/ln -s "$FIXTURE_GIT" "$PATH/git"\n')
+        brew.chmod(0o755)
+        paths = {'PATH': str(tools), 'FIXTURE_GIT': shutil.which('git'), 'GHOST_ALICE_PREREQUISITES_SHOWN': ''}
+        with mock.patch.dict(os.environ, paths), use_source(checkout), mock.patch.object(cli, 'dispatch', return_value=0) as dispatch:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(cli.main([]), 0, out.getvalue())
+            provenance = dispatch.call_args.kwargs['provenance']
+            self.assertEqual((provenance['remote'], provenance['commit']), (str(remote), expected))
+            self.assertLess(out.getvalue().index('automatic consent'), out.getvalue().index('brew install git'))
+
     def test_update_acquisition_failure_keeps_development_checkout_unchanged(self):
         repo = init_repo(self.root / 'development')
         (repo / 'tracked.txt').write_text('uncommitted user change')

@@ -188,6 +188,7 @@ def _fail(message: str, code: int = 1) -> None:
 
 
 def install_release(options: Options, *, checkout_root: Path | None = None, cause: str = 'install') -> int:
+    prerequisites.require_git_for_release()
     origin = source.input_record(checkout_root)
     origin['remote'] = origin.get('remote') or source.DEFAULT_REMOTE
     with source.acquire_release(origin['remote']) as checkout:
@@ -212,6 +213,7 @@ def run_update(ctx: Context, *, acquired_from: list[str] | None = None) -> int:
     if acquired_from is None:
         if not origin.get('root'):
             raise ValueError('Update found no recorded installation source')
+        prerequisites.require_git_for_release()
         # Older downloaded installers compare this ref to their command-line argument.
         argv = list(ctx.options.argv)
         if args.ref is None and recorded_source.get('ref') != source.RELEASE_REF:
