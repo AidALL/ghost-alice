@@ -1,0 +1,7 @@
+LINUX RESULT: 0 failures in 100 runs (6.18.33.2-microsoft-standard-WSL2, Python 3.14.4)
+[30] FAIL
+E   AssertionError: Lists differ: [PermissionError(13, 'Permission denied')] != []
+E   
+E   First list contains 1 additional elements.
+E   First extra element 0:
+WINDOWS RESULT: 1 failures in 100 runs (PowerShell 5.1.26100.9818, Python 3.14.3)

@@ -1,0 +1,121 @@
+﻿
+======================================================================
+0. 환경 (kyu-ps5, 2026-11-23 15:15)
+======================================================================
+OS: Microsoft Windows 11 Pro 25H2 (10.0.26200, build 26200)
+언어/지역: UI en-US, 형식 ko-KR, 시스템 로캘 ko-KR
+코드 페이지: ANSI 949, OEM 949
+이 스크립트를 실행한 셸: PowerShell 5.1.26100.9818 (Desktop)
+Windows PowerShell: 5.1.26100.9818
+PowerShell 7: 7.7.0
+Git: git version 2.55.0.windows.5
+Claude Code: 2.1.322 (Claude Code)
+훅용 Python: 3.14.3 C:\Users\N-\AppData\Local\Programs\Python\Python314\python.exe encoding=cp949 utf8_mode=0
+PATH 기본 Python: 3.12.5 C:\Users\N-\AppData\Local\Programs\Python\Python312\python.exe encoding=cp949 utf8_mode=0
+PYTHONUTF8 환경 변수: (없음)
+설치된 Core: local/v0.5.1-windows-fix @ c6019ac49eb482f386ef11693949f2a20623d650 (설치 2026-11-12T08:37:36.6746749+00:00)
+Core 폴더 현재 커밋: c6019ac49eb482f386ef11693949f2a20623d650 (설치와 같음)
+설치된 Autopilot: C:\Users\N-\ghost-alice-autopilot @ 2075768e268179d2951d1fa4d6c943269603eac2 (v0.5.1)
+
+======================================================================
+4-1. 실행 폴더 자리에 일반 파일이 있을 때
+======================================================================
+open(file/'x') -> FileNotFoundError errno 2 winerror None
+os.listdir(file) -> NotADirectoryError errno 20 winerror 267
+어댑터 출력 (종료 코드 0): {"continue": true, "systemMessage": "", "completion_recording": {"status": "recording-unavailable", "reason": "authority-missing"}}
+판정: recovery 안내 없음 (문제 재현)
+
+======================================================================
+4-2. 텍스트 모드로 넘긴 완료 문구의 줄바꿈
+======================================================================
+보낸 문자열: 'line1\nline2\n'
+자식이 받은 바이트: b'line1\r\nline2\r\n'
+판정: CRLF로 바뀜 (문제 재현 조건)
+
+======================================================================
+4-3. Core 응답 검토 도구에 한국어 파일 넘기기
+======================================================================
+기본 설정 (종료 코드 1): {"status": "unavailable", "reason": "illegal multibyte sequence", "detail": "'cp949' codec can't decode byte 0xec in position 0: illegal multibyte sequence"} 
+PYTHONUTF8=1 (종료 코드 1): {"status": "unavailable", "reason": "authority-unavailable", "detail": "Exact ledger root is required"} 
+판정: 인코딩 오류 재현
+
+======================================================================
+4-7. 병렬 상태 갱신 테스트 반복 실행 (2 회)
+======================================================================
+테스트 폴더: C:\Users\N-\ghost-alice-autopilot-win @ 4d9c45b (matrix-linux)
+[1] 실패. 전체 출력:
+F                                                                        [100%]
+================================== FAILURES ===================================
+_______ AutopilotStateTest.test_parallel_advance_claims_ready_item_once _______
+
+self = <test_autopilot_state.AutopilotStateTest testMethod=test_parallel_advance_claims_ready_item_once>
+
+    def test_parallel_advance_claims_ready_item_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            _write_run(run_dir, [_item("race")])
+            original_write_work_items = aps.write_work_items
+    
+            def slow_write_work_items(path, items):
+                if Path(path).name == "tasks.jsonl":
+                    time.sleep(0.08)
+                return original_write_work_items(path, items)
+    
+            aps.write_work_items = slow_write_work_items
+            payloads = []
+            errors = []
+    
+            def worker():
+                try:
+                    payloads.append(aps.advance_approved_run(run_dir))
+                except Exception as exc:  # pragma: no cover - surfaced by assertion below
+                    errors.append(exc)
+    
+            try:
+                threads = [threading.Thread(target=worker), threading.Thread(target=worker)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+            finally:
+                aps.write_work_items = original_write_work_items
+    
+            events = [
+                json.loads(line)
+                for line in _fixture_read_text(run_dir / "events.jsonl", encoding="utf-8").splitlines()
+            ]
+    
+>       self.assertEqual(errors, [])
+E       AssertionError: Lists differ: [PermissionError(13, 'Permission denied')] != []
+E       
+E       First list contains 1 additional elements.
+E       First extra element 0:
+E       PermissionError(13, 'Permission denied')
+E       
+E       - [PermissionError(13, 'Permission denied')]
+E       + []
+
+tests\test_autopilot_state.py:3224: AssertionError
+============================== warnings summary ===============================
+..\AppData\Local\Programs\Python\Python314\Lib\site-packages\anyio\pytest_plugin.py:14
+  C:\Users\N-\AppData\Local\Programs\Python\Python314\Lib\site-packages\anyio\pytest_plugin.py:14: PytestRemovedIn10Warning: _pytest.python.CallSpec2 has been renamed to CallSpec.
+  The CallSpec2 alias will be removed in pytest 10.
+  Update imports to use CallSpec instead.
+  See https://docs.pytest.org/en/stable/deprecations.html#callspec2-renamed
+    from _pytest.python import CallSpec2
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_autopilot_state.py::AutopilotStateTest::test_parallel_advance_claims_ready_item_once
+1 failed, 1 warning in 1.16s
+powershell.exe : [project-runtime] preserved temp root (returncode=1): C:\Users\N-\ghost-alice-autopilot-win\.tmp\runti
+me\pytest-vhoc123k
+At C:\Users\N-\hook-monitor\repro\ga_repro_kit.ps1:174 char:20
++ ...      $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $ru ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([project-runtim...pytest-vhoc123k:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+[2] 통과
+판정: 2 회 중 실패 1 회
