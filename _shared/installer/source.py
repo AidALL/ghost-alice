@@ -36,12 +36,14 @@ if TYPE_CHECKING:
     from installer.cli import Context
 
 HOOKS_DIR = "hooks"
+RELEASE_REF = "refs/heads/main"
+DEFAULT_REMOTE = "https://github.com/AidALL/ghost-alice.git"
 # The install-state `system_env_changes` kind of the repository's shared hook path.
 HOOK_PATH_CHANGE = "source_repo_hook_path"
 # The record of the hook path write for the whole installation, next to the hosts' install-state manifests.
 HOOK_PATH_RECORD = "source-repo-hook-path.json"
-ADOPT_HINT = ("Rerun this command from the install source, or add --adopt-source to install from this checkout "
-              "and record it as the install source.")
+ADOPT_HINT = ("Rerun this command from the install source, or add --adopt-source to record this checkout "
+              "as the install source.")
 REPAIR_HINT = ("Repair runs only from the install source; run the install from this checkout with --adopt-source to "
                "move the installation here.")
 REQUEST_ENV = "GHOST_ALICE_INSTALL_REQUEST"
@@ -61,8 +63,8 @@ class HookPathChange:
 
     `after` is the absolute path of the install source's hooks folder and `changed` says this command wrote it.
     `recorded` says the install knows the value from before Ghost-ALICE wrote one: `before_present` and `before`
-    give it (False and "" for no value, which the full uninstall unsets). `applied_at` is when an earlier install
-    wrote the value this one found in place, else None.
+    give it (False and "" for no value, which the full uninstall unsets). `applied_at` records when that change
+    was written and is shared by the hook receipt and host inventory.
     """
 
     changed: bool
@@ -141,7 +143,7 @@ def check_source_health(*, skip: bool, input_root: Path | None = None) -> bool:
             elif behind > 0:
                 report.error("Source branch is behind its upstream; refusing to install from stale source.")
                 report.error("Run git fetch origin, inspect git status, then fast-forward or otherwise reconcile this checkout "
-                             "before installing. If the human user decided to install from this local source, rerun with --skip-source-health.")
+                             "before installing. If the human user decided to install these local files, rerun with --local-source --skip-source-health.")
                 report.error(f"To preserve source-local changes while updating, run {report.install_command()} --update-source.")
                 report.error("If an old checkout is already blocked by local changes during git pull, use the bootstrap "
                              "one-command update in docs/getting-started/troubleshooting.md.")
@@ -266,18 +268,25 @@ def update_source() -> int:
 
 
 @contextlib.contextmanager
-def acquire_update(origin: dict):
-    """Fetch recorded remote/ref into a temporary input without changing the developer checkout."""
-    if not origin.get('remote') or not origin.get('ref'):
-        raise ValueError('Update needs its acquisition source: ghost-alice update --remote URL --ref NAME')
+def acquire_release(remote: str):
+    """Fetch the release branch into a temporary checkout owned by this install."""
     with tempfile.TemporaryDirectory(prefix='ghost-alice-update-') as temporary:
         root = Path(temporary)
-        for args in (('init', '--quiet'), ('fetch', '--quiet', '--depth=1', '--', origin['remote'], origin['ref']),
+        for args in (('init', '--quiet'), ('fetch', '--quiet', '--depth=1', '--', remote, RELEASE_REF),
                      ('checkout', '--quiet', '--detach', 'FETCH_HEAD')):
             result = _git(root, *args)
             if not result.ok:
-                raise ValueError(f'Update acquisition failed: {result.stderr.strip() or result.stdout.strip()}')
+                raise ValueError(f'Cannot acquire the Core release ({RELEASE_REF}): {result.stderr.strip() or result.stdout.strip()}')
         yield root
+
+
+def release_input(checkout: Path, origin: dict) -> dict:
+    """Keep the development path for hooks and ledger ownership, and identify the fetched code."""
+    commit = _git_value(checkout, 'rev-parse', 'HEAD')
+    if not commit:
+        raise ValueError('Cannot identify the downloaded Core release commit')
+    return dict(root=origin['root'], hooks_path=origin.get('hooks_path'), remote=origin['remote'],
+                ref=RELEASE_REF, branch='main', commit=commit, dirty='clean')
 
 
 def hooks_path_value(checkout: Path) -> str:
@@ -338,10 +347,9 @@ def _write_hook_path_record(change: HookPathChange) -> None:
     """Record the hook path this install owns in the same step as the write, so an install that stops before its
     install-state is written leaves the value to restore for the next one."""
     path = locations.install_state_dir() / HOOK_PATH_RECORD
-    applied_at = change.applied_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     record = {"kind": HOOK_PATH_CHANGE, "repo_root": Path(input_record()['root']).resolve().as_posix(),
               "before_present": change.before_present, "before": change.before if change.before_present else None,
-              "after": change.after, "applied_at": applied_at}
+              "after": change.after, "applied_at": change.applied_at}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         staged = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -393,6 +401,8 @@ def setup_git_hooks() -> HookPathChange:
                                             before=current if kept else "", after=wanted)
                 report.info(f"Git hook path → {wanted} (post-merge auto-refresh enabled)")
             if change.recorded:
+                if change.applied_at is None:
+                    change = replace(change, applied_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
                 _write_hook_path_record(change)
     except (OSError, file_lock.LockTimeout) as exc:
         report.warn(f"Could not serialize the Git hook path write: {exc}")
@@ -445,7 +455,8 @@ def input_record(input_root: Path | None = None) -> dict:
         origin = dict(saved['source'])
         origin.pop('ledger_source_roots', None)
         origin.update({key: value for key, value in record.get('source', {}).items()
-                       if key in {'root', 'remote', 'ref', 'branch', 'hooks_path'}})
+                       if key in {'root', 'remote', 'hooks_path'}})
+        origin['ref'] = RELEASE_REF
         return origin
     toplevel = _git_value(root_path, "rev-parse", "--show-toplevel")
     branch = _git_value(root_path, "symbolic-ref", "--quiet", "--short", "HEAD") or "DETACHED"
@@ -456,14 +467,12 @@ def input_record(input_root: Path | None = None) -> dict:
     else:
         dirty = "unknown"
     root = Path(toplevel) if toplevel else root_path
-    remote_name = _git_value(root, 'config', f'branch.{branch}.remote')
-    remote = _git_value(root, 'remote', 'get-url', remote_name or 'origin')
+    remote = _git_value(root, 'remote', 'get-url', 'origin')
     if remote and not Path(remote).is_absolute() and ':' not in remote:
         remote = str((root / remote).resolve())
-    ref = _git_value(root, 'config', f'branch.{branch}.merge')
     return {'root': str(root), 'commit': head, 'dirty': dirty, 'branch': branch,
-            'hooks_path': _git_value(root, 'config', '--local', 'core.hooksPath'), 'remote': remote,
-            'ref': ref or (branch if branch != 'DETACHED' else None)}
+            'hooks_path': _git_value(root, 'config', '--local', 'core.hooksPath'),
+            'remote': remote or DEFAULT_REMOTE, 'ref': RELEASE_REF}
 
 
 def resolve_source() -> SourceInfo:
@@ -759,7 +768,7 @@ def finalize_source(ctx: 'Context', folder: Path, platforms: list[str], *, befor
         installed_payload.update(locations.record_root(), sections, journal=journal, defer_source=defer_source)
     record = installed_payload.read(locations.record_root()) or {}
     command = ['pwsh', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(folder / 'core/install.ps1')] if os.name == 'nt' else ['bash', str(folder / 'core/install.sh')]
-    command += ['--platform', ctx.platform, '--adopt-source']
+    command += ['--platform', ctx.platform, '--local-source', '--adopt-source']
     for selected in sorted(source for source in saved['sources'] if source != 'core'):
         command += ['--addon-source', str(folder / selected)]
     lines = [f'Successful source version: {folder}', 'Reinstall this code: ' + (subprocess.list2cmdline(command) if os.name == 'nt' else shlex.join(command))]

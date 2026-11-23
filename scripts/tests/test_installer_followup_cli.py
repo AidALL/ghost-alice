@@ -17,6 +17,7 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / '_shared'))
 from installer_testing import checkout_copy, destination_fixture, inject_installer_python, installer_env, run_pty
+from installer.source import DEFAULT_REMOTE
 
 
 class InstallerFollowupCliTests(unittest.TestCase):
@@ -31,6 +32,9 @@ class InstallerFollowupCliTests(unittest.TestCase):
         self.env = installer_env(self.home)
         # An archive fixture must not discover the repository enclosing the test runner's TMPDIR.
         self.env['GIT_CEILING_DIRECTORIES'] = str(self.root)
+        # Archives without a Git origin fetch the default release from this test's main branch.
+        subprocess.run(['git', 'config', '--global', f'url.{self.source.as_uri()}.insteadOf', DEFAULT_REMOTE],
+                       env=self.env, check=True)
         self.env['GHOST_ALICE_INSTALL_LOCALE'] = 'en_US.UTF-8'
         self.settings = self.home / '.claude/settings.json'
         self.settings.write_text(json.dumps({'custom': 'preserved', 'permissions': {'allow': ['Bash(custom)']}}))
@@ -355,11 +359,11 @@ shutil.copytree = copytree
         # command boundary while the other installation still uses the fixed entry.
         for name in ('install.cmd', 'install.ps1'):
             (self.source / name).rename(self.root / name)
-        self.install()
+        self.install('--local-source')
         for name in ('install.cmd', 'install.ps1'):
             (self.root / name).rename(self.source / name)
         (self.home / '.codex').mkdir()
-        result = self.run_install('task-router', platform='codex')
+        result = self.run_install('task-router', '--local-source', platform='codex')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         ghost = self.home / '.ghost-alice'
         inventory = ghost / 'install-state/codex.json'

@@ -98,7 +98,7 @@ class TestTerminologyClarity(unittest.TestCase):
 
         self.assertIn("Install Codex skills for installed-copy contract checks", workflow)
         self.assertIn("HOME: ${{ runner.temp }}/ghost-alice-ci-home", workflow)
-        self.assertIn("bash ./install.sh --platform codex --skip-source-health", workflow)
+        self.assertIn("bash ./install.sh --platform codex --local-source --skip-source-health", workflow)
         self.assertIn(
             "GHOST_ALICE_INSTALLED_SKILLS_DIR: ${{ runner.temp }}/ghost-alice-ci-home/.agents/skills",
             workflow,

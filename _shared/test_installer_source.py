@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import installed_payload  # noqa: E402
 import install_lock  # noqa: E402
 import install_transaction  # noqa: E402
-from installer import report  # noqa: E402
+from installer import cli, report  # noqa: E402
 from installer import runner  # noqa: E402
 from installer import source  # noqa: E402
 from installer_testing import checkout_copy, installer_env, make_context, use_source  # noqa: E402
@@ -77,9 +77,11 @@ class InputProvenanceTests(SourceCase):
         versions = self.root / 'home/.ghost-alice/versions'
         external_source = dict(root=str(self.root / 'development'), commit='external',
                                ledger_source_roots={str(self.root / 'ledger'): str(self.root / 'other-source')})
-        expected = dict(root=str(self.root / 'development'), commit='external')
         for boundary in ('request', 'saved-package'):
             with self.subTest(boundary=boundary):
+                expected = dict(root=str(self.root / 'development'), commit='external')
+                if boundary == 'saved-package':
+                    expected['ref'] = source.RELEASE_REF
                 package = (self.root / 'requested' if boundary == 'request' else versions / 'external/core')
                 (package / '_shared').mkdir(parents=True)
                 (package / '_shared/product.py').write_text(boundary)
@@ -511,7 +513,7 @@ class SuccessfulSourceReinstallTests(unittest.TestCase):
                      'cli.transaction.report_gateway=lambda ctx: None; raise SystemExit(cli.main(sys.argv[1:]))')
             def install(package, platform, *skills):
                 result = subprocess.run([sys.executable, '-B', '-c', entry, str(package / '_shared'),
-                                         '--platform', platform, '--adopt-source', *skills], cwd=package, env=env,
+                                         '--platform', platform, '--adopt-source', '--local-source', *skills], cwd=package, env=env,
                                         text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
                 self.assertEqual(result.returncode, 0, result.stdout[-6000:])
                 return result.stdout
@@ -550,14 +552,34 @@ class SuccessfulSourceReinstallTests(unittest.TestCase):
 
 
 class SourceHealthTests(SourceCase):
+    @unittest.skipUnless(os.name == 'posix', 'requires a POSIX package-manager fixture')
+    def test_default_install_bootstraps_git_before_reading_the_release_remote(self):
+        remote = init_repo(self.root / 'release')
+        checkout = init_repo(self.root / 'development', upstream=remote)
+        expected = git(remote, 'rev-parse', 'main')
+        tools = self.root / 'tools'
+        tools.mkdir()
+        brew = tools / 'brew'
+        brew.write_text('#!/bin/sh\n[ "$1" = install ] && [ "$2" = git ] && '
+                        'exec /bin/ln -s "$FIXTURE_GIT" "$PATH/git"\n')
+        brew.chmod(0o755)
+        paths = {'PATH': str(tools), 'FIXTURE_GIT': shutil.which('git'), 'GHOST_ALICE_PREREQUISITES_SHOWN': ''}
+        with mock.patch.dict(os.environ, paths), use_source(checkout), mock.patch.object(cli, 'dispatch', return_value=0) as dispatch:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(cli.main([]), 0, out.getvalue())
+            provenance = dispatch.call_args.kwargs['provenance']
+            self.assertEqual((provenance['remote'], provenance['commit']), (str(remote), expected))
+            self.assertLess(out.getvalue().index('automatic consent'), out.getvalue().index('brew install git'))
+
     def test_update_acquisition_failure_keeps_development_checkout_unchanged(self):
         repo = init_repo(self.root / 'development')
         (repo / 'tracked.txt').write_text('uncommitted user change')
         before = git(repo, 'status', '--porcelain=v1')
-        for remote, ref in ((None, 'main'), (str(repo), None), (str(repo), 'missing-ref'),
-                            (str(self.root / 'missing-remote'), 'main')):
-            with self.subTest(remote=remote, ref=ref), self.assertRaisesRegex(ValueError, 'Update'):
-                with source.acquire_update(dict(root=str(repo), remote=remote, ref=ref)):
+        git(repo, 'branch', '-m', 'feature')
+        for remote in (repo, self.root / 'missing-remote'):
+            with self.subTest(remote=remote), self.assertRaisesRegex(ValueError, 'Core release'):
+                with source.acquire_release(str(remote)):
                     self.fail('failed acquisition must not yield an install input')
         self.assertEqual((repo / 'tracked.txt').read_text(), 'uncommitted user change')
         self.assertEqual(git(repo, 'status', '--porcelain=v1'), before)
@@ -610,7 +632,7 @@ class SourceHealthTests(SourceCase):
         self.assertFalse(ok)
         self.assertIn("[ERROR] Source branch is behind its upstream; refusing to install from stale source.", out)
         self.assertIn("Run git fetch origin, inspect git status, then fast-forward or otherwise reconcile this checkout "
-                      "before installing. If the human user decided to install from this local source, rerun with --skip-source-health.", out)
+                      "before installing. If the human user decided to install these local files, rerun with --local-source --skip-source-health.", out)
         self.assertIn("To preserve source-local changes while updating, run bash install.sh --update-source.", out)
         with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_COMMAND": ".\\install.cmd"}):
             _, out = self.check(clone)
@@ -748,6 +770,10 @@ print(json.dumps(vars(change)), flush=True)
             change = source.setup_git_hooks()
         return change, out.getvalue()
 
+    def recorded_hook_time(self) -> str:
+        record = self.root / "home/.ghost-alice/install-state" / source.HOOK_PATH_RECORD
+        return json.loads(record.read_text())["applied_at"]
+
     def record_install_state(self, platform: str, **entry) -> None:
         state = self.root / "home" / ".ghost-alice" / "install-state" / f"{platform}.json"
         state.parent.mkdir(parents=True, exist_ok=True)
@@ -763,7 +789,7 @@ print(json.dumps(vars(change)), flush=True)
         hook.chmod(0o644)
         change, out = self.setup_hooks()
         self.assertEqual(change, source.HookPathChange(changed=True, recorded=True, before_present=False, before="",
-                                                       after=self.hooks))
+                                                       after=self.hooks, applied_at=self.recorded_hook_time()))
         self.assertEqual(self.shared_value(), self.hooks)
         self.assertIn(f"[INFO] Git hook path → {self.hooks} (post-merge auto-refresh enabled)", out)
         self.assertTrue(hook.stat().st_mode & stat.S_IXUSR)
@@ -772,14 +798,14 @@ print(json.dumps(vars(change)), flush=True)
         git(self.repo, "config", "--local", "core.hooksPath", "hooks")
         change, _ = self.setup_hooks()
         self.assertEqual(change, source.HookPathChange(changed=True, recorded=True, before_present=False, before="",
-                                                       after=self.hooks))
+                                                       after=self.hooks, applied_at=self.recorded_hook_time()))
         self.assertEqual(self.shared_value(), self.hooks)
 
     def test_another_value_is_the_value_to_restore(self):
         git(self.repo, "config", "--local", "core.hooksPath", "elsewhere")
         change, _ = self.setup_hooks()
         self.assertEqual(change, source.HookPathChange(changed=True, recorded=True, before_present=True,
-                                                       before="elsewhere", after=self.hooks))
+                                                       before="elsewhere", after=self.hooks, applied_at=self.recorded_hook_time()))
 
     def test_a_value_an_earlier_install_wrote_keeps_the_recorded_previous_value(self):
         # A reinstall finds its own value in place: the install-state of either host carries what was there before.
@@ -799,7 +825,7 @@ print(json.dumps(vars(change)), flush=True)
                                   applied_at="2026-09-01T00:00:00Z")
         change, _ = self.setup_hooks()
         self.assertEqual(change, source.HookPathChange(changed=True, recorded=True, before_present=False, before="",
-                                                       after=self.hooks))
+                                                       after=self.hooks, applied_at=self.recorded_hook_time()))
         self.assertEqual(self.shared_value(), self.hooks)
 
     def test_an_earlier_installers_record_of_the_relative_value_keeps_the_value_it_replaced(self):
@@ -814,7 +840,7 @@ print(json.dumps(vars(change)), flush=True)
                                           before="custom-hooks", after="hooks")
                 change, _ = self.setup_hooks()
                 self.assertEqual(change, source.HookPathChange(changed=True, recorded=True, before_present=True,
-                                                               before="custom-hooks", after=self.hooks))
+                                                               before="custom-hooks", after=self.hooks, applied_at=self.recorded_hook_time()))
         # The relative value names no folder: a record from another repository says nothing about this one.
         other = init_repo(self.root / "other").resolve()
         git(self.repo, "config", "--local", "core.hooksPath", "hooks")
@@ -822,7 +848,7 @@ print(json.dumps(vars(change)), flush=True)
                                   after="hooks")
         change, _ = self.setup_hooks()
         self.assertEqual(change, source.HookPathChange(changed=True, recorded=True, before_present=False, before="",
-                                                       after=self.hooks))
+                                                       after=self.hooks, applied_at=self.recorded_hook_time()))
 
     def test_an_install_that_stops_after_the_write_leaves_its_record_for_the_retry(self):
         # The git hook step runs before the later steps; an install that stops before its install-state is written
@@ -904,8 +930,8 @@ class SourceIdentityTests(SourceCase):
         run_tool.assert_called_once_with("_shared/installer_source_update.py", "--source-dir", str(self.root))
 
 
-STOP_HINT = ("Rerun this command from the install source, or add --adopt-source to install from this checkout "
-             "and record it as the install source.")
+STOP_HINT = ("Rerun this command from the install source, or add --adopt-source to record this checkout "
+             "as the install source.")
 
 
 class InstallSourceTests(SourceCase):

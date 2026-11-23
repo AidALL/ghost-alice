@@ -73,6 +73,9 @@ def try_install_unix_prerequisite(tool: str) -> bool:
         return False
     if command_exists(tool):
         return True
+    if os.environ.get('GHOST_ALICE_PREREQUISITES_SHOWN') != '1':
+        report.info(Path(__file__).with_suffix('.txt').read_text(encoding='utf-8').strip())
+        os.environ['GHOST_ALICE_PREREQUISITES_SHOWN'] = '1'
     report.info(f"{tool} not found; trying automatic prerequisite setup.")
     if command_exists("brew"):
         return _attempt(tool, f"brew install {packages['brew']}",
@@ -104,11 +107,14 @@ def try_install_unix_prerequisite(tool: str) -> bool:
     return False
 
 
+def require_git_for_release() -> None:
+    """The installer needs Git to identify the release remote and fetch its main branch."""
+    if not try_install_unix_prerequisite('git') or not command_exists('git'):
+        raise ValueError('Fetching the Core release requires Git on PATH. Install Git, then rerun the command.')
+
+
 def install_prerequisites() -> bool:
     """git then node; a miss is a warning and the install continues."""
-    if os.environ.get('GHOST_ALICE_PREREQUISITES_SHOWN') != '1' and any(not command_exists(tool) for tool in PACKAGES):
-        report.info(Path(__file__).with_suffix('.txt').read_text(encoding='utf-8').strip())
-        os.environ['GHOST_ALICE_PREREQUISITES_SHOWN'] = '1'
     missing = False
     for tool in ("git", "node"):
         if not try_install_unix_prerequisite(tool):

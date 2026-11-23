@@ -64,7 +64,8 @@ class RepairTest(unittest.TestCase):
             env["GHOST_ALICE_INSTALL_LOCALE"] = "en"
             ghost = Path(home) / ".ghost-alice"
             def run(option, code):
-                result = self._run(env, "--platform", "codex", "--skip-source-health", option)
+                source_option = [] if option == "--repair" else ["--local-source"]
+                result = self._run(env, "--platform", "codex", "--skip-source-health", *source_option, option)
                 output = result.stdout + result.stderr
                 self.assertEqual(result.returncode, code, output)
                 return output
@@ -113,7 +114,7 @@ class RepairTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             env = installer_env(home)
             env["GHOST_ALICE_INSTALL_LOCALE"] = "en"
-            args = ("--platform", "codex", "--skip-source-health", "task-router")
+            args = ("--platform", "codex", "--local-source", "--skip-source-health", "task-router")
             result = self._run(env, *args)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             ghost = Path(home) / ".ghost-alice"

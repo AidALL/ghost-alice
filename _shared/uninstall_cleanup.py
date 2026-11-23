@@ -889,8 +889,9 @@ def _retired_host_evidence(platform: str, support: list[dict], record: dict | No
                     if not source.relative_hook_path_matches_repository(change, Path(origin)):
                         continue
                 elif change not in (manifest or {}).get('system_env_changes', []):
+                    versions = _ghost_alice_root() / 'versions'
                     package_hooks = (after.name == source.HOOKS_DIR and after.parent.name == 'core'
-                                     and after.parent.parent.parent == _ghost_alice_root() / 'versions')
+                                     and after.parent.parent.parent in (versions, versions.resolve()))
                     if change.get('repo_root') != Path(origin).as_posix() or (after != Path(origin) / source.HOOKS_DIR and not package_hooks):
                         continue
                 changes.append(change)
