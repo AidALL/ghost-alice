@@ -1,0 +1,27 @@
+4-7 failure location, W1 (Windows 11 25H2, Python 3.14.3, PYTHONUTF8=1), Autopilot checkout 4d9c45b
+(autopilot_storage.py identical to the installed 2075768 copy, line endings aside), 2026-11-23
+Script: trace47.py <autopilot checkout> 300  (same steps as test_parallel_advance_claims_ready_item_once)
+
+runs=300 failed_runs=7
+7 ('PermissionError', '__init__.py", line 771, in open <- __init__.py", line 787, in read_text <- autopilot_storage.py", line 55, in _raw')
+
+=== first traceback for PermissionError
+    return next(self.gen)
+  File "C:\Users\N-\ghost-alice-autopilot-win\addons\autopilot-mode\skill\adapters\autopilot_storage.py", line 444, in transaction
+    if not (run_dir / AUTHORITY_FILE).exists() or _raw(run_dir / AUTHORITY_FILE) != descriptor:
+                                                  ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\N-\ghost-alice-autopilot-win\addons\autopilot-mode\skill\adapters\autopilot_storage.py", line 55, in _raw
+    return json.loads(path.read_text())
+                      ~~~~~~~~~~~~~~^^
+  File "C:\Users\N-\AppData\Local\Programs\Python\Python314\Lib\pathlib\__init__.py", line 787, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\N-\AppData\Local\Programs\Python\Python314\Lib\pathlib\__init__.py", line 771, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: 'C:\\Users\\N-\\AppData\\Local\\Temp\\tmptvpzik1r\\authority.json'
+
+Competing write (autopilot_storage.py, after the SQLite transaction is closed):
+    if has_run and not descriptor.get("migration_complete"):   # 455
+        descriptor["migration_complete"] = True
+        _atomic(run_dir / AUTHORITY_FILE, descriptor)          # 457 -> os.replace(tmp, authority.json)

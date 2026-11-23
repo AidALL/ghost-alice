@@ -1,0 +1,24 @@
+4-2 real-session frequency, 2026-11-23
+
+Question: in real sessions, how often did the assistant itself run `autopilot_completion.py publish`
+(excluding pytest/test runner/search commands), and was any publication rejected?
+
+== kyu (W1): Claude Code transcripts ~/.claude/projects/*/*.jsonl (54 files), script count_publish.py
+real publish calls: 2
+2 ('Bash', 'reference-reuse/other', 'ok')
+  both on 2026-11-18 in one session, Git Bash, evidence-reference reuse (no completion text passed), both succeeded.
+Note: a plain text search found 198+ "completion publication rejected" strings; all were test output or report text.
+
+== jy, sk: Langfuse TEAM project export (2026-11-16 00:49 ~ 2026-11-23 07:28 UTC, 17,974 teammate observations),
+   script count_publish_lf.py
+shell tool observations (Bash/PowerShell) that carry command text (all observations in parentheses):
+  jy  319  (319: PowerShell 162, Bash 157)
+  sk  726  (948: Bash 884, PowerShell 64; span and event records)
+  unnamed sender 433  (813)
+real publish executions in shell tool records: 0 (the only jy shell record mentioning autopilot_completion was a file search)
+"completion publication rejected" in any observation output: 0
+Mentions of "publish" in LLM-call records were skill-instruction examples (e.g. "autopilot_completion.py publish --receipt-token CURRENT_TOKEN ...")
+or test output, not executions.
+
+Limits: Langfuse records are clipped when long; some sk conversation sessions were not sent to Langfuse;
+the Stop hook's shell-free recording path was not examined.

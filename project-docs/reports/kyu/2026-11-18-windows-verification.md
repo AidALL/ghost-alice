@@ -1,6 +1,6 @@
 # Autopilot 0.5.1 Windows 검증: 테스트 실패 22건 정리와 셸별 결과
 
-Nov 18, 2026 · kyu (Nov 19, 2026 갱신: 7절 · Nov 23, 2026 갱신: 4절 재작성, 8절, 부록 A)
+Nov 18, 2026 · kyu (Nov 19, 2026 갱신: 7절 · Nov 23, 2026 갱신: 4절 재작성, 8절, 부록 A · Nov 23, 2026 저녁 갱신: 4-1·4-2·4-3·4-7 리뷰 반영, 9절)
 
 - 기준 버전: `test-baseline-2026-11-16` (Core `c6019ac`, Autopilot `v0.5.1` `2075768`)
 - 확인 환경: Windows PC 3대(W1 kyu, W2 jy, W3 sk. 모두 시스템 로캘 ko-KR, cp949)와 비교용 Linux 2곳(WSL2 Ubuntu, GitHub Actions). 상세는 4.0절
@@ -50,7 +50,7 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
 | --- | --- | --- |
 | Ghost-ALICE Core | 0.5.1 + 팀 Windows 수정 (태그 `test-baseline-2026-11-16`) | `c6019ac` |
 | Ghost-ALICE Autopilot | 0.5.1 공식 (태그 `v0.5.1`) | `2075768` |
-| 비교용 AidALL Core 최신 | main | `7c78c69` (2026-11-16) |
+| 비교용 AidALL Core 최신 | main | `5730668` (2026-11-23) |
 
 **확인 환경**
 
@@ -67,7 +67,7 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
 | 구분 | 문제 | 처리 |
 | --- | --- | --- |
 | AidALL에 보고할 문제 (제품 코드) | 4-1, 4-3 (Windows), 4-2 (OS 무관, Windows에서 쉽게 발생) | 팀 범위 밖이라 기록만 함. 이슈 초안 준비됨 |
-| AidALL에 보고할 문제 (테스트, 제품 코드 가능성) | 4-7 | 관찰 중 (Windows PC 3대에서 실패, Linux 100회 통과) |
+| AidALL에 보고할 문제 (제품 코드, 경쟁 조건) | 4-7 | 원인 줄 확인 (Windows PC 3대에서 실패, Linux 100회 통과) |
 | 팀 내부에서 고친 문제 | 4-4, 4-5 | 수정 완료 |
 | Windows와 무관한 관찰 (모델 동작) | 부록 A-1 (이전 4-6) | 기록만 함 |
 
@@ -92,15 +92,26 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
   W2: {"continue": true, "systemMessage": "", "completion_recording": {"status": "recording-unavailable", "reason": "authority-missing"}}
   W3: {"continue": true, "systemMessage": "", "completion_recording": {"status": "recording-unavailable", "reason": "authority-unavailable"}}
   ```
-  세 PC 모두 `recovery` 항목이 없어, 설정 오류가 사용자에게 보이지 않습니다. 평소 설치 그대로인 W1·W2는 `authority-missing` 으로 같고, 별도 홈 폴더에 격리 설치한 W3만 `authority-unavailable` 입니다. 격리 환경이라 권한 정보를 찾는 결과가 달랐기 때문으로 봅니다(확인하지 않음). 문제의 핵심인 "`recovery` 없음"은 같습니다.
-- **원인:** "일반 파일 아래 경로"를 열 때 OS마다 다른 예외가 납니다. 어댑터는 `FileNotFoundError` 를 "실행 기록 없음"으로 처리합니다. 같은 스크립트를 두 OS에서 실행한 결과:
+  같은 명령을 L1(WSL2 Ubuntu, Autopilot 테스트 코드 `ad51900`)에서 실행한 결과 (종료 코드 0, 출력 일부):
+  ```
+  L1: {"continue": true, "systemMessage": "[autopilot-mode adapter error]\nerror: [Errno 20] Not a directory: '/tmp/.../not-a-directory/approved-run.json'\nGhost-ALICE Autopilot recording code cannot access recording state and parks dependent advancement. ...", "completion_recording": {"status": "recording-error", "reason": "authority-unavailable", ...}, "recov...
+  ```
+
+  | 항목 | Windows (W1·W2·W3) | Linux (L1) |
+  | --- | --- | --- |
+  | `completion_recording.status` | `recording-unavailable` (기록 없음) | `recording-error` (오류) |
+  | `systemMessage` | 빈 문자열 | `[autopilot-mode adapter error]` 안내 |
+  | `recovery` | 없음 | 있음 |
+
+  핵심 차이는 위 세 항목입니다. Windows에서는 설정 오류가 사용자에게 보이지 않습니다. `reason` 값은 Linux에서도 `authority-unavailable` 이므로 이 문제와 관계없습니다. W1·W2(`authority-missing`)와 W3(`authority-unavailable`)의 `reason` 차이는 W3가 별도 홈 폴더에 격리 설치한 환경이기 때문으로 봅니다(확인하지 않음).
+- **원인:** 어댑터는 `<실행 폴더>/approved-run.json` 을 엽니다. 실행 폴더 자리가 일반 파일이면 Windows는 `FileNotFoundError` 를 내고, 어댑터는 이를 "실행 기록 없음"으로 처리합니다. Linux는 `NotADirectoryError` 를 내어 오류 안내로 이어집니다. 같은 스크립트를 두 OS에서 실행한 결과:
 
   | 동작 | W1 (Windows 25H2, Python 3.14.3) | W3 (Windows 24H2, Python 3.14.7) | L1 (Linux, Python 3.14.4) |
   | --- | --- | --- | --- |
   | `open(<파일>/'x')` | `FileNotFoundError` (errno 2) | `FileNotFoundError` (errno 2) | `NotADirectoryError` (errno 20) |
   | `os.listdir(<파일>)` | `NotADirectoryError` (errno 20, WinError 267) | `NotADirectoryError` (errno 20, WinError 267) | `NotADirectoryError` (errno 20) |
 
-- **재현 범위:** Windows PC 3대 모두 같은 키트로 직접 재현(W2는 11/19 테스트 xfail도 재현). Windows 버전(24H2·25H2)과 Python 버전(3.14.3·3.14.7)이 달라도 같은 결과. L2(Linux CI)에서는 같은 테스트가 통과(기대 동작).
+- **재현 범위:** Windows PC 3대 모두 같은 키트로 직접 재현(W2는 11/19 테스트 xfail도 재현). Windows 버전(24H2·25H2)과 Python 버전(3.14.3·3.14.7)이 달라도 같은 결과. L1에서는 같은 명령으로, L2(Linux CI)에서는 같은 테스트로 기대 동작을 확인. 출력: [`4-1-adapter-linux-vs-windows-20261123.txt`](evidence/2026-11-23/4-1-adapter-linux-vs-windows-20261123.txt)
 - **영향:** 설정 오류가 조용히 묻힙니다. 데이터 손상은 확인되지 않았습니다.
 - **처리:** 기록만 함. 어댑터를 고치면 설치본 지문이 바뀌어 재설치가 필요합니다. 테스트는 Windows에서 xfail.
 
@@ -111,7 +122,7 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
 - **재현 환경:** W1 (Windows 11 25H2, Python 3.14.3, pytest 9.2.0), L1 (WSL2 Ubuntu, Python 3.14.4, pytest 9.2.0). 두 환경 모두 Autopilot 테스트 코드 `ad51900`(팀 `autopilot/main`), Core `c6019ac`.
 - **재현 방법:** 공식 테스트 `CompletionV2BoundaryTest.test_v2_cli_explicit_schema_publishes_and_reuses_exact_reference` 와 같은 준비 과정(응답 검토 기록 → 완료 문구 생성)을 거친 뒤, 완료 문구를 표준 입력 대신 **파일로** 넘깁니다. 같은 내용을 LF로 저장한 파일과 CRLF로 저장한 파일로 각각 `publish` 를 실행합니다.
   ```text
-  python autopilot_completion.py publish --schema-version autopilot-completion-receipt.v2     --receipt-token <token> --verified-at <time> --evidence-source <id>     --completion-file completion.md --criterion-dependencies-json <mapping>
+  python autopilot_completion.py publish --schema-version autopilot-completion-receipt.v2 --receipt-token <token> --verified-at <time> --evidence-source <id> --completion-file completion.md --criterion-dependencies-json <mapping>
   ```
   재현용 테스트([`test_zz_repro_crlf_completion_file.py`](evidence/2026-11-23/test_zz_repro_crlf_completion_file.py))가 이 과정을 자동으로 합니다.
 - **기대 결과:** 줄바꿈 형식과 관계없이 같은 완료 문구는 받아들여짐(종료 코드 0).
@@ -132,16 +143,21 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
   | Windows PowerShell 5.1 `Set-Content -Value @('줄1','줄2')` | CRLF |
   | PowerShell 7.7.0 `Set-Content -Value @('줄1','줄2')` | CRLF |
   | 텍스트 모드로 표준 입력에 넘기기 (Python `subprocess.run(..., text=True)`) | LF가 CRLF로 바뀜 (W1·W2·W3) |
-  | Git Bash 파이프 | 바이트 그대로 (문제 없음) |
+  | Git Bash 파이프 (`cat 파일 \| python autopilot_completion.py publish ... --completion-file -`) | 바이트 그대로 (672바이트). 기록 통과 |
+  | PowerShell 7.7.0 파이프 (`Get-Content -Raw 파일 \| python ... --completion-file -`) | 끝에 CRLF 1개 추가 (674바이트). **기록 통과** |
+  | Windows PowerShell 5.1 파이프 (같은 명령) | 맨 앞에 UTF-8 BOM(`ef bb bf`), 끝에 CRLF 추가 (677바이트). **거부:** `completion publication rejected: A retained explanation requires the current explanation route` |
+
+  파이프 세 줄은 실제 `publish` 까지 실행한 결과입니다(재현 테스트 [`test_zz_repro_pipe_completion.py`](evidence/2026-11-23/test_zz_repro_pipe_completion.py), 출력 [`4-2-pipe-20261123.txt`](evidence/2026-11-23/4-2-pipe-20261123.txt)). 끝에 붙은 줄바꿈은 허용되지만, 중간 줄바꿈(CRLF 파일)이나 맨 앞(BOM)이 바뀌면 거부됩니다. 원인(전달 중 바이트가 바뀜)은 같은데 바뀐 위치에 따라 오류 문구가 달라, 사용자가 원인을 짐작하기 어렵습니다. 파이프 실험은 테스트 실행기 환경(`PYTHONUTF8=1`)에서 영어만 있는 문구로 했습니다.
 
   공식 테스트 2건(`NativeGeneratedPublicationV2Test.test_generated_publish_command_and_native_stop_apply_exact_original_proof`, `CompletionV2BoundaryTest.test_v2_cli_explicit_schema_publishes_and_reuses_exact_reference`)이 Windows에서 같은 메시지로 실패한 것도 이 경로(텍스트 모드 입력) 때문입니다.
-- **재현 범위:** W1·L1에서 같은 결과. 줄바꿈만 다르면 OS와 관계없이 항상 재현됩니다(결정적).
-- **확인하지 않은 것:** Claude Code가 실제 세션에서 완료 문구를 파일로 저장해 넘기는 경우가 있는지. Claude Code는 Windows에서 Git Bash로 명령을 실행하므로, 표준 입력 경로에서는 영향이 없을 것으로 봅니다.
-- **처리:** 기록만 함. 제안: 비교 전에 줄바꿈을 LF로 정규화하거나, 거부 메시지에 "줄바꿈 형식(CRLF)이 다름"을 알려주기.
+- **재현 범위:** W1·L1에서 같은 결과. 줄바꿈만 다르면 OS와 관계없이 항상 재현됩니다(결정적). 파이프 결과는 W1에서 두 번 실행해 같았습니다.
+- **실제 사용에서의 빈도 (11/23 조사):** 실제 세션 기록에서 Claude가 `publish` 를 직접 실행한 경우를 셌습니다. kyu는 Claude Code 기록 파일 54개에서 2번(둘 다 Git Bash, 근거 재사용 방식, 성공), jy·sk는 Langfuse TEAM 기록(11/16~11/23)의 셸 명령 1,478건(jy 319, sk 726, 이름 없는 기록 433)에서 0번이었습니다. 거부 문구는 어디에도 없었습니다([`4-2-frequency-20261123.txt`](evidence/2026-11-23/4-2-frequency-20261123.txt)). 지금 쓰는 방식에서는 거의 생기지 않습니다. 다만 Windows의 Claude Code는 PowerShell 도구도 쓰고(jy 셸 명령의 절반이 PowerShell), Windows PowerShell 5.1로 넘기면 거부되므로 잠재 위험은 남습니다.
+- **확인하지 않은 것:** Stop 훅이 셸 없이 자동으로 기록하는 경로의 줄바꿈 처리. 평소 Windows PowerShell 5.1 창(`PYTHONUTF8` 없음)과 한글 문구에서의 파이프 결과. Langfuse 기록은 긴 내용이 잘려 일부 명령은 끝까지 보지 못했을 수 있습니다.
+- **처리:** 기록만 함. 제안: 이 비교는 "검토한 그대로인지"를 확인하는 장치이므로 한쪽만 바꾸지 말고, 검토 기록과 제출 문구에 같은 규칙(맨 앞 BOM 제거, 줄바꿈 LF 통일)을 적용하거나 거부 메시지에 "줄바꿈·BOM 차이"를 알려 주기. 실제 빈도가 낮아 우선순위는 낮습니다.
 
 ### 4-3. 한국어 Windows에서 Core 응답 검토 도구가 한국어 파일을 읽지 못함 (Core)
 
-- **대상:** `_shared/completion_assessment.py` 의 `prepare-response` / `record-response`. Core `c6019ac` 845·848·851줄, AidALL 최신 `7c78c69` 871·874·877줄. 설치본(`~/.ghost-alice/runtime/current/_shared/completion_assessment.py`)도 같은 코드입니다.
+- **대상:** `_shared/completion_assessment.py` 의 `prepare-response` / `record-response`. Core `c6019ac` 845·848·851줄. AidALL 최신 main `5730668`(2026-11-23)에도 974·977·980줄에 그대로 남아 있습니다. 설치본(`~/.ghost-alice/runtime/current/_shared/completion_assessment.py`)도 같은 코드입니다.
   ```python
   response_text=Path(args.response_file).read_text()           # 인코딩 지정 없음
   json.loads(Path(args.claims_file).read_text())
@@ -161,9 +177,10 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
   ```
 - **대조 실험:** 같은 명령을 `$env:PYTHONUTF8='1'` 로 실행하면 파일 읽기를 통과하고 다음 단계에서 `{"status": "unavailable", "reason": "authority-unavailable", "detail": "Exact ledger root is required"}` 를 냅니다(세션 정보를 주지 않았으므로 정상적인 거부). 원인이 파일 읽기 인코딩임을 보여 줍니다.
 - **재현 범위:** W1·W2·W3 세 PC 모두 같은 오류(`'cp949' codec can't decode byte 0xec`)와 같은 대조 결과(`PYTHONUTF8=1` 이면 통과)를 확인. 세 PC 모두 시스템 로캘 ko-KR, 코드 페이지 949입니다. 시스템 기본 인코딩이 UTF-8이 아닌 모든 Windows(한국어 cp949, 일본어 cp932, 중국어 cp936 등)와, 파일에 ASCII 밖 문자가 있는 경우에 생길 것으로 봅니다. 영어 Windows(cp1252)에서도 비ASCII 문자가 있으면 같은 종류의 오류가 날 수 있습니다(직접 확인하지 않음).
-- **확인하지 않은 것:** 훅 실행 경로(Stop 훅이 내부적으로 응답 검토를 읽는 경로)에서도 같은 문제가 생기는지.
-- **영향:** Ghost-ALICE 규칙이 요구하는 응답 검토 기록(`prepare-response`)을 한국어 답변으로는 남길 수 없습니다. 실제로 작업 세션에서 이 오류 때문에 응답 검토가 실패했습니다(부록 A-1).
-- **처리:** 기록만 함 (Core는 팀 범위 밖). 우회: `PYTHONUTF8=1`.
+- **같은 종류의 코드 (11/23 확인):** Core `c6019ac` `_shared` 에는 인코딩을 지정하지 않은 `read_text()` 가 7곳 있습니다(응답 검토 도구 3, 훅 설정 읽기 1, 설치 도구 2, 응답 경로 1). 그중 `hook_profile_gate.py:887` 은 훅이 실행될 때마다 `~/.claude/settings.json` 을 읽습니다. 읽기에 실패하면 오류를 조용히 넘기므로(`ValueError` 처리) 훅은 멈추지 않지만, 어댑터 지문 다시 맞추기 기능이 말없이 꺼질 수 있습니다. W1의 `settings.json` 은 ASCII만 있어 지금은 영향이 없고, 최근 24시간 훅 1,523번 실행에서 실패는 없었습니다.
+- **확인하지 않은 것:** `settings.json` 에 한글(경로, 권한 규칙 등)이 들어 있을 때의 훅 동작.
+- **영향:** Ghost-ALICE 규칙이 요구하는 응답 검토 기록(`prepare-response`)을 한국어 답변으로는 남길 수 없습니다. kyu 작업 세션에서 이 오류 때문에 응답 검토가 실패한 것을 관찰했습니다(부록 A-1).
+- **처리:** 기록만 함 (Core는 팀 범위 밖). 우회: `PYTHONUTF8=1`. 제안: 위 7곳 모두 `encoding="utf-8"` 지정. 영향이 확실하고 수정이 간단해 AidALL 이슈 1순위로 봅니다.
 
 ### 4-4. Windows 테스트 실행기가 Windows PowerShell 5.1에서 바로 멈춤 (팀 실행기, 수정 완료)
 
@@ -185,9 +202,9 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
 - **원인:** Autopilot 0.5.1과 AidALL Core 최신 main은 버전 짝이 맞지 않습니다(두 Core는 Git 기록이 이어져 있지 않음).
 - **처리:** 수정 완료. CI가 팀 태그 `test-baseline-2026-11-16` 의 Core를 받습니다.
 
-### 4-7. 병렬 상태 갱신 테스트가 Windows에서 가끔 실패함 (Autopilot 테스트, 관찰 중)
+### 4-7. 병렬 상태 갱신이 Windows에서 가끔 실패함 (Autopilot 상태 저장 코드, 원인 줄 확인)
 
-- **대상:** `tests/test_autopilot_state.py::AutopilotStateTest::test_parallel_advance_claims_ready_item_once`
+- **대상:** `addons/autopilot-mode/skill/adapters/autopilot_storage.py` 의 `transaction()` (Autopilot `2075768`, 설치본과 같은 코드). 드러나는 테스트: `tests/test_autopilot_state.py::AutopilotStateTest::test_parallel_advance_claims_ready_item_once`
 - **재현 환경:** W1 (Windows PowerShell 5.1, Python 3.14.3), W2 (Windows PowerShell 5.1, Python 3.14.4), W3 (Windows PowerShell 5.1, Python 3.14.7)
 - **재현 방법 (W1, 2026-11-23):** 이 테스트만 반복 실행합니다. 재현 키트 `ga_repro_kit.ps1 -Repeat N` 이 같은 일을 합니다.
   ```powershell
@@ -222,22 +239,37 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
   두 100회 실행은 같은 테스트 코드(Autopilot `ad51900`)와 같은 Core(`c6019ac`), 같은 pytest 9.2.0으로, 서로 겹치지 않게 차례로 실행했습니다(출력: [`4-7-loop-linux100-windows100-20261123.txt`](evidence/2026-11-23/4-7-loop-linux100-windows100-20261123.txt)). W2의 20회는 11/19 실패 때 쓴 테스트 폴더(`autopilot/windows-verify` `7663c9a`)와 venv로 실행했으며, 이 커밋의 테스트·어댑터 코드는 `ad51900` 과 같음을 확인했습니다.
 
   Windows PC 3대 모두에서 실패가 관찰됐습니다. 같은 테스트만 반복한 Windows 실행은 모두 147회이고 그중 9회가 실패했습니다(약 6%). PC마다 빈도 차이가 큽니다(W1 102회 중 2회, W3 20회 중 1회, W2 20회 중 6회). Linux는 100회 모두 통과했습니다. Windows에서만 나는 문제일 가능성이 높지만, 실패가 드물어서 Linux 100회 통과만으로 Linux에서 절대 안 난다고 단정하기는 어렵습니다(실패율이 1%라면 100회 연속 통과할 확률도 약 37%).
-- **원인 (추정):** 같은 프로세스 안의 두 스레드가 같은 상태 파일을 동시에 바꿀 때, Windows는 다른 핸들이 열고 있는 파일을 교체·삭제하는 것을 POSIX보다 엄격하게 막아 `PermissionError(13)` 이 납니다. 테스트가 아니라 상태 저장 코드(병렬 갱신 시 파일 교체)의 Windows 동작일 가능성이 높아 코드 확인이 필요합니다. 실제 사용에서 Stop 훅이 겹쳐 실행되면 같은 일이 생길 수 있습니다(확인하지 않음).
-- **처리:** 기록만 함. 원인 조사가 다음 단계입니다(상태 저장 코드에서 병렬 갱신 시 파일을 바꾸는 부분 확인).
+- **원인 (11/23 확인):** 테스트와 같은 상황을 W1에서 300회 반복하며 실패마다 오류 위치를 기록했습니다. 300회 중 7회 실패했고, 7회 모두 같은 곳이었습니다.
+  ```
+  autopilot_storage.py:444, in transaction
+      if not (run_dir / AUTHORITY_FILE).exists() or _raw(run_dir / AUTHORITY_FILE) != descriptor:
+  autopilot_storage.py:55, in _raw
+      return json.loads(path.read_text())
+  PermissionError: [Errno 13] Permission denied: '...\\authority.json'
+  ```
+  `transaction()` 은 SQLite 잠금(`BEGIN IMMEDIATE`) 안에서 444줄로 `authority.json` 을 읽습니다. 그런데 455~457줄은 잠금이 풀린 뒤에 같은 파일을 새 파일로 교체합니다(`_atomic()` 의 `os.replace`).
+  ```python
+      if has_run and not descriptor.get("migration_complete"):   # 455
+          descriptor["migration_complete"] = True
+          _atomic(run_dir / AUTHORITY_FILE, descriptor)          # 457: 잠금 밖에서 교체
+  ```
+  먼저 끝난 스레드가 잠금 밖에서 파일을 교체하는 순간, 잠금을 막 얻은 다른 스레드가 444줄에서 그 파일을 열면 Windows는 `PermissionError(13)` 을 냅니다. Linux의 `rename` 은 원자적이라 읽는 쪽이 옛 파일이나 새 파일 중 하나를 보게 되어 실패하지 않습니다. 재현 스크립트: [`trace47.py`](evidence/2026-11-23/trace47.py), 출력: [`4-7-trace-300-20261123.txt`](evidence/2026-11-23/4-7-trace-300-20261123.txt)
+- **실제 사용에서의 영향 (코드 읽기 기준, 확인하지 않음):** 455~457줄은 실행 폴더에 `migration_complete` 표시가 없을 때, 즉 새 Autopilot 실행을 처음 저장할 때만 실행됩니다. 실제로는 새 실행을 시작하는 순간 훅 두 개가 같은 실행 폴더를 동시에 갱신할 때만 생길 수 있습니다.
+- **처리:** 기록만 함(고치면 설치본 지문이 바뀜). 제안: 455~457줄의 `authority.json` 쓰기를 잠금 안으로 옮기거나, 444줄 읽기에서 `PermissionError` 가 나면 잠깐 뒤 다시 읽기. 원인 줄이 분명해 AidALL 이슈 2순위로 봅니다.
 
 테스트 쪽 차이 21건(Windows `chmod` 한계, 텍스트 모드 줄바꿈 변환, 경로 따옴표, 절대경로, 한국어 오류 문구 등)의 상세는 [발견 사항 문서](https://github.com/bogop8-star/ghost-alice/blob/autopilot/main/docs/windows-verification/2026-11-18-findings.md) 3절에 있습니다.
 
 ## 5. 확인하지 못한 것
 
 - 실제 Claude Code 세션에서 Windows 훅 전체 흐름. 테스트는 부품 단위 확인입니다.
-- 4-2: Claude Code 실제 세션에서 완료 문구를 파일로 넘기는 경우가 있는지 (CRLF 파일 거부 자체는 11/23 재현함)
-- 4-3: 훅 실행 경로에서도 cp949 오류가 나는지
-- 4-7: `PermissionError(13)` 을 내는 상태 저장 코드 위치 (원인은 추정)
+- 4-2: Stop 훅이 셸 없이 기록하는 경로의 줄바꿈 처리, 평소 Windows PowerShell 5.1 창과 한글 문구에서의 파이프 결과
+- 4-3: `settings.json` 에 한글이 있을 때의 훅 동작
+- 4-7: 실제 Claude 세션에서 새 실행을 시작할 때 훅이 겹치는 경우가 있는지
 - Linux에서 실제 Claude 세션으로 훅 동작 관찰
 
 ## 6. 다음 단계
 
-- 4-7 원인 조사: 상태 저장 코드에서 병렬 갱신 시 파일을 교체하는 부분 확인
+- AidALL 이슈 우선순위 제안: 1순위 4-3(영향 확실, 수정 간단), 2순위 4-7(원인 줄 확인), 3순위 4-1, 4순위 4-2(실제 빈도 낮음)
 - 4-1·4-2·4-3·4-7을 AidALL에 이슈로 낼지 결정. 4절은 AidALL 버그 리포트 양식 항목을 따르므로 그대로 옮길 수 있습니다. 이슈 초안은 준비되어 있습니다. [개선 보고서](../../improvement-report.md) 4번 "Windows 테스트 실패 22건"과 이번 결과의 관계도 확인이 필요합니다.
 - 저장소 README에 `autopilot/` 브랜치 안내와 "Core는 태그로 설치" 규칙 추가 (별도 PR)
 
@@ -258,6 +290,16 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
 - 4-7을 반복 실행했습니다. Windows 147회 중 9회 실패(세 PC 모두에서 관찰), Linux 100회 모두 통과.
 - 이전 4-6(Claude 규칙 누락)은 Windows와 관계없는 모델 동작이라 부록 A-1로 옮기고, kyu·jy·sk 기록의 Stop 훅 경고 수를 함께 적었습니다.
 - 증거 파일은 [`evidence/2026-11-23/`](evidence/2026-11-23/)에 있습니다.
+
+## 9. 11/23 리뷰 반영
+
+4절을 4-1부터 차례로 다시 검토하고, 근거가 약한 부분을 직접 확인해 고쳤습니다.
+
+- 4-1: 같은 재현 명령을 Linux(WSL2)에서 실행해 실제 출력을 넣었습니다. 핵심 차이를 `status`·`systemMessage`·`recovery` 세 항목으로 좁히고, 관계없는 `reason` 비교는 줄였습니다.
+- 4-2: PowerShell 파이프로 실제 `publish` 를 실행했습니다(Git Bash·PowerShell 7 통과, Windows PowerShell 5.1은 BOM 때문에 다른 문구로 거부). "Claude Code는 Git Bash를 쓴다"는 전제를 지우고, kyu·jy·sk 실제 세션 기록으로 발생 빈도(0건)를 적었습니다.
+- 4-3: 비교 버전을 오늘 나온 AidALL 최신 main(`5730668`)으로 바꿨습니다(같은 코드가 남아 있음). 훅이 매번 실행하는 `settings.json` 읽기도 같은 방식임을 적었습니다.
+- 4-7: 실패 위치를 300회 반복으로 잡아 원인 줄(444줄 읽기, 455~457줄 잠금 밖 쓰기)을 확인했습니다. 분류를 "테스트"에서 "제품 코드(경쟁 조건)"로 바꿨습니다.
+- AidALL 이슈 우선순위를 6절에 적었습니다.
 
 ## 부록 A. Windows와 관계없는 관찰
 

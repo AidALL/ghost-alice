@@ -1,0 +1,21 @@
+4-2 pipe reproduction on W1 (Windows 11 25H2, Python 3.14.3, Autopilot test checkout 4d9c45b), 2026-11-23
+Runner: scripts\run_windows_tests.ps1 (sets PYTHONUTF8=1, PYTHONIOENCODING=utf-8)
+Test: test_zz_repro_pipe_completion.py with pipe_shim.py (records the exact bytes the shell delivered, then
+forwards them to `autopilot_completion.py publish --completion-file -`). The reviewed completion block is 672 bytes, LF, ASCII only.
+
+Run 1
+[4-2 pipe] bash: sent=672B received=672B identical=True tail=' none\n' exit=0 stderr=
+[4-2 pipe] pwsh7: sent=672B received=674B identical=False tail='one\n\r\n' exit=0 stderr=
+[4-2 pipe] ps51: sent=672B received=677B identical=False tail='one\n\r\n' exit=2 stderr=completion publication rejected: A retained explanation requires the current explanation route
+
+Run 2 (byte details)
+[4-2 pipe] bash: sent=672B received=672B identical=True head=5b 63 6f 6d 70 6c crlf=0 lf=16 non_ascii=0/0 tail=' none\n' exit=0 stderr=
+[4-2 pipe] pwsh7: sent=672B received=674B identical=False head=5b 63 6f 6d 70 6c crlf=1 lf=17 non_ascii=0/0 tail='one\n\r\n' exit=0 stderr=
+[4-2 pipe] ps51: sent=672B received=677B identical=False head=ef bb bf 5b 63 6f crlf=1 lf=17 non_ascii=3/0 tail='one\n\r\n' exit=2 stderr=completion publication rejected: A retained explanation requires the current explanation route
+
+Shell output encodings: Windows PowerShell 5.1 $OutputEncoding = us-ascii, PowerShell 7 $OutputEncoding = utf-8
+
+Simple byte probe without publish ($s = "line1`nline2`n"; $s | python probe.py):
+  PowerShell 7:            b'line1\nline2\n\r\n'
+  Windows PowerShell 5.1:  b'line1\nline2\n\r\n'
+  Git Bash (printf):       b'line1\nline2\n'
