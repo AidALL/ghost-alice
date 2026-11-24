@@ -19,9 +19,10 @@ from datetime import datetime, timezone
 import uuid
 
 from installer_assets import _content_hashes, classify_skill_root, OWNERSHIP_GHOST_ALICE_MANAGED, OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED
-from install_destination import assert_mutation_path, ghost_root
+from install_destination import assert_mutation_path
+from installer import locations
 from install_transaction import _rename_path
-from install_state_writer import read_state
+from installed_payload import read_inventory
 import atomic_write
 import pending_manifest
 import state_retention
@@ -292,7 +293,7 @@ def _retire(path, *, ownership, backup_root, platform, source_root, pending_root
 
 def _recorded_source(path, pending_root, platform):
     state_path = Path(pending_root)/'install-state'/f'{platform}.json'
-    state = read_state(state_path)
+    state = read_inventory(state_path)
     if state is None:
         return None
     if state.get('platform', platform) != platform:
@@ -351,7 +352,7 @@ def retire_skill(path, *, platform, source_root, pending_root):
 
 def retire_command(path, *, source_root, pending_root=None):
     path = Path(path).absolute()
-    pending_root = Path(pending_root) if pending_root is not None else ghost_root()
+    pending_root = Path(pending_root) if pending_root is not None else locations.record_root()
     backup_root = path.parent.parent/'retired-command-backups'
     if path.name != 'jailbreak-detector.md':
         return {'action':'preserved', 'path':str(path)}

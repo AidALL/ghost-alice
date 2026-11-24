@@ -1,5 +1,6 @@
 import json, os, sys
 from pathlib import Path
+from installer import locations
 from retired_assets import retire_command
 from claude_commands import skill_command_body
 
@@ -65,7 +66,8 @@ def sync_platform(commands_dir, ext, make_content, label):
 
     if mode == "check":
         if missing or drift:
-            print(f"  {info_c} Run 'bash install.sh --sync-commands' to fix")
+            entry = os.environ.get('GHOST_ALICE_INSTALL_COMMAND') or locations.package_command(Path(__file__).resolve().parents[1])
+            print(f"  {info_c} Run {entry} --sync-commands to fix")
             exit_code = 1
         return
 

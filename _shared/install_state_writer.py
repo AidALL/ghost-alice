@@ -1,12 +1,12 @@
 import json
 import os
 import sys
-import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from hash_utils import hash_target
 import atomic_write
+from installed_payload import inventory_destination, read_inventory as read_state
 
 
 def as_posix(path):
@@ -22,24 +22,17 @@ def managed_markers(name, source_path, dest_path):
     return markers
 
 
-def read_state(path):
-    """Read the current inventory without adopting live files as a new baseline."""
-    path = Path(path)
+def preserve_unreadable(state_path):
+    """Move an inventory that cannot be read to a backup beside it and return (backup, cause); None for a readable or
+    absent inventory. Nothing in the unreadable file counts as installed: the caller goes on without an inventory."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
-    if isinstance(data, dict) and "targets" not in data and data.get("partial_failure") is True:
-        # The earlier postflight writer recorded observations without an inventory.
-        data = dict(data, targets=[])
-    if not isinstance(data, dict) or not isinstance(data.get("targets"), list):
-        raise ValueError(f"invalid install-state targets: {path}")
-    for target in data["targets"]:
-        if (not isinstance(target, dict) or not isinstance(target.get("dest_path"), str)
-                or not target["dest_path"] or not isinstance(target.get("target_name"), str)
-                or not target["target_name"]):
-            raise ValueError(f"invalid install-state target: {path}")
-    return data
+        read_state(state_path)
+    except (OSError, ValueError) as exc:
+        state = Path(state_path)
+        backup = state.with_name(state.name + "." + uuid.uuid4().hex + ".bak")
+        os.replace(state, backup)
+        return backup, exc
+    return None
 
 
 def record_partial_failure(state_path, platform, failures):
@@ -55,13 +48,11 @@ def record_partial_failure(state_path, platform, failures):
 
 
 def merge_system_env_changes(previous, changes):
-    """Carry rollback records forward; replace only the three setting owners this writer reads."""
+    """Carry rollback records forward; replace only the two setting owners this writer reads."""
     def owner(change):
         if not isinstance(change, dict):
             return None
         kind = change.get("kind")
-        if kind == "source_repo_hook_path" and isinstance(change.get("repo_root"), str):
-            return kind, change["repo_root"]
         if kind == "codex_hooks_feature_flag" and isinstance(change.get("path"), str):
             return kind, change["path"]
         if (kind == "codex_project_trust" and isinstance(change.get("path"), str)
@@ -79,10 +70,10 @@ def remove_targets(state_path, *, destinations=(), addon_id=None):
     data = read_state(state_path)
     if data is None:
         return 0
-    selected = {as_posix(path) for path in destinations}
+    selected = {inventory_destination(path) for path in destinations}
     previous = data["targets"]
     data["targets"] = [target for target in previous
-                       if as_posix(target["dest_path"]) not in selected
+                       if inventory_destination(target["dest_path"]) not in selected
                        and not (addon_id is not None and target.get("addon_id") == addon_id)]
     removed = len(previous) - len(data["targets"])
     if removed:
@@ -126,14 +117,10 @@ def main(argv=None):
         targets.append(target_record(name, source_path, dest_path, install_mode, source_root, installed_at))
 
     # Keep untouched Core rows and their original baselines; this invocation replaces only its own batch.
-    try:
-        previous = read_state(state_path)
-    except (OSError, ValueError) as exc:
-        state = Path(state_path)
-        backup = state.with_name(state.name + "." + uuid.uuid4().hex + ".bak")
-        shutil.copy2(state, backup, follow_symlinks=False)
-        print(f"Preserved unreadable install inventory at {backup}: {exc}", file=sys.stderr)
-        previous = None
+    preserved = preserve_unreadable(state_path)
+    if preserved:
+        print(f"Moved unreadable install inventory to {preserved[0]}: {preserved[1]}", file=sys.stderr)
+    previous = read_state(state_path)
     if previous is not None and previous.get("platform", platform) != platform:
         raise ValueError(f"install-state platform mismatch: {state_path}")
     by_destination = {as_posix(target["dest_path"]): {**({'source_root': previous['source_root']} if previous.get('source_root') else {}), **target}
@@ -212,19 +199,6 @@ def main(argv=None):
             dest_index[addon_dest] = addon_target
 
     system_env_changes = []
-    # The shared git hook path this install owns, whenever the installer knows the value the full uninstall restores.
-    if os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED") == "1":
-        before_present = os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT") == "1"
-        change = {
-            "kind": "source_repo_hook_path",
-            "repo_root": as_posix(os.environ.get('GHOST_ALICE_SOURCE_REPO_HOOK_ROOT') or source_root),
-            "before_present": before_present,
-            "before": os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE") if before_present else None,
-            "after": os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_AFTER", ""),
-            "applied_at": os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_APPLIED_AT") or installed_at,
-        }
-        system_env_changes.append(change)
-
     sidecar = Path(state_path).with_name(f"{platform}-hook-feature-change.json")
     if platform == "codex" and sidecar.exists():
         try:

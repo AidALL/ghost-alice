@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import shutil
 import sys
@@ -197,9 +198,23 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
         self.assertNotIn("Python.Python.3.13", install_sh)
         self.assertNotIn("Python.Python.3.14", install_sh)
 
-        # Every command runs through the Python cli, --help and --list included: the shell keeps no copy of them.
-        self.assertLess(install_sh.index("if ! _ensure_python_runtime_for_install; then"),
-                        install_sh.index('exec "$py" "${SCRIPT_DIR}/_shared/installer/cli.py" "$@"'))
+    def test_shell_forwards_arguments_and_exit_status_using_the_verified_interpreter(self):
+        bash = _find_test_bash()
+        if not bash:
+            self.skipTest("No non-WSL bash executable available for install.sh runtime test")
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            python = folder / 'python3'
+            python.write_bytes(b'#!/bin/sh\nif [ "$1" = -c ]; then touch "$PROBED"; exit 0; fi\n'
+                               b'[ -f "$PROBED" ] || exit 25\nprintf "%s\\n" "$@"\nexit 37\n')
+            python.chmod(0o755)
+            env = {**os.environ, 'PROBED': _bash_path(folder / 'probed')}
+            arguments = ['--help', 'two words']
+            result = subprocess.run([bash, '-c', 'export PATH="$1:$PATH"; shift; exec bash "$@"', 'test',
+                                     _bash_path(folder), _bash_path(REPO_ROOT / 'install.sh'), *arguments],
+                                    capture_output=True, text=True, env=env, timeout=30)
+            self.assertEqual(result.returncode, 37, result.stdout + result.stderr)
+            self.assertEqual(result.stdout.splitlines(), [_bash_path(REPO_ROOT / '_shared/installer/cli.py'), *arguments])
 
     def test_install_sh_python_bootstrap_rechecks_runtime_after_package_manager(self) -> None:
         bash_exe = _find_test_bash()
@@ -310,7 +325,6 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
         self.assertIn("Python 3.11+ is required", install_sh)
         self.assertIn("_find_python_runtime()", install_sh)
         self.assertIn('py="$(_find_python_runtime)"', install_sh)
-        self.assertIn('exec "$py" "${SCRIPT_DIR}/_shared/installer/cli.py" "$@"', install_sh)
 
     def test_install_ps1_requires_python_311_or_newer_without_upper_bound(self) -> None:
         install_ps1 = installer_ps1_source()

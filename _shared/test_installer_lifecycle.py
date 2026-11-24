@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import subprocess
 import sys
 import shutil
@@ -20,8 +21,9 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gateway_testing  # noqa: E402
 from context_gateway_model import LABEL  # noqa: E402
-from installer import lifecycle  # noqa: E402
+from installer import lifecycle, locations, runner  # noqa: E402
 from installer.runner import InstallerExit, ToolResult  # noqa: E402
+from installer.transaction import migrate_record  # noqa: E402
 from installer_testing import (hook_status, FakeRunner, destination_fixture, installer_observations,
                                make_context, make_source, quiet, use_source)  # noqa: E402
 
@@ -144,7 +146,7 @@ class UninstallTests(LifecycleCase):
         self.assertFalse(retired.exists())
         self.assertNotIn(str(retired), output)
         self.assertNotIn(str(current), output)
-        self.assertIn(f'The current work record location is {unknown}', output)
+        self.assertIn(lifecycle.report.message('move_relation_unknown', current_path=unknown), output)
 
     def test_addon_only_removal(self):
         # uninstall.sh:303-358
@@ -199,8 +201,10 @@ class UninstallTests(LifecycleCase):
         self.patches.enter_context(mock.patch("installer.transaction.remove_installed_target",
                                               side_effect=remove))
         self.patches.enter_context(mock.patch("installer.selection.has_managed_installs", return_value=False))
+        dropped = self.stub("installer.source.drop_unfinished_choices")
         rc, out = self.captured(lifecycle.uninstall, self.ctx, ["alpha", "fam"])
         self.assertEqual(rc, 1)
+        self.assertEqual(dropped.mock_calls, [mock.call("claude", ["two", "_shared"])])
         self.assertIn("[INFO] Removing selected skills...", out)
         self.assertIn("[WARN] Skipping alpha: an installed addon depends on it (use --force to override)", out)
         self.assertIn("[WARN] Dependency check failed for one; preserving its installed target", out)
@@ -242,23 +246,40 @@ class UninstallTests(LifecycleCase):
         self.patches.enter_context(mock.patch("installer.transaction.remove_installed_target", return_value={"action": "missing"}))
         self.patches.enter_context(mock.patch("installer.hosts.remove_claude_bootstrap_if_unused", return_value=False))
         self.patches.enter_context(mock.patch("installer.selection.has_managed_installs", return_value=True))
+        dropped = self.stub("installer.source.drop_unfinished_choices")
         rc, out = self.captured(lifecycle.uninstall, self.ctx, ["alpha"])
         self.assertEqual(rc, 0)
         self.assertIn("[INFO] No skills to remove.", out)
+        # An unfinished installation can still add a skill that is not installed.
+        self.assertEqual(dropped.mock_calls, [mock.call("claude", ["alpha"])])
 
 
 class FullUninstallTests(LifecycleCase):
     def test_full_uninstall_passes_cleanup_scope_and_failure_status(self):
         runner = FakeRunner()
         runner.respond_to("uninstall_cleanup.py", ToolResult(1))
+        dropped = self.stub("installer.source.drop_unfinished_choices")
         with runner.patch():
             self.assertEqual(lifecycle.run_full_uninstall(self.ctx), 1)
+        self.assertEqual(dropped.mock_calls, [mock.call("claude")])
         self.assertEqual(runner.tool_calls("uninstall_cleanup.py")[0],
                          ["--platform", "claude", "--install-state-manifest", str(self.ghost / "install-state" / "claude.json"),
                           "--apply"])
 
 
 class SelectedRemovalOwnershipTests(LifecycleCase):
+    def test_home_abbreviated_inventory_requires_the_requested_target_name(self):
+        alpha = self.installed('alpha')
+        self.inventory('alpha')
+        inventory = json.loads(self.state.read_text())
+        row = inventory['targets'][0]
+        row.update(target_name='another-skill', dest_path='~/' + alpha.relative_to(self.home).as_posix())
+        self.state.write_text(json.dumps(inventory))
+        rc, output = self.captured(lifecycle.uninstall, self.ctx, ['alpha'])
+        self.assertEqual(rc, 1, output)
+        self.assertTrue(alpha.exists())
+        self.assertEqual(json.loads(self.state.read_text()), inventory)
+
     def setUp(self):
         super().setUp()
         self.stub("installer.transaction.migrate_record")
@@ -524,7 +545,9 @@ class SelectedRemovalOwnershipTests(LifecycleCase):
         other.write_text(json.dumps(dict(platform='codex', source_root=str(self.source), targets=[
             dict(target_name='alpha', dest_path=str(alpha), install_mode='copy')])))
         other_bytes = other.read_bytes()
+        dropped = self.patches.enter_context(mock.patch('installer.source.drop_unfinished_choices'))
         self.assertEqual(self.captured(lifecycle.uninstall, self.ctx, ["alpha"])[0], 0)
+        self.assertEqual(dropped.mock_calls, [mock.call('claude', ['alpha', '_shared'])])
         self.assertTrue(alpha.exists())
         self.assertEqual(json.loads(self.state.read_text())['targets'], [])
         self.assertEqual(other.read_bytes(), other_bytes)
@@ -728,19 +751,57 @@ class RepairTests(LifecycleCase):
         super().setUp()
         self.stub("installer.transaction.migrate_record")
 
+    def record_selection(self, ctx, *skills):
+        import installed_payload
+        installed_payload.update(self.ghost, {"installer": {"commit": "abc123def"}, "targets": {
+            (ctx.skills_dir / name).as_posix(): dict(name=name, kind="support" if name == "_shared" else "skill",
+                provider="core", mode="copy", baseline="recorded", used_by=[ctx.platform])
+            for name in ("_shared", *skills)}})
+
     def test_repair_migrates_earlier_records_before_its_first_publish(self):
         # Repair publishes like install, so the first command that writes the install record migrates first.
+        self.stub("installer.transaction.migrate_record", side_effect=lambda ctx: self.record_selection(ctx, "task-router"))
         self.stub("installer.transaction.install_shared", 0)
         self.stub("installer.transaction.copy_target", True)
-        self.stub("installer.addons.repair_missing", True)
+        self.stub("installer.addons.repair_missing", (0, 0))
         (self.source / "task-router").mkdir()
         (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
         rc, _ = self.captured(lifecycle.run_repair, self.ctx)
         self.assertEqual(rc, 0)
         self.assertEqual(self.calls[:3], ["migrate_record", "install_shared", "copy_target"])
 
+    def test_recorded_leaf_skills_must_exist_before_any_repair_placement(self):
+        # A recorded leaf may have disappeared or become a family since the installation.
+        self.record_selection(self.ctx, "alpha", "fam", "missing-skill")
+        self.stub("installer.transaction.install_shared", 0)
+        self.stub("installer.transaction.copy_target", True)
+        self.assert_stopped("fam", "missing-skill", self.source)
+        self.assertNotIn("install_shared", self.calls)
+
+    def test_repair_uses_recorded_destinations_through_a_settings_alias(self):
+        from dataclasses import replace
+        import installed_payload
+        self.record_selection(self.ctx, "alpha")
+        expected = installed_payload.read(self.ghost)["targets"]
+        alias = self.home / "settings-alias"
+        alias.symlink_to(self.ctx.skills_dir.parent, target_is_directory=True)
+        ctx = replace(self.ctx, skills_dir=alias / "skills")
+        rc, out = self.captured(lifecycle.run_repair, ctx)
+        self.assertEqual(rc, 0, out)
+        for name in ("_shared/encoding_guard.py", "alpha/SKILL.md"):
+            self.assertTrue((ctx.skills_dir / name).is_file(), out)
+        self.assertEqual(set(installed_payload.read(self.ghost)["targets"]), set(expected))
+
+    def test_file_in_recorded_support_slot_stops_skill_repair_and_keeps_its_bytes(self):
+        self.record_selection(self.ctx, "alpha")
+        shared = self.ctx.skills_dir / "_shared"
+        shared.write_bytes(b"foreign bytes")
+        self.assert_stopped(shared)
+        self.assertEqual(shared.read_bytes(), b"foreign bytes")
+        self.assertFalse((self.ctx.skills_dir / "alpha").exists())
+
     def test_repair_reprovisions_missing_and_keeps_occupied_targets(self):
-        # install.sh:677-726
+        self.record_selection(self.ctx, "task-router", "writing-plans")
         (self.source / "task-router").mkdir()
         (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
         (self.source / "coding-convention" / "writing-plans").mkdir(parents=True)
@@ -749,42 +810,167 @@ class RepairTests(LifecycleCase):
         (self.ctx.skills_dir / "_shared").mkdir()
         self.stub("installer.transaction.install_shared", 0)
         self.stub("installer.transaction.link_or_copy", 0)
-        self.stub("installer.transaction.copy_target", True)
-        self.stub("installer.addons.repair_missing", True)
+        copied = self.stub("installer.transaction.copy_target", True)
+        self.stub("installer.addons.repair_missing", (0, 0))
         clean = {"_shared": True, "writing-plans": False}
         self.patches.enter_context(mock.patch("installer.preservation.is_clean_managed_target",
-                                              side_effect=lambda ctx, name, path: clean[name]))
+                                              side_effect=lambda ctx, name, path, **kwargs: clean[name]))
         rc, out = self.captured(lifecycle.run_repair, self.ctx)
         self.assertEqual(rc, 0)
-        self.assertIn("[INFO] Installer repair: re-provisioning missing managed targets...", out)
+        self.assertIn("[INFO] Installer repair for claude: re-provisioning missing managed targets...", out)
         self.assertIn("[OK] repair: re-provisioned task-router", out)
         self.assertIn("[WARN] repair: writing-plans is occupied and not cleanly managed; left untouched", out)
-        self.assertIn("[OK] Repair complete: 1 re-provisioned, 1 left untouched", out)
+        self.assertIn("[OK] Repair complete for claude: 1 re-provisioned, 1 left untouched", out)
         self.assertNotIn("install_shared", self.calls)
         self.assertEqual(self.calls.count("copy_target"), 1)
+        self.assertEqual(copied.call_args.kwargs, {"repair_from": self.source})
         self.assertNotIn("link_or_copy", self.calls)
 
     def test_repair_restores_missing_shared_and_uses_copies_for_codex(self):
         ctx = make_context(self.home, "codex")
+        self.record_selection(ctx, "task-router")
         ctx.skills_dir.mkdir(parents=True)
         (self.source / "task-router").mkdir()
         (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
         self.stub("installer.transaction.install_shared", 0)
         self.stub("installer.transaction.link_or_copy", 0)
         self.stub("installer.transaction.copy_target", True)
-        self.stub("installer.addons.repair_missing", True)
+        self.stub("installer.addons.repair_missing", (0, 0))
         rc, out = self.captured(lifecycle.run_repair, ctx)
         self.assertEqual(rc, 0)
         self.assertEqual(self.calls.count("install_shared"), 1)
         self.assertEqual(self.calls.count("copy_target"), 1)
         self.assertNotIn("link_or_copy", self.calls)
-        self.assertIn("[OK] Repair complete: 2 re-provisioned, 0 left untouched", out)
+        self.assertIn("[OK] Repair complete for codex: 2 re-provisioned, 0 left untouched", out)
+
+    def assert_stopped(self, *named):
+        """The repair of Claude restores nothing, and its message names `named`."""
+        for language in ("en", "ko"):
+            self.calls.clear()
+            with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_LOCALE": language}):
+                quiet(self.home)
+                rc, out = self.captured(lifecycle.run_repair, self.ctx)
+            self.assertEqual(rc, 1, out)
+            self.assertEqual(bool(re.search("[\uac00-\ud7a3]", out)), language == "ko", out)
+            for text in named:
+                self.assertIn(str(text), out)
+            self.assertNotIn("Repair complete", out)
+            self.assertNotIn("copy_target", self.calls)
+
+    def test_repair_stops_when_no_record_identifies_what_is_installed(self):
+        import installed_payload
+        self.stub("installer.addons.repair_missing", (0, 0))
+        inventory = self.ghost / "install-state/claude.json"
+        inventory.parent.mkdir(parents=True)
+        command = locations.package_command(runner.REPO_ROOT, "--platform", "claude")
+        with self.subTest("no record"):
+            self.assert_stopped(command)
+        # An earlier installer left this file after a failed installation.
+        inventory.write_text(json.dumps({"partial_failure": True}), encoding="utf-8")
+        with self.subTest("a failed installation"):
+            self.assert_stopped(command)
+        installed_payload.update(self.ghost, {"targets": {}})
+        with self.subTest("a record without targets"):
+            self.assert_stopped(command)
+        # The gateway registration alone writes such a record: it names no installer, and the host has no inventory.
+        inventory.unlink()
+        with self.subTest("a record without an installer"):
+            self.assert_stopped(command)
+        inventory.write_text(json.dumps({"partial_failure": True}), encoding="utf-8")
+        self.record_selection(make_context(self.home, "codex"), "alpha")
+        with self.subTest("a record of another host"):
+            self.assert_stopped(command)
+        with self.subTest("a host without an installation"):
+            inventory.unlink()
+            rc, out = self.captured(lifecycle.run_repair, self.ctx)
+            self.assertEqual(rc, 0, out)
+            self.assertIn("[OK] Repair complete for claude: 0 re-provisioned, 0 left untouched", out)
+
+    def test_repair_migrates_no_record_while_an_inventory_cannot_be_read(self):
+        self.stub("installer.addons.repair_missing", (0, 0))
+        self.stub("installer.transaction.install_shared", 0)
+        self.stub("installer.transaction.migrate_record", side_effect=migrate_record)
+        folder = self.ghost / "install-state"
+        folder.mkdir(parents=True)
+        for host in locations.PLATFORMS:
+            inventory = folder / f"{host}.json"
+            for content in (b"{broken", b"\xff", b'{"targets": {}}', None):
+                with self.subTest(host=host, content=content):
+                    if content is None:  # A folder in its place cannot be read as a file.
+                        inventory.unlink()
+                        inventory.mkdir()
+                    else:
+                        inventory.write_bytes(content)
+                    self.assert_stopped(inventory, locations.package_command(runner.REPO_ROOT, "--platform", host))
+                    self.assertIsNone(lifecycle.installed_payload.read(self.ghost))
+            inventory.rmdir()
+        with self.subTest("a file that is no inventory"):
+            (folder / "claude-registry-health.json").write_text("[]", encoding="utf-8")
+            self.assertIsNone(self.captured(migrate_record, self.ctx)[0])
+            self.assertIsNone(lifecycle.installed_payload.read(self.ghost))
+            self.record_selection(self.ctx)
+            rc, out = self.captured(lifecycle.run_repair, self.ctx)
+            self.assertEqual(rc, 0, out)
+        with self.subTest("a current record"):
+            inventory.write_bytes(b"{broken")
+            rc, out = self.captured(lifecycle.run_repair, self.ctx)
+            self.assertEqual(rc, 0, out)
+
+    def test_repair_restores_no_skill_without_the_shared_folder_that_it_needs(self):
+        import installed_payload
+        self.stub("installer.addons.repair_missing", (0, 0))
+        self.stub("installer.transaction.copy_target", True)
+        (self.source / "task-router").mkdir()
+        (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
+        installed_payload.update(self.ghost, {"targets": {(self.ctx.skills_dir / "task-router").as_posix(): dict(
+            name="task-router", kind="skill", provider="core", mode="copy", baseline="recorded", used_by=["claude"])}})
+        shared = self.ctx.skills_dir / "_shared"
+        self.assert_stopped(shared, locations.package_command(runner.REPO_ROOT, "--platform", "claude", "task-router"))
+        # A file at the support path is kept, and the repair says that it restored no support folder.
+        shared.write_text("a file of the user")
+        rc, out = self.captured(lifecycle.run_repair, self.ctx)
+        self.assertEqual((rc, self.calls.count("copy_target")), (1, 0), out)
+        self.assertIn(lifecycle.report.message("repair_shared_occupied", path=shared), out)
+        self.assertEqual(shared.read_text(), "a file of the user")
+        shared.unlink()
+        shared.mkdir()
+        rc, out = self.captured(lifecycle.run_repair, self.ctx)
+        self.assertEqual((rc, self.calls.count("copy_target")), (0, 1), out)
+
+    def test_repair_under_another_settings_folder_names_the_folder_of_the_installation(self):
+        import dataclasses
+        installed = dataclasses.replace(self.ctx, skills_dir=self.home / "first-settings" / "skills")
+        self.record_selection(installed, "task-router")
+        (self.source / "task-router").mkdir()
+        (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
+        self.stub("installer.transaction.install_shared", 0)
+        self.stub("installer.transaction.copy_target", True)
+        self.stub("installer.addons.repair_missing", (0, 0))
+        # The record names the host's skills in another folder: the repair places nothing here and names that folder.
+        rc, out = self.captured(lifecycle.run_repair, self.ctx)
+        self.assertEqual((rc, self.calls.count("copy_target"), self.calls.count("install_shared")), (1, 0, 0), out)
+        self.assertIn(lifecycle.report.message("repair_other_folder", host="claude", recorded=installed.skills_dir,
+                                               current=self.ctx.skills_dir), out)
+        self.assertEqual(list(self.ctx.skills_dir.iterdir()), [])
+        # With the settings of the installation the repair restores the skill there.
+        installed.skills_dir.mkdir(parents=True)
+        rc, out = self.captured(lifecycle.run_repair, installed)
+        self.assertEqual((rc, self.calls.count("copy_target"), self.calls.count("install_shared")), (0, 1, 1), out)
+
+    def test_repair_leaves_an_uninstalled_host_empty(self):
+        self.record_selection(make_context(self.home, "codex"), "task-router")
+        (self.source / "task-router").mkdir()
+        (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
+        rc, _ = self.captured(lifecycle.run_repair, self.ctx)
+        self.assertEqual(rc, 0)
+        self.assertEqual(list(self.ctx.skills_dir.iterdir()), [])
 
     def test_repair_propagates_a_shared_placement_failure(self):
         # A missing `_shared` that cannot be re-provisioned is a failed repair, not a repaired target.
+        self.record_selection(self.ctx)
         self.stub("installer.transaction.install_shared", 3)
         self.stub("installer.transaction.link_or_copy", 0)
-        self.stub("installer.addons.repair_missing", True)
+        self.stub("installer.addons.repair_missing", (0, 0))
         rc, out = self.captured(lifecycle.run_repair, self.ctx)
         self.assertEqual(rc, 3)
         self.assertEqual(self.calls.count("install_shared"), 1)
@@ -803,7 +989,7 @@ class RepairTests(LifecycleCase):
         effects = gateway_testing.FakeEffects(self.home, running=True, agent=agent)
         self.stub("installer.transaction.install_shared", 0)
         self.stub("installer.transaction.link_or_copy", 0)
-        self.stub("installer.addons.repair_missing", True)
+        self.stub("installer.addons.repair_missing", (0, 0))
         with mock.patch.object(sys, "platform", "darwin"), \
                 mock.patch("context_gateway_install._effects", return_value=effects):
             rc, out = self.captured(lifecycle.run_repair, self.ctx)
@@ -815,17 +1001,20 @@ class RepairTests(LifecycleCase):
         self.assertEqual(effects.service_calls(), [])
 
     def test_repair_failures(self):
+        self.record_selection(self.ctx, "task-router")
         (self.ctx.skills_dir / "_shared").mkdir()
         self.stub("installer.transaction.install_shared", 0)
         self.stub("installer.transaction.link_or_copy", 0)
         self.stub("installer.preservation.is_clean_managed_target", False)
-        self.stub("installer.addons.repair_missing", False)
+        self.stub("installer.addons.repair_missing", None)
+        (self.source / "task-router").mkdir()
+        (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
+        self.stub("installer.transaction.copy_target", True)
         rc, out = self.captured(lifecycle.run_repair, self.ctx)
         self.assertEqual(rc, 1)
         self.assertIn("[WARN] repair: _shared is occupied and not cleanly managed; left untouched", out)
-        self.assertIn("[ERROR] repair: addon target repair failed; see addon registry sidecars", out)
-        (self.source / "task-router").mkdir()
-        (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
+        self.assertIn("repair_missing", self.calls)
+        self.assertNotIn("Repair complete", out)
         self.patches.enter_context(mock.patch("installer.transaction.copy_target", return_value=False))
         rc, _ = self.captured(lifecycle.run_repair, self.ctx)
         self.assertEqual(rc, 1)

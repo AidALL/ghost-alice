@@ -56,6 +56,20 @@ class PathTests(LocationCase):
         with self.assertRaises(ValueError):
             locations.skills_dir("windows")
 
+    def test_the_commands_follow_the_operating_system(self):
+        for folder, posix, windows in (('plain', '{}', '{}'), ('two words', "'{}'", '"{}"')):
+            package = self.home / folder
+            for system, quoted, script, command in (('posix', posix, 'install.sh', 'ghost-alice'),
+                                                    ('nt', windows, 'install.ps1', 'ghost-alice.ps1')):
+                with self.subTest(folder=folder, system=system), mock.patch.object(locations.os, 'name', system), \
+                        mock.patch.object(locations, 'record_root', return_value=package):
+                    shell = 'bash ' if system == 'posix' else 'pwsh -NoProfile -ExecutionPolicy Bypass -File '
+                    self.assertEqual(locations.package_command(package), shell + quoted.format(package / script))
+                    self.assertEqual(locations.package_command(package, '--platform', 'claude'),
+                                     shell + quoted.format(package / script) + ' --platform claude')
+                    managed = quoted.format(package / 'bin' / command)
+                    self.assertEqual(locations.management_command(), shell + managed if system == 'nt' else managed)
+
     def test_ghost_root_and_state_paths(self):
         # targets.sh:373; install.sh:36, 88-89, 279, 629-632; report.sh:84
         ghost = self.home / ".ghost-alice"

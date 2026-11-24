@@ -130,6 +130,49 @@ class SourceTests(AddonCase):
         self.assertEqual(git.addon_sources, ["/cache/key"])
 
 
+class HeldAddonTests(AddonCase):
+    def test_unreadable_host_registration_stops_reinstall_and_names_the_file(self):
+        directory = addons.locations.addons_dir("codex")
+        directory.mkdir(parents=True)
+        sidecar = directory / "one.json"
+        sidecar.write_text("broken", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, r"codex[/\\]one\.json"):
+            addons.held_ids(self.context(), ["codex"])
+
+    def test_an_unreadable_registry_directory_cannot_mean_no_addons(self):
+        directory = addons.locations.addons_dir("codex")
+        directory.parent.mkdir(parents=True)
+        directory.write_text("not a directory", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "codex"):
+            addons.held_ids(self.context(), ["codex"])
+
+    def test_a_host_keeps_the_addon_ids_that_its_registry_names(self):
+        ctx = self.context(addon_sources=["/saved/a", "/saved/b"])
+        supplied = {"/saved/a": ["first", "second"], "/saved/b": ["third"]}
+        held = {"claude": ["first", "unrelated"], "codex": []}
+
+        def targets(host):
+            (source,) = host.addon_sources
+            return [Target(name, Path(source) / name, name) for name in supplied[source]]
+
+        def registrations(*, addons_dir):
+            return [{"addon_id": addon_id} for addon_id in held[Path(addons_dir).name]], []
+
+        with mock.patch("installer.addons.collect_addon_targets", side_effect=targets), \
+                mock.patch("addon_registry.scan_records", side_effect=registrations):
+            # One addon of a source with two addons stays alone; a host that holds none receives none.
+            self.assertEqual(addons.held_ids(ctx, ["claude", "codex"]), {"claude": {"/saved/a": ["first"]}, "codex": {}})
+            held["codex"] = ["third", "second"]
+            self.assertEqual(addons.held_ids(ctx, ["claude", "codex"]),
+                             {"claude": {"/saved/a": ["first"]}, "codex": {"/saved/a": ["second"], "/saved/b": ["third"]}})
+
+    def test_the_addon_tool_receives_the_addon_ids_of_the_host(self):
+        ctx = self.context(addon_sources=["/saved/a"])
+        self.assertEqual(addons.selection_args(ctx.addon_sources, ctx.addon_ids, "--source"), ["--source", "/saved/a"])
+        ctx.addon_ids = ["first", "second"]
+        self.assertEqual(addons.selection_args(ctx.addon_sources, ctx.addon_ids, "--source"), ["--source", "/saved/a", "--addon-id", "first", "--addon-id", "second"])
+
+
 class ManifestTests(AddonCase):
     def test_collect_addon_targets(self):
         # targets.sh:123-148 with --format json
@@ -221,14 +264,27 @@ class ManifestTests(AddonCase):
         # install.sh:665-675
         ctx = self.context("claude")
         with self.runner.patch():
-            self.assertTrue(addons.repair_missing(ctx))
+            self.assertEqual(addons.repair_missing(ctx), (0, 0))
         self.assertEqual(self.runner.calls, [])
         (self.home / ".ghost-alice" / "addons" / "claude").mkdir(parents=True)
+        self.runner.respond_to("addon_installer.py", ToolResult(0, json.dumps({
+            "repaired": [{"name": "placed"}], "kept": [{"name": "kept"}], "errors": []}), ""))
         with self.runner.patch():
-            self.assertTrue(addons.repair_missing(ctx))
+            self.assertEqual(addons.repair_missing(ctx), (1, 1))
         args = self.runner.tool_calls("addon_installer.py")[0]
         self.assertEqual(args[:3], ["repair-missing", "--platform", "claude"])
         self.assertEqual(args[args.index("--skills-dir") + 1], str(ctx.skills_dir))
+
+    def test_an_unreadable_addon_record_reports_its_filename_and_reason(self):
+        ctx = self.context("claude")
+        folder = self.home / ".ghost-alice/addons/claude"
+        folder.mkdir(parents=True)
+        (folder / "broken.json").write_text("{invalid")
+        with mock.patch("installer.runner.REPO_ROOT", Path(__file__).resolve().parents[1]), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            result = addons.repair_missing(ctx)
+        self.assertFalse(result)
+        self.assertIn("broken.json", output.getvalue())
 
 
 class UninstallHelperTests(AddonCase):

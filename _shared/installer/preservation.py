@@ -42,10 +42,10 @@ def encoding_guard(ctx: "Context", collected: "Collected") -> bool:
     return True
 
 
-def is_clean_managed_target(ctx: "Context", name: str, path: Path) -> bool:
+def is_clean_managed_target(ctx: "Context", name: str, path: Path, *, source_root: Path | None = None) -> bool:
     """`installer_assets_cli.py classify-clean`: the occupied slot is a clean Ghost-ALICE managed target."""
     return runner.run_tool("_shared/installer_assets_cli.py", "classify-clean", "--asset-id", name,
-                           "--path", str(path), "--repo-root", str(runner.REPO_ROOT), capture=True).ok
+                           "--path", str(path), "--repo-root", str(source_root or runner.REPO_ROOT), capture=True).ok
 
 
 def preflight(ctx: "Context", collected: "Collected") -> bool:

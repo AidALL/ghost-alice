@@ -881,6 +881,8 @@ class InvariantMatchTests(unittest.TestCase):
                 "uninstall-backup",
             ".ghost-alice/state-retention-failures.jsonl": "retention-failures",
             ".ghost-alice/rollbacks/20261021T150020837001Z-9768-5351ef10/journal.json": "publish-rollbacks",
+            ".ghost-alice/git-hooks/post-merge": "install-record",
+            ".ghost-alice/git-hooks/repositories.json": "install-record",
             ".claude/settings.json.bak": "hook-settings-backups",
             ".claude/skills/task-router": "installed-skills",
             ".agents/skills/_shared/state_retention.py": "installed-skills",
@@ -898,6 +900,8 @@ class InvariantMatchTests(unittest.TestCase):
 
     def test_an_empty_folder_matches_when_an_entry_lives_under_it(self):
         self.assertEqual(state_retention.entry_for(self.home / ".ghost-alice/install-state", self.roots, directory=True),
+                         "install-record")
+        self.assertEqual(state_retention.entry_for(self.home / ".ghost-alice/git-hooks", self.roots, directory=True),
                          "install-record")
         self.assertIsNone(state_retention.entry_for(self.home / ".ghost-alice/empty-new-folder", self.roots,
                                                     directory=True))

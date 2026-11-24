@@ -17,7 +17,7 @@ from xml.parsers.expat import ExpatError
 
 import hook_definitions
 import ledger_access
-from installer import locations, report, runner, source, terminal
+from installer import addons, locations, report, runner, source, terminal
 
 if TYPE_CHECKING:
     from installer.cli import Context
@@ -353,8 +353,7 @@ def install_hooks(ctx: "Context", action: str, platform: str, *, backup_sources=
         args.extend(["--core-source-root", str(runner.REPO_ROOT), "--visibility", ctx.options.visibility or "dynamic"])
     elif action == "status":
         args.append("--status")
-    for addon_source in ctx.addon_sources:
-        args.extend(["--addon-source", str(addon_source)])
+    args.extend(addons.selection_args(ctx.addon_sources, ctx.addon_ids, "--addon-source"))
     result = runner.run_tool('_shared/install_hooks.py', *args, '--format', 'json', capture=True,
                              env={'GHOST_ALICE_PROJECT_ROOT': str(source.resolve_source().root)})
     if result.stderr:
@@ -451,7 +450,7 @@ def remove_claude_bootstrap(ctx: "Context", require_change: bool = False) -> boo
 def remove_claude_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool:
     from installer import selection
 
-    if selection.has_managed_installs(skills_root, ctx.platform):
+    if selection.has_managed_installs(skills_root, ctx.platform) is not False:
         return False
     return remove_claude_bootstrap(ctx, True)
 
@@ -459,7 +458,7 @@ def remove_claude_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool
 def remove_codex_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool:
     from installer import selection
 
-    if selection.has_managed_installs(skills_root, ctx.platform):
+    if selection.has_managed_installs(skills_root, ctx.platform) is not False:
         return False
     codex_home = locations.codex_home()
     agents = codex_home / "AGENTS.md"

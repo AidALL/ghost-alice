@@ -43,21 +43,115 @@ class RecordCase(unittest.TestCase):
         self.addCleanup(install_lock.release_lock, self.ghost / "install.lock", generation)
 
 
-class SchemaAndWriteTests(RecordCase):
-    def test_later_publication_supersedes_pending_hosts_even_when_the_package_and_paths_match(self):
+class PendingSourceTests(RecordCase):
+    """The source facts that an earlier installer's interrupted activation left in their own file."""
+
+    def setUp(self):
+        super().setUp()
+        self.file = self.ghost / installed_payload.PENDING_SOURCE_FILENAME
+        self.package, self.checkout = str(self.home / 'package'), str(self.home / 'checkout')
+        self.ledger = str(self.home / 'checkout/records')
+        self.pending = {'active_root': self.package, 'source': self.source_for('claude')}
+
+    def source_for(self, *hosts):
+        return {'root': self.checkout,
+                'ledger_source_roots': {self.ledger: {'source_root': self.checkout, 'hosts': list(hosts)}}}
+
+    def left(self, pending=None) -> bytes:
+        self.file.write_text(json.dumps(self.pending if pending is None else pending), encoding='utf-8')
+        return self.file.read_bytes()
+
+    def test_the_reader_returns_the_saved_facts_and_none_without_the_file(self):
+        self.assertIsNone(installed_payload.pending_source(self.ghost))
+        content = self.left()
+        self.assertEqual(installed_payload.pending_source(self.ghost), self.pending)
+        self.assertEqual(self.file.read_bytes(), content)
+
+    def test_the_reader_refuses_content_that_names_no_package_source_or_relationship(self):
+        source, relations = self.pending['source'], self.pending['source']['ledger_source_roots']
+        contents = {
+            'not JSON': b'{',
+            'a list': json.dumps([self.pending]).encode(),
+            'no package': json.dumps({'source': source}).encode(),
+            'a relative package': json.dumps(dict(self.pending, active_root='package')).encode(),
+            'no source': json.dumps({'active_root': self.package}).encode(),
+            'a source that is a path': json.dumps(dict(self.pending, source=self.checkout)).encode(),
+            'no source root': json.dumps(dict(self.pending, source={'ledger_source_roots': relations})).encode(),
+            'a relative source root': json.dumps(dict(self.pending, source=dict(source, root='checkout'))).encode(),
+            'no relationships': json.dumps(dict(self.pending, source={'root': self.checkout})).encode(),
+            'a list of relationships': json.dumps(dict(
+                self.pending, source=dict(source, ledger_source_roots=[self.ledger]))).encode(),
+            'a relationship without hosts': json.dumps(dict(self.pending, source=dict(
+                source, ledger_source_roots={self.ledger: {'source_root': self.checkout}}))).encode(),
+        }
+        for label, content in contents.items():
+            with self.subTest(content=label):
+                self.file.write_bytes(content)
+                with self.assertRaises(installed_payload.RecordError):
+                    installed_payload.pending_source(self.ghost)
+                self.assertEqual(self.file.read_bytes(), content)
+
+    def test_the_reader_refuses_a_folder_and_a_link(self):
+        self.file.mkdir()
+        with self.assertRaises(installed_payload.RecordError):
+            installed_payload.pending_source(self.ghost)
+        self.file.rmdir()
+        outside = self.home / 'outside.json'
+        outside.write_text(json.dumps(self.pending), encoding='utf-8')
+        try:
+            self.file.symlink_to(outside)
+        except OSError as exc:
+            self.skipTest(f'symbolic links are unavailable: {exc}')
+        with self.assertRaises(installed_payload.RecordError):
+            installed_payload.pending_source(self.ghost)
+        self.assertTrue(self.file.is_symlink())
+
+    def test_only_the_record_of_the_interrupted_activation_matches(self):
+        installer, paths = {'active_root': self.package}, {self.ledger: self.checkout}
+        record = {'installer': installer, 'source': {'root': self.checkout, 'ledger_source_roots': paths}}
+        self.assertTrue(installed_payload.matches_pending(record, self.pending))
+        self.assertTrue(installed_payload.matches_pending(
+            {'installer': installer, 'source': {'root': self.checkout}},
+            {'active_root': self.package, 'source': {'root': self.checkout, 'ledger_source_roots': {}}}))
+        others = {
+            'no record': {},
+            'no package': dict(record, installer={}),
+            'another package': dict(record, installer={'active_root': self.package + '-next'}),
+            'no source': {'installer': installer},
+            'another source': dict(record, source={'root': self.checkout + '-next', 'ledger_source_roots': paths}),
+            'no relationship': dict(record, source={'root': self.checkout}),
+            'another path': dict(record, source={
+                'root': self.checkout, 'ledger_source_roots': {self.ledger + '-next': self.checkout}}),
+            'another source of the path': dict(record, source={
+                'root': self.checkout, 'ledger_source_roots': {self.ledger: self.checkout + '-next'}}),
+            'the hosts of a later publication': dict(record, source=self.source_for('codex')),
+        }
+        for label, other in others.items():
+            with self.subTest(record=label):
+                self.assertFalse(installed_payload.matches_pending(other, self.pending))
+
+    def test_a_record_write_neither_reads_nor_changes_the_file(self):
         self.hold_lock()
-        checkout = str(self.home / 'checkout')
-        ledger = str(self.home / 'checkout/records')
-        def source_for(host):
-            return {'root': checkout, 'ledger_source_roots': {ledger: {'source_root': checkout, 'hosts': [host]}}}
+        paths = {'root': self.checkout, 'ledger_source_roots': {self.ledger: self.checkout}}
+        for label, content in {'matching': json.dumps(self.pending).encode(),
+                               'of another package': json.dumps(dict(self.pending, active_root='/other')).encode(),
+                               'unreadable': b'{'}.items():
+            with self.subTest(pending=label):
+                installed_payload.update(self.ghost, {'installer': {'active_root': self.package}, 'source': paths})
+                self.file.write_bytes(content)
+                installed_payload.update(self.ghost, {'targets': {'/alpha': _entry()}})
+                record = installed_payload.read(self.ghost)
+                self.assertEqual((record['schema_version'], record['source'], list(record['targets'])),
+                                 (2, paths, ['/alpha']))
+                self.assertEqual(self.file.read_bytes(), content)
+                installed_payload.update(self.ghost, {'source': self.source_for('codex')})
+                record = installed_payload.read(self.ghost)
+                self.assertEqual((record['schema_version'], record['source']), (3, self.source_for('codex')))
+                self.assertEqual(self.file.read_bytes(), content)
+                self.file.unlink()
 
-        installed_payload.update(self.ghost, {'installer': {'active_root': str(self.home / 'package')},
-                                             'source': source_for('claude')}, defer_source=True)
-        installed_payload.update(self.ghost, {'source': source_for('codex')})
-        installed_payload.finish_pending_source(self.ghost)
-        self.assertFalse((self.ghost / installed_payload.PENDING_SOURCE_FILENAME).exists())
-        self.assertEqual(installed_payload.read(self.ghost)['source'], source_for('codex'))
 
+class SchemaAndWriteTests(RecordCase):
     def test_host_attribution_uses_a_versioned_detail_until_the_relation_is_released(self):
         self.hold_lock()
         ledger = str(self.home / 'original/ledger')
@@ -265,6 +359,16 @@ class SchemaAndWriteTests(RecordCase):
 
 
 class ReleaseTargetTests(RecordCase):
+    def test_record_lookup_uses_the_published_destination_spelling(self):
+        from pathlib import PureWindowsPath
+        import install_transaction
+        destination = PureWindowsPath(r'C:\skills\alpha')
+        original = self.home / 'old'
+        original.symlink_to('expected')
+        targets = {destination.as_posix(): _entry(link_target='expected')}
+        self.assertIsNone(install_transaction._original_cleanup_reason(original, {'dest': destination}, {'targets': targets}))
+        native = {str(destination): _entry(link_target='expected')}
+        self.assertIsNone(install_transaction._original_cleanup_reason(original, {'dest': destination}, {'targets': native}))
     def release(self, destination="/a", provider="core", platform="codex"):
         self.assertTrue(callable(getattr(installed_payload, "release_target", None)),
                         "installed_payload must own removal of a confirmed host reference")
@@ -499,8 +603,7 @@ class MigrationTests(RecordCase):
         self.assertEqual(record["schema_version"], 2)
         self.assertEqual(record["installer"], {"commit": "ccc333", "schema_version": 2})
         # The latest install-state names the source.
-        self.assertEqual(record["source"], {"root": self.source.as_posix(), "commit": "bbb222", "dirty": "clean",
-                                            "hooks_path": None})
+        self.assertEqual(record["source"], {"root": self.source.as_posix(), "commit": "bbb222", "dirty": "clean"})
         for absent in ("last_transaction", "addons", "adapters", "host_changes", "service"):
             self.assertNotIn(absent, record)
 
@@ -571,6 +674,19 @@ class MigrationTests(RecordCase):
         self.assertIsNone(self.migrate())
         self.assertFalse(self.record.exists())
 
+    def test_a_record_that_no_installer_wrote_still_takes_the_inventories(self):
+        self.hold_lock()
+        # A service registration can write the record of the current form before an installer has read the inventories.
+        installed_payload.update(self.ghost, {"targets": {}})
+        self.assertNotIn("installer", installed_payload.read(self.ghost))
+        self.assertIsNotNone(self.migrate())
+        record = installed_payload.read(self.ghost)
+        self.assertTrue(record["targets"] and "installer" in record)
+        # An installer has written the record now, so an inventory that comes back later is not taken again.
+        written = self.record.read_bytes()
+        self.assertIsNone(self.migrate())
+        self.assertEqual(self.record.read_bytes(), written)
+
     def test_install_states_with_unusual_install_times_still_name_the_source(self):
         # A time without an offset counts as UTC, and a value that is not a time counts as the earliest.
         self.hold_lock()
@@ -588,6 +704,24 @@ class MigrationTests(RecordCase):
                 self.migrate()
                 self.assertEqual(installed_payload.read(self.ghost)["source"]["commit"], "bbb222")
 
+    def test_a_saved_package_is_not_recorded_as_the_development_root(self):
+        self.hold_lock()
+        state_file = self.ghost / "install-state" / "codex.json"
+        linked = self.ghost.parent / "linked"
+        try:
+            linked.symlink_to(self.ghost, target_is_directory=True)
+        except OSError:  # Windows without the privilege to create links
+            linked = self.ghost
+        for source_root, recorded in ((self.ghost / "versions" / ("0" * 64) / "core", None),
+                                      (linked / "versions" / ("0" * 64) / "core", None), (self.source, self.source.as_posix())):
+            with self.subTest(source_root=source_root):
+                for name in installed_payload.RECORD_FILENAMES:
+                    (self.ghost / name).unlink(missing_ok=True)
+                state = json.loads(state_file.read_text(encoding="utf-8"))
+                state_file.write_text(json.dumps(dict(state, source_root=source_root.as_posix())), encoding="utf-8")
+                self.migrate()
+                self.assertEqual(installed_payload.read(self.ghost).get("source", {}).get("root"), recorded)
+
     def test_an_unreadable_install_state_contributes_no_entries(self):
         self.hold_lock()
         (self.ghost / "install-state" / "claude.json").write_text("{broken", encoding="utf-8")
@@ -595,6 +729,40 @@ class MigrationTests(RecordCase):
         targets = installed_payload.read(self.ghost)["targets"]
         self.assertEqual(summary["targets"], 4)
         self.assertTrue(all("codex" in entry["used_by"] for entry in targets.values()))
+
+    def test_invalid_row_disqualifies_the_whole_host_inventory(self):
+        self.hold_lock()
+        path = self.ghost / 'install-state' / 'claude.json'
+        old = json.loads(path.read_text())
+        old['targets'].append({'dest_path': '/unknown'})
+        path.write_text(json.dumps(old))
+        self.migrate()
+        record = installed_payload.read(self.ghost)
+        self.assertEqual({host for row in record['targets'].values() for host in row['used_by']}, {'codex'})
+        self.assertEqual(json.loads(path.read_text()), old)
+
+    def test_inventories_that_cannot_be_read_leave_the_migration_open(self):
+        self.hold_lock()
+        states = {path: path.read_text(encoding="utf-8") for path in (self.ghost / "install-state").glob("*.json")}
+        # The second form is what a failed first installation leaves: observations without a target.
+        for content in ("{broken", json.dumps({"schema_version": 1, "targets": [], "partial_failure": True})):
+            with self.subTest(content=content):
+                for path in states:
+                    path.write_text(content, encoding="utf-8")
+                self.assertIsNone(self.migrate())
+                self.assertFalse(self.record.exists())
+        for path, text in states.items():
+            path.write_text(text, encoding="utf-8")
+        self.assertTrue(self.migrate()["targets"])
+
+    def test_schema_1_targets_are_carried_without_a_readable_inventory(self):
+        self.hold_lock()
+        (self.ghost / installed_payload.LEGACY_FILENAME).write_text(
+            json.dumps({"schema_version": 1, "targets": {"/old": _entry()}}), encoding="utf-8")
+        for path in (self.ghost / "install-state").glob("*.json"):
+            path.write_text("{broken", encoding="utf-8")
+        self.assertEqual(self.migrate()["targets"], 1)
+        self.assertEqual(list(installed_payload.read(self.ghost)["targets"]), ["/old"])
 
     def test_migration_writes_only_under_the_install_lock(self):
         with self.assertRaises(installed_payload.NotLockHolder):

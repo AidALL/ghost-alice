@@ -272,6 +272,49 @@ class LocalizedMessageTests(ReportCase):
             self.assertNotIn(report.message("install_complete"), cancelled)
             self.assertIn(values["entry_command"] + " update", cancelled)
 
+    def test_the_refusal_of_an_earlier_request_names_its_command_in_the_selected_language(self):
+        command = '/saved package/core/install.sh'
+        for language in ('en', 'ko'):
+            with self.subTest(language=language), mock.patch.dict(os.environ, {'GHOST_ALICE_INSTALL_LOCALE': language}):
+                report.configure(home=self.home, tty=False)
+                output = self.captured(report.error, report.message('earlier_request', command=command))
+                self.assertEqual(output.count(command), 1, output)
+                # A request for another host or other skills needs its arguments again.
+                self.assertIn('--platform', output)
+                self.assertEqual(bool(re.search('[\uac00-\ud7a3]', output)), language == 'ko', output)
+
+    def test_a_stopped_update_names_the_command_that_keeps_the_recorded_remote(self):
+        expected = {
+            'en': ('without --remote', 'Run the update again', 'If an error above names another command, run that command.'),
+            'ko': ('--remote 없이', '갱신 명령을 다시 실행', '위 오류에 다른 명령이 안내되어 있으면 그 명령을 실행해 주세요.'),
+        }
+        for language, (command, repeated, condition) in expected.items():
+            with self.subTest(language=language):
+                self.configure_locale({'LANG': language})
+                changed = report.message('update_origin_changed')
+                self.assertIn(command, changed)
+                self.assertNotIn(repeated, changed)
+                # This message follows the error above it.
+                self.assertIn(condition, report.message('install_unfinished'))
+
+    def test_a_repair_that_cannot_restore_the_active_package_names_the_update(self):
+        for language in ('en', 'ko'):
+            with self.subTest(language=language):
+                self.configure_locale({'LANG': language})
+                text = report.message('active_version_mismatch', package='/package', update='/checkout/install.sh update')
+                self.assertIn('/checkout/install.sh update', text)
+                # The active installer's own message carries one whole sentence for the restoration.
+                restore = report.message('restore_from_registered', repair='/checkout/install.sh --repair')
+                self.assertIn('/checkout/install.sh --repair', restore)
+                replacement = report.message('replacement_update', command='/package/install.sh update')
+                text = report.message('active_core_lost', package='/package', file='/package/a', restore=restore,
+                                      replacement=replacement)
+                self.assertIn(restore + ' ', text)
+                self.assertIn('/package/install.sh update', text)
+                self.assertNotIn('{', text + report.message('restore_from_checkout'))
+                # An installation of other files would add every skill and replace the release.
+                self.assertNotIn('--local-source', text)
+
     def test_input_and_recovery_guidance_uses_the_selected_language(self):
         expected = {
             "en": {"move_invalid": "Press Enter, or type y, yes, n, or no", "move_wait_invalid": "Press Enter, or type n or no",
@@ -407,7 +450,7 @@ class LogTests(ReportCase):
         self.assertTrue(report.report_enabled())
         self.assertEqual(report.state().event_file, original.with_suffix('.events.jsonl'))
 
-    def test_final_result_keeps_details_and_a_later_parent_only_summary_cannot_replace_them(self):
+    def test_the_result_is_the_last_event_and_the_details_stay(self):
         digest = 'a' * 64
         version = self.home / '.ghost-alice/versions' / digest
         version.mkdir(parents=True)
@@ -420,17 +463,6 @@ class LogTests(ReportCase):
         self.assertIn('actual detail', log.read_text())
         self.assertEqual(json.loads(log.with_suffix('.events.jsonl').read_text().splitlines()[-1]),
                          dict(type='install-result', source_digest=digest, returncode=0))
-
-        # A legacy candidate writes elsewhere; the parent only emits a compatibility notice.
-        previous = log
-        original = previous.read_bytes()
-        report.configure(home=self.home)
-        summary = report.log_init()
-        self.captured(report.info, report.message('move_unsupported'))
-        report.finish_install('a' * 64, 0)
-        self.assertEqual(previous.read_bytes(), original)
-        self.assertTrue(summary.is_file())
-        self.assertFalse(summary.with_suffix('.events.jsonl').exists())
 
     def test_finishing_an_older_failure_keeps_both_current_files_and_the_previous_success(self):
         digest = 'a' * 64

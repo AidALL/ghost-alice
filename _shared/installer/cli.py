@@ -16,7 +16,12 @@ if __name__ == "__main__" and not __package__:
     # and does not make `installer` importable. Replace it with `_shared` and
     # run the package module once.
     sys.path[0] = str(Path(__file__).resolve().parents[1])
-    from installer.cli import main as _main  # noqa: E402
+    try:
+        from installer.cli import main as _main  # noqa: E402
+    except ImportError as error:
+        # This installer lost one of its modules; the shells report a lost `cli.py` with the same sentence.
+        raise SystemExit(f"[ERROR] This installer's files are incomplete: {error}. Run the repair from a Ghost-ALICE "
+                         "checkout that holds the same Core files.")
 
     raise SystemExit(_main())
 
@@ -34,6 +39,10 @@ from installer.runner import InstallerExit  # noqa: E402
 
 ISOLATED_REJECTION = "isolated destinations require the Python hook installer; shell source integration is unsupported"
 VISIBILITY_FLAGS = ("--visibility", "--agent-visibility")
+# The install source that the calling installer read before it downloaded the release.
+START_ORIGIN_ENV = 'GHOST_ALICE_START_ORIGIN'
+# The request that a starting installer sends to the release that it downloaded.
+ACQUIRED_RELEASE = '--install-acquired-release'
 
 
 @dataclass
@@ -50,6 +59,7 @@ class Options:
     update_source: bool = False
     cleanup_pending: bool = False
     addon_sources: list[str] = field(default_factory=list)
+    addon_ids: list[str] = field(default_factory=list)
     addon_tags: list[str] = field(default_factory=list)
     addon_skip: bool = False
     list_addons: bool = False
@@ -69,8 +79,9 @@ class Context:
     skills_dir: Path | None = None
     addon_sources: list[str] = field(default_factory=list)  # Effective install sources; Options retains the raw request.
     addon_sources_prepared: bool = False
+    addon_ids: list[str] | None = None  # The addons of the sources that this host's process installs; None means all.
+    held_addons: dict[str, dict[str, list[str]]] | None = None  # Per host and source, the ids `addons.held_ids` read.
     visibility: str = "dynamic"
-    hook_change: object | None = None
     record_source: dict | None = None
     source_match: object | None = None
 
@@ -96,13 +107,15 @@ class Command(HelpRow):
     option that `parse_options` records in that `Options` field wherever it
     appears. Install has no names: it runs when `args[0]` is empty or a skill
     name. `run(ctx)` returns the exit code. `lock` is the install-lock command
-    name held around `run` (None: no lock); `before_lock` runs first, outside
-    the lock. `platform` False: the command needs no platform, so
+    name held around `run` (None: no lock). `platform` False: the command needs no platform, so
     `--prompt-platform` does not ask and the addon sources are not prepared.
     `checks_source`: `dispatch` compares the install record's source with this
     checkout (`source.check_install_source`) before anything else changes, and
     `run_command` compares again under the lock. `adopts_source`: the command
     may replace the install source; without it only the recorded checkout runs it.
+    `active_runs`: the active installer runs the command. Another installer starts it with the
+    same options and returns its exit code while the active package is complete
+    (`source.active_installer`); otherwise this installer runs the command.
     """
 
     names: tuple[str, ...]
@@ -110,9 +123,9 @@ class Command(HelpRow):
     flag: str | None = None
     lock: str | None = None
     platform: bool = True
-    before_lock: Callable[["Context"], None] | None = None
     checks_source: bool = False
     adopts_source: bool = False
+    active_runs: bool = False
 
 
 COMMON, REMOVAL, ADVANCED = "Common commands", "Removal commands", "Advanced commands"
@@ -130,8 +143,7 @@ UNINSTALL = Command(REMOVAL, "--uninstall, -u",
                     names=("--uninstall", "--remove", "-u"),
                     run=lambda ctx: lifecycle.uninstall(ctx, ctx.options.args[1:]), lock="uninstall")
 INSTALL = Command(ADVANCED, "SKILL_NAMES", "Install specified skills only", names=(),
-                  run=lambda ctx: run_install(ctx), lock="install", before_lock=lambda ctx: prepare_install(ctx),
-                  checks_source=True, adopts_source=True)
+                  run=lambda ctx: run_install(ctx), lock="install", checks_source=True, adopts_source=True)
 COMMAND_LINE: tuple[HelpRow, ...] = (
     HelpRow(COMMON, "--platform, -p PLAT", "Choose claude | codex"),
     HelpRow(COMMON, "--prompt-platform", "Ask which AI tool to install"),
@@ -144,7 +156,8 @@ COMMAND_LINE: tuple[HelpRow, ...] = (
     Command(COMMON, "update [--remote URL]", "Update installed Core skills from the remote main branch",
             names=('update',), run=lambda ctx: run_update(ctx), platform=False),
     Command(COMMON, "--repair", "Re-provision missing managed targets (never overwrites an occupied slot that is not a clean managed target)",
-            names=("--repair",), run=lambda ctx: lifecycle.run_repair(ctx), lock="repair", checks_source=True),
+            names=("--repair",), run=lambda ctx: lifecycle.run_repair(ctx), lock="repair", checks_source=True,
+            active_runs=True),
     HelpRow(COMMON, "--verbose, -v", "Show per-target install details"),
     UNINSTALL,
     HelpRow(REMOVAL, "--platform PLAT --uninstall SKILL_NAMES", "Remove selected skills from one platform"),
@@ -187,51 +200,105 @@ def _fail(message: str, code: int = 1) -> None:
     raise InstallerExit(code)
 
 
-def install_release(options: Options, *, checkout_root: Path | None = None, cause: str = 'install') -> int:
+def install_release(root: Path, argv: list[str], *, remote: str | None = None, origin: dict | None = None) -> int:
+    """Download the release, let it install itself for `root` and return its exit code. Another command can change the
+    install source during the download, so the release receives the one read before it: `origin`, the registration of
+    an update, else the source of `root` with the registration."""
     prerequisites.require_git_for_release()
-    origin = source.input_record(checkout_root)
-    origin['remote'] = origin.get('remote') or source.DEFAULT_REMOTE
-    with source.acquire_release(origin['remote']) as checkout:
-        return dispatch(options, input_root=checkout, provenance=source.release_input(checkout, origin),
-                        execution_cause=cause)
+    if origin is None:
+        try:
+            record = install_transaction.record_after_recovery(locations.record_root())
+        except (installed_payload.RecordError, install_transaction.InstallTransactionError):
+            # The downloaded release may support a record that the starting installer cannot read.
+            record = None
+        origin = dict(source.input_record(root, record=record), registered=source.registration(record))
+    remote = remote or origin.get('remote') or source.DEFAULT_REMOTE
+    with source.acquire_release(remote) as release:
+        code = runner.run_command([sys.executable, str(release / '_shared/installer/cli.py'), ACQUIRED_RELEASE,
+                                   str(root), remote, *argv], inherit_stdin=True,
+                                  env={START_ORIGIN_ENV: json.dumps(origin)}).returncode
+        if code == 1:
+            report.info(report.message('release_older', remote=remote))
+        return code
 
 
-def run_update(ctx: Context, *, acquired_from: list[str] | None = None) -> int:
+def install_acquired(options: Options, root: str, remote: str) -> int:
+    """Install this downloaded release for `root`, the folder the calling installer started from, and for the install
+    source that it read before the download."""
+    if (source.install_request() or options.local_source or not remote or not Path(root).is_absolute()
+            or not Path(root).is_dir()):
+        raise ValueError('The downloaded release installs its own files for the folder and the remote that the calling '
+                         'installer passes')
+    if options.args[:1] == ['update']:
+        return update_acquired(build_context(options), remote=remote)
+    merged = options.args[:1] == ['--post-merge']
+    if not merged and find_command(options) is not INSTALL:
+        raise ValueError('The downloaded release accepts an installation, an update or a post-merge installation')
+    start = json.loads(os.environ.get(START_ORIGIN_ENV) or '{}')
+    if 'registered' not in start:
+        raise ValueError('The calling installer passes the install source that it read before the download')
+    # The files come from `remote`. The registration of the start decides, inside the install lock, whether this
+    # command may replace the installation.
+    return dispatch(Options() if merged else options,
+                    provenance=source.release_input(runner.REPO_ROOT, dict(start, remote=remote)),
+                    reinstall_from=Path(root), execution_cause='post-merge' if merged else 'install',
+                    registered=start['registered'])
+
+
+def _update_arguments(options: Options, *, downloaded: bool):
     import argparse
-    parser = argparse.ArgumentParser(prog='ghost-alice update', add_help=acquired_from is not None)
+    parser = argparse.ArgumentParser(prog='ghost-alice update', add_help=downloaded)
     parser.add_argument('--remote')
     parser.add_argument('--ref')
-    arguments = ctx.options.args[1:]
-    args = parser.parse_known_args(arguments)[0] if acquired_from is None else parser.parse_args(arguments)
-    if args.ref not in (None, 'main', source.RELEASE_REF) or '--local-source' in ctx.options.argv:
+    arguments = options.args[1:]
+    args = parser.parse_args(arguments) if downloaded else parser.parse_known_args(arguments)[0]
+    if args.ref not in (None, 'main', source.RELEASE_REF) or '--local-source' in options.argv:
         raise ValueError('Core update installs the remote main branch. To install local files, run the install script with --local-source.')
+    return args
+
+
+def _recorded_installation() -> tuple[dict, Path | None]:
     record_path = install_transaction.record_path_after_recovery(locations.record_root())
     record = installed_payload.read_file(record_path) or {}
-    recorded_source = record.get('source', {})
-    origin = dict(recorded_source, remote=args.remote or recorded_source.get('remote') or source.DEFAULT_REMOTE)
-    coordinates = [origin.get('root'), origin['remote'], args.ref or source.RELEASE_REF]
-    if acquired_from is None:
-        if not origin.get('root'):
-            raise ValueError('Update found no recorded installation source')
-        prerequisites.require_git_for_release()
-        # Older downloaded installers compare this ref to their command-line argument.
-        argv = list(ctx.options.argv)
-        if args.ref is None and recorded_source.get('ref') != source.RELEASE_REF:
-            argv.extend(['--ref', source.RELEASE_REF])
-        if args.remote is None and not recorded_source.get('remote'):
-            argv.extend(['--remote', origin['remote']])
-        with source.acquire_release(origin['remote']) as root:
-            return runner.run_command([sys.executable, str(root / '_shared/installer/cli.py'),
-                                       '--install-acquired-update', *coordinates, *argv], inherit_stdin=True).returncode
-    if acquired_from[:2] != coordinates[:2] or acquired_from[2] not in ('main', source.RELEASE_REF):
+    if source.registration(record) is None:
+        raise ValueError('Update found no recorded installation source')
+    return record, record_path
+
+
+def _require_registration(record: dict, expected: dict | None, cause: str) -> None:
+    if source.registration(record) != expected:
+        raise ValueError(report.message('update_origin_changed' if cause == 'update' else 'install_origin_changed'))
+
+
+def run_update(ctx: Context) -> int:
+    """Download the release from the recorded remote and let it update the installation."""
+    args = _update_arguments(ctx.options, downloaded=False)
+    record, _ = _recorded_installation()
+    origin = source.registration(record)
+    return install_release(runner.REPO_ROOT, list(ctx.options.argv),
+                           remote=args.remote or origin['remote'], origin=origin)
+
+
+def update_acquired(ctx: Context, *, remote: str | None = None, coordinates: list[str] | None = None) -> int:
+    """Update the installation from this downloaded release. `coordinates` holds the root, remote and ref that an
+    earlier installer passes with `--install-acquired-update`."""
+    args = _update_arguments(ctx.options, downloaded=True)
+    record, record_path = _recorded_installation()
+    registered = source.registration(record)
+    if remote is not None:
+        start_origin = os.environ.get(START_ORIGIN_ENV)
+        if start_origin is not None:
+            _require_registration(record, json.loads(start_origin), 'update')
+        if remote != (args.remote or registered['remote']):
+            raise ValueError(report.message('update_origin_changed'))
+    origin = dict(record['source'])
+    origin['remote'] = args.remote or registered['remote']
+    if coordinates is not None and (coordinates[:2] != [origin['root'], origin['remote']]
+                                    or coordinates[2:] not in (['main'], [source.RELEASE_REF])):
         raise ValueError(report.message('update_origin_changed'))
-    selected = selection.installed_core_selection(record, record_path)
-    if ctx.options.platform_explicit:
-        selected = {host: names for host, names in selected.items() if host == ctx.platform}
-    if not selected:
-        raise ValueError('Update found no installed Core skills to update')
-    return dispatch(replace(ctx.options, args=[], addon_skip=True), input_root=runner.REPO_ROOT,
-                    provenance=source.release_input(runner.REPO_ROOT, origin), selections=selected, execution_cause='update')
+    return dispatch(replace(ctx.options, args=[], addon_skip=True), execution_cause='update',
+                    provenance=source.release_input(runner.REPO_ROOT, origin), registered=registered,
+                    update_core=(record, selection.installed_core_selection(record, record_path)))
 
 
 def parse_options(argv: list[str]) -> Options:
@@ -282,6 +349,13 @@ def parse_options(argv: list[str]) -> Options:
                 _fail("--addon-source requires a value")
             options.addon_sources.append(tokens[index + 1])
             index += 2
+        elif token == "--addon-id":
+            if os.environ.get('GHOST_ALICE_INSTALL_HOST_CHILD') != '1':
+                _fail(report.message('private_addon_id'))
+            if not has_value:
+                _fail("--addon-id requires a value")
+            options.addon_ids.append(tokens[index + 1])
+            index += 2
         elif token == "--addon-tag":
             if not has_value:
                 _fail("--addon-tag requires a value")
@@ -303,6 +377,8 @@ def parse_options(argv: list[str]) -> Options:
         else:
             options.args.append(token)
             index += 1
+    if options.addon_ids and (not options.platform_explicit or find_command(options) is not INSTALL):
+        _fail(report.message('private_addon_id'))
     return options
 
 
@@ -377,7 +453,7 @@ def print_help() -> int:
     each section's rows in table order."""
     report.emit("Usage:")
     for arguments, comment in HELP_USAGE:
-        report.emit(f"  {report.install_command() + arguments:<45}# {comment}")
+        report.emit(f"  {report.install_command() + arguments:<44} # {comment}")
     for section in HELP_SECTIONS:
         report.emit("")
         report.emit(f"{section}:")
@@ -398,6 +474,7 @@ def build_context(options: Options) -> Context:
     return Context(options=options, platform=options.platform,
                    skills_dir=locations.skills_dir(options.platform),
                    addon_sources=[] if options.addon_skip else list(options.addon_sources),
+                   addon_ids=list(options.addon_ids) or None,
                    visibility=config.resolve_effective_visibility(options.visibility))
 
 
@@ -453,14 +530,6 @@ def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool
     return counts, installed, skipped
 
 
-def prepare_install(ctx: Context) -> None:
-    """Prerequisites and the git hook path, before the install lock."""
-    prerequisites.install_prerequisites()
-    ctx.hook_change = source.setup_git_hooks()
-    if ctx.hook_change.recorded:
-        ctx.record_source = dict(source.input_record(), hooks_path=ctx.hook_change.after)
-
-
 def run_install(ctx: Context) -> int:
     """For the skills in `args` (every skill when none), under the install
     lock that `run_command` takes and releases (`docs/reference/installer-architecture.md`)."""
@@ -468,13 +537,15 @@ def run_install(ctx: Context) -> int:
     skills = selection.requested_skills(ctx, ctx.platform)
     skills_dir = Path(ctx.skills_dir)
     visibility = ctx.visibility
-    # The first install over an earlier installer's records creates the install record before anything is placed.
-    report.run_logged(transaction.migrate_record, ctx)
     # Source, selection (the source check comes first)
     if not source.install_request() and not report.run_logged(source.check_source_health, skip=options.skip_source_health):
         raise InstallerExit(1)
     collected = selection.collect_targets(ctx, skills)
     skills_dir.mkdir(parents=True, exist_ok=True)
+    # An inventory that cannot be read names nothing that is installed: its owner keeps it as a backup, and the
+    # installation goes on with the install record and this command's selection.
+    inventory = locations.install_state_path(ctx.platform)
+    transaction.backup_unreadable_inventory(inventory)
     # Checks before any placement. Deprecated installed skills leave the
     # discovery path first, so that the encoding guard does not scan their content.
     if not report.run_logged(selection.cleanup_deprecated_installed_skills, ctx, skills_dir):
@@ -502,7 +573,7 @@ def run_install(ctx: Context) -> int:
         report.ok(f"Done: {installed} installed, {skipped} skipped")
         report.emit("")
         report.info(f"Install path: {skills_dir}")
-        report.info(f"To update the installed Core selection: {locations.management_command()} update")
+        report.info(f"To update the installed Core selection: {locations.management_command('update')}")
     # Runtime, hooks, managed blocks, commands (blocks after the runtime and hooks)
     if not report.run_logged(transaction.sync_runtime_shared, ctx):
         report.error("Runtime shared core sync failed. Aborting hook install")
@@ -537,7 +608,7 @@ def run_install(ctx: Context) -> int:
     report.run_logged(addons.migrate_state_once, ctx)
     if not report.run_logged(addons.write_sidecars, ctx, skills_dir):
         raise InstallerExit(1)
-    if not report.run_logged(transaction.write_install_state_manifest, ctx, skills_dir, copy_only, collected, ctx.hook_change):
+    if not report.run_logged(transaction.write_install_state_manifest, ctx, skills_dir, copy_only, collected):
         raise InstallerExit(1)
     if not report.run_logged(transaction.cleanup_obsolete_copies, ctx, collected):
         report.error('New placement is verified, but previous-original cleanup is incomplete; review the listed paths.')
@@ -574,51 +645,60 @@ def run_install(ctx: Context) -> int:
 
 
 def run_post_merge(ctx: Context) -> int:
-    """The step the install source's `hooks/post-merge` runs after a merge in any worktree: when the merged checkout
+    """The step that the registered `post-merge` hook runs after a merge in any worktree: when the merged checkout
     (`--merged-checkout`, else this checkout) is the checkout the install record names as the install source, the
     auto-mode install for every detected host; for any other checkout one line and nothing installed.
 
-    `source.match_install_source`, the judgment of the install source check, decides. The step takes no lock:
-    each host's install takes it and refuses while another install holds it, and the exit code tells the hook.
+    `source.match_install_source`, the judgment of the install source check, decides. The step takes no lock: the
+    installation that it starts takes it and refuses while another one holds it, and the exit code tells the hook.
     """
     merged = Path(ctx.options.merged_checkout) if ctx.options.merged_checkout else None
-    match = source.match_install_source(merged)
+    try:
+        record = install_transaction.record_after_recovery(locations.record_root())
+    except (installed_payload.RecordError, install_transaction.InstallTransactionError) as error:
+        report.warn(f"Post-merge: the install record cannot be read ({error}); nothing was installed.")
+        return 0
+    match = source.match_install_source(merged, record=record)
     if match.state == "same":
-        return install_release(Options(), checkout_root=match.here, cause='post-merge')
+        return install_release(match.here, ['--post-merge'], remote=record['source'].get('remote'),
+                               origin=dict(source.input_record(match.here), registered=source.registration(record)))
     if match.state == "other":
         report.info(f"Post-merge: the merged checkout {match.here} is not the install source ({match.recorded}); "
                     "nothing was installed.")
-    elif match.state == "unrecorded":
-        report.info("Post-merge: no install record names an install source; nothing was installed.")
     else:
-        report.warn(f"Post-merge: the install record cannot be read ({match.detail}); nothing was installed.")
+        report.info("Post-merge: no install record names an install source; nothing was installed.")
     return 0
 
 
+def _checks_source(command: Command) -> bool:
+    # The package has already checked the installation's starting registration under the lock its children inherit.
+    return command.checks_source and not (command is INSTALL and 'start_registration' in (source.install_request() or {}))
+
+
 def run_command(command: Command, ctx: Context) -> int:
-    """`before_lock`, then `run` under the command's install lock when it names one; the exit code of `run`.
+    """`run` under the command's install lock when it names one; the exit code of `run`.
     A command that `checks_source` compares the install source again once it holds the lock."""
-    if command.before_lock is not None:
-        command.before_lock(ctx)
     if command.lock is None:
         return command.run(ctx)
     lock_handle = (lock.acquire(command.lock, ctx.platform, inherit=True) if source.install_request()
                    else lock.acquire(command.lock, ctx.platform))
     try:
-        if command.checks_source:
+        if _checks_source(command):
             source.recheck_install_source(ctx, can_adopt=command.adopts_source)
         return command.run(ctx)
     finally:
         lock.release(lock_handle)
 
 
-def _dispatch(options: Options) -> int:
+def _dispatch(options: Options, *, install_context: Context | None = None) -> int:
     """`--addon` shortcuts, then the table's command (`find_command`): an unknown
     option ends with exit 1, the full uninstall and auto mode run once per
     detected platform, every other command runs once through `run_command`.
     A command that `checks_source` compares the install
     source first, before the addon sources are prepared; the auto mode compares
-    it once, in the parent."""
+    it once, in the parent. A command that the active installer runs (`active_runs`)
+    goes to it instead when another installer was started and the active package
+    states that command (`source.active_installer`)."""
     command = find_command(options)
     if command is None:
         report.error(f"Unknown option: {options.args[0]}")
@@ -636,8 +716,8 @@ def _dispatch(options: Options) -> int:
         if not detected:
             report.warn("No AI platform home directories detected. At least one of ~/.claude, ~/.codex is required.")
             return 0
-        ctx = build_context(options)
-        if command.checks_source:
+        ctx = install_context or build_context(options)
+        if _checks_source(command):
             source.check_install_source(ctx, can_adopt=command.adopts_source)
         if not options.addon_skip and ctx.addon_sources:
             addons.prepare_sources(ctx)
@@ -648,8 +728,14 @@ def _dispatch(options: Options) -> int:
         else:
             options.platform = prompt_platform()
     ctx = build_context(options)
-    if command.checks_source:
+    if _checks_source(command):
         source.check_install_source(ctx, can_adopt=command.adopts_source)
+    if command.active_runs:
+        # The active installer chooses and copies what this command restores; this installer has checked the install
+        # source and now only starts that installer and returns its exit code.
+        active = source.active_installer(command.names[0])
+        if active is not None:
+            return _start_active(auto.child_command(ctx, ctx.platform, package=active))
     if command.platform and not options.addon_skip and ctx.addon_sources:
         addons.prepare_sources(ctx)
     return run_command(command, ctx)
@@ -728,19 +814,31 @@ def confirm_host_shutdown(platforms, *, interactive: bool) -> bool:
             time.sleep(0.1)
 
 
-def dispatch(options: Options, *, input_root: Path | None = None, provenance: dict | None = None,
-             selections: dict[str, list[str]] | None = None, execution_cause: str = 'install') -> int:
-    """Run an install from a fixed candidate; activate it only after the whole request succeeds."""
+def _start_active(command: list[str]) -> int:
+    """Run `command` of the active installer with the terminal, outside any install request; its exit code."""
+    return runner.run_command(command, inherit_stdin=True,
+                              env={source.REQUEST_ENV: '', 'GHOST_ALICE_INSTALL_HOST_CHILD': '0'}).returncode
+
+
+def _report_unfinished(execution_cause: str, package: Path) -> None:
+    """Name the command that continues the installation of `package` that did not finish, and the active installer."""
+    active = source.active_root()
+    if execution_cause == 'post-merge':
+        # The plain command of another active package installs that package's release again.
+        command = locations.management_command(*(() if active == str(package) else ('update',)))
+        report.error(report.message('merged_install_unfinished', command=command))
+    else:
+        report.error(report.message('install_unfinished'))
+    if active:
+        report.error(report.message('active_installer', active=active))
+
+
+def dispatch(options: Options, *, provenance: dict | None = None, reinstall_from: Path | None = None,
+             execution_cause: str = 'install', registered: object = ..., update_core: tuple[dict, dict] | None = None) -> int:
+    """Prepare this package as a fixed candidate; the candidate activates and places itself."""
     request = source.install_request()
     if request and request.get('stage') == 'record-move':
         from installer import record_move
-        root = locations.record_root()
-        if os.path.lexists(root / installed_payload.PENDING_SOURCE_FILENAME) or install_transaction.unfinished(root):
-            handle = lock.acquire('activate', 'installer')
-            try:
-                installed_payload.finish_pending_source(root, selected_package=runner.REPO_ROOT)
-            finally:
-                lock.release(handle)
         return record_move.run(request['execution_cause'])
     if find_command(options) is not INSTALL:
         return _dispatch(options)
@@ -748,27 +846,43 @@ def dispatch(options: Options, *, input_root: Path | None = None, provenance: di
         options.platform = prompt_platform()
         options.platform_explicit = True
         options.prompt_platform = False
-    selected = selections if selections is not None else (request or {}).get('selections')
-    if selected is None and request is None and execution_cause != 'post-merge' and not options.args:
-        selected = source.reinstall_selection()
-        if selected is not None and options.platform_explicit:
-            selected = {host: names for host, names in selected.items() if host == options.platform}
+    platform = options.platform if options.platform_explicit else None
+    selected = (request or {}).get('selections')
+    package_source = reinstall_from or runner.REPO_ROOT
+    uses_recorded_selection = request is None and (update_core is not None or (
+        execution_cause == 'install' and not options.args and source.saved_package(package_source)))
+    if uses_recorded_selection:
+        record, installed = update_core if update_core is not None else source.recorded_core()
+        selected = source.reinstall_selection(None if update_core is not None else package_source,
+                                              core=(record, installed), platform=platform)
     platforms = list(selected) if selected is not None else (
         locations.detect_present_platforms() if auto_detect_requested(options) else [options.platform])
     if not platforms:
         report.warn('No AI platform home directories detected. At least one of ~/.claude, ~/.codex is required.')
         return 0
+    if not uses_recorded_selection:
+        record, installed = source.recorded_core()
     ctx = build_context(options)
+    chosen = selected if selected is not None else {host: options.args or list(selection.ALL_SKILLS) for host in platforms}
     if any(host not in locations.PLATFORMS for host in platforms):
         raise ValueError('Update requires adapters for installed hosts: ' + ', '.join(host for host in platforms if host not in locations.PLATFORMS))
     if request is None:
-        source.check_install_source(ctx, match=source.match_install_source(Path(provenance['root'])) if provenance else None)
+        if registered is ...:
+            registered = source.registration(record)
+        else:
+            _require_registration(record, registered, execution_cause)
+        if source.saved_package(runner.REPO_ROOT):
+            source.check_saved_package(runner.REPO_ROOT.parent)
+        selection.validate_requested_skills(
+            sorted({name for names in selected.values() for name in names}) if selected is not None else options.args)
+        input_source = provenance if provenance is not None else source.input_record(record=record)
+        if update_core is None and execution_cause != 'post-merge':
+            match = source.match_install_source(Path(input_source['root']), record=record)
+            source.check_install_source(ctx, match=match)
         confirmed_project = hosts.confirm_project_trust(platforms, project_root=Path(provenance['root']) if provenance else None)
-        if not source.check_source_health(skip=options.skip_source_health, **({'input_root': input_root} if input_root else {})):
+        if not source.check_source_health(skip=options.skip_source_health):
             return 1
     ghost_root = locations.record_root()
-    record_path = install_transaction.record_path_after_recovery(ghost_root)
-    installed = selection.installed_core_selection(installed_payload.read_file(record_path) or {}, record_path)
     shutdown_hosts = set(platforms) | set(installed)
     pending = install_transaction.unfinished(ghost_root)
     for txid in pending:
@@ -790,71 +904,82 @@ def dispatch(options: Options, *, input_root: Path | None = None, provenance: di
             _details_log()
         return 1
     if request is None:
+        prerequisites.install_prerequisites()
         if not options.addon_skip and ctx.addon_sources:
             addons.prepare_sources(ctx)
-        input_source = provenance if provenance is not None else source.input_record()
         handle = lock.acquire('prepare', ctx.platform)
         try:
-            folder, addon_commits = source.prepare_source(ctx, input_root=input_root, provenance=input_source,
-                selections=selected if selected is not None else {host: options.args or list(selection.ALL_SKILLS) for host in platforms})
-            source.check_record_reader(folder / 'core', locations.record_root())
+            folder, addon_commits = source.prepare_source(
+                ctx, provenance=input_source, selections=chosen,
+                active_runs=tuple(name for row in COMMANDS if row.active_runs for name in row.names))
         finally:
             lock.release(handle)
+        package = folder / 'core'
         ctx.addon_sources = list(addon_commits)
         ctx.addon_sources_prepared = True
-        request = dict(package_root=str(folder / 'core'), source=input_source, addon_commits=addon_commits,
-                       request_writer_reads_v3=True)
-        if execution_cause == 'post-merge':
-            request['execution_cause'] = execution_cause
+        common = dict(package_root=str(package), source=input_source)
         if log_file is not None:
-            request['log_file'] = str(log_file)
+            common['log_file'] = str(log_file)
+        request = dict(common, addon_commits=addon_commits, start_registration=registered)
+        if uses_recorded_selection:
+            request['start_core'] = source.for_platform(installed, platform)
+            if update_core is None:
+                request['reinstall_from'] = str(package_source)
+        if execution_cause != 'install':
+            request['execution_cause'] = execution_cause
         if selected is not None:
             request['selections'] = selected
-        command = auto.child_command(ctx, options.platform if options.platform_explicit else None, package=folder / 'core')
+            if auto_detect_requested(options) and ctx.addon_sources and folder.samefile(runner.REPO_ROOT.parent):
+                # A package that installs itself again installs for each host the addons that the host holds. The
+                # installer reads the host registrations under the install lock before activation.
+                request['held_addons'] = True
+        command = auto.child_command(ctx, options.platform if options.platform_explicit else None, package=package)
         result = runner.run_command(command, env={source.REQUEST_ENV: json.dumps(request), 'GHOST_ALICE_INSTALL_HOST_CHILD': '0',
                                                    'GHOST_ALICE_CONFIRMED_PROJECT_TRUST': confirmed_project})
-        if not result.ok:
-            active = (install_transaction.record_after_recovery(locations.record_root()) or {}).get('installer', {}).get('active_root')
-            if active:
-                report.error(report.message('candidate_failed', active=active))
-            else:
-                report.error(report.message('candidate_first_retry', package=folder / 'core' /
-                                            ('install.cmd' if os.name == 'nt' else 'install.sh')))
-            report.finish_install(folder.name, result.returncode)
-            return result.returncode
-        active_record = install_transaction.record_after_recovery(locations.record_root()) or {}
-        active = active_record.get('installer', {}).get('active_root')
-        if not active:
-            raise ValueError('The successful candidate did not record an active installer')
-        saved = json.loads((Path(active).parent / 'version.json').read_text(encoding='utf-8'))
-        if saved.get('record_move') is not True:
-            report.info(report.message('move_unsupported'))
-            report.finish_install(folder.name, 0)
-            return 0
-        followup = dict(package_root=active, source=active_record.get('source', {}),
-                        stage='record-move', execution_cause=execution_cause)
-        if log_file is not None:
-            followup['log_file'] = str(log_file)
-        result = runner.run_command([sys.executable, str(Path(active) / '_shared/installer/cli.py')],
-            inherit_stdin=True, env={source.REQUEST_ENV: json.dumps(followup),
-                                    'GHOST_ALICE_INSTALL_HOST_CHILD': '0'})
+        if result.ok:
+            followup = dict(common, stage='record-move', execution_cause=execution_cause)
+            result = runner.run_command([sys.executable, str(package / '_shared/installer/cli.py')], inherit_stdin=True,
+                                        env={source.REQUEST_ENV: json.dumps(followup), 'GHOST_ALICE_INSTALL_HOST_CHILD': '0'})
+        else:
+            _report_unfinished(execution_cause, package)
         report.finish_install(folder.name, result.returncode)
         return result.returncode
     if os.environ.get('GHOST_ALICE_INSTALL_HOST_CHILD') == '1':
         return _dispatch(options)
     handle = lock.acquire('install', ctx.platform)
     try:
-        if request.get('execution_cause') == 'post-merge' and source.match_install_source(Path(request['source']['root'])).state != 'same':
-            report.info(report.message('merged_origin_changed'))
-            return 1
-        if not source.request_writer_needs_v2():
-            installed_payload.finish_pending_source(locations.record_root())
-        initial = transaction.installed_ledger_locations().publication_source(source.input_record())
-        interim = source.check_previous_manager(initial)
-        result = _dispatch(options)
+        if 'start_registration' in request:
+            record, installed = source.recorded_core()
+            _require_registration(record, request['start_registration'], request.get('execution_cause', 'install'))
+            if request.get('execution_cause') == 'post-merge':
+                origin = request['source']
+                if source.match_install_source(Path(origin['root']), record=record).state != 'same':
+                    raise ValueError(report.message('merged_origin_changed'))
+                # A legacy record without a remote used the checkout's origin for this download.
+                remote = record['source'].get('remote')
+                if remote and remote != origin['remote']:
+                    raise ValueError(report.message('install_origin_changed'))
+            if 'start_core' in request:
+                if source.for_platform(installed, platform) != request['start_core']:
+                    raise ValueError(report.message('core_selection_changed'))
+                if 'reinstall_from' in request and source.reinstall_selection(
+                        Path(request['reinstall_from']), core=(record, installed), platform=platform) != selected:
+                    raise ValueError(report.message('core_selection_changed'))
+        else:
+            match = source.match_install_source()
+            if request.get('execution_cause') == 'post-merge' and match.state != 'same':
+                report.info(report.message('merged_origin_changed'))
+                return 1
+            if match.state == 'other' and not options.adopt_source:
+                source.check_install_source(ctx, match=match)
+            elif match.state == 'unrecorded':
+                options.adopt_source = True
+        if request.get('held_addons'):
+            ctx.held_addons = addons.held_ids(ctx, platforms)
+        transaction.activate(ctx, chosen)
+        result = _dispatch(options, install_context=ctx)
         if result == 0:
-            for line in source.finalize_source(ctx, runner.REPO_ROOT.parent, platforms,
-                                             before_handoff=initial if interim != initial else None):
+            for line in source.finalize_source(ctx, runner.REPO_ROOT.parent, platforms):
                 report.info(line)
         return result
     finally:
@@ -864,40 +989,52 @@ def dispatch(options: Options, *, input_root: Path | None = None, provenance: di
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the thin shells: returns the exit code; an early stop
     (`_fail`, the isolated rejection) becomes its code here."""
-    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv is None:
+        argv = sys.argv[1:]
+        if not os.environ.get('GHOST_ALICE_INSTALL_COMMAND'):
+            os.environ['GHOST_ALICE_INSTALL_COMMAND'] = (locations.management_command() if argv[:1] == ['--management-entry']
+                                                         else locations.package_command(runner.REPO_ROOT))
+    argv = list(argv)
     try:
+        if os.environ.get(source.EARLIER_REQUEST_ENV):
+            report.configure()
+            report.error(report.message('earlier_request', command=locations.package_command(runner.REPO_ROOT)))
+            return 1
         if argv[:1] == ['--management-entry']:
-            record = install_transaction.record_after_recovery(locations.record_root()) or {}
-            active = record.get('installer', {}).get('active_root')
-            if not active:
-                report.error('No successful installer package is active. Retry the candidate install from its reported path.')
+            active = source.active_root()
+            if active:
+                entry = Path(active) / '_shared/installer/cli.py'
+                if not entry.is_file():
+                    report.error(report.message('active_entry_missing', entry=entry))
+                    return 1
+                return _start_active([sys.executable, str(entry), *argv[1:]])
+            if '--post-merge' not in argv:
+                report.error('No installer is active. Run the installation command again.')
                 return 1
-            entry = Path(active) / '_shared/installer/cli.py'
-            if not entry.is_file():
-                report.error(f'The active installer is missing: {entry}')
-                return 1
-            return runner.run_command([sys.executable, str(entry), *argv[1:]],
-                                      inherit_stdin=True,
-                                      env={source.REQUEST_ENV: '', 'GHOST_ALICE_INSTALL_HOST_CHILD': '0'}).returncode
-        acquired_from = None
-        if argv[:1] == ['--install-acquired-update']:
-            acquired_from, argv = argv[1:4], argv[4:]
+            argv = argv[1:]
+        acquired = update_coordinates = None
+        if argv[:1] == [ACQUIRED_RELEASE]:
+            acquired, argv = argv[1:3], argv[3:]
+        elif argv[:1] == ['--install-acquired-update']:
+            update_coordinates, argv = argv[1:4], argv[4:]
         reject_isolated_destination(argv)
         # The downloaded version owns adapter names and install options for the public update command.
-        options = (Options(args=argv, argv=tuple(argv)) if argv[:1] == ['update'] and acquired_from is None
-                   else parse_options(argv))
+        options = (Options(args=argv, argv=tuple(argv))
+                   if argv[:1] == ['update'] and acquired is None and update_coordinates is None else parse_options(argv))
         request = source.install_request() or {}
         report.configure(verbose=options.verbose,
                          report_child=os.environ.get("GHOST_ALICE_INSTALL_REPORT_CHILD") == "1",
                          log_file=Path(request['log_file']) if request.get('log_file') else None)
         if request.get('log_file'):
             report.log_init()
-        if acquired_from is not None:
+        if acquired is not None:
+            return install_acquired(options, *(acquired + ['', ''])[:2])
+        if update_coordinates is not None:
             if options.args[:1] != ['update'] or request:
                 raise ValueError('The acquired update entry requires an update command')
-            return run_update(build_context(options), acquired_from=acquired_from)
+            return update_acquired(build_context(options), coordinates=update_coordinates)
         if not request and find_command(options) is INSTALL and not options.local_source:
-            return install_release(options)
+            return install_release(runner.REPO_ROOT, argv)
         return dispatch(options)
     except InstallerExit as stop:
         return stop.code

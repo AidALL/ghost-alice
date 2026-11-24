@@ -1,4 +1,5 @@
-"""Cross-version installs use disposable Git repositories and the shipped management command."""
+"""Installers of different releases meet in disposable Git repositories through the shipped commands."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,10 +12,12 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / '_shared'))
 from installer_testing import checkout_copy, inject_installer_python, installer_env, run_pty
+import install_transaction
 import installed_payload
+from installer.selection import ALL_SKILLS, installed_core_selection, leaf_names
 
-# The last deployed parent reads installed-payload-v2.json again after its child exits.
-V2_COMMIT = (Path(__file__).parent / '_fixtures/v2-manager-commit.txt').read_text().strip()
+# The installer of this commit starts a newer package from its own process for a plain install and the hook.
+EARLIER_COMMIT = (Path(__file__).parent / '_fixtures/earlier-installer-commit.txt').read_text().strip()
 
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'requires the POSIX installer')
@@ -58,6 +61,7 @@ class ReleaseSourceTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(), local)
         run('bash', str(saved / 'install.sh'))
         self.assertEqual(target.read_bytes(), release)
+        self.assertEqual(installed_core_selection(installed_payload.read(ghost)), {'claude': ['task-router']})
         detail = installed_payload.read_path(ghost)
         before = detail.read_bytes()
         manager = ['bash', str(ghost / 'bin/ghost-alice'), 'update']
@@ -72,110 +76,316 @@ class ReleaseSourceTests(unittest.TestCase):
 
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'requires the POSIX installer')
-class VersionHandoffTests(unittest.TestCase):
+class HandoffCase(unittest.TestCase):
+    """A checkout, another repository that also publishes main, and a home that holds Claude Code only."""
+
     def setUp(self):
         self.repo = checkout_copy(self)
+        self.remote = checkout_copy(self)
         self.home = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         (self.home / '.claude').mkdir()
         self.env = installer_env(self.home)
         self.env['GHOST_ALICE_INSTALL_LOCALE'] = 'en'
         self.ghost = self.home / '.ghost-alice'
         self.ledger = self.repo / 'records'
+        self.entry = ['bash', str(self.repo / 'install.sh')]
         self.command = ['bash', str(self.ghost / 'bin/ghost-alice')]
-        self.pending = self.ghost / 'pending-install-source.json'
-        self.remote = checkout_copy(self)
-        self.git('fetch', '--quiet', '--depth=1', str(ROOT), V2_COMMIT)
-        self.git('checkout', '--detach', '--quiet', V2_COMMIT)
         self.options = ['--platform', 'claude', '--skip-source-health', 'task-router']
-        self.shell(['bash', str(self.repo / 'install.sh'), *self.options],
-                   env=dict(self.env, GHOST_ALICE_SESSION_INTENT_ROOT=str(self.ledger)))
-        self.old = Path(installed_payload.read(self.ghost)['installer']['active_root'])
-        self.update = [*self.command, 'update', '-p', 'claude', '--remote', str(self.remote),
-                       '--ref', 'main', '--skip-source-health']
 
-    def git(self, *args):
-        return subprocess.run(['git', '-C', str(self.repo), *args], env=self.env, capture_output=True,
-                              text=True, check=True).stdout.strip()
-
-    def shell(self, argv, *, env=None, code=0):
-        result = subprocess.run(argv, cwd=self.home, env=env or self.env, stdin=subprocess.DEVNULL,
+    def shell(self, argv, *, code=0, **env):
+        """The output of a command that ends with `code`; None stands for any failure."""
+        result = subprocess.run(argv, cwd=self.home, env={**self.env, **env}, stdin=subprocess.DEVNULL,
                                 capture_output=True, text=True, timeout=180)
-        self.assertEqual(result.returncode, code, result.stdout + result.stderr)
-        return result.stdout + result.stderr
+        output = result.stdout + result.stderr
+        if code is None:
+            self.assertNotEqual(result.returncode, 0, output)
+        else:
+            self.assertEqual(result.returncode, code, output)
+        return output
 
-    def test_v2_update_retains_hosts_across_interruption_and_package_reuse(self):
-        self.git('checkout', '--quiet', 'main')
-        # Fail once after the request writer reads the activation record, before the move process starts.
-        inject_installer_python(self.env, """
-import json, sys
-def stop_at_handoff(event, args):
-    if event == 'subprocess.Popen' and args[3]:
-        request = json.loads(args[3].get('GHOST_ALICE_INSTALL_REQUEST') or '{}')
-        if request.get('stage') == 'record-move' and (Path.home() / 'interrupt').exists():
-            (Path.home() / 'interrupt').unlink()
-            raise OSError('fixture interrupted before record move')
-sys.addaudithook(stop_at_handoff)
-""")
-        (self.home / 'interrupt').touch()
-        self.assertIn('fixture interrupted', self.shell(self.update, code=1))
-        record = installed_payload.read(self.ghost)
-        self.assertEqual(record['schema_version'], 2)
-        self.assertEqual(record['source']['ledger_source_roots'], {str(self.ledger): str(self.repo)})
-        active = Path(record['installer']['active_root'])
-        self.assertNotEqual(active, self.old)
-        self.assertTrue(self.pending.is_file(), 'The pending hosts must belong to the install record')
-        self.assertNotIn('pending_record_source', json.loads((active.parent / 'version.json').read_bytes()))
-        # The same captured package is reused. Its last installation never reached record-move.
-        (self.home / '.codex').mkdir(exist_ok=True)
-        self.shell([*self.command, 'update'])
-        from installer.selection import installed_core_selection
-        self.assertEqual(installed_core_selection(installed_payload.read(self.ghost)), {'claude': ['task-router']})
-        self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'],
-                         {str(self.ledger): {'hosts': ['claude'], 'source_root': str(self.repo)}})
-        self.assertFalse(self.pending.exists())
-        self.assertEqual(Path(installed_payload.read(self.ghost)['installer']['active_root']), active)
+    def git(self, *args, root=None):
+        return self.shell(['git', '-C', str(root or self.repo), *args]).strip()
 
-    def test_new_checkout_can_read_v3_immediately_with_the_v2_manager_installed(self):
-        self.git('checkout', '--quiet', 'main')
-        inject_installer_python(self.env, """
+    def commit(self, name, text, *, root=None):
+        """One more commit that changes the file `name`."""
+        root = root or self.repo
+        (root / name).write_text(text)
+        self.git('add', name, root=root)
+        self.git('commit', '--quiet', '-m', f'Change {name}', root=root)
+
+    def active(self):
+        return Path(install_transaction.record_after_recovery(self.ghost)['installer']['active_root'])
+
+    def packages(self):
+        return {folder for folder in (self.ghost / 'versions').iterdir() if folder.is_dir()}
+
+    def installation(self):
+        """The bytes of every installed file and installation record, the work records and the checkout's Git settings.
+
+        A starting installer adds its own log, its lock file and the package that it saves.
+        """
+        own = {self.ghost / name for name in ('install', 'install.lock', 'versions')}
+        files = [self.repo / '.git/config', *self.active().parent.rglob('*')]
+        for folder in (self.home / '.claude', self.home / '.codex', self.home / '.agents', self.ghost, self.ledger):
+            files += (path for path in folder.rglob('*') if own.isdisjoint((path, *path.parents)))
+        return {path: os.readlink(path) if path.is_symlink() else hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in files if path.is_symlink() or path.is_file()}
+
+    def assert_unchanged(self, before):
+        after = self.installation()
+        self.assertEqual([str(path) for path in sorted(before.keys() | after.keys()) if before.get(path) != after.get(path)], [])
+
+
+class DownloadedInstallerTests(HandoffCase):
+    """Every installing command starts the installer that it downloaded."""
+
+    PROMPT = 'Downloaded installer ready?'
+    # A distinct release asks through its own entry and declines the installation.
+    DOWNLOADED = f"""import json, sys
+from pathlib import Path
+terminal = sys.stdin.isatty()
+Path.home().joinpath('received.json').write_text(json.dumps([sys.argv[1:], terminal]))
+if terminal:
+    print({PROMPT!r}, flush=True)
+sys.exit(38 if terminal and input() != 'continue' else 37)
+"""
+
+    def received(self):
+        file = self.home / 'received.json'
+        self.assertTrue(file.is_file(), 'The downloaded installer did not start')
+        value = json.loads(file.read_bytes())
+        file.unlink()
+        return value
+
+    def test_the_downloaded_installer_receives_the_arguments_and_the_terminal_and_its_exit_code_returns(self):
+        self.git('remote', 'set-url', 'origin', str(self.remote))
+        self.shell([*self.entry, *self.options, '--local-source'])
+        self.commit('_shared/installer/cli.py', self.DOWNLOADED, root=self.remote)
+        active, other = self.active(), f'{self.remote}/.git'
+        before, packages = self.installation(), self.packages()
+        # Only the downloaded release can interpret a new adapter name or its options.
+        update = ['update', '-p', 'next-adapter', '--remote', other, '--ref', 'main', '--skip-source-health',
+                  '--new-adapter-option']
+        for name, command, argv, root, remote in (('checkout', self.entry, self.options, self.repo, self.remote),
+                                                  ('ghost-alice', self.command, [], active, self.remote),
+                                                  ('update', self.command, update, active, other)):
+            with self.subTest(entry=name):
+                code, output = run_pty([*command, *argv], env=self.env, cwd=self.home,
+                                       responses=[(self.PROMPT, 'continue\n')], timeout=60)
+                self.assertEqual(code, 37, output)
+                self.assertNotIn("older than this installer", output)
+                self.assertEqual(self.received(), [['--install-acquired-release', str(root), str(remote), *argv], True])
+        with self.subTest(entry='hook'):
+            # The hook starts the same command without a terminal.
+            self.git('remote', 'set-url', 'origin', str(self.home / 'obsolete-remote'))
+            self.shell([*self.command, '--post-merge', '--merged-checkout', str(self.repo)], code=37)
+            self.assertEqual(self.received(), [['--install-acquired-release', str(self.repo), str(self.remote),
+                                                '--post-merge'], False])
+            self.git('remote', 'set-url', 'origin', str(self.remote))
+        self.assert_unchanged(before)
+        self.assertEqual(self.packages(), packages)
+
+
+class ChangedOriginTests(HandoffCase):
+    def assert_later_installation_survives(self, *, before_activation=False, update=True):
+        self.git('remote', 'set-url', 'origin', str(self.remote))
+        self.shell([*self.entry, *self.options])
+        if before_activation:
+            # Same checkout, changed remote. An update names its download remote; a plain command takes the registered one.
+            other = checkout_copy(self)
+            skill = 'task-router/SKILL.md'
+            self.commit(skill, (other / skill).read_text() + '\nInstalled from the new remote\n', root=other)
+            second = [*self.command, 'update', '--remote', str(other)]
+            first = [*self.command, *(['update', '--remote', str(self.remote)] if update else [])]
+            expected_root, expected_remote = self.repo, other
+        else:
+            # Same remote, changed checkout. The first update used the recorded remote.
+            other = checkout_copy(self)
+            self.git('remote', 'set-url', 'origin', str(self.remote), root=other)
+            second = ['bash', str(other / 'install.sh'), '--adopt-source', *self.options]
+            first = [*self.command, *(['update'] if update else [])]
+            expected_root, expected_remote = other, self.remote
+        record_path = installed_payload.read_path(self.ghost)
+        target = self.home / '.claude/skills/task-router/SKILL.md'
+        # Run a second real command inside the download, or between the two installer processes that follow it. Both
+        # commands use the test home.
+        inject_installer_python(self.env, f"""
 import json, sys
-def observe_handoff(event, args):
-    if event == 'subprocess.Popen' and args[3]:
-        request = json.loads(args[3].get('GHOST_ALICE_INSTALL_REQUEST') or '{}')
-        if request.get('stage') == 'record-move':
-            (Path.home() / 'at-handoff.json').write_text(json.dumps(request['source']))
-sys.addaudithook(observe_handoff)
+def switch_source(event, args):
+    if event != 'subprocess.Popen' or not (Path.home() / 'switch-once').is_file():
+        return
+    argv = args[1]
+    request = json.loads((args[3] or {{}}).get('GHOST_ALICE_PACKAGE_REQUEST') or '{{}}')
+    ready = bool(request.get('package_root') and not request.get('stage')) if {before_activation!r} else argv[-2:] == ['--detach', 'FETCH_HEAD']
+    if ready:
+        (Path.home() / 'switch-once').unlink()
+        subprocess.run({second!r}, stdin=subprocess.DEVNULL, check=True, timeout=120)
+        (Path.home() / 'second-record').write_bytes(Path({str(record_path)!r}).read_bytes())
+        (Path.home() / 'second-skill').write_bytes(Path({str(target)!r}).read_bytes())
+sys.addaudithook(switch_source)
 """)
-        self.shell(['bash', str(self.repo / 'install.sh'), *self.options])
+        (self.home / 'switch-once').touch()
+        result = subprocess.run(first, cwd=self.home, env=self.env, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=180)
+        self.assertTrue((self.home / 'second-record').is_file(), result.stdout + result.stderr)
+        second_record = (self.home / 'second-record').read_bytes()
+        origin = json.loads(second_record)['source']
+        self.assertEqual((origin['root'], origin['remote']), (str(expected_root), str(expected_remote)))
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 1, output)
+        self.assertIn('registered checkout or remote changed', output)
+        if not before_activation:
+            self.assertEqual(output.count('Install source: this checkout replaces'), 1, output)
+        self.assertEqual('run the command again without --remote' in output, update, output)
+        self.assertEqual(record_path.read_bytes(), second_record)
+        self.assertEqual(target.read_bytes(), (self.home / 'second-skill').read_bytes())
+        if update:
+            # The command that the message names keeps the later installation.
+            self.shell([*self.command, 'update'])
+            origin = installed_payload.read(self.ghost)['source']
+            self.assertEqual((origin['root'], origin['remote']), (str(expected_root), str(expected_remote)))
+            self.assertEqual(target.read_bytes(), (self.home / 'second-skill').read_bytes())
+
+    def test_checkout_changed_during_download(self):
+        self.assert_later_installation_survives()
+
+    def test_checkout_changed_during_the_download_of_a_plain_command(self):
+        self.assert_later_installation_survives(update=False)
+
+    def test_remote_changed_after_the_package_was_prepared(self):
+        self.assert_later_installation_survives(before_activation=True)
+
+    def test_remote_changed_after_the_package_of_a_plain_command_was_prepared(self):
+        self.assert_later_installation_survives(before_activation=True, update=False)
+
+
+class ChangedSelectionTests(HandoffCase):
+    def test_saved_reinstall_keeps_a_skill_removed_after_preparation(self):
+        self.shell([*self.entry, '--platform', 'claude', '--local-source', 'task-router', 'boundary-contract'])
+        remove = [*self.command, '--platform', 'claude', '--uninstall', 'task-router']
+        inject_installer_python(self.env, f"""
+import json, sys
+def remove_selected(event, args):
+    if event != 'subprocess.Popen' or not (Path.home() / 'remove-once').is_file():
+        return
+    request = json.loads((args[3] or {{}}).get('GHOST_ALICE_PACKAGE_REQUEST') or '{{}}')
+    if request.get('package_root') and not request.get('stage'):
+        (Path.home() / 'remove-once').unlink()
+        subprocess.run({remove!r}, stdin=subprocess.DEVNULL, check=True, timeout=120)
+sys.addaudithook(remove_selected)
+""")
+        (self.home / 'remove-once').touch()
+        output = self.shell([*self.command, '--local-source'], code=1)
+        self.assertIn('Core selection changed', output)
+        self.assertFalse((self.home / '.claude/skills/task-router').exists())
+        self.assertEqual(installed_core_selection(installed_payload.read(self.ghost)), {'claude': ['boundary-contract']})
+        self.shell([*self.command, '--local-source'])
+        self.assertFalse((self.home / '.claude/skills/task-router').exists())
+
+
+class OlderReleaseTests(HandoffCase):
+    """The main branch of the remote holds an earlier release, which does not know this installer's request."""
+
+    def test_a_release_that_does_not_know_the_request_ends_with_the_cause_and_changes_nothing(self):
+        self.git('fetch', '--quiet', '--depth=1', str(ROOT), EARLIER_COMMIT, root=self.remote)
+        self.git('checkout', '--quiet', '-B', 'main', EARLIER_COMMIT, root=self.remote)
+        self.git('remote', 'set-url', 'origin', str(self.remote))
+        def stopped(command):
+            output = self.shell([*self.entry, *command], code=1)
+            self.assertIn("did not accept this installer's request", output)
+            self.assertIn(str(self.remote), output)
+            self.assertIn('--local-source', output)
+
+        stopped(self.options)
+        self.assertFalse((self.ghost / 'versions').exists())
+        self.assertFalse((self.home / '.claude/skills').exists())
+        # The files of this checkout install with the option that the message names.
+        self.shell([*self.entry, *self.options, '--local-source'])
+        self.assertTrue((self.home / '.claude/skills/task-router/SKILL.md').is_file())
+        # An update from that remote ends the same way and keeps the installation.
+        before = self.installation()
+        stopped(['update'])
+        self.assert_unchanged(before)
+
+
+class EarlierInstallerTests(HandoffCase):
+    """The installer of an earlier commit made the installation; the checkout then holds main."""
+
+    def setUp(self):
+        super().setUp()
+        self.git('fetch', '--quiet', '--depth=1', str(ROOT), EARLIER_COMMIT)
+        self.git('checkout', '--quiet', '--detach', EARLIER_COMMIT)
+        self.shell([*self.entry, *self.options, '--local-source'], GHOST_ALICE_SESSION_INTENT_ROOT=str(self.ledger))
+        self.git('checkout', '--quiet', 'main')
+        self.main = self.git('rev-parse', 'HEAD')
+        self.old = self.active()
+
+    def test_a_repair_from_this_checkout_does_not_start_the_earlier_installer(self):
+        # The earlier installer restores every skill of its release. This checkout stops and names the update.
+        shutil.rmtree(self.home / '.claude/skills/task-router')
+        before = self.installation()
+        output = self.shell([*self.entry, '--repair', '--platform', 'claude'], code=1)
+        self.assertIn('install.sh update', output)
+        self.assert_unchanged(before)
+
+    def record_without_hosts(self):
+        """The installation record files in the form whose ledger relations name a path only."""
         record = installed_payload.read(self.ghost)
-        self.assertEqual(json.loads((self.home / 'at-handoff.json').read_bytes()), record['source'])
+        record.update(schema_version=2, source=dict(record['source'], ledger_source_roots={str(self.ledger): str(self.repo)}))
+        installed_payload.read_path(self.ghost).unlink()
+        notice = dict(schema_version=2, record_file='installed-payload-v2.json')
+        for name, value in (('installed-payload-v2.json', record), ('installed-payload.json', notice)):
+            (self.ghost / name).write_bytes(installed_payload._encode(value))
+        self.assertEqual(installed_payload.read(self.ghost), record)
+
+    def assert_stopped(self, argv, *, code=1):
+        """The downloaded package stops before any change and names its own install file, which this returns."""
+        before = self.installation()
+        output = self.shell(argv, code=code)
+        (package,) = self.packages() - {self.old.parent}
+        command = package / 'core/install.sh'
+        # The earlier installer adds its own line about the failed candidate.
+        named = [line for line in output.splitlines()
+                 if str(command) in line and 'Candidate install did not finish' not in line]
+        self.assertEqual(len(named), 1, output)
+        self.assert_unchanged(before)
+        return command
+
+    def assert_installed(self):
+        record = installed_payload.read(self.ghost)
+        self.assertNotEqual(Path(record['installer']['active_root']), self.old)
+        self.assertEqual((record['source']['root'], record['source']['commit']), (str(self.repo), self.main))
+        self.assertEqual(installed_core_selection(record), {'claude': ['task-router']})
         self.assertEqual(record['source']['ledger_source_roots'],
                          {str(self.ledger): {'hosts': ['claude'], 'source_root': str(self.repo)}})
-        self.assertFalse(self.pending.exists())
 
-    def test_fetched_update_entry_receives_original_arguments_terminal_and_returns_its_exit_code(self):
-        self.git('checkout', '--quiet', 'main')
-        self.shell(['bash', str(self.repo / 'install.sh'), *self.options])
-        # A distinct downstream version asks via its own entry and deliberately declines installation.
-        entry = self.remote / '_shared/installer/cli.py'
-        entry.write_text("import json, sys\nfrom pathlib import Path\n"
-                         "Path.home().joinpath('received.json').write_text(json.dumps(sys.argv[1:]))\n"
-                         "print('Downstream installer ready?', flush=True)\n"
-                         "sys.exit(37 if input() == 'continue' else 38)\n")
-        subprocess.run(['git', '-C', str(self.remote), '-c', 'user.email=t@example.invalid', '-c', 'user.name=t',
-                        'commit', '-qam', 'Next installer'], env=self.env, check=True)
-        # Only the downloaded version can interpret a new adapter name or its options.
-        argv = list(self.update)
-        argv[argv.index('-p') + 1] = 'next-adapter'
-        argv.append('--new-adapter-option')
-        code, output = run_pty(argv, env=self.env, cwd=self.home,
-                               responses=[('Downstream installer ready?', 'continue\n')], timeout=30)
-        self.assertEqual(code, 37, output)
-        self.assertEqual(json.loads((self.home / 'received.json').read_bytes()),
-                         ['--install-acquired-update', str(self.repo), str(self.remote), 'main',
-                          *argv[len(self.command):]])
+    def assert_installs(self, command):
+        # The installed selection decides although another host is present now.
+        (self.home / '.codex').mkdir(exist_ok=True)
+        self.shell(['bash', str(command)])
+        self.assert_installed()
 
-    def test_v2_locked_command_recovers_interrupted_activation_and_first_v3_publication(self):
+    def test_the_new_checkout_records_the_hosts_before_it_moves_work_records(self):
+        self.record_without_hosts()
+        inject_installer_python(self.env, """
+import json, sys
+def observe_followup(event, args):
+    if event == 'subprocess.Popen' and args[3]:
+        request = json.loads(args[3].get('GHOST_ALICE_PACKAGE_REQUEST') or '{}')
+        record = Path.home() / '.ghost-alice/installed-payload-v3.json'
+        if request.get('stage') == 'record-move' and record.exists():
+            (Path.home() / 'at-followup.json').write_bytes(record.read_bytes())
+sys.addaudithook(observe_followup)
+""")
+        self.shell([*self.entry, *self.options])
+        self.assert_installed()
+        observed = self.home / 'at-followup.json'
+        self.assertTrue(observed.is_file(), 'The record move starts after the installation record names the hosts')
+        self.assertEqual(json.loads(observed.read_bytes())['source'], installed_payload.read(self.ghost)['source'])
+        self.assertFalse((self.ghost / 'pending-install-source.json').exists())
+
+    def test_the_new_package_stays_the_installer_after_an_interruption_and_finishes(self):
+        self.record_without_hosts()
         # Exit the writing process immediately after the actual rename, bypassing Python rollback.
         inject_installer_python(self.env, """
 _replace = os.replace
@@ -188,37 +398,45 @@ def interrupt_write(src, dst, *args, **kwargs):
     return result
 os.replace = interrupt_write
 """)
-        for name in (self.pending.name, installed_payload.ATTRIBUTED_FILENAME):
-            with self.subTest(interrupted_file=name):
-                (self.home / 'interrupt').write_text(name)
-                self.shell(self.update, code=73)
-                self.assertTrue(self.pending.is_file())
-                self.assertTrue((self.ghost / name).is_file())
-                lock = self.ghost / 'install.lock'
+        arm, started = self.home / 'interrupt', set()
+        for name, command in (('installed-payload-v2.json', [*self.entry, *self.options]),
+                              ('installed-payload-v3.json', self.command)):
+            arm.write_text(name)
+            output = self.shell(command, code=None)
+            self.assertFalse(arm.exists(), f'No process replaced {name}\n{output}')
+            self.assertNotEqual(self.active(), self.old, f'{name}\n{output}')
+            started.add(self.active())
+            lock = self.ghost / 'install.lock'
+            if lock.exists():
                 os.utime(lock, (1, 1))  # Model the stale interval after the process exited.
-                self.shell(['bash', str(self.old / 'install.sh'), '--platform', 'claude', '--cleanup-pending'])
-                record = installed_payload.read(self.ghost)
-                self.assertEqual(record['schema_version'], 2)
-                self.assertFalse((self.ghost / installed_payload.ATTRIBUTED_FILENAME).exists())
-                self.assertEqual(self.pending.exists(), name == installed_payload.ATTRIBUTED_FILENAME)
-                self.assertEqual(Path(record['installer']['active_root']) == self.old, not self.pending.exists())
-        self.shell(self.update)
-        self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'],
-                         {str(self.ledger): {'hosts': ['claude'], 'source_root': str(self.repo)}})
-        self.assertFalse(self.pending.exists())
+        self.shell(self.command)
+        self.assert_installed()
+        self.assertEqual({self.active()}, started)
 
-    def test_v2_hook_can_read_the_last_record_even_when_the_active_manager_already_reads_v3(self):
+    def test_install_and_hook_stop_before_any_change_and_the_named_command_installs(self):
+        self.git('checkout', '--quiet', '-b', 'topic')
+        self.commit('topic.txt', 'topic\n')
         self.git('checkout', '--quiet', 'main')
-        self.shell(['bash', str(self.repo / 'install.sh'), *self.options],
-                   env=dict(self.env, GHOST_ALICE_SESSION_INTENT_ROOT=str(self.ghost / 'session-intent')))
-        record = installed_payload.read(self.ghost)
-        self.assertNotEqual(Path(record['installer']['active_root']), self.old)
-        self.assertEqual(record['schema_version'], 2)
-        config = self.ghost / 'config.json'
-        data = json.loads(config.read_bytes())
-        data['install_locations']['claude']['ledger_root'] = str(self.ledger)
-        config.write_text(json.dumps(data))
-        # A checkout can still invoke a hook supplied by the deployed v2 package.
-        self.shell(['bash', str(self.old / 'install.sh'), '--post-merge', '--merged-checkout', str(self.repo)])
-        self.assertEqual(installed_payload.read(self.ghost)['source']['ledger_source_roots'],
-                         {str(self.ledger): {'hosts': ['claude'], 'source_root': str(self.repo)}})
+        # The merge runs the hook of the earlier package, which asks for every skill of every host, and succeeds.
+        (self.home / '.codex').mkdir()
+        merge = ['git', '-C', str(self.repo), 'merge', '--quiet', '--ff-only', 'topic']
+        command = self.assert_stopped(merge, code=0)
+        self.assertEqual(self.assert_stopped(self.command), command)
+        self.assert_installs(command)
+
+    def test_the_named_command_installs_another_host_with_the_arguments_of_the_stopped_command(self):
+        (self.home / '.codex').mkdir()
+        options = ['--platform', 'codex', '--skip-source-health']
+        self.git('checkout', '--quiet', '--detach', EARLIER_COMMIT)
+        command = self.assert_stopped([*self.entry, *options])
+        self.shell(['bash', str(command), *options])
+        self.assertEqual(installed_core_selection(installed_payload.read(self.ghost)),
+                         {'claude': ['task-router'], 'codex': leaf_names(ALL_SKILLS)})
+
+    def test_update_installs_the_downloaded_release(self):
+        self.shell([*self.command, 'update'])
+        self.assert_installed()
+
+
+if __name__ == '__main__':
+    unittest.main()

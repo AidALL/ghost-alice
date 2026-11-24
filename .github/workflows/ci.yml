@@ -74,8 +74,8 @@ jobs:
       - name: Install the Codex CLI for the native prompt-input test
         run: npm install -g @openai/codex@0.161.0
 
-      - name: Fetch the v2 installer used by the upgrade test
-        run: git fetch --no-tags --depth=1 origin "$(cat scripts/tests/_fixtures/v2-manager-commit.txt)"
+      - name: Fetch the earlier installer used by the upgrade tests
+        run: git fetch --no-tags --depth=1 origin "$(cat scripts/tests/_fixtures/earlier-installer-commit.txt)"
 
       - name: Run script unit tests
         env:

@@ -350,9 +350,13 @@ def scan_records(
     base = Path(addons_dir)
     records: list[dict[str, Any]] = []
     skipped: list[tuple[str, str]] = []
-    if not base.is_dir():
+    try:
+        files = sorted(path for path in base.iterdir() if path.suffix == ".json")
+    except FileNotFoundError:
         return records, skipped
-    for path in sorted(base.glob("*.json")):
+    except OSError as error:
+        return records, [(".", str(error))]
+    for path in files:
         stem = path.stem
         if not ADDON_ID_RE.fullmatch(stem):
             continue  # not an addon sidecar (e.g. _migration-report.json)

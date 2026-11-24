@@ -539,12 +539,13 @@ def _discover_ghost_alice_skill_names_from_catalog() -> list[str]:
     return names
 
 
-def _print_addon_target_summary(addon_sources: list[str], platform: str | None = None) -> int:
+def _print_addon_target_summary(addon_sources: list[str], platform: str | None = None, addon_ids: list[str] | None = None) -> int:
     try:
         targets = load_addon_targets(
             addon_sources,
             core_skill_names=_discover_ghost_alice_skill_names_from_catalog(),
             platform=platform,
+            addon_ids=addon_ids,
         )
     except AddonManifestError as exc:
         print(f"Addon manifest error: {exc}", file=sys.stderr)
@@ -560,7 +561,7 @@ def _print_addon_target_summary(addon_sources: list[str], platform: str | None =
     return 0
 
 
-def _verified_addon_skill_names(addon_sources: Any, platform_key: str) -> list[str]:
+def _verified_addon_skill_names(addon_sources: Any, platform_key: str, addon_ids: Any = None) -> list[str]:
     """Return names from manifest-validated addon targets for one platform."""
     if not addon_sources:
         return []
@@ -568,6 +569,7 @@ def _verified_addon_skill_names(addon_sources: Any, platform_key: str) -> list[s
         list(addon_sources),
         core_skill_names=_discover_ghost_alice_skill_names_from_catalog(),
         platform=platform_key,
+        addon_ids=addon_ids,
     )
     return sorted({target.name for target in targets})
 
@@ -2048,7 +2050,7 @@ def install_hook(
     addon_sources: Any = (),
     skills_dir: str | Path | None = None,
     node_runtime: str | Path | None = None,
-    *, destination: install_destination.InstallDestination | dict | None = None,
+    *, destination: install_destination.InstallDestination | dict | None = None, addon_ids: Any = None,
 ) -> HookStatus:
     """Install hooks into a single framework.
 
@@ -2068,7 +2070,7 @@ def install_hook(
         with install_destination.use(resolved):
             if PLATFORMS[platform_key]["detect"]() or resolved.mode == "isolated":
                 _prepare_destination_runtime(resolved,dry_run=dry_run)
-            result = install_hook(platform_key,dry_run,addon_sources,resolved.skills_dir,node_runtime)
+            result = install_hook(platform_key,dry_run,addon_sources,resolved.skills_dir,node_runtime,addon_ids=addon_ids)
             if not dry_run and result.legacy_status in {"installed","already"}:
                 runtime_config.save_config({"install_locations":{platform_key: __import__('dataclasses').asdict(resolved)}},home=_home())
             return result
@@ -2129,7 +2131,8 @@ def install_hook(
                                          reason='permission-attribution-unresolved', detail=str(error)))
             _log(f'[WARN] Permissions retained for review: {error}')
     core_names = _discover_ghost_alice_skill_names_from_catalog()
-    addon_targets = (load_addon_targets(list(addon_sources), core_skill_names=core_names, platform=platform_key)
+    addon_targets = (load_addon_targets(list(addon_sources), core_skill_names=core_names, platform=platform_key,
+                                        addon_ids=addon_ids)
                      if addon_sources else [])
     if permission_data is not None:
         if _ensure_claude_ghost_alice_skill_permissions(settings, core_names, addon_targets):
@@ -2575,7 +2578,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
         _validate_hook_settings(settings)
     except (OSError, ValueError, UnicodeError) as error:
         details.update(settings_state='unreadable', errors=exception_lines(error))
-        details['items'].append(dict(kind='hook-config', target_name=f'{platform_key}-hooks',
+        details['items'].append(dict(kind='hook-config', target_name=f'{platform_key}-hooks', path=str(settings_file),
                                      action='manual-review', reason='settings-unreadable', errors=details['errors']))
         return HookStatus(platform_key, 'HOOK_ACTION_ERROR', STATUS_LABELS['error'], 'error', details)
     original = copy.deepcopy(settings)
@@ -2644,7 +2647,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
               'skipped' if not platform['detect']() else 'not_found')
     if total_removed:
         _log(f'  {"Would remove" if dry_run else "Removed"} {total_removed} hook(s)')
-    details['items'].append(dict(kind='hook-config', target_name=f'{platform_key}-hooks',
+    details['items'].append(dict(kind='hook-config', target_name=f'{platform_key}-hooks', path=str(settings_file),
                                  action='manual-review' if failed and not details['hooks_detached'] else
                                  'hook-uninstall-dry-run' if dry_run else 'hook-uninstall',
                                  result=legacy, hooks_detached=details['hooks_detached'],
@@ -2714,13 +2717,14 @@ def check_status_detail(
     node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
     addon_sources: Any = (),
     destination=None,
+    addon_ids: Any = None,
 ) -> HookStatus:
     """Return structured hook installation status for a single framework."""
     if destination is not None or install_destination.current() is None:
         destination = _default_destination(platform_key, installed=True) if destination is None else destination
         resolved = _destination_action(platform_key,destination,"status")
         with install_destination.use(resolved):
-            return check_status_detail(platform_key,node_runtime=node_runtime,addon_sources=addon_sources)
+            return check_status_detail(platform_key,node_runtime=node_runtime,addon_sources=addon_sources,addon_ids=addon_ids)
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
@@ -2785,7 +2789,7 @@ def check_status_detail(
             if isinstance(allow, list)
             else set()
         )
-        for skill_name in _verified_addon_skill_names(addon_sources, platform_key):
+        for skill_name in _verified_addon_skill_names(addon_sources, platform_key, addon_ids):
             permission = f"Skill({skill_name})"
             present = permission in allowed_rules
             required[f"skill-permission:{skill_name}"] = (present, present)
@@ -2949,6 +2953,7 @@ def main() -> int:
         default=[],
         help="Addon repo or local manifest path",
     )
+    parser.add_argument("--addon-id", action="append", help="Keep only this addon of the addon sources")
     parser.add_argument(
         "--skills-dir",
         help="Installed skills directory of the destination",
@@ -3009,9 +3014,9 @@ def _execute_actions(args, destination, *, results):
     _log(f"install_hooks.py v{VERSION}")
     _log(f"Home directory: {Path.home()}")
     if args.list_addons:
-        return _print_addon_target_summary(args.addon_source, platform=args.platform)
+        return _print_addon_target_summary(args.addon_source, platform=args.platform, addon_ids=args.addon_id)
     if args.addon_source and args.dry_run:
-        rc = _print_addon_target_summary(args.addon_source, platform=args.platform)
+        rc = _print_addon_target_summary(args.addon_source, platform=args.platform, addon_ids=args.addon_id)
         if rc != 0:
             return rc
     if args.dry_run:
@@ -3043,6 +3048,7 @@ def _execute_actions(args, destination, *, results):
                     node_runtime=node_runtime,
                     addon_sources=args.addon_source,
                     destination=destination,
+                    addon_ids=args.addon_id,
                 )
             elif args.uninstall:
                 results[key] = uninstall_hook(key, dry_run=args.dry_run, destination=destination)
@@ -3054,6 +3060,7 @@ def _execute_actions(args, destination, *, results):
                     key,
                     dry_run=args.dry_run,
                     addon_sources=args.addon_source,
+                    addon_ids=args.addon_id,
                     skills_dir=args.skills_dir,
                     node_runtime=node_runtime,
                     destination=destination,

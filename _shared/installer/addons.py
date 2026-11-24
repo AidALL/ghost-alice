@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import contextlib
+import dataclasses
 import hashlib
 import io
 import json
@@ -13,6 +14,7 @@ import re
 import shutil
 from typing import TYPE_CHECKING
 
+import addon_registry
 from installer import locations, report, runner
 from installer.runner import InstallerExit
 
@@ -103,10 +105,13 @@ def _core_skill_args(ctx: "Context") -> list[str]:
     return args
 
 
-def _source_args(ctx: "Context") -> list[str]:
+def selection_args(sources: list[str], ids: list[str] | None, source_option: str) -> list[str]:
+    """`--source S`... and, for a host that keeps only the addons it holds, `--addon-id ID`..."""
     args: list[str] = []
-    for source in ctx.addon_sources:
-        args.extend(["--source", str(source)])
+    for source in sources:
+        args.extend([source_option, str(source)])
+    for addon_id in ids or ():
+        args.extend(["--addon-id", addon_id])
     return args
 
 
@@ -117,7 +122,7 @@ def collect_addon_targets(ctx: "Context") -> "list[Target]":
     if ctx.options.addon_skip or not ctx.addon_sources:
         return []
     prepare_sources(ctx)
-    result = runner.run_tool("_shared/addon_installer.py", *_source_args(ctx), *_core_skill_args(ctx),
+    result = runner.run_tool("_shared/addon_installer.py", *selection_args(ctx.addon_sources, ctx.addon_ids, "--source"), *_core_skill_args(ctx),
                              "--platform", ctx.platform, "--format", "json", capture=True)
     if result.stderr:
         report.emit(result.stderr.rstrip("\n"))
@@ -132,6 +137,26 @@ def collect_addon_targets(ctx: "Context") -> "list[Target]":
             for entry in payload.get("targets", []) if entry.get("name")]
 
 
+def held_ids(ctx: "Context", hosts: list[str]) -> dict[str, dict[str, list[str]]]:
+    """Per host and addon source of the command, the addon ids that the source supplies and the host's addon
+    registry names. The caller holds the install lock, so no other command changes the registry meanwhile."""
+    held: dict[str, dict[str, list[str]]] = {}
+    for host in hosts:
+        directory = locations.addons_dir(host)
+        records, skipped = addon_registry.scan_records(addons_dir=directory)
+        if skipped:
+            details = '; '.join(f'{directory / filename}: {reason}' for filename, reason in skipped)
+            raise ValueError(report.message('addon_registry_unreadable', host=host, details=details))
+        installed = {record['addon_id'] for record in records}
+        held[host] = {}
+        for source in ctx.addon_sources:
+            every = dataclasses.replace(ctx, platform=host, addon_sources=[source], addon_ids=None)
+            ids = sorted({target.addon_id for target in collect_addon_targets(every)} & installed)
+            if ids:
+                held[host][source] = ids
+    return held
+
+
 def list_addons(ctx: "Context") -> int:
     """`--list-addons`: disabled → info; no source → error 1; else the text listing."""
     if ctx.options.addon_skip:
@@ -141,7 +166,7 @@ def list_addons(ctx: "Context") -> int:
         report.error("--list-addons requires --addon-source")
         return 1
     prepare_sources(ctx)
-    return runner.run_tool("_shared/addon_installer.py", *_source_args(ctx), *_core_skill_args(ctx),
+    return runner.run_tool("_shared/addon_installer.py", *selection_args(ctx.addon_sources, ctx.addon_ids, "--source"), *_core_skill_args(ctx),
                            "--platform", ctx.platform, "--format", "text").returncode
 
 
@@ -150,7 +175,7 @@ def write_sidecars(ctx: "Context", skills_dir: Path) -> bool:
     if not ctx.addon_sources:
         return True
     installed_at = datetime.now(timezone.utc).isoformat()
-    result = runner.run_tool("_shared/addon_installer.py", "write-sidecars", *_source_args(ctx),
+    result = runner.run_tool("_shared/addon_installer.py", "write-sidecars", *selection_args(ctx.addon_sources, ctx.addon_ids, "--source"),
                              "--platform", ctx.platform, "--addons-dir", str(locations.addons_dir(ctx.platform)),
                              "--skills-dir", str(skills_dir), "--installed-at", installed_at,
                              "--claude-commands-dir", str(locations.claude_commands_dir()),
@@ -178,15 +203,26 @@ def _addon_location_args(ctx: "Context") -> list[str]:
             "--resources-dir", str(locations.resources_dir(ctx.platform))]
 
 
-def repair_missing(ctx: "Context") -> bool:
-    """`addon_installer.py repair-missing ...` when the addons dir exists."""
+def repair_missing(ctx: "Context") -> tuple[int, int] | None:
+    """Return the repaired and occupied addon target counts, or report the failure and return None."""
     if not locations.addons_dir(ctx.platform).is_dir():
-        return True
+        return 0, 0
     result = runner.run_tool("_shared/addon_installer.py", "repair-missing", "--platform", ctx.platform,
                              *_addon_location_args(ctx), capture=True)
     if result.stderr:
         report.emit(result.stderr.rstrip("\n"))
-    return result.ok
+    if not result.stdout:
+        if not result.stderr:
+            report.error(f"Addon repair produced no result (exit {result.returncode})")
+        return None
+    summary = json.loads(result.stdout)
+    for error in summary['errors']:
+        identity = error.get('addon_id') or error.get('sidecar')
+        target = f" {error['target']}" if 'target' in error else ''
+        report.error(f"Addon repair: {identity}{target}: {error['reason']}")
+    if not result.ok or summary['errors']:
+        return None
+    return len(summary['repaired']), len(summary['kept'])
 
 
 def _uninstall_args(ctx: "Context") -> list[str]:

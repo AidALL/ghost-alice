@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import installed_payload
-from install_state_writer import read_state
+from installed_payload import inventory_destination, read_inventory
 from installer import addons, locations, report, runner, source
 from installer.runner import InstallerExit
 
@@ -66,14 +66,24 @@ def _skill_hosts(target: str, entry: dict, record_path: Path | None) -> list[str
         raise installed_payload.RecordError(report.message('invalid_skill_hosts', file=record_path, target=target)) from exc
 
 
+def installed_core_targets(record: dict, record_path: Path | None = None) -> dict[str, dict[Path, str]]:
+    """Per host, the recorded paths of its Core skills with their leaf names."""
+    selected: dict[str, dict[Path, str]] = {}
+    for target, entry in record.get('targets', {}).items():
+        if not isinstance(entry, dict):
+            raise installed_payload.RecordError(f"{record_path}: target {target} is not an object")
+        if entry.get('kind') == 'skill' and entry.get('provider') == 'core':
+            if not isinstance(entry.get('name'), str) or not entry['name']:
+                raise installed_payload.RecordError(f"{record_path}: Core target {target} needs a skill name")
+            for host in _skill_hosts(target, entry, record_path):
+                selected.setdefault(host, {})[Path(target)] = entry['name']
+    return selected
+
+
 def installed_core_selection(record: dict, record_path: Path | None = None) -> dict[str, list[str]]:
     """The recorded Core leaf names per host, independent of current adapter availability."""
-    selected: dict[str, set[str]] = {}
-    for target, entry in record.get('targets', {}).items():
-        if entry.get('kind') == 'skill' and entry.get('provider') == 'core':
-            for host in _skill_hosts(target, entry, record_path):
-                selected.setdefault(host, set()).add(entry['name'])
-    return {host: sorted(names) for host, names in sorted(selected.items())}
+    return {host: sorted(set(paths.values()))
+            for host, paths in sorted(installed_core_targets(record, record_path).items())}
 
 
 def requested_skills(ctx: 'Context', platform: str) -> list[str]:
@@ -87,25 +97,32 @@ def requested_skills(ctx: 'Context', platform: str) -> list[str]:
     return list(ctx.options.args) or list(ALL_SKILLS)
 
 
-def expand_skill_targets(skill: str) -> list[Target]:
+def expand_skill_targets(skill: str, *, source_root: Path | None = None) -> list[Target]:
     """A skill with `SKILL.md` in the checkout is one target; a family dir yields
     one target per direct sub-directory with `SKILL.md`; a missing dir yields
     none."""
-    root = runner.REPO_ROOT / skill
+    source_root = source_root or runner.REPO_ROOT
+    root = source_root / skill
     if not root.is_dir():
-        return [target for family in ALL_SKILLS if (runner.REPO_ROOT / family).is_dir()
-                for target in expand_skill_targets(family) if target.name == skill]
+        return [target for family in ALL_SKILLS if (source_root / family).is_dir()
+                for target in expand_skill_targets(family, source_root=source_root) if target.name == skill]
     if (root / "SKILL.md").is_file():
         return [Target(root.name, root)]
     return [Target(sub.name, sub) for sub in sorted(root.iterdir())
             if sub.is_dir() and not sub.name.startswith(".") and (sub / "SKILL.md").is_file()]
 
 
-def iter_install_targets(skills: list[str], addon_targets: list[Target] = ()) -> list[Target]:
+def leaf_names(skills: list[str]) -> list[str]:
+    """The names of the targets that `skills` expand to; a name without a target stays."""
+    return sorted({name for skill in skills
+                   for name in [target.name for target in expand_skill_targets(skill)] or [skill]})
+
+
+def iter_install_targets(skills: list[str], addon_targets: list[Target] = (), *, source_root: Path | None = None) -> list[Target]:
     """Expanded core targets in skill order, then the addon targets."""
     targets: list[Target] = []
     for skill in skills:
-        targets.extend(expand_skill_targets(skill))
+        targets.extend(expand_skill_targets(skill, source_root=source_root))
     targets.extend(addon_targets)
     return targets
 
@@ -123,21 +140,20 @@ def _present(path: Path) -> bool:
     return path.is_symlink() or path.is_dir()
 
 
-def has_managed_installs(skills_root: Path, platform: str, *, excluding: tuple[Path, ...] = ()) -> bool:
-    """Whether a Core slot remains after excluding the caller's confirmed removal paths."""
+def has_managed_installs(skills_root: Path, platform: str, *, excluding: tuple[Path, ...] = (),
+                        on_error=report.warn) -> bool | None:
+    """Whether a Core slot remains after the specified releases. None when its ownership is unknown."""
     skills_root = Path(skills_root).absolute()
     excluded = {Path(path).absolute() for path in excluding}
     state_path = locations.install_state_path(platform)
     try:
-        state = read_state(state_path)
-        if state is not None and state.get("platform", platform) != platform:
-            raise ValueError(f"install-state platform mismatch: {state_path}")
+        state = read_inventory(state_path, platform=platform)
     except (OSError, ValueError) as exc:
-        report.warn(f"Keeping shared support because the install inventory could not be read: {exc}")
-        return True
+        on_error(f"Keeping hooks and shared support because the install inventory could not be read: {exc}")
+        return None
     if state is not None:
         for target in state["targets"]:
-            path = Path(target["dest_path"]).absolute()
+            path = inventory_destination(target["dest_path"]).absolute()
             if (target["target_name"] != "_shared" and not target.get("addon_id")
                     and target.get("owner") != "addon" and path.parent == skills_root
                     and path not in excluded and _present(path)):
@@ -148,34 +164,30 @@ def has_managed_installs(skills_root: Path, platform: str, *, excluding: tuple[P
     try:
         record_path = installed_payload.read_path(locations.record_root())
         record = installed_payload.read_file(record_path)
-    except (OSError, ValueError) as exc:
-        report.warn(f'Keeping shared support because the install record could not be read: {exc}')
-        return True
-
-    def remains_for_host(path: Path) -> bool:
-        if path.absolute() in excluded or not _present(path):
-            return False
-        entry = (record or {}).get('targets', {}).get(str(path))
-        try:
-            if isinstance(entry, dict) and platform in _skill_hosts(str(path), entry, record_path):
-                return True
-            return not platforms_referencing_target(path, current_manifest=state_path, current_platform=platform)
-        except (OSError, ValueError) as exc:
-            report.warn(f'Keeping shared support because host references are unresolved for {path}: {exc}')
+        recorded = installed_core_targets(record or {}, record_path).get(platform, {})
+        if any(path not in excluded for path in recorded):
             return True
+    except (OSError, ValueError) as exc:
+        on_error(f'Keeping hooks and shared support because the install record could not be read: {exc}')
+        return None
+
+    def remains_for_host(path: Path) -> bool | None:
+        if path.absolute() in excluded:
+            return False
+        try:
+            return _present(path) and not platforms_referencing_target(path, current_manifest=state_path,
+                                                                        current_platform=platform)
+        except (OSError, ValueError) as exc:
+            on_error(f'Keeping hooks and shared support because host references are unresolved for {path}: {exc}')
+            return None
 
     # Source-name presence remains evidence when no other-host attribution excludes it.
     for skill in ALL_SKILLS:
         targets = expand_skill_targets(skill)
-        if not targets:
-            path = Path(skills_root) / skill
-            if remains_for_host(path):
-                return True
-            continue
-        for target in targets:
-            path = Path(skills_root) / target.name
-            if remains_for_host(path):
-                return True
+        for name in [target.name for target in targets] or [skill]:
+            remains = remains_for_host(skills_root / name)
+            if remains is not False:
+                return remains
     return False
 
 
@@ -183,7 +195,7 @@ def cleanup_deprecated_installed_skills(ctx: "Context", skills_root: Path) -> bo
     """Let the retirement owner classify candidates and resume unfinished work."""
     result = runner.run_tool("_shared/retired_assets.py",
                              "--skills-root", str(skills_root), "--source-root", source.input_record()['root'],
-                             "--ghost-root", str(locations.ghost_root()), "--platform", ctx.platform,
+                             "--ghost-root", str(locations.record_root()), "--platform", ctx.platform,
                              "--commands-root", str(locations.claude_commands_dir()), no_bytecode=True)
     return result.ok
 
@@ -207,9 +219,7 @@ def check_addon_collisions(ctx: "Context") -> None:
     aborting install` exit 1."""
     if not ctx.addon_sources:
         return
-    args: list[str] = ["detect-collisions"]
-    for source in ctx.addon_sources:
-        args.extend(["--source", str(source)])
+    args: list[str] = ["detect-collisions", *addons.selection_args(ctx.addon_sources, ctx.addon_ids, "--source")]
     args.extend(["--platform", ctx.platform, "--skills-dir", str(ctx.skills_dir),
                  "--addons-dir", str(locations.addons_dir(ctx.platform)),
                  "--claude-commands-dir", str(locations.claude_commands_dir()),

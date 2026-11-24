@@ -122,6 +122,47 @@ class ChildCommandTests(AutoCase):
         self.assertEqual(auto.child_command(plain, "claude"),
                          [sys.executable, self.cli, "--platform", "claude", "--addon-source", "https://x/y.git", "--addon-tag", "v1"])
 
+    def request(self, **fields):
+        return mock.patch.dict(os.environ, {auto.source.REQUEST_ENV: json.dumps(
+            dict({"package_root": str(self.source.resolve()), "source": {}}, **fields))})
+
+    def test_a_host_child_receives_the_addon_ids_that_the_host_holds(self):
+        ctx = self.context(addon_sources=["/cache/a", "/cache/b"])
+        ctx.addon_sources_prepared = True
+        with self.request(selections={"claude": ["alpha"], "codex": ["alpha"]}):
+            # Without the choice every host receives every source.
+            self.assertEqual(auto.child_command(ctx, "codex"),
+                             [sys.executable, self.cli, "--platform", "codex", "--addon-source", "/cache/a",
+                              "--addon-source", "/cache/b", "alpha"])
+            ctx.held_addons = {"claude": {"/cache/a": ["first"]}, "codex": {}}
+            self.assertEqual(auto.child_command(ctx, "claude"),
+                             [sys.executable, self.cli, "--platform", "claude", "--addon-source", "/cache/a",
+                              "--addon-id", "first", "alpha"])
+            self.assertEqual(auto.child_command(ctx, "codex"), [sys.executable, self.cli, "--platform", "codex", "alpha"])
+            # The command that starts the whole installation names every source.
+            self.assertEqual(auto.child_command(ctx, None),
+                             [sys.executable, self.cli, "--addon-source", "/cache/a", "--addon-source", "/cache/b"])
+            seen = {}
+
+            def targets(host):
+                seen[host.platform] = (list(host.addon_sources), host.addon_ids)
+                return [Target("both", Path("/cache/a/both"), "first")] if host.addon_sources else []
+
+            with mock.patch("installer.addons.collect_addon_targets", side_effect=targets):
+                self.assertEqual(auto.platform_target_keys(ctx, "claude", ["alpha"]),
+                                 ["support:_shared", "skill:alpha", "skill:both"])
+                self.assertEqual(auto.platform_target_keys(ctx, "codex", ["alpha"]), ["support:_shared", "skill:alpha"])
+            self.assertEqual(seen, {"claude": (["/cache/a"], ["first"]), "codex": ([], [])})
+
+    def test_the_host_process_arguments_use_the_registration_read_before_activation(self):
+        ctx = self.context(addon_sources=["/cache/a"])
+        ctx.addon_sources_prepared = True
+        ctx.held_addons = {"claude": {"/cache/a": ["first"]}, "codex": {}}
+        with self.request(selections={"claude": ["alpha"], "codex": ["alpha"]}):
+            code, _ = self.run_children(ctx, ["claude", "codex"])
+        self.assertEqual(code, 0)
+        self.assertEqual(["--addon-id" in argv for argv, _ in self.children], [True, False])
+
     def test_uninstall_child(self):
         # install.sh:294
         self.assertEqual(auto.child_command(self.context(skip_source_health=True), "codex", uninstall=True),

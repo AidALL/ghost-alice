@@ -63,6 +63,17 @@ class SelectionCase(unittest.TestCase):
 
 
 class TargetTests(SelectionCase):
+    def test_lost_recorded_core_slot_keeps_host_support_after_the_catalog_changes(self):
+        skills = self.context().skills_dir
+        slot = skills / 'previous-leaf'
+        record = self.home / '.ghost-alice' / 'installed-payload-v2.json'
+        record.parent.mkdir()
+        record.write_text(json.dumps(dict(schema_version=2, installer={}, targets={slot.as_posix(): {
+            'name': slot.name, 'kind': 'skill', 'provider': 'core', 'used_by': ['claude']}})))
+        self.assertTrue(selection.has_managed_installs(skills, 'claude'))
+        self.assertFalse(selection.has_managed_installs(skills, 'claude', excluding=(slot,)))
+        self.assertFalse(selection.has_managed_installs(skills, 'codex'))
+
     def test_remaining_core_uses_current_inventory_destinations(self):
         skills = self.home / ".claude" / "skills"
         skills.mkdir(parents=True)
@@ -115,7 +126,7 @@ class TargetTests(SelectionCase):
                 state.write_text(body)
                 output = io.StringIO()
                 with contextlib.redirect_stdout(output):
-                    self.assertTrue(selection.has_managed_installs(skills, "claude"))
+                    self.assertIsNone(selection.has_managed_installs(skills, "claude"))
                 self.assertEqual(state.read_text(), body)
                 self.assertIn("inventory", output.getvalue())
 
@@ -191,7 +202,8 @@ class CleanupTests(SelectionCase):
         def invoke(*args, **kwargs):
             calls.append((args, kwargs))
             return runner.ToolResult(retired_assets.main(list(args[1:])))
-        with mock.patch("installer.runner.run_tool", side_effect=invoke), \
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_GHOST_ROOT': str(self.home / 'runtime-settings')}), \
+                mock.patch("installer.runner.run_tool", side_effect=invoke), \
                 mock.patch('uninstall_cleanup.platforms_referencing_target', return_value=[]), \
                 mock.patch('uninstall_cleanup.release_target_records', create=True) as release:
             out = io.StringIO()

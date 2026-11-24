@@ -43,7 +43,6 @@ try { [Console]::InputEncoding = $Utf8NoBom } catch { $null = $_ }
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 # The installer names this command in its help and hints.
-$env:GHOST_ALICE_INSTALL_COMMAND = ".\install.cmd"
 
 # ── Messages for the Python runtime step only ─────────────
 function Write-Info { param([string]$Message) Write-Host ("[INFO] " + $Message) -ForegroundColor Cyan }
@@ -197,5 +196,10 @@ if (-not $python) {
     exit 1
 }
 $installerArguments = ConvertTo-InstallerArgument -Arguments $args
-& $python (Join-Path -Path $PSScriptRoot -ChildPath "_shared/installer/cli.py") @installerArguments
+$entry = Join-Path -Path $PSScriptRoot -ChildPath "_shared/installer/cli.py"
+if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) {
+    Write-Err "This installer's files are incomplete: $entry is missing. Run the repair from a Ghost-ALICE checkout that holds the same Core files."
+    exit 1
+}
+& $python $entry @installerArguments
 exit $LASTEXITCODE

@@ -796,10 +796,6 @@ def record_after_recovery(ghost_root) -> dict | None:
     return installed_payload.read_file(record_path_after_recovery(ghost_root))
 
 
-def _record_key(dest) -> str:
-    return Path(dest).as_posix()
-
-
 def _record_value(path, mode: str) -> dict:
     """What the install record keeps for a published target: the link's target, or the copy's file digests."""
     if mode == "link":
@@ -830,6 +826,7 @@ class PublishBatch(ReplacementBatch):
     def __init__(self, request: dict, replaced: list[dict], current: list[dict], journal: Journal, *,
                  progress_callback=None, progress_events=None):
         self.request, self.journal = request, journal
+        self.asset_root = request.get('asset_root') or request['source'].get('root')
         self.replaced, self.current = replaced, current
         self.ghost_root = Path(request["ghost_root"])
         progress = request.get("progress") or {}
@@ -843,14 +840,14 @@ class PublishBatch(ReplacementBatch):
         super().stage()
         for item, target, selected in zip(self.prepared, self.journal.data["targets"], self.replaced):
             if 'command_text' in selected:
-                item['stage'].write_text(selected['command_text'], encoding='utf-8')
+                item['stage'].write_text(selected['command_text'], encoding='utf-8', newline='\n')
                 item['candidate'] = self.identity(item['stage'])
             if (selected["mode"] == "copy" and selected["kind"] in {"skill", "support"}
                     and item["stage"].is_dir() and not item["stage"].is_symlink()):
                 addon_id = selected["provider"].removeprefix("addon:") if selected["provider"].startswith("addon:") else None
                 write_ownership_marker(
                     item["stage"], platform=self.request["host"], asset_id=selected["name"],
-                    source_repo=self.request.get("asset_root", self.request["source"]["root"]), source_commit=selected["source_commit"],
+                    source_repo=self.asset_root, source_commit=selected["source_commit"],
                     install_mode="copy", owner="addon" if addon_id else "ghost-alice", addon_id=addon_id,
                     provided_kind=selected["kind"],
                 )
@@ -871,7 +868,7 @@ class PublishBatch(ReplacementBatch):
             entry = {key: target[key] for key in ("name", "kind", "mode", "provider", "source", "source_commit")}
             entry.update(used_by=[self.request["host"]], installed_at=installed_at, baseline="recorded")
             entry.update(value)
-            entries[_record_key(target["dest"])] = entry
+            entries[installed_payload.target_key(target["dest"])] = entry
         patches = {"targets": entries, "installer": dict(self.request["installer"]),
                    "source": dict(self.request["source"]),
                    "last_transaction": {"id": self.journal.txid, "updated_at": installed_at,
@@ -879,7 +876,7 @@ class PublishBatch(ReplacementBatch):
         installed_payload.update(self.ghost_root, patches, journal=self.journal)
         if self.request.get('install_state'):
             import install_state_writer
-            install_state_writer.rebase_source(self.request['install_state'], self.request.get('asset_root', self.request['source']['root']),
+            install_state_writer.rebase_source(self.request['install_state'], self.asset_root,
                                               self.request['targets'], self.request['source'])
 
     def restore(self):
@@ -1014,7 +1011,8 @@ def _original_cleanup_reason(original: Path, target: dict, record: dict) -> str 
     if target.get('kind') in {'data', 'configuration'} and target.get('before') is not None:
         return (None if content_digest.state(original, include_generated=target.get('mode') == 'data') == target['before']
                 else 'migration-original-changed')
-    entry = record.get("targets", {}).get(target.get("dest"))
+    targets = record.get("targets", {})
+    entry = targets.get(installed_payload.target_key(target["dest"], targets)) if target.get("dest") else None
     if isinstance(entry, dict) and entry.get("baseline") in ("recorded", "migrated"):
         if entry.get("mode") == "link" and isinstance(entry.get("link_target"), str):
             return "installed-link-changed" if content_digest.compare(entry, original)["link_target_differs"] else None

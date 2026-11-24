@@ -6,7 +6,7 @@ Older filenames hold a notice identifying the detailed record.
 
 - `installer`: `{commit, schema_version}` of the last writer and optional
   `active_root` selecting the package the installed management command executes.
-- `source`: `{root, commit, dirty, hooks_path, remote, ref}` of the development input,
+- `source`: `{root, commit, dirty, remote, ref}` of the development input,
   with optional `ledger_source_roots` mapping installed ledger paths to their source and observed hosts.
   A path alone carries no host attribution after a change of source.
 - `last_transaction`: `{id, updated_at, rollback_dir}` of the last publish.
@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from contextlib import nullcontext
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePath
 import re
 from typing import Mapping, Sequence
 import uuid
@@ -78,6 +78,14 @@ class RecordError(ValueError):
 
 class NotLockHolder(RuntimeError):
     """Neither this process nor the process that started it holds the install lock."""
+
+
+class InventoryError(ValueError):
+    """One host's earlier inventory could not supply its full target list."""
+
+    def __init__(self, host: str, file: Path, cause: Exception):
+        self.host, self.file = host, file
+        super().__init__(f"{file}: {cause}")
 
 
 def path(ghost_root: Path | str) -> Path:
@@ -161,7 +169,8 @@ def source_paths(relations: dict) -> dict:
     return {path: fact['source_root'] if isinstance(fact, dict) else fact for path, fact in relations.items()}
 
 
-def _pending_source(root: Path) -> dict | None:
+def pending_source(root: Path) -> dict | None:
+    """The source facts that an earlier installer's interrupted activation left in its own file."""
     file = root / PENDING_SOURCE_FILENAME
     if file.is_symlink():
         raise RecordError(f'Pending installation source is a symbolic link: {file}')
@@ -179,7 +188,8 @@ def _pending_source(root: Path) -> dict | None:
     return pending
 
 
-def _matches_pending(record: dict, pending: dict) -> bool:
+def matches_pending(record: dict, pending: dict) -> bool:
+    """Whether the record still holds the activation that left `pending`."""
     source = record.get('source', {})
     saved = pending['source']
     return (record.get('installer', {}).get('active_root') == pending['active_root']
@@ -187,54 +197,9 @@ def _matches_pending(record: dict, pending: dict) -> bool:
             and source.get('ledger_source_roots', {}) == source_paths(saved['ledger_source_roots']))
 
 
-def preserve_pending_source(file: Path, journal) -> None:
-    """Include this sidecar in the writer's existing rollback, once and before its first change."""
-    if file.is_symlink():
-        raise RecordError(f'Pending installation source is a symbolic link: {file}')
-    if not any(item['path'] == str(file.resolve()) for item in journal.data.get('metadata_records', [])):
-        journal.preserve_metadata(file)
-
-
-def recorded_source(ghost_root: Path, record: dict) -> dict:
-    """The record's source, including host names saved for its still-pending activation."""
-    source = record.get('source', {})
-    pending = _pending_source(ghost_root)
-    return dict(source, **pending['source']) if pending and _matches_pending(record, pending) else source
-
-
-def finish_pending_source(ghost_root: Path, *, selected_package: Path | None = None) -> None:
-    """Publish the saved host names under the install lock if this activation still owns the v2 record."""
-    _require_lock(ghost_root)
-    pending = _pending_source(ghost_root)
-    if pending is None:
-        return
-    record = read(ghost_root) or {}
-    if selected_package and str(selected_package) != record.get('installer', {}).get('active_root'):
-        return
-    if _matches_pending(record, pending):
-        update(ghost_root, {'source': pending['source']})
-    else:
-        # A different writer already replaced this activation, even if its package digest was reused.
-        from install_transaction import record_update
-        file = ghost_root / PENDING_SOURCE_FILENAME
-        with record_update(ghost_root) as journal:
-            preserve_pending_source(file, journal)
-            file.unlink()
-
-
-def _save(ghost_root: Path | str, record: dict, *, journal=None, defer_source: bool = False) -> None:
+def _save(ghost_root: Path | str, record: dict, *, journal=None) -> None:
     root = Path(ghost_root)
-    source = record.get("source", {})
-    relations = source.get("ledger_source_roots", {})
-    pending_file = root / PENDING_SOURCE_FILENAME
-    pending = _pending_source(root)
-    deferred = None
-    if defer_source:
-        deferred = {'active_root': record['installer']['active_root'],
-                    'source': {'root': source['root'], 'ledger_source_roots': relations}}
-        relations = source_paths(relations)
-        record['source'] = dict(source, ledger_source_roots=relations)
-    clear_pending = pending is not None and not _matches_pending(record, pending)
+    relations = record.get("source", {}).get("ledger_source_roots", {})
     attributed = any(isinstance(value, dict) for value in relations.values())
     version = ATTRIBUTED_SCHEMA_VERSION if attributed else SCHEMA_VERSION
     name = ATTRIBUTED_FILENAME if attributed else FILENAME
@@ -246,25 +211,16 @@ def _save(ghost_root: Path | str, record: dict, *, journal=None, defer_source: b
     guards = [file for file in guards if not file.exists() or file.read_bytes() != notice]
     obsolete = root / ATTRIBUTED_FILENAME
     demoting = not attributed and obsolete.exists()
-    operation = nullcontext(journal)
-    if (guards or demoting or deferred or clear_pending) and journal is None:
+    operation = nullcontext()
+    if (guards or demoting) and journal is None:
         from install_transaction import record_update
         operation = record_update(root)
-    with operation as transaction:
-        if deferred or clear_pending:
-            preserve_pending_source(pending_file, transaction)
-        if clear_pending and attributed and not obsolete.exists():
-            # A v2 recovery program knows only its two record filenames. Let it undo this first v3 detail too.
-            transaction.preserve_metadata(obsolete)
-        if deferred:
-            _write(pending_file, _encode(deferred))
+    with operation:
         _write(root / name, _encode(record))
         for file in guards:
             _write(file, notice)
         if demoting:
             obsolete.unlink()
-        if clear_pending and not deferred:
-            pending_file.unlink()
 
 
 def target_hosts(key: str, entry: Mapping) -> list[str]:
@@ -333,13 +289,11 @@ def _check_service(section: object) -> dict:
     return dict(section)
 
 
-def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None], *, journal=None,
-           defer_source: bool = False) -> dict:
+def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None], *, journal=None) -> dict:
     """Write the given sections in one replacement of the record and return the record.
 
     `targets` changes only the entries it names, and an entry keeps every host its
-    path already had in `used_by`; `installer` and `source` change only named
-    fields so ordinary placement preserves the active CLI and acquisition input.
+    path already had in `used_by`; `installer` and `source` change only named fields.
     `last_transaction` and `service` replace their section; `service` None deletes it.
     """
     _require_lock(ghost_root)
@@ -366,12 +320,16 @@ def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None], *, jou
                 record[section] = dict(patch)
             continue
         for key, entry in patch.items():
+            if isinstance(key, str) and key not in targets:
+                alternate = target_key(key, targets)
+                if alternate in targets:
+                    key = alternate
             merged = _check_entry(key, entry)
             previous = targets.get(key)
             if isinstance(previous, Mapping) and isinstance(previous.get("used_by"), list):
                 merged["used_by"] = sorted(set(previous["used_by"]) | set(merged["used_by"]))
             targets[key] = merged
-    _save(ghost_root, record, journal=journal, defer_source=defer_source)
+    _save(ghost_root, record, journal=journal)
     return record
 
 
@@ -384,13 +342,13 @@ def release_target(ghost_root: Path | str, *, destination: Path | str,
     unchanged, and this operation never changes service or recovery records.
     """
     _require_lock(ghost_root)
-    key = str(destination)
-    if not _absolute(key) or not isinstance(provider, str) or not provider or not isinstance(platform, str) or not platform:
+    if not _absolute(str(destination)) or not isinstance(provider, str) or not provider or not isinstance(platform, str) or not platform:
         raise RecordError("release_target needs an absolute destination, provider and platform")
     record = read(ghost_root)
-    if record is None or key not in record.get("targets", {}):
+    targets = (record or {}).get("targets", {})
+    key = target_key(destination, targets)
+    if key not in targets:
         return record
-    targets = record["targets"]
     entry = _check_entry(key, targets[key])
     if not isinstance(entry.get("provider"), str) or not entry["provider"]:
         raise RecordError(f"target {key} needs a provider")
@@ -453,8 +411,13 @@ def _load_json(file: Path) -> object:
         return None
 
 
-def _posix(value: str) -> str:
-    return Path(value).as_posix()
+def target_key(destination: PurePath | str, targets: Mapping | None = None) -> str:
+    """Use the published POSIX spelling, retaining an existing native Windows key when reading old records."""
+    path = destination if isinstance(destination, PurePath) else Path(destination)
+    key = path.as_posix()
+    if targets is not None and key not in targets and str(path) in targets:
+        return str(path)
+    return key
 
 
 def _sidecars(addons_dir: Path) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
@@ -471,7 +434,7 @@ def _sidecars(addons_dir: Path) -> tuple[dict[str, tuple[str, str]], dict[str, s
             if not isinstance(provided, dict) or not isinstance(provided.get("kind"), str):
                 continue
             if isinstance(provided.get("target"), str) and provided["target"]:
-                by_path[_posix(provided["target"])] = (sidecar["addon_id"], provided["kind"])
+                by_path[target_key(provided["target"])] = (sidecar["addon_id"], provided["kind"])
             if provided["kind"] == "skill" and isinstance(provided.get("name"), str):
                 by_name[provided["name"]] = sidecar["addon_id"]
     return by_path, by_name
@@ -487,10 +450,10 @@ def _snapshot_files(file: Path) -> dict[str, str]:
     if isinstance(records, dict):
         for key, value in records.items():
             if isinstance(key, str) and isinstance(value, dict) and isinstance(value.get("sha256"), str):
-                files[_posix(key)] = value["sha256"]
+                files[Path(key).as_posix()] = value["sha256"]
     listed = snapshot.get("files")
     if isinstance(listed, dict):
-        files.update({_posix(key): value for key, value in listed.items()
+        files.update({Path(key).as_posix(): value for key, value in listed.items()
                       if isinstance(key, str) and isinstance(value, str)})
     return files
 
@@ -522,7 +485,8 @@ def _migrated_entry(host: str, state: dict, raw: object, sidecar_paths: dict, si
     mode = _EARLIER_MODES.get(raw.get("install_mode"))
     if not isinstance(dest, str) or not dest or not isinstance(name, str) or mode is None:
         return None
-    key = _posix(dest)
+    dest = inventory_destination(dest)
+    key = target_key(dest)
     addon_id = raw.get("addon_id") if raw.get("owner") == "addon" and isinstance(raw.get("addon_id"), str) else None
     if key in sidecar_paths:
         provider_id, kind = sidecar_paths[key]
@@ -570,20 +534,80 @@ def _installed_at(state: dict) -> datetime:
     return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
 
 
-def _source(states: list[dict]) -> dict | None:
-    """The source section the latest earlier install-state names."""
+def _source(root: Path, states: list[dict]) -> dict | None:
+    """The source section the latest earlier install-state names. None when it names a saved package under `root`,
+    which is no development source."""
     if not states:
         return None
     latest = max(states, key=_installed_at)
-    hooks_path = next((change.get("after") for change in latest.get("system_env_changes") or []
-                       if isinstance(change, dict) and change.get("kind") == "source_repo_hook_path"), None)
-    return {"root": latest.get("source_root"), "commit": latest.get("source_head"),
-            "dirty": latest.get("source_dirty_state"), "hooks_path": hooks_path}
+    origin = latest.get("source_root")
+    if _absolute(origin) and Path(origin).resolve().is_relative_to((root / "versions").resolve()):
+        return None
+    return {"root": origin, "commit": latest.get("source_head"), "dirty": latest.get("source_dirty_state")}
+
+
+def awaits_migration(record: Mapping | None) -> bool:
+    """Whether no installer has written `record` yet: there is none, it has an earlier form, or only a service
+    registration wrote it. Such a record has consumed no host inventory."""
+    return (record is None or record['schema_version'] not in (SCHEMA_VERSION, ATTRIBUTED_SCHEMA_VERSION)
+            or 'installer' not in record)
+
+
+def inventory_destination(value: Path | str) -> Path:
+    """Expand a stored home path. For a parent traversal, follow directory links but keep the destination slot."""
+    path = Path(value).expanduser()
+    if '..' in path.parts:
+        return path.parent.resolve() / path.name if path.name != '..' else path.resolve()
+    return path
+
+
+def read_inventory(path: Path | str, *, platform: str | None = None) -> dict | None:
+    """Read the current inventory without adopting live files as a new baseline."""
+    path = Path(path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        if os.path.lexists(path):
+            raise
+        return None
+    except ValueError as exc:
+        raise ValueError(f"invalid install-state JSON: {path}: {exc}") from exc
+    if isinstance(data, dict) and "targets" not in data and data.get("partial_failure") is True:
+        # The earlier postflight writer recorded observations without an inventory.
+        data = dict(data, targets=[])
+    if not isinstance(data, dict) or not isinstance(data.get("targets"), list):
+        raise ValueError(f"invalid install-state targets: {path}")
+    if platform is not None and data.get("platform", platform) != platform:
+        raise ValueError(f"install-state platform mismatch: {path}")
+    for target in data["targets"]:
+        if (not isinstance(target, dict) or not isinstance(target.get("dest_path"), str)
+                or not target["dest_path"] or not isinstance(target.get("target_name"), str)
+                or not target["target_name"]):
+            raise ValueError(f"invalid install-state target: {path}")
+    return data
+
+
+def earlier_inventories(root: Path, hosts: Sequence[str]) -> tuple[dict[str, dict], list[InventoryError]]:
+    """Read each complete host inventory and identify every file that could not be read."""
+    inventories, errors = {}, []
+    for host in hosts:
+        file = root / 'install-state' / f'{host}.json'
+        try:
+            state = read_inventory(file)
+        except (OSError, ValueError) as exc:
+            errors.append(InventoryError(host, file, exc))
+            continue
+        if state is not None:
+            if state.get('platform', host) != host:
+                raise InventoryError(host, file, ValueError('install-state platform mismatch'))
+            inventories[host] = state
+    return inventories, errors
 
 
 def migrate(ghost_root: Path | str, hosts: Sequence[str], *, installer_commit: str,
-            runtime_targets: dict[str, list[dict]] | None = None) -> dict | None:
-    """Carry earlier inventories and v1 records into v2; None for v2 or no legacy inventory.
+            runtime_targets: dict[str, list[dict]] | None = None, inventories: dict[str, dict] | None = None) -> dict | None:
+    """Carry earlier inventories and v1 records into the record; None for a record that an installer wrote
+    (`awaits_migration`) or no readable earlier record.
 
     Every host's `install-state/<host>.json` target becomes an entry: a link keeps the
     path it points to now; a copy takes its file fingerprints from its ownership marker,
@@ -593,17 +617,19 @@ def migrate(ghost_root: Path | str, hosts: Sequence[str], *, installer_commit: s
     """
     root = Path(ghost_root)
     existing = read(root)
-    if existing is not None and existing['schema_version'] in (SCHEMA_VERSION, ATTRIBUTED_SCHEMA_VERSION):
+    if not awaits_migration(existing):
         return None
-    state_files = [(host, root / "install-state" / f"{host}.json") for host in hosts]
-    state_files = [(host, file) for host, file in state_files if file.is_file()]
-    if not state_files:
+    if inventories is None:
+        inventories, errors = earlier_inventories(root, hosts)
+        if not inventories and not errors:
+            return None
+    elif not inventories:
         return None
     entries: dict[str, dict] = dict((existing or {}).get('targets', {}))
     states: list[dict] = []
-    for host, file in state_files:
-        state = _load_json(file)
-        if not isinstance(state, dict) or not isinstance(state.get("targets"), list):
+    for host, state in inventories.items():
+        # A failed installation without targets identifies nothing that is installed.
+        if state.get("partial_failure") is True and not state["targets"]:
             continue
         states.append(state)
         sidecar_paths, sidecar_names = _sidecars(root / "addons" / host)
@@ -621,9 +647,12 @@ def migrate(ghost_root: Path | str, hosts: Sequence[str], *, installer_commit: s
             key, entry = _migrated_entry(host, state, dict(raw, source_path=original), {}, {}, snapshot)
             entry.update(kind='runtime', provider='core')
             entries[key] = _merge(entries[key], entry) if key in entries else entry
+    if not states and not entries:
+        # An empty record would stop the migration of an inventory that becomes readable later.
+        return None
     patches: dict[str, Mapping] = {"targets": entries,
                                    "installer": {"commit": installer_commit, "schema_version": SCHEMA_VERSION}}
-    source = _source(states)
+    source = _source(root, states)
     if source is not None and not (existing or {}).get('source'):
         patches["source"] = source
     update(root, patches)
@@ -667,7 +696,7 @@ def _receipt(binding_path: Path) -> dict:
 def _companions(receipt: dict, targets: dict, runtime_shared: Path) -> dict[str, dict]:
     """The runtime companion files the receipt fingerprinted (under the runtime root, outside `_shared`)
     that the record does not name yet, as runtime targets of the hosts the runtime `_shared` serves."""
-    runtime_entry = targets.get(_posix(str(runtime_shared)))
+    runtime_entry = targets.get(target_key(runtime_shared))
     if not isinstance(runtime_entry, dict) or runtime_entry.get("kind") != "runtime":
         return {}
     runtime_root = runtime_shared.parent
@@ -679,7 +708,7 @@ def _companions(receipt: dict, targets: dict, runtime_shared: Path) -> dict[str,
         file = Path(path)
         if runtime_root not in file.parents or file == runtime_shared or runtime_shared in file.parents:
             continue
-        key = _posix(str(file))
+        key = target_key(file)
         if key in targets:
             continue
         relative = file.relative_to(runtime_root).as_posix()

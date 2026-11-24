@@ -17,6 +17,7 @@ This document is a fast recovery playbook for cases where a user cannot pull the
 - [4. When Local Changes Must Be Preserved](#4-when-local-changes-must-be-preserved)
 - [5. Run the Installer After Git Is Clean](#5-run-the-installer-after-git-is-clean)
 - [6. Operating Principles](#6-operating-principles)
+- [Git Hook Registration Failure](#git-hook-registration-failure)
 - [Native Hook Trust And Reload](#native-hook-trust-and-reload)
 - [Intake Warning And Doctor Lists](#intake-warning-and-doctor-lists)
 
@@ -152,6 +153,14 @@ If `Doctor` or `Status` reports a pending merge warning, the installer created a
 - If `git pull` creates a merge conflict, the installer cannot resolve that conflict for the user.
 - A blocked-user guide is not enough when it exists only inside the repo. Keep an online source link available from the Wiki so the guide can be read without pulling.
 - Do not run the installer while `UU` or `AA` remains in Git status.
+
+## Git Hook Registration Failure
+
+The installer stops with exit code 1 when it cannot write `core.hooksPath` to the shared configuration file of the install source's repository, or cannot write the files in `~/.ghost-alice/git-hooks`. It restores those files before it stops, so the install record, the installed files and the Git setting stay unchanged. The message shows Git's error, the configuration file and, when it exists, the `config.lock` beside that file.
+
+1. If the message names a `config.lock`, confirm that no Git command is running in that repository, then delete only that file.
+2. If the error is a permission error, make the named file or folder writable, or install with `--adopt-source` from a checkout that you can write.
+3. Run the same installation command again.
 
 ## Native Hook Trust And Reload
 

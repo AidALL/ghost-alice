@@ -11,6 +11,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_STATE_SCHEMA = REPO_ROOT / "installer_update" / "install_state_schema.md"
 INSTALL_STATE_WRITER = REPO_ROOT / "_shared" / "install_state_writer.py"
+sys.path.insert(0, str(REPO_ROOT / "_shared"))
+import install_state_writer  # noqa: E402
 
 
 class InstallStateManifestTest(unittest.TestCase):
@@ -31,6 +33,16 @@ class InstallStateManifestTest(unittest.TestCase):
                 self.assertEqual(json.loads(state.read_text())['targets'][0]['target_name'], 'skill')
                 if old == b'{broken':
                     self.assertEqual([p.read_bytes() for p in state.parent.glob('claude.json.*.bak')], [old])
+
+    def test_the_reader_names_the_inventory_that_it_cannot_decode(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder) / 'claude.json'
+            for content in (b'{broken', b'\xff'):
+                with self.subTest(content=content):
+                    state.write_bytes(content)
+                    with self.assertRaises(ValueError) as caught:
+                        install_state_writer.read_state(state)
+                    self.assertIn(str(state), str(caught.exception))
 
     def test_partial_reinstall_keeps_unselected_core_baseline_and_host_inventory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -94,46 +106,38 @@ class InstallStateManifestTest(unittest.TestCase):
         ]:
             self.assertIn(kind, body)
 
-    def test_installer_writer_records_system_env_changes_field(self) -> None:
-        transaction_py = (REPO_ROOT / "_shared" / "installer" / "transaction.py").read_text(encoding="utf-8")
-        self.assertIn("GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED", transaction_py)
-        # source_repo_hook_path is computed by the Python installer module
-        writer_py = INSTALL_STATE_WRITER.read_text(encoding="utf-8")
-        self.assertIn("source_repo_hook_path", writer_py)
+    def test_the_install_passes_no_git_hook_change_to_the_writer(self) -> None:
+        for path in (REPO_ROOT / "_shared" / "installer" / "transaction.py", INSTALL_STATE_WRITER):
+            self.assertFalse("SOURCE_REPO_HOOK" in path.read_text(encoding="utf-8"), str(path))
 
-    def test_python_writer_records_the_hook_path_the_install_owns(self) -> None:
-        # The entry tells the full uninstall what the repository's shared core.hooksPath was before Ghost-ALICE
-        # wrote the install source's hooks folder. A later install without new hook input retains that record
-        # so full uninstall can still restore it (install_state_schema.md, system_env_changes).
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            state_path = root / ".ghost-alice" / "install-state" / "claude.json"
-            hooks = (root / "repo" / "hooks").as_posix()
-            argv = [sys.executable, str(INSTALL_STATE_WRITER), "claude", str(root / "repo"), "main", "abc123", "clean",
-                    str(state_path)]
-            env = {**os.environ, "HOME": str(root),
-                   "GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED": "1",
-                   "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT": "0",
-                   "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE": "",
-                   "GHOST_ALICE_SOURCE_REPO_HOOK_AFTER": hooks,
-                   "GHOST_ALICE_SOURCE_REPO_HOOK_APPLIED_AT": "2026-10-01T00:00:00Z"}
-            result = subprocess.run(argv, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-            manifest = json.loads(state_path.read_text(encoding="utf-8"))
-            expected_changes = [{
-                "kind": "source_repo_hook_path",
-                "repo_root": (root / "repo").as_posix(),
-                "before_present": False,
-                "before": None,
-                "after": hooks,
-                "applied_at": "2026-10-01T00:00:00Z",
-            }]
-            self.assertEqual(manifest["system_env_changes"], expected_changes)
-            env["GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED"] = "0"
-            result = subprocess.run(argv, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
-            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-            manifest = json.loads(state_path.read_text(encoding="utf-8"))
-            self.assertEqual(manifest["system_env_changes"], expected_changes)
+    def test_python_writer_keeps_an_earlier_hook_path_row_and_adds_none(self) -> None:
+        # An earlier release records in this inventory which core.hooksPath the repository had before it.
+        for earlier in (False, True):
+            with self.subTest(earlier=earlier), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                state_path = root / ".ghost-alice" / "install-state" / "claude.json"
+                argv = [sys.executable, str(INSTALL_STATE_WRITER), "claude", str(root / "repo"), "main", "abc123",
+                        "clean", str(state_path)]
+                rows = [{
+                    "kind": "source_repo_hook_path",
+                    "repo_root": (root / "repo").as_posix(),
+                    "before_present": True,
+                    "before": "custom-hooks",
+                    "after": (root / "repo" / "hooks").as_posix(),
+                    "applied_at": "2026-10-01T00:00:00Z",
+                }] if earlier else []
+                state_path.parent.mkdir(parents=True)
+                state_path.write_text(json.dumps({"schema_version": 1, "platform": "claude", "targets": [],
+                                                  "system_env_changes": rows}), encoding="utf-8")
+                env = {**os.environ, "HOME": str(root),
+                       "GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED": "1",
+                       "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT": "0",
+                       "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE": "",
+                       "GHOST_ALICE_SOURCE_REPO_HOOK_AFTER": "/from/the/environment"}
+                result = subprocess.run(argv, env=env, capture_output=True, text=True, encoding="utf-8",
+                                        errors="replace")
+                self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+                self.assertEqual(json.loads(state_path.read_text(encoding="utf-8"))["system_env_changes"], rows)
 
     def test_python_writer_imports_codex_hook_feature_flag_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

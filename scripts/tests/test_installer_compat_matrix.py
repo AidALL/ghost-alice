@@ -3,6 +3,7 @@ import fnmatch
 import io
 import itertools
 import os
+import re
 import runpy
 import subprocess
 import shutil
@@ -215,7 +216,8 @@ class InstallerCompatMatrixTest(unittest.TestCase):
         runner = RUNNER.read_text(encoding="utf-8")
         unrun = []
         for path in sorted(test_files):
-            if "TestCase" in (REPO_ROOT / path).read_text(encoding="utf-8"):
+            # A unittest file can take its base class from another test module.
+            if re.search(r"^import unittest$|TestCase", (REPO_ROOT / path).read_text(encoding="utf-8"), re.MULTILINE):
                 if path not in reached:
                     unrun.append(str(path))
             elif str(path) not in runner:

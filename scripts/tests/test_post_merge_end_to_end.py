@@ -70,15 +70,13 @@ class HookPathOwnershipEndToEndTests(unittest.TestCase):
         installed = self.install("--platform", "claude", "--skip-source-health", "task-router")
         self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
         record = json.loads(self.record.read_text(encoding="utf-8"))
-        hooks = (Path(record['installer']['active_root']) / 'hooks').as_posix()
+        self.assertEqual(record["source"]["root"], str(self.source))
+        folder = self.home / ".ghost-alice" / "git-hooks"
+        hooks = folder.as_posix()
         self.assertEqual(self.shared_hook_path(), hooks)
-        self.assertEqual((record["source"]["root"], record["source"]["hooks_path"]), (str(self.source), hooks))
-        state = json.loads((self.home / ".ghost-alice" / "install-state" / "claude.json").read_text(encoding="utf-8"))
-        change = next(item for item in state["system_env_changes"] if item["kind"] == "source_repo_hook_path")
-        self.assertEqual((change["before_present"], change["after"]), (False, hooks))
-        # The record of the write, made in the same step as the write, for an install that stops before the end.
-        write_record = self.home / ".ghost-alice" / "install-state" / "source-repo-hook-path.json"
-        self.assertEqual(json.loads(write_record.read_text(encoding="utf-8")), change)
+        self.assertEqual((folder / "post-merge").read_bytes(), (self.source / "hooks" / "post-merge").read_bytes())
+        change, = json.loads((folder / "repositories.json").read_text(encoding="utf-8"))
+        self.assertEqual((change["repo_root"], change["before_present"], change["after"]), (str(self.source), False, hooks))
 
         # A worktree whose own commit holds an older hook file: its merge runs the install source's hook, which
         # names the worktree to the install source's installer, and nothing is installed.
@@ -103,13 +101,13 @@ class HookPathOwnershipEndToEndTests(unittest.TestCase):
         skill.write_text(skill.read_text() + '\nLocal merge content not published to a remote.\n')
         self.assertEqual(self.git(self.source, 'commit', '-q', '-am', 'local skill change').returncode, 0)
         self.git(self.source, "checkout", "-q", "main")
-        # Observe the checkout of the Python process that sends the package its install request.
+        # Observe the checkout of the Python process that sends the package its request.
         inject_installer_python(self.env, """
 import sys
 def observe_request(event, args):
     if event == 'subprocess.Popen' and args[3]:
-        request = args[3].get('GHOST_ALICE_INSTALL_REQUEST')
-        if request and not os.environ.get('GHOST_ALICE_INSTALL_REQUEST'):
+        request = args[3].get('GHOST_ALICE_PACKAGE_REQUEST')
+        if request and not os.environ.get('GHOST_ALICE_PACKAGE_REQUEST'):
             import json
             if not json.loads(request).get('stage'):
                 (Path.home() / 'request-writer').write_text(str(Path(sys.argv[0]).resolve()))
@@ -124,14 +122,20 @@ sys.addaudithook(observe_request)
                          merged.stdout + merged.stderr)
         self.assertNotIn('Local merge content not published to a remote.',
                       (self.home / '.claude/skills/task-router/SKILL.md').read_text())
-        self.assertEqual(self.shared_hook_path(), str(Path(record['installer']['active_root']) / 'hooks'))
-        self.assertEqual(Path((self.home / 'request-writer').read_text()), Path(hooks).parent / '_shared/installer/cli.py')
+        self.assertEqual(self.shared_hook_path(), hooks)
+        # The downloaded release sends it; its temporary checkout is gone after the install.
+        observed = self.home / 'request-writer'
+        self.assertTrue(observed.is_file(), merged.stdout + merged.stderr)
+        writer = Path(observed.read_text())
+        self.assertEqual(writer.parts[-3:], ('_shared', 'installer', 'cli.py'))
+        self.assertFalse(writer.exists(), writer)
+        self.assertFalse(writer.is_relative_to(self.source) or writer.is_relative_to(self.home / '.ghost-alice'), writer)
 
         # The full uninstall of the last host puts back what was there before Ghost-ALICE: no value.
         removed = self.install("--uninstall")
         self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
         self.assertIsNone(self.shared_hook_path())
-        self.assertFalse(write_record.exists())
+        self.assertEqual(list(folder.iterdir()), [])
 
 
 if __name__ == "__main__":

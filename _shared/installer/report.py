@@ -117,36 +117,91 @@ _MESSAGES = {
         "In installation record {file}, used_by for {target} must be a list of host names.",
         "설치 기록 {file}에서 {target}의 used_by 값은 호스트 이름의 목록이어야 합니다."),
     "active_version_mismatch": (
-        "The active installer at {package} is incomplete. From a checkout containing this version's Core files, run {command} --local-source with the original host, skills and addon sources.",
-        "현재 관리자({package})의 파일이 누락되었습니다. 이 버전과 같은 Core 파일이 있는 원본에서 기존 호스트, 스킬 및 애드온 원본을 지정해 {command} --local-source를 실행하세요."),
+        "This installer's files differ from the saved files of the active installer at {package}, and repair restores only the active installer's files. To restore this version, run the repair from a checkout containing the same Core files with the same addon sources. To replace the installed Core skills with the newest release, run {update}; an update restores no addon file.",
+        "이 인스톨러의 파일이 활성 인스톨러({package})의 보관 파일과 다르며, 복구는 활성 인스톨러의 파일만 복원합니다. 이 버전을 복원하려면 같은 Core 파일이 있는 원본에서 기존 애드온 원본을 지정해 복구를 실행해 주세요. 설치한 Core 스킬을 최신 릴리스로 교체하려면 {update} 명령을 실행해 주세요. 갱신은 애드온 파일을 복원하지 않습니다."),
+    "active_core_lost": (
+        "The active installer at {package} lost {file} and has only its own files to restore from. {restore} {replacement}",
+        "활성 인스톨러({package})에서 {file} 항목이 누락되었고, 활성 인스톨러가 복원에 사용할 수 있는 파일은 자신의 보관 파일뿐입니다. {restore} {replacement}"),
+    "restore_from_checkout": (
+        "To restore this version, run the repair from a checkout containing the same Core files.",
+        "이 버전을 복원하려면 같은 Core 파일이 있는 원본에서 복구를 실행해 주세요."),
+    "restore_from_registered": (
+        "To restore this version, run {repair}: the registered checkout restores it when it contains the same Core files.",
+        "이 버전을 복원하려면 {repair} 명령을 실행해 주세요. 설치 기록의 원본 폴더에 같은 Core 파일이 있으면 이 명령이 누락된 항목을 복원합니다."),
+    "active_addon_lost": (
+        "The saved addon files of the active installer at {package} lost {file}, and this command names no addon source that holds it. Run the repair with --addon-source for each addon source that this version was installed with.",
+        "활성 인스톨러({package})의 보관 애드온 파일에서 {file} 항목이 누락되었고, 이 명령은 그 항목이 있는 애드온 원본을 지정하지 않았습니다. 이 버전을 설치할 때 지정한 애드온 원본마다 --addon-source를 지정해 복구를 실행해 주세요."),
+    "private_addon_id": (
+        "Only the per-host installer accepts --addon-id. To remove one addon, use --uninstall --addon ID.",
+        "--addon-id는 호스트별 설치 프로세스에서만 받습니다. 애드온 하나를 제거하려면 --uninstall --addon ID를 사용하세요."),
+    "addon_registry_unreadable": (
+        "Reinstall stopped because the installer could not read the {host} addon registry: {details}",
+        "{host}의 애드온 등록 파일을 읽을 수 없어 재설치를 중단했습니다. {details}"),
+    "active_entry_missing": (
+        "The active installer is missing {entry}. Run --repair from a Ghost-ALICE checkout with the same Core files.",
+        "활성 인스톨러에 {entry} 파일이 없습니다. 같은 Core 파일이 있는 Ghost-ALICE 체크아웃에서 --repair를 실행하세요."),
     "active_version_missing": (
-        "The entire saved version for {package} is missing. From a checkout containing this version's Core files, run {command} --local-source with the original host, skills and addon sources to rebuild it.",
-        "현재 관리자({package})의 보관 버전 전체가 없습니다. 이 버전과 같은 Core 파일이 있는 원본에서 기존 호스트, 스킬 및 애드온 원본을 지정해 {command} --local-source를 실행해 보관 버전을 복원하세요."),
-    "active_manager_unavailable": (
-        "The active installer at {package} cannot start or cannot read the current installation record. From a checkout containing this version's Core files, run {command} --local-source with the original host, skills and addon sources.",
-        "현재 관리자({package})를 시작할 수 없거나 현재 설치 기록을 읽을 수 없습니다. 이 버전과 같은 Core 파일이 있는 원본에서 기존 호스트, 스킬 및 애드온 원본을 지정해 {command} --local-source를 실행하세요."),
-    "package_record_unreadable": (
-        "This installer package cannot read the current installation record: {package}. Use an installer that supports the recorded format.",
-        "이 설치 패키지는 현재 설치 기록을 읽을 수 없습니다. 패키지 경로는 {package}입니다. 해당 기록 형식을 지원하는 설치 버전을 사용하세요."),
+        "The entire saved version at {path} is missing. {replacement}",
+        "활성 인스톨러의 보관 버전 폴더 {path}이(가) 없습니다. {replacement}"),
+    "version_metadata_missing": (
+        "The saved file list is missing at {path}. To use this same version, restore its file list from backup. {replacement}",
+        "보관 버전의 파일 목록 {path}이(가) 없습니다. 같은 버전을 사용하려면 백업에서 파일 목록을 복원해 주세요. {replacement}"),
+    "replacement_update": (
+        "To replace the installed Core skills with the latest release, run {command}. An update restores no addon files.",
+        "설치한 Core 스킬을 최신 릴리스로 교체하려면 {command} 명령을 실행해 주세요. 갱신은 애드온 파일을 복원하지 않습니다."),
+    "replacement_from_checkout": (
+        "To install a replacement, use a Core checkout containing the desired version and specify its host, skills and addon sources with --local-source.",
+        "새로 설치하려면 원하는 버전이 있는 Core 체크아웃에서 호스트, 스킬 및 애드온 원본을 지정해 --local-source로 설치해 주세요."),
+    "repair_inventory_unreadable": (
+        "Repair could not read the inventory {file}. Run {command} with the names of the skills to install, then run the repair again.",
+        "복구가 설치 목록을 조회하지 못했습니다: {file}. {command}에 설치할 스킬 이름을 덧붙여 실행한 뒤 복구를 다시 실행해 주세요."),
+    "repair_targets_unrecorded": (
+        "The install record does not identify what is installed for {host}. Run {command} with the names of the skills to install.",
+        "설치 기록에서 {host}에 설치된 대상을 확인할 수 없습니다. {command}에 설치할 스킬 이름을 덧붙여 실행해 주세요."),
+    "repair_skill_missing": (
+        "The install record names the Core skill {name}, but {package} contains no such skill.",
+        "설치 기록에 있는 Core 스킬 {name}을 {package}에서 찾을 수 없습니다."),
+    "repair_shared_unrecorded": (
+        "The install record names skills of {host}, but {path} is missing and the install record does not name it. Run {command}.",
+        "설치 기록에 {host}의 스킬이 있지만 {path} 폴더가 누락되었고 설치 기록에도 이 폴더가 없습니다. {command} 명령을 실행해 주세요."),
+    "inventory_preserved": (
+        "The inventory {file} could not be read ({cause}). The installer moved it to {backup} and continues without it.",
+        "설치 목록 {file}을 읽을 수 없습니다({cause}). 인스톨러가 이 파일을 {backup}으로 옮기고 설치를 계속합니다."),
+    "repair_other_folder": (
+        "The install record names the skills of {host} in {recorded}, and this command uses {current}. Run the repair with the settings that place the skills in {recorded}.",
+        "설치 기록에는 {host}의 스킬이 {recorded}에 있고, 이 명령은 {current}를 사용합니다. 스킬을 {recorded}에 배치하는 설정으로 복구를 실행해 주세요."),
+    "repair_shared_occupied": (
+        "A file occupies {path}. Repair kept it and could not restore the support directory.",
+        "{path}에 파일이 있어 지원 폴더를 복원할 수 없습니다. 파일은 유지했습니다."),
     "update_origin_changed": (
-        "The installation source changed during download. Run the update again.",
-        "코드를 내려받는 동안 설치 원본이 바뀌었습니다. 갱신 명령을 다시 실행해 주세요."),
+        "The registered checkout or remote changed before installation. To use the current registration, run the command again without --remote.",
+        "설치 전에 설치 기록의 원본 폴더 또는 원격 저장소가 바뀌었습니다. 현재 기록으로 갱신하려면 --remote 없이 명령을 다시 실행해 주세요."),
+    "install_origin_changed": (
+        "The registered checkout or remote changed before installation. Installation stopped.",
+        "설치 전에 설치 기록의 원본 폴더 또는 원격 저장소가 바뀌어 설치를 중단했습니다."),
+    "core_selection_changed": (
+        "The recorded Core selection changed before installation. Run the command again to use the current selection.",
+        "설치 전에 기록된 Core 스킬 선택이 바뀌었습니다. 현재 선택으로 설치하려면 명령을 다시 실행해 주세요."),
+    "reinstall_command": (
+        "Reinstall this version for the hosts and Core skills currently installed: {command}",
+        "현재 설치된 호스트와 Core 스킬에 이 버전을 다시 설치하는 명령: {command}"),
     "merged_origin_changed": (
         "Post-merge: the registered installation source changed before placement. Installation stopped.",
         "병합 후 파일을 배치하기 전에 등록된 설치 원본이 바뀌어 설치를 중단했습니다."),
-    "previous_manager_incompatible": (
-        "The active installer at {package} cannot read the proposed installation record. Update from the recorded source ({origin}). To switch sources while work records still use the old folder, run {command} from a terminal, accept the record move, then retry the source change.",
-        "현재 관리자({package})는 갱신할 설치 기록 형식을 읽을 수 없습니다. 기존 원본({origin})에서 갱신하세요. 작업 기록이 옛 폴더에 있는 상태에서 원본을 바꾸려면 터미널에서 {command}를 실행해 기록 이동에 동의한 뒤 원본 변경을 다시 실행하세요."),
-    "candidate_first_retry": (
-        "Candidate install did not finish. To retry these files, run {package} --local-source.",
-        "첫 설치를 완료하지 못했습니다. 이 파일로 다시 설치하려면 {package} --local-source를 실행하세요."),
+    "release_older": (
+        "If the release from {remote} reported an unknown --install-acquired-release option, its installer did not accept this installer's request. Use a compatible main branch, or run this checkout's install script with --local-source to install its files.",
+        "{remote}의 릴리스가 --install-acquired-release 옵션을 알 수 없다고 출력했다면 그 릴리스가 이 설치 요청을 지원하지 않습니다. 호환되는 main 브랜치를 사용하거나, 이 체크아웃의 파일을 설치하려면 설치 스크립트에 --local-source를 지정해 실행해 주세요."),
+    "earlier_request": (
+        "An earlier Ghost-ALICE installer started this package. This version does not continue that installation and changed no installed file or installation record. Run {command}. If your command named a host or skills, add the same --platform option and skill names.",
+        "이전 Ghost-ALICE 인스톨러가 이 패키지를 실행했습니다. 이 버전은 그 설치를 이어서 실행하지 않으며, 설치된 파일과 설치 기록을 변경하지 않았습니다. {command}를 실행해 주세요. 중단된 명령에 호스트나 스킬을 지정했으면 같은 --platform 옵션과 스킬 이름을 덧붙여 주세요."),
+    "install_unfinished": (
+        "The installation did not finish. If an error above names another command, run that command. Otherwise resolve the reported cause and run the same command again.",
+        "설치를 완료하지 못했습니다. 위 오류에 다른 명령이 안내되어 있으면 그 명령을 실행해 주세요. 없으면 표시된 원인을 해결한 뒤 같은 명령을 다시 실행해 주세요."),
+    "merged_install_unfinished": (
+        "The installation after the merge did not finish. Resolve the reported cause, then run {command}.",
+        "병합 뒤 설치를 완료하지 못했습니다. 표시된 원인을 해결한 뒤 {command}를 실행해 주세요."),
+    "active_installer": ("The active installer is {active}.", "활성 인스톨러는 {active}입니다."),
     "removal_backup_path": ("Backup location: {path}", "보관 사본 위치: {path}"),
-    "candidate_failed": (
-        "Candidate install did not finish. Active installer: {active}",
-        "후보 설치를 완료하지 못했습니다. 현재 관리자 경로는 {active}입니다."),
-    "move_unsupported": (
-        "The code installation is complete. This installer version does not support moving existing work records, so the move was not started.",
-        "코드 설치를 완료했습니다. 이 인스톨러 버전은 기존 작업 기록 옮기기를 지원하지 않아 기록 이동을 시작하지 않았습니다."),
     "host_claude": ("Claude Code", "Claude Code"),
     "host_codex": ("Codex", "Codex"),
     "shutdown_running": (
@@ -345,6 +400,25 @@ _MESSAGES = {
         "복구가 끝날 때까지 관련 호스트 앱과 CLI 명령을 다시 실행하지 마세요. 다시 실행하면 새 위치에 기록이 추가될 수 있습니다. "
         "다음 기본 설치 또는 업데이트는 설치 준비 중 미완료 데이터·설정이 바뀌지 않았을 때만 복구를 다시 시도합니다. "
         "바뀐 경우 자동 복구는 덮어쓰기를 거부합니다. 두 기록 위치와 복구 기록을 보존하고, 재시도를 통과시키려고 새 기록 위치를 삭제하지 마세요."),
+    "git_hooks_skipped": (
+        "The installer did not set a Git hook path because it found no Git repository at {root} or no Git program.",
+        "{root}의 Git 저장소 또는 Git 프로그램을 찾지 못해 Git 훅 경로를 설정하지 않았습니다."),
+    "git_hooks_repository_unreadable": (
+        "Git could not read the repository at {root}. The installation stopped before it placed files.",
+        "Git이 {root}의 저장소를 조회하지 못했습니다. 파일을 배치하기 전에 설치를 중단했습니다."),
+    "git_hooks_failed": (
+        "The installer could not register its Git hooks folder in {config}. "
+        "The installation stopped before it placed files.",
+        "{config}에 Ghost-ALICE의 Git 훅 폴더를 등록하지 못했습니다. 파일을 배치하기 전에 설치를 중단했습니다."),
+    "git_hooks_locked": (
+        "Git's lock file exists: {lock}. Delete it only when no Git command is running, then run the same command again.",
+        "Git 잠금 파일이 있습니다: {lock}. 실행 중인 Git 명령이 없을 때만 이 파일을 삭제한 뒤 같은 명령을 다시 실행하세요."),
+    "git_hooks_record_unreadable": (
+        "The installer could not read the Git hook path record {path}. Repair it, then run the same command again. "
+        "If it cannot be repaired, set core.hooksPath of the registered repository to its earlier value, "
+        "move the file to another folder and run the same command again.",
+        "Git 훅 경로 기록을 조회하지 못했습니다: {path}. 파일 내용을 수정한 뒤 같은 명령을 다시 실행하세요. "
+        "수정할 수 없으면 등록된 저장소의 core.hooksPath를 이전 값으로 변경하고 파일을 다른 폴더로 이동한 뒤 같은 명령을 다시 실행하세요."),
     "step_restart": ("Restarting the context gateway", "문맥 게이트웨이 다시 시작"),
     "step_mark": ("Saving the completion record", "완료 기록 저장"),
 }
@@ -419,9 +493,7 @@ DEFAULT_INSTALL_COMMAND = "bash install.sh"
 
 
 def install_command() -> str:
-    """The command the user runs to start the installer, as the help and the hints
-    name it: `$GHOST_ALICE_INSTALL_COMMAND` when the shell reports one
-    (`install.ps1` reports `.\\install.cmd`), else `bash install.sh`."""
+    """The command printed by the public entry that started this process and its children."""
     return os.environ.get("GHOST_ALICE_INSTALL_COMMAND") or DEFAULT_INSTALL_COMMAND
 
 
@@ -515,13 +587,10 @@ def log_init() -> Path:
 
 
 def finish_install(source_digest: str, returncode: int) -> None:
-    """The outer installer records its final result after candidate and follow-up exit."""
+    """The requesting installer records its final result after the processes it started have exited."""
     if _state.log_file is None or not _state.log_file.is_file():
-        return  # Verbose or an older candidate may have produced no shared detail log.
-    # Old candidates ignore the shared path. Their separate logs cannot be classified
-    # from a parent-only summary; platform results show this candidate used the shared file.
-    if returncode != 0 or (_state.event_file is not None and read_install_results(_state.event_file)[0]):
-        _append_event(json.dumps(dict(type='install-result', source_digest=source_digest, returncode=returncode)))
+        return  # Verbose output produces no shared detail log.
+    _append_event(json.dumps(dict(type='install-result', source_digest=source_digest, returncode=returncode)))
     state_retention.apply('install-logs', _state.log_file.parent, protect=[_state.log_file])
 
 
