@@ -1,0 +1,171 @@
+--- a/_shared/native_transcript.py
++++ b/_shared/native_transcript.py
+@@ -8,6 +8,7 @@
+ import hashlib
+ import json
+ import os
++import re
+ from pathlib import Path
+ 
+ 
+@@ -55,6 +56,76 @@
+                                      for item in items)
+ 
+ 
++# Local fix 2026-11-24. Tools that cannot change files, and shell commands made only of
++# read commands or Ghost-ALICE's own record scripts. Anything not listed counts as work.
++_READ_ONLY_TOOLS = {'Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'Skill', 'ToolSearch'}
++_RECORD_SCRIPTS = ('session_intent_ledger.py', 'response_route.py', 'completion_assessment.py')
++_READ_COMMANDS = {'cat', 'head', 'tail', 'ls', 'dir', 'grep', 'rg', 'wc', 'pwd', 'cd', 'echo', 'printf', 'type', 'sort', 'uniq',
++                  'cut', 'nl', 'file', 'stat', 'test', 'true', 'od', 'tr', 'basename', 'dirname', 'get-content', 'gc', 'get-childitem', 'gci',
++                  'select-string', 'sls', 'select-object', 'measure-object', 'test-path', 'get-item', 'write-output'}
++
++
++_READ_GIT = {'rev-parse', 'status', 'log', 'diff', 'show', 'ls-files'}
++
++
++def _read_only_call(call):
++    name, data = call.get('name'), call.get('input')
++    if name in _READ_ONLY_TOOLS:
++        return True
++    if name not in {'Bash', 'PowerShell'} or not isinstance(data, dict) or not isinstance(data.get('command'), str):
++        return False
++    command = data['command']
++    if any(script in command for script in _RECORD_SCRIPTS):
++        return True
++    return _read_only_command(command)
++
++
++def _read_only_command(command):
++    if re.search(r'\bawk\b', command) and re.search(r'system|getline', command):
++        return False
++    # A command substitution is a command of its own: each innermost $( … ) is judged by the
++    # same rules, then stands in the outer command as a plain word.
++    for _ in range(20):
++        inner = re.search(r'\$\(([^()]*)\)', command)
++        if inner is None:
++            break
++        if not _read_only_command(inner.group(1)):
++            return False
++        command = command[:inner.start()] + 'S' + command[inner.end():]
++    # Output redirection to a file is a write. Discarding or merging streams is not.
++    # Quoted text is data (a grep pattern, a label); it is set aside before the commands are read.
++    plain = re.sub(r'"[^"`]*"|\'[^\']*\'', ' Q ', command)
++    plain = re.sub(r'\d?>\s*(/dev/null|\$null|&\d)', ' ', plain)
++    if '>' in plain or '`' in plain or '$(' in plain:
++        return False
++    for segment in re.split(r'&&|\|\||[;|\n]', plain):
++        words = segment.replace('(', ' ').split()
++        while words and words[0] in {'do', 'then', 'else'}:
++            words = words[1:]
++        if not words or words[0] in {'for', 'done', 'fi'}:
++            continue
++        head = words[0].lower()
++        if re.fullmatch(r'\$?[a-z_][a-z0-9_]*=\S*', head) or (head.startswith('$') and words[1:2] == ['=']):
++            continue                                  # a variable set to a literal value
++        if head.startswith('[io.file]::read'):
++            continue
++        if head == 'awk':
++            if 'system' in segment or 'getline' in segment:
++                return False
++        elif head == 'sed':
++            if '-n' not in words or any(word.startswith('-i') for word in words):
++                return False
++        elif head == 'find':
++            if any(word in {'-delete', '-exec', '-execdir', '-ok'} for word in words):
++                return False
++        elif head == 'git':
++            if words[1:2] == [] or words[1] not in _READ_GIT:
++                return False
++        elif head not in _READ_COMMANDS:
++            return False
++    return True
++
++
+ def native_tool_activity(platform, session_id, native_input, *, input_observation=None):
+     """Observe calls after the current human input; unavailable evidence is not absence.
+ 
+@@ -133,15 +204,21 @@
+     owned = [row for row in rows if row.get('sessionId') == session_id and not row.get('isSidechain')]
+     for index in range(len(owned) - 1, -1, -1):
+         if is_actual_user_prompt(owned[index]):
++            calls = []
+             for row in owned[index + 1:]:
+                 message = row.get('message')
+                 if (row.get('type') != 'assistant' or not isinstance(message, dict)
+                         or message.get('role') != 'assistant'):
+                     continue
+                 content = message.get('content')
+-                if isinstance(content, list) and any(isinstance(item, dict)
+-                        and item.get('type') == 'tool_use' for item in content):
+-                    return result('observed', 'current-turn-tool-call')
++                calls += [item for item in content if isinstance(item, dict)
++                          and item.get('type') == 'tool_use'] if isinstance(content, list) else []
++            if calls:
++                # Local fix 2026-11-24: an input that only read files (or kept Ghost-ALICE's own
++                # records) is reported separately so completion does not demand a route for it.
++                observed = result('observed', 'current-turn-tool-call')
++                observed['read_only'] = all(_read_only_call(call) for call in calls)
++                return observed
+             return result('absent', 'current-turn-has-no-tool-call')
+     return result('unavailable', 'native-user-boundary-unavailable')
+ 
+--- a/_shared/native_completion.py
++++ b/_shared/native_completion.py
+@@ -145,7 +145,8 @@
+     if phase == 'final':
+         issue = selected['claim_report_issue']
+         if issue is None and selected['route_binding'] != 'current' and native_activity is not None:
+-            if native_activity['status'] == 'observed':
++            # Local fix 2026-11-24: read-only inputs answer without a registered route.
++            if native_activity['status'] == 'observed' and not native_activity.get('read_only'):
+                 issue = ('route-unavailable: This input contains native tool calls but has no current Core response-route. '
+                     'The current-session assistant follows task-router to register this input\'s work and response purpose. '
+                     'Retain the tool results; route registration does not require repeating the work.')
+--- a/_shared/claude_stop_verification_hook.py
++++ b/_shared/claude_stop_verification_hook.py
+@@ -153,6 +153,30 @@
+     )
+ 
+ 
++# Local fix 2026-11-24: every block and notice also tells the user, in Korean, what was held,
++# why, and what the user has to do. The English text above it stays for the assistant.
++_KOREAN_WHY = {
++    "route-unavailable": "이번 입력에서 파일을 바꾸거나 명령을 실행했는데, 그 작업의 목적을 적은 기록(response-route)이 없습니다.",
++    "native-activity-unavailable": "이번 입력에서 도구를 썼는지 대화 기록으로 확인하지 못했습니다.",
++    "criterion-unbound": "답변에 적힌 완료 근거가 어느 완료 조건에 해당하는지 연결되지 않았습니다.",
++    "response-assessment-required": "답변 내용을 근거와 대조한 검토 기록이 없습니다.",
++    "claim-evidence-unbound": "답변의 일부 문장이 제시한 근거로 뒷받침되지 않습니다.",
++    "assessment-unsupported": "검토 결과 답변의 주장 중 근거가 부족한 것이 있습니다.",
++}
++
++
++def _korean_guide(reason: str, blocked: bool) -> str:
++    code = reason.split(":", 1)[0].strip()
++    why = _KOREAN_WHY.get(code, "완료 근거 기록이 Ghost-ALICE가 받는 형식과 맞지 않습니다.")
++    if blocked:
++        return ("\n[사용자 안내] 무엇이 막혔나: Ghost-ALICE가 이번 답변을 끝내기 전에 한 번 멈췄습니다. "
++                f"왜: {why} "
++                "다음에 할 일: 사용자가 할 일은 없습니다. 어시스턴트가 기록을 채운 뒤 이어서 답하고, 앞서 나온 답변 내용은 그대로 유효합니다.")
++    return ("\n[사용자 안내] 무엇이 남았나: 답변은 그대로 나갔고, Ghost-ALICE 기록 하나가 채워지지 않았습니다. "
++            f"왜: {why} "
++            "다음에 할 일: 사용자가 할 일은 없습니다. 답변을 그대로 쓰셔도 됩니다.")
++
++
+ def _parse_args(argv: list[str]) -> argparse.Namespace:
+     parser = argparse.ArgumentParser(add_help=False)
+     parser.add_argument("--platform", choices=("claude", "codex"), default="claude")
+@@ -199,9 +223,11 @@
+     # One retry per turn: a defect that survives it ends the turn with a visible notice instead of another
+     # rewrite. The notice is not a pass; the answer stays marked as lacking valid evidence.
+     if _gate_blocks_this_turn(entries) >= RETRIES_PER_TURN:
+-        print(json.dumps(_allow_payload(_retry_limit_notice(reason, assessment.get('repair_target', 'completion_metadata'))), ensure_ascii=False))
++        print(json.dumps(_allow_payload(_retry_limit_notice(reason, assessment.get('repair_target', 'completion_metadata'))
++            + _korean_guide(reason, False)), ensure_ascii=False))
+         return 0
+-    reason = f"{COMPLETION_GATE_MARKER} {reason} {_recovery_guidance(input_data, entries, args.platform, final_text, assessment.get('repair_target', 'completion_metadata'))}"
++    reason = (f"{COMPLETION_GATE_MARKER} {reason} {_recovery_guidance(input_data, entries, args.platform, final_text, assessment.get('repair_target', 'completion_metadata'))}"
++        + _korean_guide(reason, True))
+     print(json.dumps(_block_payload(reason), ensure_ascii=False))
+     return 0
+ 
