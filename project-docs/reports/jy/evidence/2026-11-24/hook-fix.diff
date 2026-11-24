@@ -8,7 +8,7 @@
  from pathlib import Path
  
  
-@@ -55,6 +56,57 @@
+@@ -55,6 +56,76 @@
                                       for item in items)
  
  
@@ -16,9 +16,12 @@
 +# read commands or Ghost-ALICE's own record scripts. Anything not listed counts as work.
 +_READ_ONLY_TOOLS = {'Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'Skill', 'ToolSearch'}
 +_RECORD_SCRIPTS = ('session_intent_ledger.py', 'response_route.py', 'completion_assessment.py')
-+_READ_COMMANDS = {'cat', 'head', 'tail', 'ls', 'dir', 'grep', 'rg', 'wc', 'pwd', 'cd', 'echo', 'type', 'sort', 'uniq',
++_READ_COMMANDS = {'cat', 'head', 'tail', 'ls', 'dir', 'grep', 'rg', 'wc', 'pwd', 'cd', 'echo', 'printf', 'type', 'sort', 'uniq',
 +                  'cut', 'nl', 'file', 'stat', 'test', 'true', 'od', 'tr', 'basename', 'dirname', 'get-content', 'gc', 'get-childitem', 'gci',
 +                  'select-string', 'sls', 'select-object', 'measure-object', 'test-path', 'get-item', 'write-output'}
++
++
++_READ_GIT = {'rev-parse', 'status', 'log', 'diff', 'show', 'ls-files'}
 +
 +
 +def _read_only_call(call):
@@ -30,11 +33,24 @@
 +    command = data['command']
 +    if any(script in command for script in _RECORD_SCRIPTS):
 +        return True
++    return _read_only_command(command)
++
++
++def _read_only_command(command):
 +    if re.search(r'\bawk\b', command) and re.search(r'system|getline', command):
 +        return False
++    # A command substitution is a command of its own: each innermost $( … ) is judged by the
++    # same rules, then stands in the outer command as a plain word.
++    for _ in range(20):
++        inner = re.search(r'\$\(([^()]*)\)', command)
++        if inner is None:
++            break
++        if not _read_only_command(inner.group(1)):
++            return False
++        command = command[:inner.start()] + 'S' + command[inner.end():]
 +    # Output redirection to a file is a write. Discarding or merging streams is not.
 +    # Quoted text is data (a grep pattern, a label); it is set aside before the commands are read.
-+    plain = re.sub(r'"[^"$`]*"|\'[^\']*\'', ' Q ', command)
++    plain = re.sub(r'"[^"`]*"|\'[^\']*\'', ' Q ', command)
 +    plain = re.sub(r'\d?>\s*(/dev/null|\$null|&\d)', ' ', plain)
 +    if '>' in plain or '`' in plain or '$(' in plain:
 +        return False
@@ -58,6 +74,9 @@
 +        elif head == 'find':
 +            if any(word in {'-delete', '-exec', '-execdir', '-ok'} for word in words):
 +                return False
++        elif head == 'git':
++            if words[1:2] == [] or words[1] not in _READ_GIT:
++                return False
 +        elif head not in _READ_COMMANDS:
 +            return False
 +    return True
@@ -66,7 +85,7 @@
  def native_tool_activity(platform, session_id, native_input, *, input_observation=None):
      """Observe calls after the current human input; unavailable evidence is not absence.
  
-@@ -133,15 +185,21 @@
+@@ -133,15 +204,21 @@
      owned = [row for row in rows if row.get('sessionId') == session_id and not row.get('isSidechain')]
      for index in range(len(owned) - 1, -1, -1):
          if is_actual_user_prompt(owned[index]):

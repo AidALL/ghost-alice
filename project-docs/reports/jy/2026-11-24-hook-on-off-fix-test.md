@@ -141,6 +141,6 @@ Nov 24, 2026 · jy
   - [minimal에서도 내부 코드와 어댑터 오류가 표시됨](issues/2026-11-24/3-minimal-visibility-shows-internal-output.md)
   - [도구 없는 질문에 훅 5번, 도구 1번마다 훅 3개](issues/2026-11-24/4-hooks-run-without-tools-and-three-per-tool.md)
 - 네 문제 모두 한 명이 한 PC에서 5회 중 5회 재현한 것입니다. 팀 지침의 두 명 이상 재현 조건은 아직 채우지 못했습니다.
-- 시간비용-03에 남은 막힘의 원인은 확인했습니다. 실패한 3회 모두 읽기 명령인데 읽기 전용 목록에 없던 형태(`printf`, `$(git rev-parse …)`, `$(basename …)`)여서 전처럼 막혔습니다. 설치본에서 이 형태를 읽기 전용으로 보도록 고쳤고, 터미널 테스트로는 아직 확인하지 않았습니다.
+- 시간비용-03에 남은 막힘의 원인은 확인했습니다. 실패한 3회 모두 읽기 명령인데 읽기 전용 목록에 없던 형태(`printf`, `$(git rev-parse …)`, `$(basename …)`)여서 전처럼 막혔습니다. 설치본에서 이 형태를 읽기 전용으로 보도록 고쳤고, 터미널 테스트로는 아직 확인하지 않았습니다. 이 수정은 수정 후 테스트가 끝난 뒤에 한 것이라 3절의 수치에는 들어 있지 않고, [hook-fix.diff](evidence/2026-11-24/hook-fix.diff)에는 들어 있습니다.
 
 첨부: [hook-fix.diff](evidence/2026-11-24/hook-fix.diff)
