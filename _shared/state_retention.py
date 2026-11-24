@@ -79,7 +79,7 @@ _TABLE = (
            limit=30, order="mtime", members="*.json", files_only=True),
     Policy("install-record", "overwrite",
            (*("{record}/" + name for name in installed_payload.INSTALL_RECORD_FILES),
-            "{record}/install.lock", "{record}/install.lock.guard",
+            "{record}/install.lock", "{record}/install.lock.guard", "{record}/git-hooks/*",
             "{record}/install-state/*.json", "{record}/install-state/source-repo-hook-path.json.guard")),
     Policy("install-state-events", "size-rotation",
            ("{record}/install-state/*-events.jsonl", "{record}/install-state/*-events.jsonl.1"),

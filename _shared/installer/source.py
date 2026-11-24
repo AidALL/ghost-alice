@@ -14,10 +14,8 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
 import shutil
 import stat
-import subprocess
 import sys
 import tempfile
 import contextlib
@@ -28,25 +26,21 @@ import installed_payload
 import addon_registry
 import content_digest
 from installer_assets import _is_windows_junction, unrecorded_copy_content
-import file_lock
 from installer import locations, report, runner, terminal
 from installer.runner import InstallerExit
 
 if TYPE_CHECKING:
     from installer.cli import Context
 
-HOOKS_DIR = "hooks"
 RELEASE_REF = "refs/heads/main"
 DEFAULT_REMOTE = "https://github.com/AidALL/ghost-alice.git"
-# The install-state `system_env_changes` kind of the repository's shared hook path.
-HOOK_PATH_CHANGE = "source_repo_hook_path"
-# The record of the hook path write for the whole installation, next to the hosts' install-state manifests.
-HOOK_PATH_RECORD = "source-repo-hook-path.json"
 ADOPT_HINT = ("Rerun this command from the install source, or add --adopt-source to record this checkout "
               "as the install source.")
 REPAIR_HINT = ("Repair runs only from the install source; run the install from this checkout with --adopt-source to "
                "move the installation here.")
-REQUEST_ENV = "GHOST_ALICE_INSTALL_REQUEST"
+REQUEST_ENV = "GHOST_ALICE_PACKAGE_REQUEST"
+# Installers that activate a package after placement send their request under this name.
+EARLIER_REQUEST_ENV = "GHOST_ALICE_INSTALL_REQUEST"
 
 
 @dataclass(frozen=True)
@@ -55,24 +49,6 @@ class SourceInfo:
     branch: str       # short branch name, `DETACHED` without one
     head: str         # full commit id, `unknown` without git
     dirty: str        # `dirty`, `clean` or `unknown`
-
-
-@dataclass(frozen=True)
-class HookPathChange:
-    """The repository's shared `core.hooksPath` this install owns, as the install-state records it.
-
-    `after` is the absolute path of the install source's hooks folder and `changed` says this command wrote it.
-    `recorded` says the install knows the value from before Ghost-ALICE wrote one: `before_present` and `before`
-    give it (False and "" for no value, which the full uninstall unsets). `applied_at` records when that change
-    was written and is shared by the hook receipt and host inventory.
-    """
-
-    changed: bool
-    recorded: bool
-    before_present: bool = False
-    before: str = ""
-    after: str = ""
-    applied_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -99,14 +75,14 @@ def _git_value(root: Path, *args: str) -> str | None:
     return result.stdout.strip() if result.ok else None
 
 
-def check_source_health(*, skip: bool, input_root: Path | None = None) -> bool:
+def check_source_health(*, skip: bool) -> bool:
     """Print the checkout's source health and return False only when the branch is behind its upstream.
 
     Skip → warn and pass; no git or not a worktree → warn and pass; `Source health: branch=,
     head=, upstream=`; diverged → two warnings; behind → four errors, False;
     ahead → warning; untracked → warning; tracked changes → warning.
     """
-    root = input_root if input_root is not None else runner.REPO_ROOT
+    root = runner.REPO_ROOT
     if skip:
         report.warn("Skipping source health gate (--skip-source-health)")
         return True
@@ -169,7 +145,16 @@ def _same_folder(first: Path, second: Path) -> bool:
         return os.path.normcase(str(first.resolve())) == os.path.normcase(str(second.resolve()))
 
 
-def match_install_source(checkout: Path | None = None) -> SourceMatch:
+def registration(record: dict | None) -> dict | None:
+    """The recorded checkout and effective update remote, or None before an installation records a checkout."""
+    origin = (record or {}).get('source', {})
+    root = origin.get('root')
+    if isinstance(root, str) and root:
+        return {'root': root, 'remote': origin.get('remote') or DEFAULT_REMOTE}
+    return None
+
+
+def match_install_source(checkout: Path | None = None, *, record=...) -> SourceMatch:
     """Compare `checkout` (the checkout the installer runs from, `runner.REPO_ROOT`, when not given) with the
     install record's `source.root`, both with their links followed.
 
@@ -180,14 +165,14 @@ def match_install_source(checkout: Path | None = None) -> SourceMatch:
     """
     here = Path(resolve_source().root if checkout is None else checkout).resolve()
     try:
-        record = install_transaction.record_after_recovery(locations.record_root())
+        if record is ...:
+            record = install_transaction.record_after_recovery(locations.record_root())
     except (installed_payload.RecordError, install_transaction.InstallTransactionError) as exc:
         return SourceMatch("unreadable", here, detail=str(exc))
-    section = (record or {}).get("source")
-    root = section.get("root") if isinstance(section, dict) else None
-    if not isinstance(root, str) or not root:
+    registered = registration(record)
+    if registered is None:
         return SourceMatch("unrecorded", here)
-    recorded = Path(root)
+    recorded = Path(registered['root'])
     return SourceMatch("same" if _same_folder(recorded, here) else "other", here, recorded)
 
 
@@ -281,144 +266,11 @@ def acquire_release(remote: str):
 
 
 def release_input(checkout: Path, origin: dict) -> dict:
-    """Keep the development path for hooks and ledger ownership, and identify the fetched code."""
+    """Keep the development path for ledger ownership, and identify the fetched code."""
     commit = _git_value(checkout, 'rev-parse', 'HEAD')
     if not commit:
         raise ValueError('Cannot identify the downloaded Core release commit')
-    return dict(root=origin['root'], hooks_path=origin.get('hooks_path'), remote=origin['remote'],
-                ref=RELEASE_REF, branch='main', commit=commit, dirty='clean')
-
-
-def hooks_path_value(checkout: Path) -> str:
-    """The `core.hooksPath` an install from `checkout` writes: the checkout's hooks folder by absolute path, links
-    followed."""
-    return (Path(checkout).resolve() / HOOKS_DIR).as_posix()
-
-
-def _same_repository(first: Path, second: Path) -> bool:
-    """Whether two checkouts belong to one repository: the same git common folder."""
-    common = [_git_value(Path(path), "rev-parse", "--path-format=absolute", "--git-common-dir") for path in (first, second)]
-    return all(common) and _same_folder(Path(common[0]), Path(common[1]))
-
-
-def _hook_path_records() -> list[dict]:
-    """The hook path changes the installation recorded: the record of the last write, then each host's
-    install-state entry."""
-    sources = [locations.install_state_dir() / HOOK_PATH_RECORD,
-               *locations.install_state_manifests(locations.install_state_dir())]
-    records: list[dict] = []
-    for path in sources:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if path.name == HOOK_PATH_RECORD:
-            entries = [data]
-        else:
-            entries = data.get("system_env_changes") if isinstance(data, dict) else None
-        if isinstance(entries, list):
-            records.extend(entry for entry in entries
-                           if isinstance(entry, dict) and entry.get("kind") == HOOK_PATH_CHANGE)
-    return records
-
-
-def relative_hook_path_matches_repository(change: dict, root: Path) -> bool:
-    """The legacy relative hooks path identifies an installation only within the same Git repository."""
-    recorded = change.get('repo_root')
-    return isinstance(recorded, str) and Path(recorded).is_absolute() and _same_repository(Path(recorded), root)
-
-
-def _recorded_hook_path(value: str) -> HookPathChange | None:
-    """The hook path change the installation records as writing `value`, else None. The relative `hooks` an earlier
-    installer wrote names no folder, so its record counts only for a checkout of this repository."""
-    for change in _hook_path_records():
-        if change.get("after") != value:
-            continue
-        if value == HOOKS_DIR and not relative_hook_path_matches_repository(change, Path(input_record()['root'])):
-            continue
-        before_present = change.get("before_present") is True and isinstance(change.get("before"), str)
-        return HookPathChange(changed=False, recorded=True, before_present=before_present,
-                              before=change["before"] if before_present else "", after=value,
-                              applied_at=change.get("applied_at"))
-    return None
-
-
-def _write_hook_path_record(change: HookPathChange) -> None:
-    """Record the hook path this install owns in the same step as the write, so an install that stops before its
-    install-state is written leaves the value to restore for the next one."""
-    path = locations.install_state_dir() / HOOK_PATH_RECORD
-    record = {"kind": HOOK_PATH_CHANGE, "repo_root": Path(input_record()['root']).resolve().as_posix(),
-              "before_present": change.before_present, "before": change.before if change.before_present else None,
-              "after": change.after, "applied_at": change.applied_at}
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        staged = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        staged.write_text(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        os.replace(staged, path)
-    except OSError as exc:
-        report.warn(f"Could not record the Git hook path write: {exc}")
-
-
-def setup_git_hooks() -> HookPathChange:
-    """Write the repository's shared `core.hooksPath` as this checkout's hooks folder by absolute path, make
-    `hooks/post-merge` executable, and return what the install-state records.
-
-    Every worktree of the repository inherits the shared value (`git config --local` writes the configuration the
-    worktrees share), so a merge in any worktree runs the install source's post-merge hook and no other checkout's
-    hook file; a worktree's own setting (`git config --worktree`) still comes first. The value the full uninstall
-    restores is the value from before Ghost-ALICE wrote one: the recorded value when the installation records the
-    earlier value as written by an install (a reinstall, an install that stopped before its install-state, an
-    install source that moved, or the relative `hooks` an earlier installer wrote over another value in this
-    repository); else none for an unset value or the relative `hooks`; else the earlier value itself. A value
-    already in place that no record names leaves the value to restore unknown, and the uninstall leaves the hook
-    path as it is. A known value is recorded in the same step as the write (`HOOK_PATH_RECORD`). The sidecar's
-    persistent guard serializes the shared Git value and its first-before record across source adoptions. This
-    guard ends before the caller takes the installation lock; prerequisite preparation keeps its own lifetime.
-    """
-    root = Path(input_record()['root'])
-    if not root.is_dir() and root != runner.REPO_ROOT:
-        return HookPathChange(changed=False, recorded=False)
-    wanted = hooks_path_value(runner.REPO_ROOT)
-    record = locations.install_state_dir() / HOOK_PATH_RECORD
-    try:
-        record.parent.mkdir(parents=True, exist_ok=True)
-        with file_lock.exclusive(record.with_name(record.name + ".guard"), must_lock=True):
-            found = _git(root, "config", "--local", "--get", "core.hooksPath")
-            current = found.stdout.strip() if found.ok and found.stdout.strip() else None
-            if current == wanted:
-                change = _recorded_hook_path(wanted) or HookPathChange(changed=False, recorded=False, after=wanted)
-            elif not _git(root, "config", "--local", "core.hooksPath", wanted).ok:
-                report.warn("Failed to set Git hook path. Post-merge hook may not fire")
-                return HookPathChange(changed=False, recorded=False)
-            else:
-                earlier = _recorded_hook_path(current) if current is not None else None
-                if earlier is not None:
-                    change = HookPathChange(changed=True, recorded=True, before_present=earlier.before_present,
-                                            before=earlier.before, after=wanted)
-                else:
-                    kept = current not in (None, HOOKS_DIR)
-                    change = HookPathChange(changed=True, recorded=True, before_present=kept,
-                                            before=current if kept else "", after=wanted)
-                report.info(f"Git hook path → {wanted} (post-merge auto-refresh enabled)")
-            if change.recorded:
-                if change.applied_at is None:
-                    change = replace(change, applied_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
-                _write_hook_path_record(change)
-    except (OSError, file_lock.LockTimeout) as exc:
-        report.warn(f"Could not serialize the Git hook path write: {exc}")
-        return HookPathChange(changed=False, recorded=False)
-    hook = runner.REPO_ROOT / HOOKS_DIR / "post-merge"
-    if hook.is_file() and not os.access(hook, os.X_OK):
-        try:
-            hook.chmod(hook.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-        except OSError:
-            pass
-    return change
-
-
-def configured_hooks_path() -> str | None:
-    """The checkout's `core.hooksPath`, or None when it is not set."""
-    return _git_value(Path(input_record()['root']), "config", "--local", "core.hooksPath") or None
+    return dict(root=origin['root'], remote=origin['remote'], ref=RELEASE_REF, branch='main', commit=commit, dirty='clean')
 
 
 def commit_of(path: Path) -> str:
@@ -443,19 +295,33 @@ def install_request() -> dict | None:
     return request
 
 
-def input_record(input_root: Path | None = None) -> dict:
+def saved_package(root: Path) -> bool:
+    """Whether `root` is inside the folder of the saved versions."""
+    return root.resolve().is_relative_to((locations.record_root() / 'versions').resolve())
+
+
+def input_record(input_root: Path | None = None, *, record=...) -> dict:
     """Development origin and acquisition coordinates, separate from this process's assets."""
     request = install_request() if input_root is None else None
     if request:
-        return {key: value for key, value in request['source'].items() if key != 'ledger_source_roots'}
+        return dict(request['source'])
     root_path = Path(input_root) if input_root is not None else runner.REPO_ROOT
-    if root_path.resolve().is_relative_to((locations.record_root() / 'versions').resolve()):
-        record = installed_payload.read(locations.record_root()) or {}
-        saved = json.loads((root_path.parent / 'version.json').read_text())
+    if saved_package(root_path):
+        try:
+            # As `match_install_source` reads the record: a publish that stopped halfway may have written its own source.
+            if record is ...:
+                record = install_transaction.record_after_recovery(locations.record_root())
+        except (installed_payload.RecordError, install_transaction.InstallTransactionError):
+            record = {}
+        metadata = root_path.parent / 'version.json'
+        try:
+            saved = json.loads(metadata.read_text())
+        except FileNotFoundError:
+            raise _missing_version_error(metadata) from None
         origin = dict(saved['source'])
         origin.pop('ledger_source_roots', None)
-        origin.update({key: value for key, value in record.get('source', {}).items()
-                       if key in {'root', 'remote', 'hooks_path'}})
+        origin.update({key: value for key, value in (record or {}).get('source', {}).items()
+                       if key in {'root', 'remote'}})
         origin['ref'] = RELEASE_REF
         return origin
     toplevel = _git_value(root_path, "rev-parse", "--show-toplevel")
@@ -471,7 +337,6 @@ def input_record(input_root: Path | None = None) -> dict:
     if remote and not Path(remote).is_absolute() and ':' not in remote:
         remote = str((root / remote).resolve())
     return {'root': str(root), 'commit': head, 'dirty': dirty, 'branch': branch,
-            'hooks_path': _git_value(root, 'config', '--local', 'core.hooksPath'),
             'remote': remote or DEFAULT_REMOTE, 'ref': RELEASE_REF}
 
 
@@ -531,17 +396,22 @@ def _version_source_files(root: Path, *, addon: bool = False) -> list[str]:
     return _package_files(root, paths)
 
 
-def _copy_version_source(root: Path, destination: Path, *, addon: bool = False) -> dict[str, str]:
+def _version_file_hashes(root: Path, destination: Path | None = None, *, addon: bool = False) -> dict[str, str]:
+    """Hash the product files and, when capturing a version, verify their staged copies."""
     files = {}
     for name in _version_source_files(root, addon=addon):
-        original, copy = root / name, destination / name
-        if not original.resolve().is_relative_to(root) or not copy.resolve().is_relative_to(destination.resolve()):
+        original = root / name
+        if not original.resolve().is_relative_to(root):
             raise ValueError(f'Source entry escapes its package: {original}')
         before = install_transaction._file_hash(original)
-        copy.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(original, copy)
-        if before != install_transaction._file_hash(copy) or before != install_transaction._file_hash(original):
-            raise ValueError(f'Source changed while preserving it: {original}')
+        if destination is not None:
+            copy = destination / name
+            if not copy.resolve().is_relative_to(destination.resolve()):
+                raise ValueError(f'Source entry escapes its package: {original}')
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(original, copy)
+            if before != install_transaction._file_hash(copy) or before != install_transaction._file_hash(original):
+                raise ValueError(f'Source changed while preserving it: {original}')
         files[name] = before
     if not files:
         raise ValueError(f'No source files found for {root}')
@@ -552,11 +422,6 @@ def _active_versions(root: Path, record: dict) -> dict[Path, set[str]]:
     """Versions consumed by current targets, service, pending merges, install source or addon registries."""
     references = install_transaction._cleanup_references(locations.record_root(), record=record)
     references.append((record.get('source', {}).get('root'), 'install source'))
-    origin = record.get('source', {}).get('root')
-    if origin and Path(origin).is_dir():
-        hooks = _git_value(Path(origin), 'config', '--local', 'core.hooksPath')
-        if hooks:
-            references.append((Path(hooks) if Path(hooks).is_absolute() else Path(origin) / hooks, 'developer post-merge hook'))
     addon_root = locations.record_root() / 'addons'
     for directory in sorted(addon_root.iterdir()) if addon_root.is_dir() else ():
         if directory.is_dir():
@@ -578,7 +443,7 @@ def _unchanged_version(folder: Path) -> bool:
     try:
         files = _version_metadata(folder)['files']
         return (not unrecorded_copy_content(folder, [*files, 'version.json'])
-                and not _missing_version_entries(folder, files, check_bytes=True))
+                and not _missing_version_entries(folder, files))
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
@@ -596,16 +461,44 @@ def _version_entry_exists(path: Path, *, directory: bool) -> bool:
 
 def _version_metadata(folder: Path) -> dict:
     metadata = folder / 'version.json'
-    if _version_entry_exists(metadata, directory=False):
-        saved = json.loads(metadata.read_text(encoding='utf-8'))
-        files = saved.get('files') if isinstance(saved, dict) else None
-        if (isinstance(files, dict) and files and _version_hash(files) == folder.name
-                and all(isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest) for digest in files.values())):
-            return saved
+    if not _version_entry_exists(metadata, directory=False):
+        raise _missing_version_error(metadata)
+    saved = json.loads(metadata.read_text(encoding='utf-8'))
+    files = saved.get('files') if isinstance(saved, dict) else None
+    if (isinstance(files, dict) and files and _version_hash(files) == folder.name
+            and all(isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest) for digest in files.values())):
+        return saved
     raise ValueError(f'Preserved source file list is missing or has changed: {metadata}')
 
 
-def _missing_version_entries(folder: Path, files: dict[str, str], *, check_bytes: bool) -> list[Path]:
+def _has_installer(package: Path) -> bool:
+    return locations.package_script(package).is_file() and (package / '_shared/installer/cli.py').is_file()
+
+
+def _registered_checkout(record: dict) -> Path | None:
+    root = record.get('source', {}).get('root')
+    if isinstance(root, str) and Path(root).is_absolute():
+        checkout = Path(root)
+        if not saved_package(checkout) and _has_installer(checkout):
+            return checkout
+    return None
+
+
+def _replacement_hint(record: dict, package: Path | None) -> str:
+    core_skills = any(entry.get('kind') == 'skill' and entry.get('provider') == 'core'
+                      for entry in record.get('targets', {}).values())
+    if core_skills and record.get('source', {}).get('root') and package and _has_installer(package):
+        return report.message('replacement_update', command=locations.package_command(package, 'update'))
+    return report.message('replacement_from_checkout')
+
+
+def _missing_version_error(path: Path) -> ValueError:
+    record = install_transaction.record_after_recovery(locations.record_root()) or {}
+    key = 'version_metadata_missing' if path.name == 'version.json' else 'active_version_missing'
+    return ValueError(report.message(key, path=path, replacement=_replacement_hint(record, _registered_checkout(record))))
+
+
+def _missing_version_entries(folder: Path, files: dict[str, str]) -> list[Path]:
     """Verify surviving entries before returning the topmost absent files and directories."""
     directories = set()
     regular = {}
@@ -626,32 +519,29 @@ def _missing_version_entries(folder: Path, files: dict[str, str], *, check_bytes
         if not _version_entry_exists(path, directory=relative in directories):
             absent.add(relative)
             missing.append(relative)
-        elif check_bytes and relative in regular and install_transaction._file_hash(path) != regular[relative]:
+        elif relative in regular and install_transaction._file_hash(path) != regular[relative]:
             raise ValueError(f'Preserved source version has changed: {path}')
     return missing
 
 
+def active_root() -> str | None:
+    """The active installer that the install record names. Only when it names none, the record that recovery would
+    restore: a later release can have written journals that this package cannot read."""
+    root = locations.record_root()
+    try:
+        active = (installed_payload.read(root) or {}).get('installer', {}).get('active_root')
+    except installed_payload.RecordError:
+        active = None
+    return active or (install_transaction.record_after_recovery(root) or {}).get('installer', {}).get('active_root')
+
+
 def _active_version(root: Path) -> Path | None:
-    record = installed_payload.read(locations.record_root()) or {}
-    active = record.get('installer', {}).get('active_root')
+    active = active_root()
     if active:
         package = Path(active)
         if package.name == 'core' and package.parent.parent == root:
             return package.parent
     return None
-
-
-def _manager_missing(folder: Path) -> bool:
-    """When saved files are missing, check whether the active CLI imports and its reader reads the current record."""
-    if not _version_entry_exists(folder, directory=True):
-        return True
-    files = _version_metadata(folder)['files']
-    if _missing_version_entries(folder, files, check_bytes=False):
-        try:
-            check_record_reader(folder / 'core', locations.record_root(), check_entry=True)
-        except ValueError:
-            return True
-    return False
 
 
 def _version_root() -> Path:
@@ -661,37 +551,90 @@ def _version_root() -> Path:
     return root.resolve()
 
 
-def repair_active_source(ctx: 'Context') -> None:
-    """Under the repair lock, restore a recorded version before publishing any managed targets."""
+def active_installer(command: str) -> Path | None:
+    """The Core directory of the active package while another installer runs, that package is complete and its version
+    file states that its installer runs `command` for another installer (`active_runs`). A package that states
+    nothing or that lost files leaves the command to the installer that was started. The active installer chooses and
+    copies what the command restores; the statement is a promise between releases, so the started installer passes only
+    the arguments of `auto.child_command`."""
+    active = _active_version(_version_root())
+    if active is None or _same_folder(active / 'core', runner.REPO_ROOT) or not _version_entry_exists(active, directory=True):
+        return None
+    saved = _version_metadata(active)
+    if command not in saved.get('active_runs', ()) or _missing_version_entries(active, saved['files']):
+        return None
+    return active / 'core'
+
+
+def repair_active_source(ctx: 'Context') -> Path:
+    """Restore the active package and return its Core directory. Older installations have only the checkout.
+    The command's addon sources restore lost addon files of the package: a repair copies no addon source.
+    The package is no input for an entry that it lost: the repair then names the entry and the input that restores it."""
     active = _active_version(_version_root())
     if active is None:
-        return
+        return runner.REPO_ROOT
     if not _version_entry_exists(active, directory=True):
-        raise ValueError(report.message('active_version_missing', package=active / 'core', command=report.install_command()))
-    files = _version_metadata(active)['files']
-    if _missing_version_entries(active, files, check_bytes=True):
-        addon_paths = sorted({str(active.joinpath(*Path(name).parts[:2])) for name in files if name.startswith('addons/')})
-        inputs = replace(ctx, addon_sources=ctx.addon_sources or addon_paths)
-        prepare_source(inputs, required_version=active)
-    check_record_reader(active / 'core', locations.record_root(), check_entry=True)
+        raise _missing_version_error(active)
+    saved = _version_metadata(active)
+    files = saved['files']
+    lost = _missing_version_entries(active, files)
+    lost_addon = any(entry.parts[0] == 'addons' for entry in lost)
+    addon_paths = sorted({str(active.joinpath(*Path(name).parts[:2])) for name in files if name.startswith('addons/')})
+    sources = ctx.addon_sources if lost_addon and ctx.addon_sources else addon_paths
+    inputs = [Path(folder).resolve() for folder in (runner.REPO_ROOT, *sources)]
+    for entry in lost:
+        path = active.resolve() / entry
+        if any(folder == path or folder in path.parents or path in folder.parents for folder in inputs):
+            if entry.parts[0] == 'addons':
+                raise ValueError(report.message('active_addon_lost', package=active / 'core', file=active / entry))
+            # The registered checkout holds the same Core files unless it changed after the installation.
+            record = install_transaction.record_after_recovery(locations.record_root()) or {}
+            checkout = _registered_checkout(record)
+            restore = (report.message('restore_from_registered', repair=locations.package_command(
+                checkout, '--repair', '--platform', ctx.platform))
+                if checkout is not None
+                else report.message('restore_from_checkout'))
+            raise ValueError(report.message('active_core_lost', package=active / 'core', file=active / entry,
+                                            restore=restore,
+                                            replacement=_replacement_hint(record, runner.REPO_ROOT)))
+    if lost:
+        prepare_source(replace(ctx, addon_sources=sources), required_version=active)
+    elif not _same_folder(active / 'core', runner.REPO_ROOT):
+        # Older versions may leave repair to this checkout. Compare all its product bytes
+        # with the verified Core file list before using the saved package for placement.
+        expected = {name.removeprefix('core/'): digest for name, digest in files.items() if name.startswith('core/')}
+        if _version_file_hashes(runner.REPO_ROOT.resolve()) != expected:
+            raise ValueError(report.message('active_version_mismatch', package=active / 'core',
+                                           update=locations.package_command(runner.REPO_ROOT, 'update')))
+    # The bytes just matched this release. Its commit identifies any Core file repair restores.
+    ctx.record_source = saved['source']
+    return active / 'core'
 
 
-def prepare_source(ctx: 'Context', *, input_root: Path | None = None, provenance: dict | None = None,
+def check_saved_package(folder: Path) -> None:
+    """Refuse a saved package whose files are missing or changed."""
+    missing = _missing_version_entries(folder, _version_metadata(folder)['files'])
+    if missing:
+        raise ValueError(f'Preserved source version is incomplete: {folder / missing[0]}')
+
+
+def prepare_source(ctx: 'Context', *, provenance: dict | None = None,
                    selections: dict[str, list[str]] | None = None,
-                   required_version: Path | None = None) -> tuple[Path, dict[str, str]]:
-    """Capture the requested product bytes once without declaring installation success."""
+                   required_version: Path | None = None, active_runs: tuple[str, ...] = ()) -> tuple[Path, dict[str, str]]:
+    """Capture the requested product bytes once without declaring installation success. The version file states
+    `active_runs`, the commands that this package's installer runs for another installer."""
     root = _version_root()
     root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.stage-', dir=root) as temporary:
         stage = Path(temporary)
-        core_root = Path(input_root if input_root is not None else runner.REPO_ROOT).resolve()
-        core = _copy_version_source(core_root, stage / 'core')
+        core_root = runner.REPO_ROOT.resolve()
+        core = _version_file_hashes(core_root, stage / 'core')
         files = {'core/' + name: digest for name, digest in core.items()}
         sources = ['core']
         captured = [(core_root, 'core')]
         for index, selected in enumerate(dict.fromkeys(ctx.addon_sources)):
             candidate = stage / f'addon-{index}'
-            addon = _copy_version_source(Path(selected).resolve(), candidate, addon=True)
+            addon = _version_file_hashes(Path(selected).resolve(), candidate, addon=True)
             relative = 'addons/' + _version_hash(addon)
             captured.append((Path(selected).resolve(), relative))
             if relative in sources:
@@ -704,16 +647,18 @@ def prepare_source(ctx: 'Context', *, input_root: Path | None = None, provenance
             files.update((relative + '/' + name, digest) for name, digest in addon.items())
         folder = root / _version_hash(files)
         saved = {'files': files, 'sources': sorted(sources), 'platforms': [], 'status': 'candidate',
-                 'selections': selections,
+                 'selections': selections, 'active_runs': list(active_runs),
                  'source': provenance if provenance is not None else input_record(),
                  'origins': {relative: str(original) for original, relative in captured}}
         active = required_version or _active_version(root)
-        if active and folder != active and (required_version or _manager_missing(active)):
-            raise ValueError(report.message('active_version_mismatch', package=active / 'core', command=report.install_command()))
+        if required_version and folder != required_version:
+            raise ValueError(report.message('active_version_mismatch', package=active / 'core',
+                                            update=locations.package_command(runner.REPO_ROOT, 'update')))
         if _version_entry_exists(folder, directory=True):
-            if _version_metadata(folder)['files'] != files:
+            earlier = _version_metadata(folder)
+            if earlier['files'] != files:
                 raise ValueError(f'Preserved source version has changed: {folder}')
-            missing = _missing_version_entries(folder, files, check_bytes=True)
+            missing = _missing_version_entries(folder, files)
             if missing and folder != active:
                 raise ValueError(f'Preserved source version is incomplete: {folder}')
             if missing:
@@ -728,13 +673,12 @@ def prepare_source(ctx: 'Context', *, input_root: Path | None = None, provenance
                     for original, relative in captured if relative != 'core'}
 
 
-def finalize_source(ctx: 'Context', folder: Path, platforms: list[str], *, before_handoff: dict | None = None) -> list[str]:
-    """After the requested placements succeed, commit success and active CLI, then prune old successes."""
+def finalize_source(ctx: 'Context', folder: Path, platforms: list[str]) -> list[str]:
+    """After the requested placements succeed, commit the success, then prune old successes."""
     root = (locations.record_root() / 'versions').resolve()
     version_file = folder / 'version.json'
+    check_saved_package(folder)
     saved = _version_metadata(folder)
-    if _missing_version_entries(folder, saved['files'], check_bytes=True):
-        raise ValueError(f'Preserved source version is incomplete: {folder}')
     from installer.selection import installed_core_selection
     record_path = installed_payload.read_path(locations.record_root())
     record = installed_payload.read_file(record_path) or {}
@@ -748,30 +692,28 @@ def finalize_source(ctx: 'Context', folder: Path, platforms: list[str], *, befor
             expected = entry.get('files') if entry.get('kind') == 'command' else content_digest.tree(original)
             if expected != content_digest.tree(destination):
                 raise ValueError(f'Preserved source differs from installed code: {destination}')
-    # The executing package declares support for the parent's record-move request.
     saved.update(status='successful', platforms=sorted(set(saved.get('platforms', [])) | set(platforms)),
                  selections=selections,
-                 record_move=True,
                  completed_at=datetime.now(timezone.utc).isoformat())
-    sections = {'installer': {'active_root': str(folder / 'core')}}
+    sections = {}
     if record.get('source', {}).get('root'):
         from installer.transaction import installed_ledger_locations
-        observed = installed_ledger_locations(before_handoff=before_handoff)
+        observed = installed_ledger_locations()
         if observed.observation_errors:
-            raise ValueError('; '.join(observed.observation_errors.values()))
-        facts = observed.publication_source({'root': record['source']['root']})
-        sections['source'] = facts
-    defer_source = (request_writer_needs_v2() and
-                    any(isinstance(value, dict) for value in sections.get('source', {}).get('ledger_source_roots', {}).values()))
+            raise ValueError('; '.join(f'{path}: {cause}' for path, cause in observed.observation_errors.items()))
+        sections['source'] = observed.publication_source({'root': record['source']['root']})
     with install_transaction.record_update(locations.record_root(), version_file=version_file) as journal:
         install_transaction._write_json(version_file, saved)
-        installed_payload.update(locations.record_root(), sections, journal=journal, defer_source=defer_source)
+        installed_payload.update(locations.record_root(), sections, journal=journal)
     record = installed_payload.read(locations.record_root()) or {}
-    command = ['pwsh', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(folder / 'core/install.ps1')] if os.name == 'nt' else ['bash', str(folder / 'core/install.sh')]
-    command += ['--platform', ctx.platform, '--local-source', '--adopt-source']
+    # The line names no host: the package then reinstalls each installed host's Core selection, or the selection that
+    # this version file saved while no Core skill is installed. A host here would narrow the line to that host or add
+    # every skill of it.
+    arguments = ['--local-source', '--adopt-source']
     for selected in sorted(source for source in saved['sources'] if source != 'core'):
-        command += ['--addon-source', str(folder / selected)]
-    lines = [f'Successful source version: {folder}', 'Reinstall this code: ' + (subprocess.list2cmdline(command) if os.name == 'nt' else shlex.join(command))]
+        arguments += ['--addon-source', str(folder / selected)]
+    lines = [f'Successful source version: {folder}',
+             report.message('reinstall_command', command=locations.package_command(folder / 'core', *arguments))]
     from installer.transaction import cleanup_record_source
     lines.extend(install_transaction.cleanup_completed(locations.record_root(), record_source_cleanup=cleanup_record_source))
     try:
@@ -809,81 +751,57 @@ def finalize_source(ctx: 'Context', folder: Path, platforms: list[str], *, befor
     return lines
 
 
-def reinstall_selection() -> dict[str, list[str]] | None:
-    """A saved package uses current Core choices, or its saved choices after full removal/failed first install."""
+def drop_unfinished_choices(host: str, names: list[str] | None = None) -> None:
+    """Drop the skills `names` of `host`, or the whole host, from the choices that the active package keeps for an
+    installation that did not finish."""
+    from installer.selection import leaf_names
+    try:
+        folder = _active_version(_version_root())
+        saved = _version_metadata(folder) if folder else {}
+    except (OSError, ValueError):
+        return  # `reinstall_selection` reads no choices of such a package.
+    choices = dict(saved.get('selections') or {})
+    if saved.get('status') != 'candidate' or host not in choices:
+        return
+    chosen = leaf_names(choices.pop(host))
+    left = [name for name in chosen if names is not None and name not in names]
+    if left:
+        choices[host] = left
+    install_transaction._write_json(folder / 'version.json', dict(saved, selections=choices))
+
+
+def recorded_core() -> tuple[dict, dict[str, list[str]]]:
+    """Read the installation that lock recovery will restore and the Core skills it records."""
     from installer.selection import installed_core_selection
-    if not runner.REPO_ROOT.resolve().is_relative_to((locations.record_root() / 'versions').resolve()):
-        return None
-    saved = json.loads((runner.REPO_ROOT.parent / 'version.json').read_text())
     record_path = install_transaction.record_path_after_recovery(locations.record_root())
-    current = installed_core_selection(installed_payload.read_file(record_path) or {}, record_path)
-    selected = (current if saved.get('status') == 'successful' and current else saved.get('selections'))
+    record = installed_payload.read_file(record_path) or {}
+    return record, installed_core_selection(record, record_path)
+
+
+def for_platform(choices: dict, platform: str | None) -> dict:
+    if platform is None:
+        return choices
+    return {platform: choices[platform]} if platform in choices else {}
+
+
+def reinstall_selection(package: Path | None, *, core: tuple[dict, dict] | None = None,
+                        platform: str | None = None) -> dict | None:
+    """Update (no package) selects installed skills. A saved package also resumes its own unfinished choices."""
+    from installer.selection import leaf_names
+    if package is not None and not saved_package(package):
+        return None
+    record, installed = core if core is not None else recorded_core()
+    if package is None:
+        selected = for_platform(installed, platform)
+        if not selected:
+            raise ValueError('Update found no installed Core skills to update')
+        return selected
+    saved = json.loads((package.parent / 'version.json').read_text())
+    selected = dict(installed)
+    active = record.get('installer', {}).get('active_root')
+    if not selected or saved.get('status') == 'candidate' and active and _same_folder(Path(active), package):
+        for host, names in (saved.get('selections') or {}).items():
+            selected[host] = leaf_names([*selected.get(host, ()), *names])
     if not selected:
         raise ValueError('This saved package has no recorded Core selection; name the host and skills to reinstall')
-    return selected
-
-
-def _read_with_package(package: Path, ghost_root: Path, operation: str):
-    program = 'import json,sys; sys.path.insert(0,sys.argv[1]); ' + operation
-    result = subprocess.run([sys.executable, '-I', '-B', '-c', program, str(package / '_shared'), str(ghost_root)],
-                            capture_output=True, text=True, encoding='utf-8')
-    if result.returncode:
-        raise ValueError(report.message('package_record_unreadable', package=package))
-    return json.loads(result.stdout)
-
-
-def check_record_reader(package: Path, ghost_root: Path, *, check_entry: bool = False) -> None:
-    """Check that a package reads the same installation record before giving it write access."""
-    expected = installed_payload.read(ghost_root)
-    operation = 'import installed_payload; print(json.dumps(installed_payload.read(sys.argv[2])))'
-    if check_entry:
-        operation = 'from installer import cli; ' + operation
-    if expected is not None and _read_with_package(package, ghost_root, operation) != expected:
-        raise ValueError(report.message('package_record_unreadable', package=package))
-
-
-def request_writer_needs_v2() -> bool:
-    """A deployed request writer reads v2 after placement, even when another package is active."""
-    request = install_request()
-    return request is not None and not request.get('request_writer_reads_v3')
-
-
-def check_previous_manager(source_fields: dict) -> dict:
-    """Select the record the manager handling an interrupted placement must still be able to read."""
-    import install_lock
-    record = installed_payload.read(locations.record_root()) or {}
-    active = record.get('installer', {}).get('active_root')
-    recorded_source = record.get('source', {})
-    relations = source_fields.get('ledger_source_roots', {})
-    old_parent = request_writer_needs_v2()
-    attributed = [fact for fact in relations.values() if isinstance(fact, dict)]
-    if not active and not old_parent:
-        return source_fields
-    choices = [] if old_parent and attributed else [source_fields]
-    if attributed and record.get('schema_version', 2) <= 2:
-        # Only the first upgrade on the same source can temporarily expose a path-only view.
-        origin = recorded_source.get('root')
-        if (origin == source_fields.get('root')
-                and not any(isinstance(fact, dict) for fact in recorded_source.get('ledger_source_roots', {}).values())
-                and all(fact['source_root'] == origin for fact in attributed)):
-            choices.append(dict(source_fields, ledger_source_roots=installed_payload.source_paths(relations)))
-    with tempfile.TemporaryDirectory(prefix='ghost-alice-record-check-') as directory:
-        for index, fields in enumerate(choices):
-            if not active:
-                return fields
-            root = Path(directory) / str(index)
-            with install_lock.command_lock(root / 'install.lock', owner='compatibility-check'):
-                installed_payload._save(root, dict(record, source=dict(recorded_source, **fields)))
-            try:
-                check_record_reader(Path(active), root)
-            except ValueError:
-                continue
-            return fields
-    if active:
-        # Offer the installed command only when the retained manager can still start and read today's record.
-        try:
-            check_record_reader(Path(active), locations.record_root(), check_entry=True)
-        except ValueError as exc:
-            raise ValueError(report.message('active_manager_unavailable', package=active, command=report.install_command())) from exc
-    raise ValueError(report.message('previous_manager_incompatible', package=active or runner.REPO_ROOT,
-                                   origin=recorded_source.get('root', active), command=locations.management_command()))
+    return for_platform(selected, platform) or None

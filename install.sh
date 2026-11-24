@@ -224,4 +224,9 @@ if ! _ensure_python_runtime_for_install; then
   exit 1
 fi
 py="$(_find_python_runtime)"
-exec "$py" "${SCRIPT_DIR}/_shared/installer/cli.py" "$@"
+entry="${SCRIPT_DIR}/_shared/installer/cli.py"
+if [ ! -f "$entry" ]; then
+  error "This installer's files are incomplete: ${entry} is missing. Run the repair from a Ghost-ALICE checkout that holds the same Core files."
+  exit 1
+fi
+exec "$py" "$entry" "$@"

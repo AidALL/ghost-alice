@@ -56,9 +56,28 @@ class InstalledHookCleanupTests(TempHomeTestCase):
                 self.assertEqual(settings.read_bytes(), payload)
                 self.assertFalse(result.details['hooks_detached'])
                 self.assertEqual(result.legacy_status, 'error')
+                self.assert_screen_names(settings, result)
                 settings.write_bytes(original)
                 install_hooks.uninstall_hook('claude')
                 self.assertEqual(self._read_settings('claude')['permissions']['allow'], ['Skill(task-router)'])
+
+    def assert_screen_names(self, settings, result):
+        """The removal screen shows the settings file that still holds the hooks."""
+        lines = [line for item in result.details['items'] for _, line in report.removal_item_lines(item)]
+        self.assertTrue(any(str(settings) in line for line in lines), lines)
+
+    def test_a_codex_removal_that_cannot_detach_names_the_hook_settings(self):
+        self._create_platform_dir('codex')
+        install_hooks.install_hook('codex')
+        self._codex_config_toml().write_bytes(b'\xff')
+        result = install_hooks.uninstall_hook('codex')
+        self.assertEqual((result.legacy_status, result.details['hooks_detached']), ('error', False))
+        self.assert_screen_names(self._config_file('codex'), result)
+        # The hook file itself cannot be read either.
+        self._config_file('codex').write_text('{broken', encoding='utf-8')
+        result = install_hooks.uninstall_hook('codex')
+        self.assertEqual((result.legacy_status, result.details['settings_state']), ('error', 'unreadable'))
+        self.assert_screen_names(self._config_file('codex'), result)
 
     def test_strict_settings_reader_distinguishes_absence_from_unreadable(self):
         path = self._config_file('claude')

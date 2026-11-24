@@ -6,7 +6,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import os
+import shlex
+import subprocess
 
 from hook_definitions import SUPPORTED_PLATFORMS as PLATFORMS
 
@@ -15,9 +18,34 @@ from hook_definitions import SUPPORTED_PLATFORMS as PLATFORMS
 MANAGEMENT_COMMANDS = {'ghost-alice': 'install.sh', 'ghost-alice.ps1': 'install.ps1', 'ghost-alice.cmd': 'install.cmd'}
 
 
-def management_command() -> Path:
-    """The installed command users invoke for installation and updates."""
-    return record_root() / 'bin' / ('ghost-alice.cmd' if os.name == 'nt' else 'ghost-alice')
+def command_line(*words: object) -> str:
+    """The command that users type on this operating system."""
+    return subprocess.list2cmdline(map(str, words)) if os.name == 'nt' else shlex.join(map(str, words))
+
+
+def management_command(*arguments: str) -> str:
+    """The installed command, with `arguments`, that users invoke for installation and updates."""
+    directory = record_root() / 'bin'
+    if os.name == 'nt':
+        return _powershell_command(directory / 'ghost-alice.ps1', *arguments)
+    return command_line(directory / 'ghost-alice', *arguments)
+
+
+def package_script(package: Path) -> Path:
+    """The installer script executed by the supported shell on this platform."""
+    return package / ('install.ps1' if os.name == 'nt' else 'install.sh')
+
+
+def package_command(package: Path, *arguments: str) -> str:
+    """The command that starts the installer of `package` with `arguments`."""
+    script = package_script(package)
+    if os.name == 'nt':
+        return _powershell_command(script, *arguments)
+    return command_line('bash', script, *arguments)
+
+
+def _powershell_command(script: Path, *arguments: str) -> str:
+    return command_line('pwsh', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, *arguments)
 
 
 def home() -> Path:
@@ -81,9 +109,24 @@ def install_state_path(platform: str) -> Path:
 
 
 def install_state_manifests(directory: Path) -> list[Path]:
-    """Existing host inventories, excluding the setting owners' sidecar filenames."""
+    """Inventory candidates for this and other host adapters, excluding installer sidecars."""
     sidecars = {'source-repo-hook-path.json', 'codex-hook-feature-change.json', 'codex-project-trust-change.json'}
-    return sorted(path for path in Path(directory).glob('*.json') if path.name not in sidecars)
+    sidecars.update(f'{host}-registry-health.json' for host in PLATFORMS)
+    found = []
+    for path in sorted(Path(directory).glob('*.json')):
+        if path.name in sidecars:
+            continue
+        if path.stem not in PLATFORMS and path.is_file() and not path.is_symlink():
+            # Keep inventories from another adapter, and unresolved files that may still represent a host.
+            try:
+                data = json.loads(path.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                pass
+            else:
+                if not isinstance(data, dict) or ('targets' not in data and data.get('platform') != path.stem):
+                    continue
+        found.append(path)
+    return found
 
 
 def events_log(platform: str) -> Path:
@@ -121,6 +164,11 @@ def record_root() -> Path:
     (current detail and legacy incompatibility notice) and the publish rollbacks (`rollbacks/<txid>/`). It does not
     follow `GHOST_ALICE_GHOST_ROOT`, so the record stays next to the lock its writers hold."""
     return home() / ".ghost-alice"
+
+
+def git_hooks_dir() -> Path:
+    """`~/.ghost-alice/git-hooks`: the folder the registered repository's `core.hooksPath` names."""
+    return record_root() / "git-hooks"
 
 
 def install_lock_path() -> Path:

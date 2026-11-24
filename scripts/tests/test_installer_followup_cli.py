@@ -51,6 +51,11 @@ class InstallerFollowupCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(self.receipt.is_file())
 
+    def earlier_hook_row(self, after, *, before=None):
+        """The row in which a release without the hooks folder recorded its `core.hooksPath`."""
+        return dict(kind='source_repo_hook_path', repo_root=self.source.as_posix(), before_present=before is not None,
+                    before=before, after=after, applied_at='2026-10-01T00:00:00Z')
+
     def test_final_codex_skill_restores_settings_and_archives_host_queue_before_full_retry(self):
         codex = self.home / '.codex'
         codex.mkdir()
@@ -87,9 +92,10 @@ class InstallerFollowupCliTests(unittest.TestCase):
         pending = ghost / 'pending-merges/codex'
         dispatcher = ghost / 'hooks/ghost-alice-hook.mjs'
         state = ghost / 'install-state'
-        sidecars = [*state.glob('codex-*-change.json'), state / 'source-repo-hook-path.json']
-        self.assertEqual(len(sidecars), 3)
+        sidecars = [*state.glob('codex-*-change.json')]
+        self.assertEqual(len(sidecars), 2)
         receipts = {path: path.read_bytes() for path in [*sidecars, dispatcher]}
+        receipts[state / 'source-repo-hook-path.json'] = json.dumps(self.earlier_hook_row('hooks')).encode()
         queue_manifest = (pending / 'manifest.json').read_bytes()
         selected = self.run_install('--uninstall', 'task-router', platform='codex')
         self.assertEqual(selected.returncode, 0, selected.stdout + selected.stderr)
@@ -173,12 +179,10 @@ class InstallerFollowupCliTests(unittest.TestCase):
         self.install()
         receipt = self.manifest.with_name('source-repo-hook-path.json')
         inventory = json.loads(self.manifest.read_text())
-        change = json.loads(receipt.read_text())
-        change.update(after='hooks', before_present=True, before='personal/hooks')
+        change = self.earlier_hook_row('hooks', before='personal/hooks')
+        shutil.rmtree(self.home / '.ghost-alice/git-hooks')
         receipt.write_text(json.dumps(change))
-        for entry in inventory['system_env_changes']:
-            if entry['kind'] == change['kind']:
-                entry.update(change)
+        inventory['system_env_changes'].append(change)
         self.manifest.write_text(json.dumps(inventory))
         git = ['git', '-C', str(self.source), 'config', '--local']
         subprocess.run([*git, 'core.hooksPath', 'hooks'], env=self.env, check=True)
@@ -686,7 +690,7 @@ if entry.name == 'cli.py' and entry.parent.name == 'installer':
         (self.home / '.codex').mkdir()
         self.inject('''import select, sys
 entry = Path(sys.argv[0]).resolve()
-if entry.name == 'cli.py' and entry.parent.name == 'installer' and not os.environ.get('GHOST_ALICE_INSTALL_REQUEST'):
+if entry.name == 'cli.py' and entry.parent.name == 'installer' and '--install-acquired-release' in sys.argv:
     print('BEFORE_PLATFORM_QUESTION', flush=True)
     assert select.select([sys.stdin], [], [], 5)[0], 'No queued input received'
 ''')
@@ -709,7 +713,7 @@ if entry.name == 'cli.py' and entry.parent.name == 'installer' and not os.enviro
         shutil.copytree(self.source, other, ignore=shutil.ignore_patterns('.git', '.tmp'))
         self.inject('''import select, sys
 entry = Path(sys.argv[0]).resolve()
-if entry.name == 'cli.py' and entry.parent.name == 'installer' and not os.environ.get('GHOST_ALICE_INSTALL_REQUEST'):
+if entry.name == 'cli.py' and entry.parent.name == 'installer' and '--install-acquired-release' in sys.argv:
     print('BEFORE_SOURCE_QUESTION', flush=True)
     assert select.select([sys.stdin], [], [], 5)[0], 'No queued input received'
 ''')
@@ -728,7 +732,7 @@ if entry.name == 'cli.py' and entry.parent.name == 'installer' and not os.enviro
         config.write_text(f'[projects.{json.dumps(project)}]\ntrust_level = "untrusted"\n')
         self.inject('''import select, sys
 entry = Path(sys.argv[0]).resolve()
-if entry.name == 'cli.py' and entry.parent.name == 'installer' and not os.environ.get('GHOST_ALICE_INSTALL_REQUEST'):
+if entry.name == 'cli.py' and entry.parent.name == 'installer' and '--install-acquired-release' in sys.argv:
     print('BEFORE_TRUST_QUESTION', flush=True)
     assert select.select([sys.stdin], [], [], 5)[0], 'No queued input received'
 ''')
@@ -811,7 +815,7 @@ if entry.name == 'cli.py' and entry.parent.name == 'installer':
     hosts.observe_writers = lambda platforms, **kwargs: {{host: hosts.WriterObservation(
         'absent' if Path({str(exited)!r}).exists() else 'running', pids=() if Path({str(exited)!r}).exists() else ({process.pid},))
         for host in platforms}}
-    if not os.environ.get('GHOST_ALICE_INSTALL_REQUEST'):
+    if '--install-acquired-release' in sys.argv:
         import select
         print('BEFORE_SHUTDOWN_QUESTION', flush=True)
         assert select.select([sys.stdin], [], [], 5)[0], 'No queued input received'
@@ -880,7 +884,7 @@ os.replace = replace
         """Only external writer observations are controlled; the bound active CLI performs the move."""
         self.inject('''import json, sys
 entry = Path(sys.argv[0]).resolve()
-request = json.loads(os.environ.get('GHOST_ALICE_INSTALL_REQUEST') or '{}')
+request = json.loads(os.environ.get('GHOST_ALICE_PACKAGE_REQUEST') or '{}')
 if entry.name == 'cli.py' and entry.parent.name == 'installer' and request.get('stage') == 'record-move':
     sys.path.insert(0, str(entry.parent.parent))
     from installer import hosts, gateway_participant
@@ -979,7 +983,7 @@ install_transaction._rename_path = fail_config''')
         self.assertIn('Ghost-ALICE installation is complete.', output)
         self.assertIn('restored the previous state', output)
         self.assertIn('record move config write denied', output)
-        self.assertNotIn('Candidate install did not finish', output)
+        self.assertNotIn('The installation did not finish', output)
         events = set(logs.glob('*.events.jsonl')) - previous.keys()
         self.assertEqual(len(events), 1)
         event_file = events.pop()
@@ -1010,7 +1014,7 @@ install_transaction.Journal.mark = fail_completion''')
         self.assertIn(f'Your existing work records from {self.a} are at {self.b}', output)
         self.assertIn('Saving the completion record', output)
         self.assertIn('installation preparation checks', output)
-        self.assertNotIn('Candidate install did not finish', output)
+        self.assertNotIn('The installation did not finish', output)
         self.assertEqual(json.loads(self.config.read_text())['install_locations']['claude']['ledger_root'], str(self.b))
         inject_installer_python(self.env)
         pending = install_transaction.unfinished(self.home / '.ghost-alice')

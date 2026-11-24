@@ -188,6 +188,32 @@ class AddonInstallerTest(unittest.TestCase):
 
     _RICH_FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "rich-addon"
 
+    def test_named_addon_ids_limit_the_targets_of_a_source_with_two_addons(self) -> None:
+        import addon_installer
+        with tempfile.TemporaryDirectory() as temp_dir:
+            two = Path(temp_dir) / "two"
+            shutil.copytree(self._RICH_FIXTURE / "addons" / "rich", two / "addons" / "rich")
+            shutil.copytree(FIXTURE_ROOT / "addons" / "noop", two / "addons" / "noop")
+            (two / "addons-manifest.json").write_text(json.dumps({"manifest_version": 1, "addons": [
+                {"id": name, "path": f"addons/{name}", "min_core_version": "0.1.0"} for name in ("rich", "noop")]}))
+            both = addon_installer.load_addon_targets([two], platform="codex")
+            self.assertEqual({target.addon_id for target in both}, {"rich", "noop"})
+            kept = addon_installer.load_addon_targets([two], platform="codex", addon_ids=["rich"])
+            self.assertEqual({target.addon_id for target in kept}, {"rich"})
+            self.assertEqual(addon_installer.load_addon_targets([two], platform="codex", addon_ids=[]), [])
+            listed = subprocess.run([sys.executable, str(REPO_ROOT / "_shared" / "addon_installer.py"), "--source", str(two),
+                                     "--platform", "codex", "--format", "json", "--addon-id", "noop"],
+                                    capture_output=True, text=True, check=True)
+            self.assertEqual({target["addon_id"] for target in json.loads(listed.stdout)["targets"]}, {"noop"})
+            for action in ("--list-addons", "--dry-run"):
+                with self.subTest(action=action):
+                    preview = subprocess.run([sys.executable, str(REPO_ROOT / "_shared" / "install_hooks.py"),
+                                              "--platform", "codex", action, "--addon-source", str(two),
+                                              "--addon-id", "noop"], env=installer_env(Path(temp_dir) / "home"),
+                                             capture_output=True, text=True, check=True)
+                    self.assertIn("noop (addon:noop)", preview.stdout)
+                    self.assertNotIn("(addon:rich)", preview.stdout)
+
     def test_detect_collisions_flags_unowned_command_extra(self) -> None:
         # Preflight must catch a command/resource extra whose dest already exists and is NOT owned by the installing addon. Otherwise the collision only surfaces at provision time (after hooks/skills are written), orphaning an installed addon skill + hook with no sidecar to uninstall.
         from addon_installer import detect_collisions, load_addon_targets

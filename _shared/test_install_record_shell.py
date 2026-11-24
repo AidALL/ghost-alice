@@ -25,6 +25,12 @@ from _shared.test_addon_installer import _find_test_bash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SHARED = REPO_ROOT / "_shared"
+
+
+def reinstall_commands(*outputs):
+    """The commands that the installer printed for reinstalling its saved version."""
+    return [line.split(": ", 1)[1] for output in outputs for line in output.splitlines()
+            if " --local-source --adopt-source" in line]
 if str(SHARED) not in sys.path:
     sys.path.insert(0, str(SHARED))
 
@@ -190,7 +196,7 @@ class InstallRecordShellTest(unittest.TestCase):
     def test_custom_runtime_full_removal_uses_recorded_destinations(self):
         self.custom_runtime_removal(full=True)
 
-    def test_one_host_failure_keeps_previous_active_cli_and_retry_activates_the_candidate(self):
+    def test_one_host_failure_leaves_the_candidate_active_and_a_plain_rerun_completes_it(self):
         from installer_testing import installer_env
         (self.home / '.claude').mkdir()
         (self.home / '.codex').mkdir()
@@ -226,16 +232,16 @@ raise SystemExit(cli.main(sys.argv[1:]))
                                 env=installer_env(self.home), cwd=self.home, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         record = self.record()
-        self.assertEqual(record['installer']['active_root'], active)
+        self.assertIn(record['installer']['active_root'], result.stdout + result.stderr)
         installed_source = Path(record['targets'][str(self.claude / 'task-router')]['source'])
         candidate = installed_source.parent.parent
-        self.assertNotEqual(str(installed_source.parent), active)
+        self.assertNotEqual(str(candidate / 'core'), active)
+        self.assertEqual(record['installer']['active_root'], str(candidate / 'core'))
         self.assertIn('Candidate bytes.', (self.claude / 'task-router/SKILL.md').read_text())
         self.assertEqual(json.loads((candidate / 'version.json').read_text())['status'], 'candidate')
         config.write_bytes(before)
         shutil.rmtree(self.source)
-        # The old installed consumer skills read each host's actual support placement,
-        # independently of which package remains the active management CLI.
+        # The installed consumer skills read each host's actual support placement.
         for host, skills in (('claude', self.claude), ('codex', self.codex)):
             support = record['targets'][str(skills / '_shared')]
             self.assertIn(host, support['used_by'])
@@ -257,16 +263,20 @@ raise SystemExit(cli.main(sys.argv[1:]))
                         path = reference.split('#', 1)[0]
                         if path and '://' not in path:
                             self.assertTrue((policy_file.parent / path).resolve().is_file(), reference)
-        previous_manager = subprocess.run([self.bash, str(self.ghost / 'bin/ghost-alice'), '--platform', 'claude',
-                                          '--uninstall', 'task-router'], cwd=self.home, env=installer_env(self.home),
-                                          capture_output=True, text=True, timeout=180)
-        self.assertEqual(previous_manager.returncode, 0, previous_manager.stdout + previous_manager.stderr)
+        def manage(*args):
+            managed = subprocess.run([self.bash, str(self.ghost / 'bin/ghost-alice'), *args], cwd=self.home,
+                                     env=installer_env(self.home), capture_output=True, text=True, timeout=180)
+            self.assertEqual(managed.returncode, 0, managed.stdout + managed.stderr)
+        manage('--platform', 'claude', '--uninstall', 'task-router')
         self.assertFalse((self.claude / 'task-router').exists())
-        retry = subprocess.run([self.bash, str(candidate / 'core/install.sh'), '--local-source', '--skip-source-health'],
-                               cwd=self.home, env=installer_env(self.home), capture_output=True, text=True, timeout=180)
-        self.assertEqual(retry.returncode, 0, retry.stdout + retry.stderr)
+        manage('--local-source', '--skip-source-health')
         self.assertEqual(self.record()['installer']['active_root'], str(candidate / 'core'))
         self.assertEqual(json.loads((candidate / 'version.json').read_text())['status'], 'successful')
+        kept = ['adversarial-verification', 'skill-evolution', 'verification-before-completion']
+        self.assertEqual(selection.installed_core_selection(self.record()),
+                         {'claude': kept, 'codex': sorted([*kept, 'task-router'])})
+        self.assertFalse((self.claude / 'task-router').exists())
+        self.assertIn('Candidate bytes.', (self.codex / 'task-router/SKILL.md').read_text())
 
     def test_legacy_core_links_become_copies_even_when_their_content_is_current(self):
         (self.home / ".claude").mkdir()
@@ -299,7 +309,7 @@ raise SystemExit(cli.main(sys.argv[1:]))
         skill.write_bytes(original + b'\nLater source revision.\n')
         self.run_installer('--local-source', '--platform', 'claude', '--skip-source-health', 'task-router', 'compact-handoff')
         expected = {path for path, entry in self.record()['targets'].items() if entry['kind'] == 'skill'}
-        origin_fields = ('root', 'remote', 'ref', 'branch', 'hooks_path', 'ledger_source_roots')
+        origin_fields = ('root', 'remote', 'ref', 'branch', 'ledger_source_roots')
         expected_source = {key: self.record()['source'].get(key) for key in origin_fields}
         config_path = self.ghost / 'config.json'
         config = json.loads(config_path.read_text())
@@ -459,6 +469,177 @@ raise SystemExit(cli.main(sys.argv[1:]))
         self.assertEqual(adversarial["files"], {rel: content_digest.PREFIX + value for rel, value in hashes.items()})
         self.assert_matches_the_disk(targets)
 
+    def test_the_printed_reinstall_command_installs_what_is_installed(self):
+        (self.home / ".codex").mkdir()
+        first = self.run_installer("--platform", "codex", "--skip-source-health", "--local-source", "task-router")
+        out = self.run_installer("update", "--skip-source-health")
+        commands = reinstall_commands(first, out)
+        # Neither the installation that named its host nor the update prints a host.
+        self.assertEqual(["--platform" in command for command in commands], [False, False])
+        command = commands[1]
+        installed = sorted(path.name for path in self.codex.iterdir())
+        env = installer_env(self.home)
+        result = subprocess.run([self.bash, "-c", command + " --skip-source-health"], cwd=self.home, env=env,
+                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600, check=False)
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertEqual(sorted(path.name for path in self.codex.iterdir()), installed)
+        # No host that is not installed receives a skill.
+        self.assertFalse(self.claude.exists(), msg=result.stdout + result.stderr)
+
+    def test_the_printed_reinstall_command_keeps_an_addon_on_its_host(self):
+        (self.home / ".codex").mkdir()
+        (self.home / ".claude").mkdir()
+        rich = SHARED / "tests" / "fixtures" / "rich-addon"
+        self.run_installer("--platform", "codex", "--skip-source-health", "--local-source", "task-router", "necessity-gate")
+        out = self.run_installer("--platform", "claude", "--skip-source-health", "--local-source", "--addon-source", str(rich),
+                                 "task-router")
+        (command,) = reinstall_commands(out)
+        self.assertIn("--addon-source", command)
+        codex = sorted(path.name for path in self.codex.iterdir())
+        result = subprocess.run([self.bash, "-c", command + " --skip-source-health"], cwd=self.home, env=installer_env(self.home),
+                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600, check=False)
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertTrue(os.path.lexists(self.claude / "richskill"))
+        self.assertTrue((self.ghost / "addons" / "claude" / "rich.json").is_file())
+        # The host that holds no addon of the package receives none.
+        self.assertEqual(sorted(path.name for path in self.codex.iterdir()), codex)
+        self.assertFalse((self.ghost / "addons" / "codex").exists())
+
+    def test_the_printed_reinstall_command_does_not_bring_back_an_addon_that_one_host_removed(self):
+        (self.home / ".codex").mkdir()
+        (self.home / ".claude").mkdir()
+        fixtures, two = SHARED / "tests" / "fixtures", self.home / "two-addons"
+        for folder, name in (("rich-addon", "rich"), ("dummy-addon", "noop")):
+            shutil.copytree(fixtures / folder / "addons" / name, two / "addons" / name)
+        (two / "addons-manifest.json").write_text(json.dumps({"manifest_version": 1, "addons": [
+            {"id": name, "path": f"addons/{name}", "min_core_version": "0.1.0"} for name in ("rich", "noop")]}))
+        out = self.run_installer("--skip-source-health", "--local-source", "--addon-source", str(two), "task-router")
+        (command,) = reinstall_commands(out)
+        self.run_installer("--platform", "codex", "--uninstall", "--addon", "noop")
+        registry = self.ghost / "addons"
+        self.assertEqual(sorted(path.name for path in (registry / "codex").glob("*.json")), ["rich.json"])
+        result = subprocess.run([self.bash, "-c", command + " --skip-source-health"], cwd=self.home, env=installer_env(self.home),
+                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600, check=False)
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        # Each host keeps the addons that it holds: the removed one does not come back.
+        self.assertEqual(sorted(path.name for path in (registry / "claude").glob("*.json")), ["noop.json", "rich.json"])
+        self.assertEqual(sorted(path.name for path in (registry / "codex").glob("*.json")), ["rich.json"])
+        self.assertFalse(os.path.lexists(self.codex / "noop"))
+        self.assertTrue(os.path.lexists(self.codex / "richskill"))
+
+    def reinstall_line(self):
+        """Codex holds two Core skills, Claude one with the rich addon; the line that the second installation printed."""
+        (self.home / ".codex").mkdir()
+        (self.home / ".claude").mkdir()
+        self.run_installer("--platform", "codex", "--skip-source-health", "--local-source", "task-router", "necessity-gate")
+        out = self.run_installer("--platform", "claude", "--skip-source-health", "--local-source", "--addon-source",
+                                 str(SHARED / "tests" / "fixtures" / "rich-addon"), "task-router")
+        (command,) = reinstall_commands(out)
+        return command
+
+    def run_line(self, line):
+        """Run a printed line with more words, from another folder."""
+        result = subprocess.run([self.bash, "-c", line + " --skip-source-health"], cwd=self.home, env=installer_env(self.home),
+                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600, check=False)
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
+    def registered_addons(self, host):
+        return sorted(path.name for path in (self.ghost / "addons" / host).glob("*.json"))
+
+    def test_the_reinstall_command_with_another_addon_source_saves_another_version_for_every_host(self):
+        command = self.reinstall_line()
+        active = installed_payload.read(self.ghost)["installer"]["active_root"]
+        self.run_line(command + " --addon-source " + str(SHARED / "tests" / "fixtures" / "dummy-addon"))
+        # Another addon source makes another version; that installation gives every named source to every host.
+        self.assertNotEqual(installed_payload.read(self.ghost)["installer"]["active_root"], active)
+        for host in ("claude", "codex"):
+            self.assertEqual(self.registered_addons(host), ["noop.json", "rich.json"])
+
+    def test_the_reinstall_command_with_a_named_host_gives_that_host_the_addon_source(self):
+        command = self.reinstall_line()
+        claude = sorted(path.name for path in self.claude.iterdir())
+        self.run_line(command + " --platform codex")
+        # A named host is a request for that host: it receives the addon source that the line names.
+        self.assertEqual(self.registered_addons("codex"), ["rich.json"])
+        self.assertTrue(os.path.lexists(self.codex / "richskill"))
+        self.assertEqual(sorted(path.name for path in self.claude.iterdir()), claude)
+
+    def test_the_reinstall_command_after_a_full_removal_installs_the_saved_core_selection_and_no_addon(self):
+        command = self.reinstall_line()
+        for host in ("claude", "codex"):
+            self.run_installer("--platform", host, "--uninstall")
+        self.run_line(command)
+        # The version file keeps each host's Core selection; no host holds an addon, so the line installs none.
+        self.assertEqual(sorted(path.name for path in self.codex.iterdir()), ["_shared", "necessity-gate", "task-router"])
+        self.assertEqual(sorted(path.name for path in self.claude.iterdir()), ["_shared", "task-router"])
+        self.assertEqual([self.registered_addons(host) for host in ("claude", "codex")], [[], []])
+
+    def test_a_full_removal_of_one_host_keeps_the_addon_files_of_another_host(self):
+        (self.home / ".codex").mkdir()
+        (self.home / ".claude").mkdir()
+        rich = SHARED / "tests" / "fixtures" / "rich-addon"
+        claude = ("--platform", "claude", "--skip-source-health", "--local-source", "task-router")
+        self.run_installer(*claude)
+        self.run_installer("--platform", "codex", "--skip-source-health", "--local-source", "--addon-source", str(rich),
+                           "task-router")
+        resource = self.ghost / "resources" / "codex" / "rich" / "ref.txt"
+        sidecar = self.ghost / "addons" / "codex" / "rich.json"
+        self.assertTrue(resource.is_file())
+        # The addon registry of the other host confirms its resource file: the removal ends 0 and keeps that host's files.
+        self.run_installer("--platform", "claude", "--uninstall")
+        self.assertFalse(os.path.lexists(self.claude / "task-router"))
+        self.assertTrue(resource.is_file() and sidecar.is_file() and os.path.lexists(self.codex / "richskill"))
+        # Without the registry record nothing confirms that file, so the removal keeps the shared files and stops.
+        self.run_installer(*claude)
+        sidecar.rename(sidecar.with_name("rich.json.aside"))
+        result = subprocess.run([self.bash, str(self.source / "install.sh"), "--platform", "claude", "--uninstall"],
+                                cwd=self.source, env=installer_env(self.home), capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=600, check=False)
+        self.assertEqual(result.returncode, 1, msg=result.stdout + result.stderr)
+        self.assertIn(f"other host target ownership cannot be confirmed: {self.codex / 'richskill'}",
+                      result.stdout + result.stderr)
+        self.assertTrue(resource.is_file())
+
+    def test_a_removal_of_one_skill_keeps_the_support_of_a_selected_skill_whose_folder_is_lost(self):
+        (self.home / ".claude").mkdir()
+        self.run_installer("--platform", "claude", "--skip-source-health", "--local-source", "task-router",
+                           "session-intent-analyzer")
+        lost = self.claude / "session-intent-analyzer"
+        lost.unlink() if lost.is_symlink() else shutil.rmtree(lost)
+        self.run_installer("--platform", "claude", "--uninstall", "task-router")
+        # The install record still names the other skill, so its support files and the host's bootstrap stay.
+        self.assertEqual(selection.installed_core_selection(self.record())["claude"], ["session-intent-analyzer"])
+        self.assertTrue(os.path.lexists(self.claude / "_shared"))
+        self.assertIn("Ghost-ALICE", (self.home / ".claude" / "CLAUDE.md").read_text(encoding="utf-8"))
+        self.run_installer("--platform", "claude", "--repair")
+        self.assertTrue((lost / "SKILL.md").is_file())
+
+    def test_an_installation_keeps_an_inventory_that_it_cannot_read_and_continues(self):
+        (self.home / ".codex").mkdir()
+        install = ("--platform", "codex", "--skip-source-health", "--local-source", "task-router")
+        self.run_installer(*install)
+        inventory = self.ghost / "install-state" / "codex.json"
+        inventory.write_text("not json")
+        # The installer keeps the unreadable file beside the inventory and installs what the command names.
+        self.run_installer(*install)
+        (backup,) = inventory.parent.glob("codex.json.*.bak")
+        self.assertEqual(backup.read_text(), "not json")
+        self.assertIn("task-router", {row["target_name"] for row in json.loads(inventory.read_text())["targets"]})
+        # Without the install record a repair knows no skill: it stops, and the installation that it names goes on
+        # without a file that the user would have to move.
+        inventory.write_text("not json again")
+        for record in self.ghost.glob("installed-payload*.json"):
+            record.rename(record.with_name(record.name + ".aside"))
+        result = subprocess.run([self.bash, str(self.source / "install.sh"), "--platform", "codex", "--repair"],
+                                cwd=self.source, env=installer_env(self.home), capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=600, check=False)
+        self.assertEqual(result.returncode, 1, msg=result.stdout + result.stderr)
+        self.assertEqual(inventory.read_text(), "not json again")
+        self.run_installer(*install)
+        self.run_installer("--platform", "codex", "--repair")
+        self.assertEqual(sorted(path.read_text() for path in inventory.parent.glob("codex.json.*.bak")),
+                         ["not json", "not json again"])
+
     def test_the_next_command_restores_a_publish_that_stopped_halfway(self):
         (self.home / ".codex").mkdir()
         self.run_installer("--platform", "codex", "--skip-source-health")
@@ -486,7 +667,7 @@ raise SystemExit(cli.main(sys.argv[1:]))
         [txid] = install_transaction.unfinished(self.ghost)
         out = self.run_installer("--platform", "codex", "--repair")
         self.assertIn(f"Restored {dest} from {install_transaction.rollbacks_root(self.ghost) / txid}", out)
-        self.assertIn("[OK] Repair complete: 0 re-provisioned, 0 left untouched", out)
+        self.assertIn("[OK] Repair complete for codex: 0 re-provisioned, 0 left untouched", out)
         self.assertEqual((dest / "SKILL.md").read_bytes(), original)
         self.assertEqual(installed_payload.path(self.ghost).read_bytes(), record_before)
         self.assertEqual(install_transaction.unfinished(self.ghost), [])

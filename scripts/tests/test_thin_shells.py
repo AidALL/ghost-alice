@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,7 @@ INSTALL_SH = REPO_ROOT / "install.sh"
 INSTALL_PS1 = REPO_ROOT / "install.ps1"
 INSTALL_CMD = REPO_ROOT / "install.cmd"
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
+from installer import locations  # noqa: E402
 from installer_testing import checkout_copy, installer_env  # noqa: E402
 
 # The parameter names of the earlier install.ps1 param block and the cli flag each becomes.
@@ -53,6 +55,20 @@ WINGET_POWERSHELL = "winget install --id Microsoft.PowerShell --exact"
 
 
 class ThinInstallShTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("bash") and os.name == "posix", "requires a POSIX shell")
+    def test_unknown_option_prints_help_that_runs_from_the_callers_directory(self):
+        with tempfile.TemporaryDirectory(prefix="ghost home ") as directory:
+            home = Path(directory)
+            env = installer_env(home)
+            bad = subprocess.run(["bash", str(INSTALL_SH), "--bad-option"], cwd=home, env=env,
+                                 capture_output=True, text=True, timeout=30)
+            self.assertEqual(bad.returncode, 1)
+            hint = next(line.removeprefix("See ") for line in bad.stdout.splitlines() if line.startswith("See "))
+            help_result = subprocess.run(shlex.split(hint), cwd=home, env=env, capture_output=True,
+                                         text=True, timeout=30)
+            self.assertEqual(help_result.returncode, 0, help_result.stderr)
+            self.assertIn("Usage:", help_result.stdout)
+
     def setUp(self):
         self.text = INSTALL_SH.read_text(encoding="utf-8")
 
@@ -60,9 +76,17 @@ class ThinInstallShTests(unittest.TestCase):
         self.assertNotIn("installer_lib", self.text)
         self.assertEqual(sorted((REPO_ROOT / "installer_lib").glob("*.sh")), [])
 
-    def test_runs_the_python_cli(self):
-        self.assertIn('_shared/installer/cli.py', self.text)
-        self.assertRegex(self.text, r'exec "\$py" "\$\{SCRIPT_DIR\}/_shared/installer/cli\.py" "\$@"')
+    @unittest.skipUnless(shutil.which("bash"), "bash is required")
+    def test_incomplete_checkout_names_the_missing_entry_and_reports_how_to_repair(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "install.sh"
+            shutil.copyfile(INSTALL_SH, script)
+            result = subprocess.run(["bash", str(script), "--help"], env=installer_env(root), cwd=root,
+                                    capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("_shared/installer/cli.py", result.stdout + result.stderr)
+        self.assertIn("checkout that holds the same Core files", result.stdout + result.stderr)
 
     def test_keeps_the_bash_guard_and_runtime_detection(self):
         # install.sh:19-25; installer_lib/python_runtime.sh functions move here by name
@@ -89,7 +113,7 @@ class ThinInstallShTests(unittest.TestCase):
                                     capture_output=True, text=True, timeout=120)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn("Usage:", result.stdout)
-        self.assertIn("  bash install.sh                              # Install to detected AI tools", result.stdout)
+        self.assertIn(f"  {locations.package_command(REPO_ROOT):<44} # Install to detected AI tools", result.stdout)
 
     @unittest.skipUnless(shutil.which("zsh") and shutil.which("bash"), "zsh and bash are required")
     def test_zsh_invocation_re_executes_under_bash(self):
@@ -132,8 +156,7 @@ class ThinInstallPs1Tests(unittest.TestCase):
     def test_sets_utf8_console_and_python_io_after_the_guard(self):
         for line in ("$Utf8NoBom = [System.Text.UTF8Encoding]::new($false)", "$OutputEncoding = $Utf8NoBom",
                      "[Console]::OutputEncoding = $Utf8NoBom", "[Console]::InputEncoding = $Utf8NoBom",
-                     '$env:PYTHONUTF8 = "1"', '$env:PYTHONIOENCODING = "utf-8"',
-                     '$env:GHOST_ALICE_INSTALL_COMMAND = ".\\install.cmd"'):
+                     '$env:PYTHONUTF8 = "1"', '$env:PYTHONIOENCODING = "utf-8"'):
             self.assertIn(line, self.text)
             self.assertLess(self.text.index("Assert-PowerShellBaseline -Version"), self.text.index(line), msg=line)
             self.assertLess(self.text.index(line), self.text.index("$python = Initialize-PythonRuntimeForInstall"), msg=line)
@@ -163,7 +186,9 @@ class ThinInstallPs1Tests(unittest.TestCase):
         self.assertEqual(self.text.count('& $python '), 1)
         self.assertRegex(
             self.text,
-            r'& \$python \(Join-Path -Path \$PSScriptRoot -ChildPath "_shared/installer/cli\.py"\) @installerArguments\n'
+            r'\$entry = Join-Path -Path \$PSScriptRoot -ChildPath "_shared/installer/cli\.py"\n'
+            r'if \(-not \(Test-Path -LiteralPath \$entry -PathType Leaf\)\) \{\n    Write-Err "[^\n]*"\n    exit 1\n\}\n'
+            r'& \$python \$entry @installerArguments\n'
             r'exit \$LASTEXITCODE\n?$')
 
     def test_no_installer_logic_in_the_shell(self):
@@ -270,8 +295,7 @@ class ThinInstallPs1RuntimeTests(unittest.TestCase):
             with self.subTest(flag=flag), tempfile.TemporaryDirectory() as home:
                 result = self.run_ps1(flag, env={**os.environ, "HOME": home, "GHOST_ALICE_INSTALL_PROGRESS": "off"})
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn("  .\\install.cmd" + " " * 32 + "# Install to detected AI tools", result.stdout)
-                self.assertNotIn("bash install.sh", result.stdout)
+                self.assertIn(f"  {locations.package_command(REPO_ROOT):<44} # Install to detected AI tools", result.stdout)
                 self.assertIn("  --repair               Re-provision missing managed targets", result.stdout)
 
     def test_install_through_powershell_names(self):

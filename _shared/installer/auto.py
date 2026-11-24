@@ -25,7 +25,8 @@ def platform_target_keys(ctx: "Context", platform: str, skills: list[str]) -> li
         for target in selection.expand_skill_targets(skill):
             keys.append(f"skill:{target.name}")
     if not ctx.options.addon_skip and ctx.addon_sources:
-        platform_ctx = dataclasses.replace(ctx, platform=platform)
+        sources, ids = _host_addons(ctx, platform)
+        platform_ctx = dataclasses.replace(ctx, platform=platform, addon_sources=sources, addon_ids=ids)
         for target in addons.collect_addon_targets(platform_ctx):
             keys.append(f"skill:{target.name}")
     return keys
@@ -41,6 +42,15 @@ def count_common_targets(ctx: "Context", platforms: list[str], skills: list[str]
         keys = set(platform_target_keys(ctx, platform, requested))
         common = keys if common is None else common & keys
     return len(common or ())
+
+
+def _host_addons(ctx: "Context", platform: str | None) -> tuple[list[str], list[str] | None]:
+    """The addon sources and the addon ids of one host's install process: every source and addon of the command, or
+    what the host holds when the installation keeps each host's addons (`run_install_children`)."""
+    if ctx.held_addons is None or platform is None:
+        return list(ctx.addon_sources), None
+    held = ctx.held_addons[platform]
+    return list(held), [addon_id for ids in held.values() for addon_id in ids]
 
 
 def child_command(ctx: "Context", platform: str | None, *, uninstall: bool = False, package: Path | None = None) -> list[str]:
@@ -62,8 +72,8 @@ def child_command(ctx: "Context", platform: str | None, *, uninstall: bool = Fal
         argv.extend(["--visibility", options.visibility])
     if options.verbose:
         argv.append("--verbose")
-    for addon_source in ctx.addon_sources:
-        argv.extend(["--addon-source", str(addon_source)])
+    sources, ids = _host_addons(ctx, platform)
+    argv.extend(addons.selection_args(sources, ids, "--addon-source"))
     if not ctx.addon_sources_prepared:
         for tag in options.addon_tags:
             argv.extend(["--addon-tag", tag])

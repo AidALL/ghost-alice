@@ -90,6 +90,16 @@ class PublishCase(unittest.TestCase):
 
 
 class PublishTests(PublishCase):
+    def test_absent_asset_root_uses_the_publish_source_for_marker_and_inventory(self):
+        manifest = self.ghost / 'install-state' / 'claude.json'
+        manifest.parent.mkdir()
+        manifest.write_text(json.dumps({'platform': 'claude', 'targets': []}))
+        target = self.target('_shared', self.claude / '_shared', 'copy', kind='support')
+        install_transaction.publish(self.request('claude', target, install_state=str(manifest), asset_root=None))
+        marker = json.loads((self.claude / '_shared' / '.ghost-alice-install.json').read_text())
+        self.assertEqual(Path(marker['source_repo']), self.src)
+        self.assertEqual(Path(json.loads(manifest.read_text())['source_root']), self.src)
+
     def test_support_publish_moves_policy_source_and_preserves_each_old_targets_owner(self):
         import uninstall_cleanup
         manifest = self.ghost / 'install-state/claude.json'

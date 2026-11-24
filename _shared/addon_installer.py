@@ -157,8 +157,11 @@ def load_addon_targets(
     core_skill_names: Iterable[str] = (),
     platform: str | None = None,
     core_version: str | None = None,
+    addon_ids: Iterable[str] | None = None,
 ) -> list[AddonTarget]:
+    """Targets of every addon of `sources`; `addon_ids` keeps only the named addons."""
     core_names = set(core_skill_names)
+    kept = None if addon_ids is None else set(addon_ids)
     resolved_core_version = core_version if core_version is not None else _read_core_version()
     targets: list[AddonTarget] = []
     seen_names: dict[str, str] = {}
@@ -172,6 +175,8 @@ def load_addon_targets(
                 "id",
                 top_manifest_path,
             )
+            if kept is not None and addon_id not in kept:
+                continue
             addon_path = _safe_child_path(
                 source_root,
                 _require_string(addon_entry.get("path"), "path", top_manifest_path),
@@ -744,6 +749,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--core-skill", action="append", default=[], help="Core skill name that addons may not shadow")
     parser.add_argument("--platform", choices=["claude", "codex"], help="Optional platform filter")
     parser.add_argument("--format", choices=["json", "shell", "text"], default="text")
+    parser.add_argument("--addon-id", action="append", help="Keep only this addon of the sources")
     return parser
 
 
@@ -1078,13 +1084,14 @@ def _main_write_sidecars(argv: list[str]) -> int:
     parser.add_argument("--addons-dir", required=True)
     parser.add_argument("--skills-dir", required=True)
     parser.add_argument("--installed-at", required=True)
+    parser.add_argument("--addon-id", action="append")
     parser.add_argument("--claude-commands-dir", default=None,
                         help="Claude commands dir for addon command provisioning")
     parser.add_argument("--resources-dir", default=None,
                         help="platform-scoped base for addon resource provisioning")
     args = parser.parse_args(argv)
     try:
-        targets = load_addon_targets(args.source, platform=args.platform)
+        targets = load_addon_targets(args.source, platform=args.platform, addon_ids=args.addon_id)
     except AddonManifestError as exc:
         print(f"addon manifest error: {exc}", file=sys.stderr)
         return 1
@@ -1134,6 +1141,7 @@ def _main_detect_collisions(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="addon_installer.py detect-collisions")
     parser.add_argument("--source", action="append", default=[], required=True)
     parser.add_argument("--platform", choices=["claude", "codex"])
+    parser.add_argument("--addon-id", action="append")
     parser.add_argument("--skills-dir", required=True)
     parser.add_argument("--addons-dir", required=True)
     parser.add_argument("--core-skill", action="append", default=[])
@@ -1141,7 +1149,7 @@ def _main_detect_collisions(argv: list[str]) -> int:
     parser.add_argument("--resources-dir", default=None)
     args = parser.parse_args(argv)
     try:
-        targets = load_addon_targets(args.source, platform=args.platform)
+        targets = load_addon_targets(args.source, platform=args.platform, addon_ids=args.addon_id)
     except AddonManifestError as exc:
         print(f"addon manifest error: {exc}", file=sys.stderr)
         return 1
@@ -1202,6 +1210,7 @@ def main(argv: list[str] | None = None) -> int:
             args.source,
             core_skill_names=args.core_skill,
             platform=args.platform,
+            addon_ids=args.addon_id,
         )
     except AddonManifestError as exc:
         print(f"addon manifest error: {exc}", file=sys.stderr)

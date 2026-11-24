@@ -171,6 +171,42 @@ def _write_manifest(
 
 
 class SelectedManagementRetirementTest(unittest.TestCase):
+    def test_malformed_inventory_never_contributes_partial_removal_targets(self):
+        for value in ({}, {'targets': [{'dest_path': str(self.runtime), 'target_name': 'runtime'}, {}]}):
+            with self.subTest(inventory=value):
+                self.manifest.write_text(json.dumps(value))
+                manifest, error = cleanup._load_manifest(self.manifest)
+                self.assertIsNone(manifest)
+                self.assertIn('manifest-invalid', error)
+
+    def test_registry_health_is_not_a_host_reference(self):
+        sidecar = self.manifest.with_name('claude-registry-health.json')
+        sidecar.write_text(json.dumps({'platform': 'claude', 'skipped_sidecars': [['x.json', 'bad']]}))
+        note = self.manifest.with_name('notes.json')
+        note.write_text('{"message":"local notes"}')
+        hosts = cleanup.platforms_referencing_target(self.command, current_manifest=self.manifest,
+                                                     current_platform='codex')
+        self.assertEqual(hosts, [])
+        self.assertTrue(sidecar.exists())
+        self.assertEqual(note.read_text(), '{"message":"local notes"}')
+
+    def test_missing_recorded_peer_skill_keeps_its_shared_install_record_for_repair(self):
+        import installed_payload
+        missing = self.home / '.claude/skills/lost'
+        installed_payload.update(self.ghost, {'targets': {missing.as_posix(): dict(
+            kind='skill', name='lost', provider='core', mode='copy', used_by=['claude'], baseline='unknown')}})
+        items = cleanup._support_artifact_items('codex', self.manifest)
+        record = next(item for item in items if item['path'] == installed_payload.path(self.ghost).as_posix())
+        self.assertEqual(record.get('shared_platforms'), ['claude'], record)
+
+    def test_unreadable_peer_keeps_management_and_reports_the_inventory_for_retry(self):
+        peer = self.manifest.with_name('claude.json')
+        peer.write_bytes(b'{bad')
+        items = cleanup.retire_unused_management('codex', self.manifest)
+        self.assertTrue(any(item.get('removal_incomplete') and str(peer) in str(item) for item in items), items)
+        self.assertTrue(self.command.exists() and self.runtime.exists() and self.manifest.exists())
+        self.assertEqual(peer.read_bytes(), b'{bad')
+
     def test_invalid_shared_runtime_is_reported_without_losing_its_record(self):
         import installed_payload
         path = installed_payload.path(self.ghost)
@@ -226,6 +262,12 @@ class SelectedManagementRetirementTest(unittest.TestCase):
         self.assertFalse(self.command.exists())
         self.assertFalse(self.runtime.exists())
 
+    def test_selected_removal_without_an_inventory_reports_attached_hooks(self):
+        self.manifest.unlink()
+        with mock.patch('install_hooks._read_hook_references', return_value=({}, False, ['retained managed hook'])):
+            items = cleanup.retire_unused_management('codex', self.manifest)
+        self.assertIn('hook-detach-unresolved', {row.get('reason') for row in items}, items)
+
     def test_missing_inventory_and_invalid_record_do_not_imply_hooks_are_detached(self):
         import installed_payload
         from install_hooks import HookStatus
@@ -271,7 +313,8 @@ class SelectedManagementRetirementTest(unittest.TestCase):
         self.command.write_text('management')
         self.active = self.ghost / 'versions/active/core'
         self.active.mkdir(parents=True)
-        self.enterContext(mock.patch.dict(os.environ, installer_env(self.home), clear=True))
+        self.enterContext(mock.patch.dict(os.environ, dict(installer_env(self.home), GHOST_ALICE_INSTALL_LOCALE='en'),
+                                          clear=True))
         self.enterContext(install_lock.command_lock(self.ghost / 'install.lock', owner='test'))
         installed_payload.update(self.ghost, {'installer': {'active_root': str(self.active)}, 'targets': {
             str(path): dict(kind=kind, name=path.name, provider='core', used_by=['codex'],
@@ -441,6 +484,43 @@ class SelectedManagementRetirementTest(unittest.TestCase):
         self.assertTrue(self.manifest.exists())
         self.assertIn(str(self.runtime), installed_payload.read(self.ghost)['targets'])
         self.assertTrue(self.runtime.exists())
+
+    def test_runtime_stays_while_another_hosts_inventory_exists_without_a_record(self):
+        import installed_payload
+        for name in installed_payload.RECORD_FILENAMES:
+            (self.ghost / name).unlink(missing_ok=True)
+        other = self.manifest.with_name('claude.json')
+        # The first form is what a failed installation leaves; the migration reads no target from it.
+        for content, kept in (('{"schema_version": 1, "platform": "claude", "status": "partial_failure"}', True), (None, False)):
+            with self.subTest(inventory=content):
+                if content is None:
+                    other.unlink()
+                else:
+                    other.write_text(content, encoding='utf-8')
+                item, = cleanup._runtime_artifact_items('codex', [])
+                self.assertEqual(item['action'], 'manual-review' if kept else 'would-remove', item)
+                if kept:
+                    self.assertIn(str(other), item['detail'])
+
+    def test_recordless_runtime_checks_peer_hooks_when_the_peer_has_no_live_targets(self):
+        import installed_payload
+        for name in installed_payload.RECORD_FILENAMES:
+            (self.ghost / name).unlink(missing_ok=True)
+        peer = self.manifest.with_name('claude.json')
+        peer.write_text(json.dumps(dict(platform='claude', targets=[])))
+        preview, = cleanup._runtime_artifact_items('codex', [])
+        self.assertEqual(preview['action'], 'would-remove', preview)
+        peer.unlink()
+        settings = self.home / '.claude' / 'settings.json'
+        settings.parent.mkdir(exist_ok=True)
+        runner = self.runtime / 'hook_profile_gate.py'
+        settings.write_text(json.dumps({'hooks': {'UserPromptSubmit': [{'hooks': [
+            {'type': 'command', 'command': f'python "{runner}" # [session-intent-analyzer]'}]}]}}))
+        item, = cleanup._runtime_artifact_items('codex', [])
+        self.assertEqual(item.get('shared_platforms'), ['claude'], item)
+        cleanup._apply_managed_support(preview, 'codex', self.manifest)
+        self.assertTrue(self.runtime.is_dir())
+        self.assertEqual(preview.get('shared_platforms'), ['claude'])
 
     def test_missing_runtime_that_reappears_is_rechecked_before_record_release(self):
         import installed_payload
@@ -643,6 +723,40 @@ class FinalManagementRetryTest(unittest.TestCase):
         self.assertEqual(self.code, 0, self.output)
         self.assertFalse(self.command.exists())
 
+    def _leave_pending_source(self):
+        """The file of an earlier release whose installation did not finish."""
+        import installed_payload
+        pending = self.ghost / installed_payload.PENDING_SOURCE_FILENAME
+        pending.write_text('{"written by": "an earlier release"}')
+        return pending, pending.read_bytes()
+
+    def test_a_failed_final_removal_restores_a_leftover_pending_source_and_the_retry_removes_it(self):
+        pending, content = self._leave_pending_source()
+        unlink = Path.unlink
+
+        def denied(path, *args, **kwargs):
+            if path == self.manifest:
+                raise PermissionError('final inventory unlink denied')
+            return unlink(path, *args, **kwargs)
+
+        with mock.patch.object(Path, 'unlink', denied):
+            self._remove()
+        self.assertEqual(pending.read_bytes(), content)
+        self._assert_retry_then_finish()
+        self.assertFalse(pending.exists())
+
+    def test_a_linked_pending_source_stops_the_final_removal(self):
+        pending, content = self._leave_pending_source()
+        elsewhere = self.home / 'elsewhere.json'
+        pending.rename(elsewhere)
+        pending.symlink_to(elsewhere)
+        self._remove()
+        self.assertIn(str(pending), self.output)
+        self.assertEqual((pending.is_symlink(), elsewhere.read_bytes()), (True, content))
+        pending.unlink()
+        self._assert_retry_then_finish()
+        self.assertEqual(elsewhere.read_bytes(), content)
+
     def test_last_host_commit_mark_failure_restores_retry_command(self):
         import install_transaction
         mark = install_transaction.Journal.mark
@@ -719,6 +833,81 @@ class FinalManagementRetryTest(unittest.TestCase):
         with mock.patch.object(Path, 'unlink', denied):
             self._remove(selected=True)
         self._assert_retry_then_finish(selected=True)
+
+    def _register_git_hooks(self):
+        """A repository whose shared `core.hooksPath` names the hooks folder of this installation."""
+        self.repo = (self.home / 'registered').resolve()
+        subprocess.run(['git', 'init', '-q', str(self.repo)], check=True, capture_output=True)
+        folder = self.ghost / 'git-hooks'
+        folder.mkdir()
+        self.hook_files = [folder / 'post-merge', folder / 'repositories.json']
+        fixed = folder.resolve().as_posix()
+        self.hook_files[0].write_text('#!/usr/bin/env bash\n')
+        self.hook_files[1].write_text(json.dumps([dict(kind='source_repo_hook_path', repo_root=self.repo.as_posix(),
+            common_dir=(self.repo / '.git').as_posix(), before_present=True, before='custom-hooks', after=fixed,
+            applied_at='2026-11-01T00:00:00Z')]))
+        subprocess.run(['git', '-C', str(self.repo), 'config', '--local', 'core.hooksPath', fixed], check=True)
+        return fixed
+
+    def _registered_value(self):
+        return subprocess.run(['git', '-C', str(self.repo), 'config', '--local', '--get', 'core.hooksPath'],
+                              capture_output=True, text=True).stdout.strip()
+
+    def _check_failed_git_restore(self, *, selected):
+        import installed_payload
+        fixed = self._register_git_hooks()
+        lock = self.repo / '.git/config.lock'
+        lock.write_text('')
+        files = {path: path.read_bytes() for path in [*self.hook_files, self.manifest]}
+        self._remove(selected=selected)
+        if selected:
+            self.assertTrue(self.incomplete, self.items)
+        else:
+            self.assertEqual(self.code, 1, self.output)
+            self.assertIn(str(self.repo / '.git/config'), self.output)
+        self.assertEqual({path: path.read_bytes() for path in files}, files)
+        self.assertEqual(self._registered_value(), fixed)
+        self.assertEqual({path: (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+                          for path in self.commands}, self.command_state)
+        self.assertEqual(installed_payload.read(self.ghost)['installer']['active_root'], str(self.active))
+        lock.unlink()
+        self._remove(selected=selected)
+        self.assertFalse(self.incomplete, self.items)
+        self.assertEqual(self._registered_value(), 'custom-hooks')
+        self.assertFalse(any(path.exists() for path in [*files, *self.commands]))
+
+    def test_a_failed_git_restore_keeps_the_commands_and_the_hook_files_until_retry(self):
+        self._check_failed_git_restore(selected=False)
+
+    def test_a_failed_git_restore_of_the_last_skill_keeps_the_commands_and_the_hook_files_until_retry(self):
+        self._check_failed_git_restore(selected=True)
+
+    def test_an_unreadable_hook_row_file_keeps_the_last_skills_management(self):
+        fixed = self._register_git_hooks()
+        rows = self.hook_files[1].read_bytes()
+        self.hook_files[1].write_text('{broken')
+        self._remove(selected=True)
+        self.assertTrue(self.incomplete, self.items)
+        self.assertEqual(self._registered_value(), fixed)
+        self.assertTrue(all(path.exists() for path in [*self.hook_files, *self.commands, self.manifest]), self.items)
+        self.hook_files[1].write_bytes(rows)
+        self._remove(selected=True)
+        self.assertFalse(self.incomplete, self.items)
+        self.assertEqual(self._registered_value(), 'custom-hooks')
+        self.assertFalse(any(path.exists() for path in [*self.hook_files, *self.commands, self.manifest]))
+
+    def test_the_last_skill_without_an_inventory_restores_the_git_value(self):
+        fixed = self._register_git_hooks()
+        files = {path: path.read_bytes() for path in self.hook_files}
+        self._remove(selected=True)
+        self.assertFalse(self.manifest.exists())
+        for path, content in files.items():
+            path.write_bytes(content)
+        subprocess.run(['git', '-C', str(self.repo), 'config', '--local', 'core.hooksPath', fixed], check=True)
+        self._remove(selected=True)
+        self.assertFalse(self.incomplete, self.items)
+        self.assertEqual(self._registered_value(), 'custom-hooks')
+        self.assertFalse(any(path.exists() for path in files), self.items)
 
     def test_selected_changed_command_holds_final_inventory_and_other_entries(self):
         self.commands[-1].write_text('user-edited command')
@@ -2097,6 +2286,32 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
         self.assertTrue(self.record.exists())
         self.assertTrue((self.publish_rollbacks / "rollback-task-router" / "SKILL.md").exists())
 
+    def test_the_dispatcher_of_another_saved_version_counts_only_with_its_own_file_list(self):
+        import install_transaction
+        from installer import source
+        digest = install_transaction._file_hash(self.dispatcher / 'ghost-alice-hook.mjs')
+        versions = self.ghost / 'versions'
+
+        def saved(root, files):
+            folder = root / source._version_hash(files)
+            folder.mkdir(parents=True)
+            (folder / 'version.json').write_text(json.dumps({'files': files}))
+            return folder
+
+        active = saved(versions, {'core/_shared/other.py': 'a' * 64})
+        self.record.write_text(json.dumps({'schema_version': 1, 'targets': {}, 'installer': {'active_root': str(active / 'core')}}))
+        elsewhere = saved(self.root / 'elsewhere', {'core/_shared/ghost-alice-hook.mjs': digest})
+        (versions / elsewhere.name).symlink_to(elsewhere, target_is_directory=True)
+        (versions / ('b' * 64)).mkdir()
+        (versions / ('b' * 64) / 'version.json').write_text('{broken')
+        (versions / 'notes.txt').write_text('')
+        item = self._support(False)['hook-dispatcher-assets']
+        self.assertEqual((item['action'], item['reason'], item.get('errors')),
+                         ('manual-review', 'dispatcher-ownership-unresolved', None))
+        (versions / elsewhere.name).unlink()
+        elsewhere.rename(versions / elsewhere.name)
+        self.assertEqual(self._support(False)['hook-dispatcher-assets']['action'], 'would-remove')
+
     def test_unreadable_other_host_inventory_keeps_retry_records_until_repaired(self):
         other = self.manifest.with_name('claude.json')
         other.write_text('{broken')
@@ -2922,6 +3137,77 @@ class UninstallCleanupTest(unittest.TestCase):
             support = {item["target_name"]: item for item in data["items"] if item.get("kind") == "support-artifact"}
             self.assertEqual(support["addon-sidecars"]["action"], "removed")
 
+    def test_missing_inventory_with_only_claude_hook_settings_finishes_on_first_removal(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            env = installer_env(root)
+            (root / ".claude").mkdir()
+            ghost = root / ".ghost-alice"
+            install = subprocess.run([sys.executable, str(REPO_ROOT / "_shared/install_hooks.py"),
+                                      "--platform", "claude"], env=env, capture_output=True, text=True)
+            self.assertEqual(install.returncode, 0, install.stdout + install.stderr)
+            settings = root / ".claude/settings.json"
+            self.assertTrue(any(json.loads(settings.read_text())["hooks"].values()))
+            shutil.rmtree(ghost)
+            report = root / "removal.json"
+            command = [sys.executable, str(UNINSTALL_CLEANUP), "--platform", "claude",
+                       "--install-state-manifest", str(ghost / "install-state/claude.json"), "--report-path", str(report)]
+            for options in ([], ["--apply"]):
+                with self.subTest(options=options):
+                    result = subprocess.run([*command, *options], env=env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    data = json.loads(report.read_text())
+                    self.assertFalse(data["removal_incomplete"], data["items"])
+                    self.assertNotIn("hook-detach-unresolved", {row.get("reason") for row in data["items"]})
+                    self.assertEqual(any(json.loads(settings.read_text()).get("hooks", {}).values()), not options)
+                    if options:
+                        self.assertTrue(data["hooks_detached"])
+
+    def test_missing_inventory_stays_incomplete_while_the_hooks_stay(self):
+        from install_hooks import HookStatus
+        for would_detach in (True, False):
+            with self.subTest(would_detach=would_detach), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                (root / ".claude").mkdir()
+                def retained_hook(*args, **kwargs):
+                    return HookStatus('claude', 'partial', 'Retained', 'already', details={
+                        'items': [], 'would_detach': would_detach, 'hooks_detached': False,
+                        'remaining_commands': ['retained managed hook']})
+                report = root / "removal.json"
+                with mock.patch.dict(os.environ, installer_env(root), clear=True), \
+                        mock.patch.object(cleanup, 'uninstall_hook', side_effect=retained_hook), \
+                        mock.patch.object(gateway_participant, 'removal',
+                                          side_effect=lambda *a, **k: dict(kind='context-gateway', action='missing')), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    code = cleanup.main(['--platform', 'claude', '--install-state-manifest',
+                                         str(root / '.ghost-alice/install-state/claude.json'),
+                                         '--report-path', str(report), '--apply'])
+                data = json.loads(report.read_text(encoding='utf-8'))
+                self.assertEqual(code, 1)
+                self.assertIn('manifest-missing', {row.get('reason') for row in data['items']}, data['items'])
+
+    def test_only_attached_hooks_are_retained_when_the_host_settings_cannot_be_saved(self):
+        for attached in (False, True):
+            with self.subTest(attached=attached), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                env = installer_env(root)
+                (root / ".codex").mkdir()
+                if attached:
+                    install = subprocess.run([sys.executable, str(REPO_ROOT / "_shared/install_hooks.py"),
+                                              "--platform", "codex"], env=env, capture_output=True, text=True)
+                    self.assertEqual(install.returncode, 0, install.stdout + install.stderr)
+                    (root / ".codex/config.toml").unlink()
+                # A link without a target cannot be saved before the removal.
+                (root / ".codex/config.toml").symlink_to(root / "no-such-file")
+                report = root / "removal.json"
+                result = subprocess.run([sys.executable, str(UNINSTALL_CLEANUP), "--platform", "codex",
+                                         "--install-state-manifest", str(root / ".ghost-alice/install-state/codex.json"),
+                                         "--report-path", str(report), "--apply"], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                retained = [row["path"] for row in json.loads(report.read_text(encoding="utf-8"))["items"]
+                            if row.get("kind") == "hook-config" and row.get("action") == "manual-review"]
+                self.assertEqual(retained, [str(root / ".codex/hooks.json")] if attached else [])
+
     def test_apply_reports_hook_uninstall_before_target_removal(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -3150,6 +3436,370 @@ class UninstallCleanupTest(unittest.TestCase):
                 data = json.loads(report.read_text(encoding="utf-8"))
                 item = next(item for item in data["items"] if item.get("target_name") == "source-repo-hook-path-record")
                 self.assertEqual(item["action"], "manual-review" if other_host else "removed")
+
+    @staticmethod
+    def _set_hook_path(git: str, repo: Path, value: str) -> None:
+        subprocess.run([git, "-C", str(repo), "config", "--local", "core.hooksPath", value], check=True)
+
+    @staticmethod
+    def _fixed_hooks(root: Path) -> Path:
+        return root / ".ghost-alice" / "git-hooks"
+
+    def _fixed_change(self, root: Path, repo: Path, *, before: str | None, repo_root: Path | None = None) -> dict:
+        return dict(self._hook_change(repo_root or repo, before=before),
+                    common_dir=(repo / ".git").resolve().as_posix(),
+                    after=self._fixed_hooks(root).resolve().as_posix())
+
+    def _register_git_hooks(self, root: Path, *changes: dict) -> list[Path]:
+        """The files of the hooks folder that the registered repositories share."""
+        folder = self._fixed_hooks(root)
+        folder.mkdir(parents=True)
+        (folder / "post-merge").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        (folder / "repositories.json").write_text(json.dumps(changes), encoding="utf-8")
+        return [folder / "post-merge", folder / "repositories.json"]
+
+    def _registered_installation(self, root: Path, *, before: str | None,
+                                 repo_root: Path | None = None) -> tuple[str, Path, Path, list[Path]]:
+        """A repository with the fixed value, its recorded row and one installed skill."""
+        git, repo = self._hook_path_repo(root, self._fixed_hooks(root.resolve()).as_posix())
+        files = self._register_git_hooks(root, self._fixed_change(root, repo, before=before, repo_root=repo_root))
+        managed = _write_managed_skill(root, "task-router")
+        manifest = _write_manifest(root, [dict(target_name="task-router", dest_path=managed.as_posix(),
+                                               install_mode="copy")], source_root=repo)
+        return git, repo, manifest, files
+
+    def test_full_removal_restores_the_value_from_before_the_registration(self) -> None:
+        for before in (None, "custom-hooks", ""):
+            for earlier_rows in (False, True):
+                with self.subTest(before=before, earlier_rows=earlier_rows), tempfile.TemporaryDirectory() as temp_dir:
+                    root = Path(temp_dir)
+                    git, repo, manifest, files = self._registered_installation(root, before=before)
+                    if earlier_rows:
+                        earlier = dict(self._hook_change(repo, before=before),
+                                       after=(root.resolve() / ".ghost-alice/versions/earlier/core/hooks").as_posix())
+                        inventory = json.loads(manifest.read_text(encoding="utf-8"))
+                        manifest.write_text(json.dumps(dict(inventory, system_env_changes=[earlier])), encoding="utf-8")
+                        rows = json.loads(files[1].read_text(encoding="utf-8"))
+                        files[1].write_text(json.dumps([*rows, earlier]), encoding="utf-8")
+                        files.append(manifest.with_name("source-repo-hook-path.json"))
+                        files[-1].write_text(json.dumps(earlier), encoding="utf-8")
+                    report = root / "uninstall-report.json"
+                    kept = {path: path.read_bytes() for path in [*files, manifest, repo / ".git" / "config"]}
+
+                    dry = self.run_cleanup(root, manifest, report)
+                    self.assertEqual(dry.returncode, 0, msg=dry.stderr + dry.stdout)
+                    self.assertEqual({path: path.read_bytes() for path in kept}, kept)
+                    planned = [item["action"] for item in json.loads(report.read_text(encoding="utf-8"))["items"]
+                               if item.get("kind") == "source-repo-hook-config"]
+                    self.assertEqual(planned, ["would-remove-source-repo-hook-path" if before is None
+                                               else "would-restore-source-repo-hook-path",
+                                               *(["unchanged"] if earlier_rows else [])])
+                    result = self.run_cleanup(root, manifest, report, apply_changes=True)
+
+                    self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+                    self.assertEqual(self._hook_path(git, repo), before)
+                    self.assertEqual(self._source_hook_item(report)["action"], "removed-source-repo-hook-path"
+                                     if before is None else "restored-source-repo-hook-path")
+                    self.assertFalse(any(path.exists() for path in [*files, manifest]), result.stdout)
+                    data = json.loads(report.read_text(encoding="utf-8"))
+                    removed = {Path(item["path"]) for item in data["items"]
+                               if item.get("target_name") == "source-repo-hook-path-record" and item["action"] == "removed"}
+                    self.assertEqual(removed, set(files))
+
+    def test_full_removal_restores_the_shared_value_after_the_registered_worktree_is_gone(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            git, repo, manifest, files = self._registered_installation(
+                root, before="custom-hooks", repo_root=root / "removed-worktree")
+            report = root / "uninstall-report.json"
+
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertEqual(self._hook_path(git, repo), "custom-hooks")
+            item = self._source_hook_item(report)
+            self.assertEqual((item["action"], item["path"], item["config_file"]),
+                             ("restored-source-repo-hook-path", (root / "removed-worktree").as_posix(),
+                              (repo / ".git" / "config").resolve().as_posix()))
+            self.assertFalse(any(path.exists() for path in files))
+
+    def test_full_removal_keeps_a_worktrees_own_value(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            git, repo, manifest, files = self._registered_installation(root, before="custom-hooks")
+            subprocess.run([git, "-C", str(repo), "config", "extensions.worktreeConfig", "true"], check=True)
+            subprocess.run([git, "-C", str(repo), "config", "--worktree", "core.hooksPath", "/dev/null"], check=True)
+
+            result = self.run_cleanup(root, manifest, root / "uninstall-report.json", apply_changes=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertEqual(self._hook_path(git, repo), "custom-hooks")
+            own = subprocess.run([git, "-C", str(repo), "config", "--worktree", "--get", "core.hooksPath"],
+                                 capture_output=True, text=True, check=True)
+            self.assertEqual(own.stdout.strip(), "/dev/null")
+
+    def test_full_removal_restores_every_registered_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            git, repo, manifest, files = self._registered_installation(root, before="custom-hooks")
+            others = {name: root / name for name in ("fixed", "earlier", "absent")}
+            for path in others.values():
+                subprocess.run([git, "init", "-q", str(path)], check=True, capture_output=True)
+            changes = [*json.loads(files[1].read_text(encoding="utf-8")),
+                       self._fixed_change(root, others["fixed"], before="theirs"),
+                       self._hook_change(others["earlier"], before="earlier-hooks"),
+                       self._fixed_change(root, others["absent"], before="lost")]
+            files[1].write_text(json.dumps(changes), encoding="utf-8")
+            self._set_hook_path(git, others["fixed"], changes[1]["after"])
+            self._set_hook_path(git, others["earlier"], changes[2]["after"])
+            shutil.rmtree(others["absent"])
+            report = root / "uninstall-report.json"
+
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertEqual(self._hook_path(git, repo), "custom-hooks")
+            self.assertEqual(self._hook_path(git, others["fixed"]), "theirs")
+            self.assertEqual(self._hook_path(git, others["earlier"]), "earlier-hooks")
+            items = json.loads(report.read_text(encoding="utf-8"))["items"]
+            self.assertEqual([(item["action"], item["reason"]) for item in items
+                              if item.get("path") == others["absent"].as_posix()],
+                             [("missing", "source-repository-absent")])
+            self.assertFalse(any(path.exists() for path in files))
+
+    @unittest.skipIf(os.name == "nt" or getattr(os, "geteuid", lambda: 0)() == 0,
+                     "Requires POSIX permissions and a user without root rights")
+    def test_a_git_configuration_that_cannot_be_opened_keeps_the_hook_files_until_the_retry(self) -> None:
+        for name in ("repo/.git/config", "repo/.git", "repo"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                git, repo, manifest, files = self._registered_installation(root, before="custom-hooks")
+                kept = {path: path.read_bytes() for path in files}
+                mode = (root / name).stat().st_mode
+                (root / name).chmod(0)
+                try:
+                    held = self.run_cleanup(root, manifest, root / "held.json", apply_changes=True)
+                finally:
+                    (root / name).chmod(mode)
+
+                self.assertEqual(held.returncode, 1, msg=held.stderr + held.stdout)
+                self.assertEqual({path: path.read_bytes() for path in kept}, kept)
+                self.assertEqual(self._source_hook_item(root / "held.json")["reason"], "source-repo-hook-path-read-failed")
+                retry = self.run_cleanup(root, manifest, root / "retry.json", apply_changes=True)
+                self.assertEqual(retry.returncode, 0, msg=retry.stderr + retry.stdout)
+                self.assertEqual(self._hook_path(git, repo), "custom-hooks")
+                self.assertFalse(any(path.exists() for path in [*files, manifest]))
+
+    def test_full_removal_restores_the_value_of_a_repository_with_a_moved_git_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            git, repo, manifest, files = self._registered_installation(root, before="custom-hooks")
+            subprocess.run([git, "init", "-q", "--separate-git-dir", str(root / "store.git")], cwd=repo, check=True)
+            result = self.run_cleanup(root, manifest, root / "report.json", apply_changes=True)
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertEqual(self._hook_path(git, repo), "custom-hooks")
+            self.assertFalse(any(path.exists() for path in [*files, manifest]))
+
+    def test_a_failed_restore_keeps_the_hook_files_until_the_retry(self) -> None:
+        for cause in ("locked", "unreadable"):
+            with self.subTest(cause=cause), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                git, repo, manifest, files = self._registered_installation(root, before="custom-hooks")
+                config = repo / ".git" / "config"
+                content, lock = config.read_bytes(), config.with_name("config.lock")
+                if cause == "locked":
+                    lock.write_text("")
+                else:
+                    config.write_text("[core\n")
+                kept = {path: path.read_bytes() for path in [*files, config]}
+
+                held = self.run_cleanup(root, manifest, root / "held.json", apply_changes=True)
+
+                self.assertEqual(held.returncode, 1, msg=held.stderr + held.stdout)
+                self.assertEqual({path: path.read_bytes() for path in kept}, kept)
+                self.assertTrue(manifest.exists())
+                self.assertIn(config.resolve().as_posix(),
+                              "\n".join(self._source_hook_item(root / "held.json")["errors"]))
+                lock.unlink(missing_ok=True)
+                config.write_bytes(content)
+                retry = self.run_cleanup(root, manifest, root / "retry.json", apply_changes=True)
+                self.assertEqual(retry.returncode, 0, msg=retry.stderr + retry.stdout)
+                self.assertEqual(self._hook_path(git, repo), "custom-hooks")
+                self.assertFalse(any(path.exists() for path in [*files, manifest]))
+
+    def test_full_removal_keeps_another_hook_in_the_hooks_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            git, repo, manifest, files = self._registered_installation(root, before=None)
+            personal = self._fixed_hooks(root) / "pre-commit"
+            personal.write_text("mine", encoding="utf-8")
+
+            result = self.run_cleanup(root, manifest, root / "uninstall-report.json", apply_changes=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertIsNone(self._hook_path(git, repo))
+            self.assertFalse(any(path.exists() for path in files))
+            self.assertEqual(personal.read_text(encoding="utf-8"), "mine")
+
+    def test_an_unreadable_row_file_keeps_the_value_and_the_records_until_it_is_repaired(self) -> None:
+        for content in ("{broken", "{}", '[{"kind": "source_repo_hook_path"}]'):
+            with self.subTest(content=content), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                git, repo, manifest, files = self._registered_installation(root, before="custom-hooks")
+                fixed, rows = self._hook_path(git, repo), files[1].read_bytes()
+                files[1].write_text(content, encoding="utf-8")
+                kept = {path: path.read_bytes() for path in files}
+
+                held = self.run_cleanup(root, manifest, root / "held.json", apply_changes=True)
+
+                self.assertEqual(held.returncode, 1, msg=held.stderr + held.stdout)
+                self.assertIn(str(files[1]), held.stdout)
+                self.assertEqual({path: path.read_bytes() for path in kept}, kept)
+                self.assertTrue(manifest.exists())
+                self.assertEqual(self._hook_path(git, repo), fixed)
+                self.assertEqual(self._source_hook_item(root / "held.json")["action"], "manual-review")
+                files[1].write_bytes(rows)
+                retry = self.run_cleanup(root, manifest, root / "retry.json", apply_changes=True)
+                self.assertEqual(retry.returncode, 0, msg=retry.stderr + retry.stdout)
+                self.assertEqual(self._hook_path(git, repo), "custom-hooks")
+                self.assertFalse(any(path.exists() for path in [*files, manifest]))
+
+    def test_another_host_keeps_the_hook_files_and_the_value(self) -> None:
+        for rows in (None, "{broken"):
+            with self.subTest(rows=rows), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                git, repo, manifest, files = self._registered_installation(root, before="custom-hooks")
+                fixed = self._hook_path(git, repo)
+                if rows is not None:
+                    files[1].write_text(rows, encoding="utf-8")
+                kept = {path: path.read_bytes() for path in files}
+                other_target = _write_managed_skill(root, "other-live-skill")
+                (manifest.parent / "claude.json").write_text(json.dumps(dict(schema_version=1, platform="claude",
+                    targets=[dict(target_name=other_target.name, dest_path=str(other_target), install_mode="copy")])),
+                    encoding="utf-8")
+                report = root / "uninstall-report.json"
+
+                result = self.run_cleanup(root, manifest, report, apply_changes=True)
+
+                self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+                self.assertFalse(manifest.exists())
+                self.assertEqual(self._hook_path(git, repo), fixed)
+                self.assertEqual({path: path.read_bytes() for path in kept}, kept)
+                item = self._source_hook_item(report)
+                self.assertEqual((item["action"], item["reason"], item["shared_platforms"]),
+                                 ("unchanged", "source-repo-hook-path-in-use-by-other-platform", ["claude"]))
+
+    def test_removal_without_an_inventory_restores_an_interrupted_first_registration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            fixed = self._fixed_hooks(root.resolve()).as_posix()
+            git, repo = self._hook_path_repo(root, fixed)
+            files = self._register_git_hooks(root, self._fixed_change(root, repo, before="custom-hooks"))
+            manifest = root / ".ghost-alice" / "install-state" / "codex.json"
+            rows = files[1].read_bytes()
+            files[1].write_text("{broken", encoding="utf-8")
+
+            held = self.run_cleanup(root, manifest, root / "held.json", apply_changes=True)
+            self.assertEqual(held.returncode, 1, msg=held.stderr + held.stdout)
+            self.assertEqual(self._hook_path(git, repo), fixed)
+            self.assertTrue(all(path.exists() for path in files))
+            files[1].write_bytes(rows)
+            for report in ("first.json", "second.json"):
+                result = self.run_cleanup(root, manifest, root / report, apply_changes=True)
+                self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+                self.assertEqual(self._hook_path(git, repo), "custom-hooks")
+                self.assertFalse(any(path.exists() for path in files))
+
+    def test_a_value_of_this_installations_folder_is_restored_from_its_row(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            git, repo, manifest, files = self._registered_installation(root, before="custom-hooks")
+            self._set_hook_path(git, repo, (root.resolve() / ".ghost-alice/versions/earlier/core/hooks").as_posix())
+
+            result = self.run_cleanup(root, manifest, root / "uninstall-report.json", apply_changes=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertEqual(self._hook_path(git, repo), "custom-hooks")
+            self.assertFalse(any(path.exists() for path in files))
+
+    def test_a_value_written_after_the_registration_stays(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            git, repo, manifest, files = self._registered_installation(root, before="custom-hooks")
+            self._set_hook_path(git, repo, "chosen-later")
+            report = root / "uninstall-report.json"
+
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertEqual(self._hook_path(git, repo), "chosen-later")
+            item = self._source_hook_item(report)
+            self.assertEqual((item["action"], item["reason"]), ("unchanged", "non-ghost-alice-hook-path"))
+            self.assertFalse(any(path.exists() for path in files))
+
+    def test_full_removal_restores_the_value_from_before_an_earlier_release(self) -> None:
+        for after in ("package", "checkout", "hooks"):
+            for place in ("record", "inventory"):
+                with self.subTest(after=after, place=place), tempfile.TemporaryDirectory() as temp_dir:
+                    root = Path(temp_dir)
+                    git, repo = self._hook_path_repo(root, None)
+                    value = {"package": (root.resolve() / ".ghost-alice/versions/earlier/core/hooks").as_posix(),
+                             "checkout": (repo / "hooks").as_posix()}.get(after, after)
+                    self._set_hook_path(git, repo, value)
+                    change = dict(self._hook_change(repo, before="custom-hooks"), after=value)
+                    managed = _write_managed_skill(root, "task-router")
+                    manifest = _write_manifest(root, [dict(target_name="task-router", dest_path=managed.as_posix(),
+                        install_mode="copy")], source_root=repo,
+                        system_env_changes=[change] if place == "inventory" else [])
+                    record = manifest.with_name("source-repo-hook-path.json")
+                    if place == "record":
+                        record.write_text(json.dumps(change), encoding="utf-8")
+
+                    result = self.run_cleanup(root, manifest, root / "uninstall-report.json", apply_changes=True)
+
+                    self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+                    self.assertEqual(self._hook_path(git, repo), "custom-hooks")
+                    self.assertFalse(record.exists())
+
+    def test_an_earlier_record_of_another_checkout_restores_its_own_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            git, repo = self._hook_path_repo(root, None)
+            earlier = root / "earlier"
+            subprocess.run([git, "init", "-q", str(earlier)], check=True, capture_output=True)
+            change = self._hook_change(earlier, before="custom-hooks")
+            self._set_hook_path(git, earlier, change["after"])
+            managed = _write_managed_skill(root, "task-router")
+            manifest = _write_manifest(root, [dict(target_name="task-router", dest_path=managed.as_posix(),
+                                                   install_mode="copy")], source_root=repo)
+            record = manifest.with_name("source-repo-hook-path.json")
+            record.write_text(json.dumps(change), encoding="utf-8")
+
+            result = self.run_cleanup(root, manifest, root / "uninstall-report.json", apply_changes=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertEqual(self._hook_path(git, earlier), "custom-hooks")
+            self.assertIsNone(self._hook_path(git, repo))
+            self.assertFalse(record.exists())
+
+    def test_a_path_of_this_installation_is_never_the_restored_value(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            git, repo = self._hook_path_repo(root, None)
+            versions = root.resolve() / ".ghost-alice" / "versions"
+            change = dict(self._hook_change(repo, before=(versions / "gone/core/hooks").as_posix()),
+                          after=(versions / "earlier/core/hooks").as_posix())
+            self._set_hook_path(git, repo, change["after"])
+            managed = _write_managed_skill(root, "task-router")
+            manifest = _write_manifest(root, [dict(target_name="task-router", dest_path=managed.as_posix(),
+                                                   install_mode="copy")], source_root=repo, system_env_changes=[change])
+            report = root / "uninstall-report.json"
+
+            result = self.run_cleanup(root, manifest, report, apply_changes=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertIsNone(self._hook_path(git, repo))
+            self.assertEqual(self._source_hook_item(report)["action"], "removed-source-repo-hook-path")
 
     def test_apply_restores_codex_hooks_feature_flag_from_change_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

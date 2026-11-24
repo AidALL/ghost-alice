@@ -1127,7 +1127,8 @@ def _runtime_core_audit(
         import install_destination
         import runtime_config
         try:
-            target = (installed_payload.read(record_root) or {}).get('targets', {}).get(str(runtime_shared))
+            targets = (installed_payload.read(record_root) or {}).get('targets', {})
+            target = targets.get(installed_payload.target_key(runtime_shared, targets))
             if target is not None:
                 if target.get('kind') != 'runtime' or not isinstance(target.get('source'), str):
                     raise installed_payload.RecordError('Runtime target does not name its source')

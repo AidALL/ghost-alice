@@ -1,24 +1,14 @@
 #!/usr/bin/env bash
-# post-merge: after a successful merge or pull in any worktree, run the installer step `--post-merge` of the checkout
-# that holds this file and name the checkout the merge ran in.
-#
-# The registered package checks the merged checkout against the installation record. For a match it fetches
-# remote main and installs it for the detected hosts. Other worktrees skip installation. Git uses the same
-# shared hooksPath across worktrees unless the worktree has its own value. The automatic install has no stdin.
-#
-# Git exports variables such as GIT_DIR for the worktree that merged. The hook clears them before it calls the
-# installer, so the installer's git commands read the checkout they name.
-#
-# A merge never fails because of this hook: no `set -e`, and it always exits 0.
-
 MERGED_CHECKOUT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-HOOK_CHECKOUT="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd -P)" || exit 0
-[ -f "$HOOK_CHECKOUT/install.sh" ] || exit 0
+ROOT="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd -P)" || exit 0
+COMMAND="$ROOT/bin/ghost-alice"
+[ -f "$COMMAND" ] || exit 0
+# git exports GIT_* to hooks; the installer must resolve its own repository.
+# shellcheck disable=SC2046  # the variable names must be split
 unset $(git rev-parse --local-env-vars 2>/dev/null)
-
-bash "$HOOK_CHECKOUT/install.sh" --post-merge --merged-checkout "$MERGED_CHECKOUT" </dev/null
+bash "$COMMAND" --post-merge --merged-checkout "$MERGED_CHECKOUT" </dev/null
 status=$?
 if [ "$status" -ne 0 ]; then
-    echo "[ghost-alice post-merge] The installer exited $status; the merge itself succeeded."
+  printf '%s\n' "[ghost-alice post-merge] The installer exited $status; the merge itself succeeded." >&2
 fi
 exit 0

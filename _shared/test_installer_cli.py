@@ -11,6 +11,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 import tempfile
@@ -21,10 +22,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import addon_registry  # noqa: E402
 import hash_utils  # noqa: E402
 from install_transaction import cleanup_completed  # noqa: E402
-from installer import cli, report  # noqa: E402
+from git_hook_paths import git  # noqa: E402
+from installer import cli, locations, report, runner, source  # noqa: E402
 from installer.runner import InstallerExit, ToolResult  # noqa: E402
 from installer.selection import ALL_SKILLS, Collected, Target  # noqa: E402
-from installer.source import HookPathChange  # noqa: E402
 from installer.transaction import report_gateway, verify_after_copy  # noqa: E402
 from installer_testing import FakeRunner, hook_status, make_context, make_source, quiet, use_source  # noqa: E402
 
@@ -89,24 +90,22 @@ def selecting_argv(command: "cli.Command") -> list[str]:
 class CliCase(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
         self.home = root / "home"
         self.home.mkdir()
         self.source = make_source(root / "src")
         self.enterContext(use_source(self.source))
-        self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=False)
+        self.env = mock.patch.dict(os.environ, {"HOME": str(self.home), "GHOST_ALICE_INSTALL_LOCALE": "en"}, clear=False)
         self.env.start()
+        self.addCleanup(self.env.stop)
         for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GHOST_ALICE_INSTALL_REPORT_CHILD", "GHOST_ALICE_INSTALL_LOG_FILE",
                     "GHOST_ALICE_INSTALL_EVENT_FILE"):
             os.environ.pop(key, None)
         quiet(self.home)
         self.patches = contextlib.ExitStack()
+        self.addCleanup(self.patches.close)
         self.calls: list[tuple[str, tuple, dict]] = []
-
-    def tearDown(self):
-        self.patches.close()
-        self.env.stop()
-        self.temp.cleanup()
 
     def stub(self, target: str, result=None, side_effect=None):
         name = target.rsplit(".", 1)[-1]
@@ -121,6 +120,10 @@ class CliCase(unittest.TestCase):
 
     def names(self):
         return [name for name, _, _ in self.calls]
+
+    def home_files(self) -> dict[str, bytes]:
+        return {path.relative_to(self.home).as_posix(): path.read_bytes()
+                for path in self.home.rglob("*") if path.is_file()}
 
     @staticmethod
     def captured(fn, *args, **kwargs):
@@ -138,6 +141,23 @@ class CliCase(unittest.TestCase):
 
 
 class OptionTests(CliCase):
+    def test_public_addon_id_is_rejected_before_any_install_or_removal(self):
+        (self.home / ".claude").mkdir(exist_ok=True)
+        self.stub("installer.auto.run_uninstall_children", 0)
+        for argv in (["--uninstall", "--addon-id", "one"],
+                     ["--platform", "codex", "--local-source", "--addon-id", "one", "--list"],
+                     ["--status", "--addon-id", "one"]):
+            with self.subTest(argv=argv):
+                code, output = self.captured(cli.main, argv)
+                self.assertEqual(code, 1, output)
+                self.assertIn("--addon-id", output)
+        self.assertNotIn("run_uninstall_children", self.names())
+
+    def test_internal_host_install_accepts_the_selected_addon_ids(self):
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_HOST_CHILD": "1"}):
+            options = cli.parse_options(["--platform", "claude", "--addon-id", "one", "alpha"])
+            self.assertEqual(cli.build_context(options).addon_ids, ["one"])
+
     def test_addon_skip_avoids_collisions_hooks_grants_extras_and_sidecars(self):
         checkout = Path(__file__).resolve().parents[1]
         addon = checkout / "_shared" / "tests" / "fixtures" / "rich-addon"
@@ -297,26 +317,27 @@ class OptionTests(CliCase):
                          sum(len(command.names) for command in cli.COMMANDS))
 
     def test_table_columns(self):
-        rows = {command.usage: (command.lock, command.platform, command.flag, command.before_lock is not None,
-                                command.checks_source, command.adopts_source)
+        rows = {command.usage: (command.lock, command.platform, command.flag, command.checks_source, command.adopts_source)
                 for command in cli.COMMANDS}
         self.assertEqual(rows, {
-            "--status, -s": (None, True, None, False, False, False),
-            "--doctor": (None, True, None, False, False, False),
-            "update [--remote URL]": (None, False, None, False, False, False),
-            "--repair": ("repair", True, None, False, True, False),
-            "--uninstall, -u": ("uninstall", True, None, False, False, False),
-            "SKILL_NAMES": ("install", True, None, True, True, True),
-            "--list, -l": (None, False, None, False, False, False),
-            "--cleanup-pending": ("cleanup-pending", True, "cleanup_pending", False, False, False),
-            "--update-source": (None, False, "update_source", False, False, False),
-            "--post-merge": (None, False, None, False, False, False),
-            "--list-addons": (None, True, "list_addons", False, False, False),
-            "--sync-commands": (None, True, None, False, False, False),
-            "--check-commands": (None, True, None, False, False, False),
-            "gateway ARGS...": ("gateway", False, None, False, False, False),
-            "--help, -h": (None, False, None, False, False, False),
+            "--status, -s": (None, True, None, False, False),
+            "--doctor": (None, True, None, False, False),
+            "update [--remote URL]": (None, False, None, False, False),
+            "--repair": ("repair", True, None, True, False),
+            "--uninstall, -u": ("uninstall", True, None, False, False),
+            "SKILL_NAMES": ("install", True, None, True, True),
+            "--list, -l": (None, False, None, False, False),
+            "--cleanup-pending": ("cleanup-pending", True, "cleanup_pending", False, False),
+            "--update-source": (None, False, "update_source", False, False),
+            "--post-merge": (None, False, None, False, False),
+            "--list-addons": (None, True, "list_addons", False, False),
+            "--sync-commands": (None, True, None, False, False),
+            "--check-commands": (None, True, None, False, False),
+            "gateway ARGS...": ("gateway", False, None, False, False),
+            "--help, -h": (None, False, None, False, False),
         })
+        # The active installer runs these commands for another installer; a saved package states them.
+        self.assertEqual([command.usage for command in cli.COMMANDS if command.active_runs], ["--repair"])
         self.assertEqual(cli.INSTALL.names, ())
         self.assertEqual(cli.UNINSTALL.names, ("--uninstall", "--remove", "-u"))
 
@@ -356,7 +377,7 @@ class CandidateHandoffTests(CliCase):
         self.stub('installer.source.check_install_source')
         self.stub('installer.hosts.confirm_project_trust', '')
         self.stub('installer.source.check_source_health', True)
-        options = cli.Options(platform='claude', platform_explicit=True, addon_skip=True, args=['task-router'])
+        options = cli.Options(platform='claude', platform_explicit=True, addon_skip=True, args=['alpha'])
         running = hosts.WriterObservation('running', pids=(43210, 43211),
                                           programs=((43210, 'Claude'), (43211, 'Claude helper')))
         cases = [(running, True, False, 'cancelled', None),
@@ -560,7 +581,7 @@ print('SELECTED=' + cli.prompt_platform(), flush=True)
             self.assertEqual(current['value'], absent)
             marker.write_text('after exit')
             raise Prepared()
-        options = cli.Options(platform='claude', platform_explicit=True, addon_skip=True, args=['task-router'])
+        options = cli.Options(platform='claude', platform_explicit=True, addon_skip=True, args=['alpha'])
         for answer, interactive, cause in [('n', True, 'install'), ('', True, 'install'),
                                             (EOFError(), True, 'install'), ('y', False, 'install'),
                                             ('y', True, 'post-merge'), ('yes', True, 'update')]:
@@ -663,8 +684,9 @@ print('SELECTED=' + cli.prompt_platform(), flush=True)
                 options = cli.Options(platform='codex' if interruption == 'later-host' else 'claude', platform_explicit=True)
                 with mock.patch.object(locations, 'record_root', return_value=ghost), \
                         mock.patch.object(source, 'install_request', return_value={'package_root': str(self.source),
-                                          'source': request['source'], 'request_writer_reads_v3': True}), \
+                                          'source': request['source']}), \
                         mock.patch.object(hosts, 'observe_writers', side_effect=observe) as observer, \
+                        mock.patch.object(cli.transaction, 'activate'), \
                         mock.patch.object(cli, '_dispatch', return_value=0), \
                         mock.patch.object(source, 'finalize_source', return_value=[]):
                     code, output = self.captured(cli.dispatch, options)
@@ -677,82 +699,1033 @@ print('SELECTED=' + cli.prompt_platform(), flush=True)
                     self.assertFalse(target.exists(), 'Recovery may restore the interrupted publish after host exit')
                     self.assertEqual(cli.install_transaction.unfinished(ghost), [])
 
-    def test_only_successful_candidate_hands_terminal_to_the_recorded_active_cli(self):
-        from installer import runner, source
+    def prepared_package(self) -> Path:
+        """The package that the installing process prepared; the test replaces the processes it starts."""
+        package = (self.home / '.ghost-alice/versions' / ('c' * 64)).resolve()
+        (package / 'core').mkdir(parents=True)
         self.stub('installer.hosts.observe_writers', {'claude': cli.hosts.WriterObservation('absent')})
-        active = (self.home / 'new-package/core').resolve()
-        active.parent.mkdir(parents=True)
-        candidate = self.home / 'candidate'
         self.stub('installer.source.check_install_source')
         self.stub('installer.hosts.confirm_project_trust', '')
         self.stub('installer.source.check_source_health', True)
-        self.stub('installer.source.prepare_source', (candidate, {}))
-        self.stub('installer.source.check_record_reader')
+        self.stub('installer.prerequisites.install_prerequisites', True)
+        self.stub('installer.source.prepare_source', (package, {}))
+        self.stub('installer.source.input_record', {'root': str(self.source), 'commit': 'installing'})
         self.stub('installer.lock.acquire')
         self.stub('installer.lock.release')
-        self.stub('installer.source.input_record', {'root': str(self.source), 'commit': 'old'})
-        with mock.patch.dict(os.environ, {source.REQUEST_ENV: ''}), \
-                mock.patch('installer.cli.install_transaction.record_after_recovery',
-                           return_value={'installer': {'active_root': str(active)}, 'source': {'root': str(self.source)}}):
-            for supported, child_codes in ((False, [1]), (False, [0]), (True, [0, 1])):
+        return package
+
+    @staticmethod
+    def install_options() -> cli.Options:
+        return cli.Options(platform='claude', platform_explicit=True, addon_skip=True, args=['alpha'])
+
+    def test_missing_programs_are_installed_after_the_host_check_and_before_the_package_is_prepared(self):
+        self.prepared_package()
+        steps = ('input_record', 'check_source_health', 'observe_writers', 'install_prerequisites', 'acquire', 'prepare_source')
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_PACKAGE_REQUEST': ''}), \
+                mock.patch.object(runner, 'run_command', return_value=ToolResult(6)):
+            self.captured(cli.dispatch, self.install_options())
+        self.assertEqual([name for name in self.names() if name in steps], list(steps))
+        self.stub('installer.hosts.observe_writers', {'claude': cli.hosts.WriterObservation('running', pids=(43211,))})
+        self.calls.clear()
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_PACKAGE_REQUEST': ''}):
+            code, _ = self.captured(cli.dispatch, self.install_options())
+        self.assertEqual((code, 'install_prerequisites' in self.names()), (1, False))
+
+    def test_a_saved_package_that_lost_a_file_names_the_file_and_not_its_skill(self):
+        package = (self.home / '.ghost-alice/versions' / ('d' * 64)).resolve()
+        self.stub('installer.source.check_install_source')
+        (package / 'core').mkdir(parents=True)
+        self.stub('installer.source._version_metadata', {'files': {'core/alpha/SKILL.md': 'e' * 64}})
+        before = self.home_files()
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_PACKAGE_REQUEST': ''}), \
+                mock.patch.object(runner, 'REPO_ROOT', package / 'core'):
+            code, output = self.captured(cli.main, ['--platform', 'claude', '--local-source', 'alpha'])
+        self.assertEqual((code, self.home_files()), (1, before), output)
+        self.assertIn(f'[ERROR] Preserved source version is incomplete: {package / "core/alpha"}', output)
+        self.assertNotIn('Skill not found', output)
+
+    def test_a_successful_candidate_hands_the_terminal_to_its_own_package_and_no_record_is_read_again(self):
+        package = self.prepared_package()
+        core = package / 'core'
+        record, version = package.parents[1] / cli.installed_payload.FILENAME, package / 'version.json'
+        record_path = cli.install_transaction.record_path_after_recovery
+        for cause in ('install', 'post-merge', 'update'):
+            with self.subTest(cause=cause):
                 report.configure(home=self.home, tty=False)
-                prior_files = set((self.home / '.ghost-alice/install').glob('*'))
-                (active.parent / 'version.json').write_text(json.dumps({'record_move': True} if supported else {}))
+                # Another package is the active installer before the candidate runs.
+                record.write_text(json.dumps({'schema_version': 2, 'targets': {}, 'source': {'root': str(self.source)},
+                                              'installer': {'active_root': str(self.home / 'earlier/core')}}))
                 calls = []
-                old_runs = []
-                previous = {}
-                followup_ran = self.home / 'followup-ran'
+
                 def run(argv, **kwargs):
-                    calls.append((argv, kwargs))
-                    if json.loads(kwargs['env'][source.REQUEST_ENV]).get('stage') == 'record-move':
-                        followup_ran.write_text('record move started')
-                    if not supported and child_codes == [0]:
-                        # This legacy candidate neither participates in the shared log nor writes platform events.
-                        logs = report.state().log_file.parent
-                        digest = 'b' * 64
-                        version = self.home / '.ghost-alice/versions' / digest
-                        version.mkdir(parents=True)
-                        (version / 'version.json').write_text('{}')
-                        success = logs / '2026-01-01-000000.log'
-                        success.write_text('previous successful details\n')
-                        event = success.with_suffix('.events.jsonl')
-                        event.write_text(json.dumps(dict(type='install-result', source_digest=digest, returncode=0)) + '\n')
-                        previous.update({path: path.read_bytes() for path in (success, event)})
-                        for number in range(31):
-                            log = logs / f'2026-02-01-000000-{number:032x}.log'
-                            log.write_text(f'legacy details {number}\n')
-                            event = log.with_suffix('.events.jsonl')
-                            event.write_text('{}\n')
-                            for path in (log, event):
-                                os.utime(path, (100 + number, 100 + number))
-                            old_runs.append((log, event))
-                    return ToolResult(child_codes[min(len(calls), len(child_codes)) - 1])
-                with self.subTest(supported=supported, child_codes=child_codes), mock.patch.object(runner, 'run_command', side_effect=run):
-                    code, output = self.captured(cli.dispatch,
-                        cli.Options(platform='claude', platform_explicit=True, addon_skip=True, args=['task-router']),
-                        execution_cause='update')
-                    self.assertEqual(code, child_codes[-1])
-                    self.assertEqual(len(calls), len(child_codes))
-                    self.assertEqual('Candidate install did not finish' in output, child_codes[0] != 0)
-                    self.assertNotIn('execution_cause', json.loads(calls[0][1]['env'][source.REQUEST_ENV]))
-                    if not supported and child_codes == [0]:
-                        current = report.state().log_file
-                        self.assertIn('does not support moving existing work records', current.read_text())
-                        self.assertFalse(current.with_suffix('.events.jsonl').exists())
-                        self.assertFalse(followup_ran.exists())
-                        for path, content in previous.items():
-                            self.assertEqual(path.read_bytes(), content)
-                        # A prior failed candidate from this loop also occupies the unclassified allowance.
-                        self.assertEqual(set(current.parent.iterdir()),
-                                         {current, *previous, *prior_files, *(path for pair in old_runs[3:] for path in pair)})
-                    if supported:
-                        argv, kwargs = calls[-1]
-                        self.assertEqual(Path(argv[1]), active / '_shared/installer/cli.py')
-                        self.assertTrue(kwargs['inherit_stdin'])
-                        with mock.patch.dict(os.environ, kwargs['env']), mock.patch.object(runner, 'REPO_ROOT', active):
-                            request = source.install_request()
-                        self.assertEqual(request['execution_cause'], 'update')
-                        self.assertEqual(request['stage'], 'record-move')
+                    calls.append(([str(value) for value in argv], kwargs))
+                    # What the candidate leaves is read by its own package only.
+                    for file in (record, version):
+                        file.write_text('{the form that the candidate reads')
+                    return ToolResult(0 if len(calls) == 1 else 9)
+
+                def before_the_candidate(root):
+                    self.assertEqual(calls, [], 'the installing process reads the record before the candidate runs')
+                    return record_path(root)
+
+                self.calls.clear()
+                with mock.patch.dict(os.environ, {'GHOST_ALICE_PACKAGE_REQUEST': ''}), \
+                        mock.patch.object(runner, 'run_command', side_effect=run), \
+                        mock.patch.object(cli.install_transaction, 'record_path_after_recovery',
+                                          side_effect=before_the_candidate):
+                    code, output = self.captured(cli.dispatch, self.install_options(), execution_cause=cause)
+                self.assertEqual(code, 9, output)
+                self.assertNotIn('The installation did not finish', output)
+                (candidate, sent), (followup, handed) = calls
+                self.assertEqual(Path(candidate[1]), core / '_shared/installer/cli.py')
+                self.assertEqual([followup[0], *map(Path, followup[1:])], [sys.executable, core / '_shared/installer/cli.py'])
+                self.assertTrue(handed['inherit_stdin'])
+                for kwargs in (sent, handed):
+                    self.assertIn('GHOST_ALICE_PACKAGE_REQUEST', kwargs['env'])
+                    self.assertNotIn('GHOST_ALICE_INSTALL_REQUEST', kwargs['env'])
+                common = dict(package_root=str(core), source={'root': str(self.source), 'commit': 'installing'},
+                              log_file=str(report.state().log_file))
+                self.assertEqual(json.loads(sent['env']['GHOST_ALICE_PACKAGE_REQUEST']),
+                                 dict(common, addon_commits={}, start_registration=dict(root=str(self.source),
+                                      remote=source.DEFAULT_REMOTE), **({'execution_cause': cause} if cause != 'install' else {})))
+                move = dict(common, stage='record-move', execution_cause=cause)
+                self.assertEqual(json.loads(handed['env']['GHOST_ALICE_PACKAGE_REQUEST']), move)
+                with mock.patch.dict(os.environ, handed['env']), mock.patch.object(runner, 'REPO_ROOT', core):
+                    self.assertEqual(source.install_request(), move)
+
+    def test_an_unfinished_installation_names_the_command_that_continues_it_and_the_active_installer(self):
+        package = self.prepared_package()
+        core = package / 'core'
+        earlier = (self.home / 'earlier/core').resolve()
+        record = package.parents[1] / cli.installed_payload.FILENAME
+        command = locations.management_command()
+        again = {'en': 'run the same command again', 'ko': '같은 명령을 다시 실행'}
+        for language in ('en', 'ko'):
+            for cause in ('install', 'update', 'post-merge'):
+                for active in (core, earlier, None):
+                    with self.subTest(language=language, cause=cause, active=active), \
+                            mock.patch.dict(os.environ, {'GHOST_ALICE_PACKAGE_REQUEST': '',
+                                                         'GHOST_ALICE_INSTALL_LOCALE': language}):
+                        report.configure(home=self.home, tty=False)
+                        record.unlink(missing_ok=True)
+                        started = []
+
+                        def run(argv, **kwargs):
+                            started.append(argv)
+                            if active is not None:
+                                record.write_text(json.dumps({'schema_version': 2, 'targets': {},
+                                                              'installer': {'active_root': str(active)}}))
+                            return ToolResult(6)
+
+                        with mock.patch.object(runner, 'run_command', side_effect=run):
+                            code, output = self.captured(cli.dispatch, self.install_options(), execution_cause=cause)
+                        self.assertEqual((code, len(started)), (6, 1), output)
+                        self.assertEqual(again[language] in output, cause != 'post-merge', output)
+                        self.assertEqual(command in output, cause == 'post-merge', output)
+                        # The plain command of another active package installs that package again.
+                        self.assertEqual(command + ' update' in output, cause == 'post-merge' and active != core, output)
+                        self.assertNotIn('--local-source', output)
+                        for path in (core, earlier):
+                            self.assertEqual(str(path) in output, path == active, output)
+                        self.assertEqual(bool(re.search('[\uac00-\ud7a3]', output)), language == 'ko', output)
+
+
+class CandidateInstallTests(CliCase):
+    """The candidate process under the install lock: its package becomes the active installer before a host child
+    starts, and its success is recorded after the last one."""
+
+    def setUp(self):
+        super().setUp()
+        self.core = (self.home / '.ghost-alice/versions' / ('c' * 64) / 'core').resolve()
+        self.core.mkdir(parents=True)
+        self.patches.enter_context(mock.patch('installer.runner.REPO_ROOT', self.core))
+        self.stub('installer.hosts.observe_writers', {'claude': cli.hosts.WriterObservation('absent')})
+        self.stub('installer.lock.acquire', 'handle')
+        self.stub('installer.lock.release')
+        self.stub('installer.source.match_install_source', source.SourceMatch('same', self.source, self.source))
+        self.stub('installer.prerequisites.install_prerequisites', True)
+        self.stub('installer.transaction.activate')
+        self.stub('installer.cli._dispatch', 0)
+        self.stub('installer.source.finalize_source', ['the version is complete'])
+
+    STEPS = ('install_prerequisites', 'acquire', 'match_install_source', 'activate', '_dispatch', 'finalize_source', 'release')
+
+    def candidate(self, *arguments, **fields):
+        self.calls.clear()
+        request = dict(package_root=str(self.core), source={'root': str(self.source), 'commit': 'c0ffee'},
+                       addon_commits={}, **fields)
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_PACKAGE_REQUEST': json.dumps(request)}):
+            code, output = self.captured(cli.main, ['--platform', 'claude', *arguments, 'task-router'])
+        return code, output, [name for name in self.names() if name in self.STEPS]
+
+    def test_the_package_is_activated_before_the_host_children_and_completed_after_them(self):
+        code, output, steps = self.candidate()
+        self.assertEqual((code, steps), (0, list(self.STEPS[1:])), output)
+        arguments = {name: (args, kwargs) for name, args, kwargs in self.calls}
+        self.assertEqual(arguments['acquire'], (('install', 'claude'), {}))
+        ((context, choices), _), ((options,), _) = arguments['activate'], arguments['_dispatch']
+        self.assertEqual((context.platform, options.args, choices), ('claude', ['task-router'], {'claude': ['task-router']}))
+        self.assertEqual(arguments['finalize_source'], ((context, self.core.parent, ['claude']), {}))
+        self.assertEqual(arguments['release'], (('handle',), {}))
+        self.assertIn('the version is complete', output)
+
+    def test_the_recorded_source_is_compared_under_the_lock_before_activation(self):
+        others = {'recorded': self.source, 'gone': self.home / 'no-such-folder'}
+        for state, arguments, recorded, code, adopts in (
+                ('same', [], 'recorded', 0, False), ('other', [], 'recorded', 2, False),
+                ('other', ['--adopt-source'], 'recorded', 0, True), ('other', [], 'gone', 0, True),
+                # The installation record that activation creates can name another source.
+                ('unrecorded', [], 'recorded', 0, True), ('unreadable', [], 'recorded', 0, False)):
+            with self.subTest(state=state, arguments=arguments, recorded=recorded):
+                self.stub('installer.source.match_install_source',
+                          source.SourceMatch(state, self.home, others[recorded], detail='cause'))
+                result, output, steps = self.candidate(*arguments)
+                following = ['activate', '_dispatch', 'finalize_source'] if code == 0 else []
+                self.assertEqual((result, steps), (code, ['acquire', 'match_install_source', *following, 'release']), output)
+                if following:
+                    ((context, _), _), ((options,), _) = (next(call[1:] for call in self.calls if call[0] == name)
+                                                          for name in ('activate', '_dispatch'))
+                    self.assertEqual((context.options.adopt_source, options.adopt_source), (adopts, adopts))
+                else:
+                    self.assertIn(str(self.source), output)
+
+    def test_a_merged_source_is_compared_under_the_lock_before_activation(self):
+        for state, following in (('same', ['activate', '_dispatch', 'finalize_source']),
+                                 ('other', []), ('unrecorded', [])):
+            with self.subTest(state=state):
+                self.stub('installer.source.match_install_source', source.SourceMatch(state, self.source, self.source))
+                code, output, steps = self.candidate(execution_cause='post-merge')
+                self.assertEqual(steps, ['acquire', 'match_install_source', *following, 'release'], output)
+                self.assertEqual(code, 0 if following else 1, output)
+
+    def test_record_that_became_unreadable_under_the_lock_names_its_read_error(self):
+        record = self.home / '.ghost-alice' / cli.installed_payload.FILENAME
+        self.stub('installer.lock.acquire', side_effect=lambda *args: record.write_text('{broken'))
+        code, output, steps = self.candidate(start_registration=None)
+        self.assertEqual(code, 1, output)
+        self.assertIn(f'{record} is not JSON', output)
+        self.assertNotIn('activate', steps)
+
+    def test_merge_keeps_a_remote_registered_while_upgrading_a_record_without_one(self):
+        record = self.home / '.ghost-alice' / cli.installed_payload.FILENAME
+        old_source = {'root': str(self.source)}
+        record.write_text(json.dumps(dict(schema_version=2, targets={}, source=old_source)))
+        original_registration = source.registration({'source': old_source})
+        new_source = dict(old_source, remote=source.DEFAULT_REMOTE)
+        self.stub('installer.lock.acquire', side_effect=lambda *args: record.write_text(
+            json.dumps(dict(schema_version=2, targets={}, source=new_source))))
+        request = dict(package_root=str(self.core), source=dict(old_source, remote='/local/checkout-origin'),
+                       execution_cause='post-merge', start_registration=original_registration)
+        with mock.patch.dict(os.environ, {source.REQUEST_ENV: json.dumps(request)}):
+            code, output = self.captured(cli.main, ['--platform', 'claude'])
+        self.assertEqual(code, 1, output)
+        self.assertIn('registered checkout or remote changed', output)
+        self.assertNotIn('activate', self.names())
+
+    def test_an_activation_that_fails_starts_no_host_child_and_releases_the_lock(self):
+        def stop(context, choices):
+            raise ValueError('the Git setting cannot be written')
+
+        self.stub('installer.transaction.activate', side_effect=stop)
+        code, output, steps = self.candidate()
+        self.assertEqual((code, steps), (1, ['acquire', 'match_install_source', 'activate', 'release']), output)
+        self.assertIn('[ERROR] the Git setting cannot be written', output)
+
+    def test_an_unreadable_addon_registration_prevents_activation(self):
+        directory = cli.locations.addons_dir('claude')
+        directory.mkdir(parents=True)
+        sidecar = directory / 'one.json'
+        sidecar.write_text('truncated', encoding='utf-8')
+        code, output, steps = self.candidate(held_addons=True)
+        self.assertEqual(code, 1, output)
+        self.assertIn(str(sidecar), output)
+        self.assertEqual(steps, ['acquire', 'match_install_source', 'release'])
+
+    def test_a_host_child_that_fails_leaves_the_version_unfinished(self):
+        self.stub('installer.cli._dispatch', 4)
+        code, output, steps = self.candidate()
+        self.assertEqual((code, steps), (4, ['acquire', 'match_install_source', 'activate', '_dispatch', 'release']), output)
+
+    def test_a_host_child_neither_activates_nor_locks_for_the_whole_install(self):
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_INSTALL_HOST_CHILD': '1'}):
+            code, output, steps = self.candidate()
+        self.assertEqual((code, steps), (0, ['_dispatch']), output)
+
+
+class EarlierRequestTests(CliCase):
+    """A process that an earlier release starts with its own request changes nothing and names this package's install
+    file, whatever the request holds and whatever the arguments are."""
+
+    ARGUMENTS = ([], ['--platform', 'claude'], ['--status'], ['--platform', 'claude', '--status'], ['--uninstall'],
+                 ['update'], ['--management-entry'], ['--management-entry', 'update'], ['--post-merge'],
+                 ['--install-acquired-release', '/folder', 'remote'],
+                 ['--install-acquired-update', '/folder', 'remote', 'main', 'update'],
+                 ['--isolated'], ['--platform'], ['--bogus'])
+
+    def setUp(self):
+        super().setUp()
+        package = str(self.source.resolve())
+        install = {'package_root': package, 'source': {'root': package}, 'addon_commits': {}}
+        self.requests = {'install': json.dumps(install),
+                         'record move': json.dumps(dict(install, stage='record-move', execution_cause='install')),
+                         'invalid JSON': '{not JSON'}
+        self.command = cli.locations.package_command(self.source)
+        ghost = self.home / '.ghost-alice'
+        ghost.mkdir(exist_ok=True)
+        (ghost / cli.installed_payload.FILENAME).write_text('{not JSON either')
+        for target in ('installer.cli.install_release', 'installer.cli.dispatch', 'installer.runner.run_command',
+                       'installer.runner.popen', 'installer.lock.acquire', 'installer.source.acquire_release',
+                       'installer.report.log_init', 'installed_payload.read_file',
+                       'install_transaction.record_path_after_recovery'):
+            self.patches.enter_context(mock.patch(target, side_effect=AssertionError(f'{target} has no part in a refusal')))
+
+    def refused(self, request, argv, language='en'):
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_INSTALL_REQUEST': request, 'GHOST_ALICE_INSTALL_LOCALE': language}):
+            code, output = self.captured(cli.main, argv)
+        self.assertEqual(code, 1, output)
+        self.assertTrue(output.startswith('[ERROR] '), output)
+        self.assertIn(self.command, output)
+        return output
+
+    def test_every_command_stops_before_any_read_or_change(self):
+        before = self.home_files()
+        for name, request in self.requests.items():
+            for argv in self.ARGUMENTS:
+                with self.subTest(request=name, argv=argv):
+                    self.refused(request, argv)
+                    self.assertEqual(self.home_files(), before)
+
+    def test_the_refusal_follows_the_display_language(self):
+        english, korean = (self.refused(self.requests['install'], [], language) for language in ('en', 'ko'))
+        self.assertNotRegex(english, '[\uac00-\ud7a3]')
+        self.assertRegex(korean, '[\uac00-\ud7a3]')
+
+    def test_an_empty_earlier_request_is_no_request(self):
+        with mock.patch.dict(os.environ, {'GHOST_ALICE_INSTALL_REQUEST': ''}), \
+                mock.patch('installer.cli.install_release', return_value=23) as install:
+            code, output = self.captured(cli.main, ['--platform', 'claude'])
+        self.assertEqual(code, 23, output)
+        install.assert_called_once_with(runner.REPO_ROOT, ['--platform', 'claude'])
+
+
+REMOTE = 'https://example.invalid/product.git'
+
+
+class ReleaseCase(CliCase):
+    """Commands that install the remote main branch, with the Git settings of the fixture only."""
+
+    def setUp(self):
+        super().setUp()
+        os.environ.update(GIT_CONFIG_GLOBAL=str(self.home / '.gitconfig'), GIT_CONFIG_NOSYSTEM='1')
+        self.ghost = self.home / '.ghost-alice'
+        self.record = self.ghost / cli.installed_payload.FILENAME
+
+    def repository(self, root: Path, *, remote: str | None = None) -> str:
+        """Commit every file under `root` in its own repository; the commit."""
+        settings = ('-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false',
+                    '-c', 'core.hooksPath=/dev/null', '-c', 'core.autocrlf=false', '-c', 'init.defaultBranch=main')
+        if not (root / '.git').exists():
+            git('-C', str(root), *settings, 'init', '-q', check=True)
+            git('-C', str(root), 'config', 'maintenance.auto', 'false', check=True)
+        if remote is not None:
+            git('-C', str(root), 'remote', 'add', 'origin', remote, check=True)
+        git('-C', str(root), *settings, 'add', '-A', check=True)
+        git('-C', str(root), *settings, 'commit', '-q', '--allow-empty', '-m', 'fixture', check=True)
+        return git('-C', str(root), 'rev-parse', 'HEAD', check=True).stdout.strip()
+
+    def write_record(self, *, active: Path | None = None, skills: dict[str, list[str]] | None = None, **fields) -> None:
+        """The install record: its source fields, the active installer and the Core skills of each host."""
+        targets = {str(self.home / host / name): dict(kind='skill', provider='core', name=name, used_by=[host])
+                   for host, names in (skills or {}).items() for name in names}
+        self.record.parent.mkdir(exist_ok=True)
+        self.record.write_text(json.dumps(dict(schema_version=2, targets=targets, source=fields,
+                                               installer={'active_root': str(active)} if active else {})))
+
+    def saved_package(self, *, status: str, selections: dict[str, list[str]], root: Path, remote: str) -> Path:
+        """A preserved package of the fixture source, with the facts its version file holds."""
+        (self.source / 'VERSION').write_text('saved\n')
+        with use_source(self.source):
+            folder, _ = source.prepare_source(make_context(self.home), selections=selections, provenance=dict(
+                root=str(root), remote=remote, ref='refs/heads/main', branch='main', commit='c0ffee', dirty='clean'))
+        version = folder / 'version.json'
+        version.write_text(json.dumps(dict(json.loads(version.read_text()), status=status)))
+        return folder / 'core'
+
+
+class InstallReleaseTests(ReleaseCase):
+    """The running installer downloads the release, starts the downloaded installer and returns its exit code."""
+
+    def setUp(self):
+        super().setUp()
+        self.release = (self.home.parent / 'downloaded').resolve()
+        self.steps: list = []
+        self.started = False
+        self.stub('installer.prerequisites.require_git_for_release',
+                  side_effect=lambda: self.steps.append('Git is available'))
+
+        @contextlib.contextmanager
+        def acquire_release(remote):
+            self.steps.append(('download', remote))
+            yield self.release
+            self.steps.append('discard the download')
+
+        self.patches.enter_context(mock.patch('installer.source.acquire_release', acquire_release))
+        run_command, read_file = runner.run_command, cli.installed_payload.read_file
+
+        def run(argv, **kwargs):
+            if argv[0] != sys.executable:
+                return run_command(argv, **kwargs)
+            self.started = True
+            self.steps.append(([str(value) for value in argv], kwargs))
+            # The release owns the record from here on and may keep it in a form that only it reads.
+            self.ghost.mkdir(exist_ok=True)
+            self.record.write_text('{the form that the release reads')
+            return ToolResult(self.child_code)
+
+        def read_before_the_release(file):
+            self.assertFalse(self.started, 'the running installer reads no record once the release has started')
+            return read_file(file)
+
+        self.patches.enter_context(mock.patch('installer.runner.run_command', side_effect=run))
+        self.patches.enter_context(mock.patch('installed_payload.read_file', side_effect=read_before_the_release))
+
+    def run_installer(self, argv, *, child_code=0):
+        self.steps.clear()
+        self.started, self.child_code = False, child_code
+        with contextlib.ExitStack() as patches:
+            for target in ('installer.lock.acquire', 'installer.source.prepare_source', 'installer.hosts.observe_writers',
+                           'installer.terminal.read_answer', 'installer.report.log_init'):
+                patches.enter_context(mock.patch(target, side_effect=AssertionError(f'{target} belongs to the release')))
+            return self.captured(cli.main, argv)
+
+    def installed(self, argv, *, root, remote, expected=None, code=0, origin=None):
+        """Run `argv` and check that the release received `expected` (the same arguments when not given) and `origin`
+        (the source of `root` when not given)."""
+        self.started = False
+        # A command other than an update adds the registration that it read before the download.
+        if origin is None:
+            try:
+                record = cli.install_transaction.record_after_recovery(self.ghost)
+            except cli.installed_payload.RecordError:
+                record = None
+            origin = dict(source.input_record(root, record=record), registered=source.registration(record))
+        result, output = self.run_installer(argv, child_code=code)
+        self.assertEqual(result, code, output)
+        self.assertEqual(self.steps, [
+            'Git is available', ('download', remote),
+            ([sys.executable, str(self.release / '_shared/installer/cli.py'), '--install-acquired-release', str(root), remote,
+              *(argv if expected is None else expected)],
+             {'inherit_stdin': True, 'env': {cli.START_ORIGIN_ENV: json.dumps(origin)}}),
+            'discard the download'])
+
+    def test_the_release_receives_the_folder_the_remote_the_arguments_and_the_terminal(self):
+        arguments = ['--platform', 'claude', '--visibility', 'strict', '--addon-source', 'relative/addons', '--verbose',
+                     'task-router', 'alpha']
+        # An unpacked archive has no remote of its own.
+        for argv in ([], arguments):
+            with self.subTest(argv=argv):
+                self.installed(argv, root=runner.REPO_ROOT, remote=source.DEFAULT_REMOTE)
+        self.repository(self.source, remote=REMOTE)
+        for code in (0, 2, 37):
+            with self.subTest(code=code):
+                self.installed(arguments, root=runner.REPO_ROOT, remote=REMOTE, code=code)
+
+    def test_a_saved_package_names_its_own_folder_and_the_recorded_remote(self):
+        core = self.saved_package(status='candidate', selections={'claude': ['alpha']}, root=self.source,
+                                  remote='https://example.invalid/saved.git')
+        with use_source(core):
+            self.installed([], root=core, remote='https://example.invalid/saved.git')
+            self.write_record(root=str(self.source), remote=REMOTE)
+            self.installed(['--platform', 'codex'], root=core, remote=REMOTE)
+
+    def test_a_merge_in_the_install_source_starts_the_release_for_the_merged_checkout(self):
+        self.repository(self.source, remote=REMOTE)
+        merged = self.source.resolve()
+        with use_source(self.saved_package(status='successful', selections={}, root=merged, remote='unused')):
+            for saved, expected, code in ((None, REMOTE, 0), ('https://example.invalid/recorded.git',
+                                         'https://example.invalid/recorded.git', 37)):
+                with self.subTest(saved=saved, code=code):
+                    self.write_record(root=str(merged), **({'remote': saved} if saved else {}))
+                    self.installed(['--post-merge', '--merged-checkout', str(merged)], root=merged,
+                                   remote=expected,
+                                   expected=['--post-merge'], code=code)
+
+    def test_update_passes_its_own_arguments_and_the_remote_it_read(self):
+        core = self.saved_package(status='successful', selections={}, root=self.source, remote='https://example.invalid/saved.git')
+        for argv, recorded, remote in (
+                (['update'], REMOTE, REMOTE),
+                (['update'], None, source.DEFAULT_REMOTE),
+                (['update', '--ref', 'main'], REMOTE, REMOTE),
+                (['update', '--ref', 'refs/heads/main', '--remote', '/another/remote'], REMOTE, '/another/remote'),
+                # The release owns the help, the adapter names and the install options.
+                (['update', '--help'], REMOTE, REMOTE),
+                (['update', '-p', 'next-adapter', '--new-adapter-option', 'value', '--verbose'], REMOTE, REMOTE)):
+            with self.subTest(argv=argv, recorded=recorded), use_source(core):
+                self.write_record(root=str(self.source), **({'remote': recorded} if recorded else {}))
+                self.installed(argv, root=core, remote=remote, code=37,
+                               origin=dict(root=str(self.source), remote=recorded or source.DEFAULT_REMOTE))
+
+    def test_the_childs_exit_code_does_not_establish_the_age_of_its_release(self):
+        code, output = self.run_installer([], child_code=37)
+        self.assertEqual(code, 37, output)
+        self.assertNotIn('older than this installer', output)
+
+    def test_a_saved_package_passes_the_source_that_it_read_before_the_download(self):
+        core = self.saved_package(status='successful', selections={}, root=self.source, remote='https://example.invalid/saved.git')
+        acquire_release = source.acquire_release
+
+        @contextlib.contextmanager
+        def switch_during_the_download(remote):
+            with acquire_release(remote) as release:
+                self.write_record(root=str(self.home), remote='/another/remote')
+                yield release
+
+        with use_source(core), mock.patch('installer.source.acquire_release', switch_during_the_download):
+            for argv, origin in (([], None), (['update'], dict(root=str(self.source), remote=REMOTE))):
+                with self.subTest(argv=argv):
+                    self.write_record(root=str(self.source), remote=REMOTE)
+                    self.installed(argv, root=core, remote=REMOTE, origin=origin)
+
+    def test_an_update_that_names_other_code_or_finds_no_recorded_source_downloads_nothing(self):
+        for argv, recorded in ((['update', '--ref', 'feature'], {'root': str(self.source)}),
+                               (['update', '--local-source'], {'root': str(self.source)}),
+                               (['update'], {}), (['update'], None)):
+            with self.subTest(argv=argv, recorded=recorded):
+                self.record.unlink(missing_ok=True)
+                if recorded is not None:
+                    self.write_record(**recorded)
+                code, output = self.run_installer(argv)
+                self.assertEqual((code, self.steps), (1, []), output)
+                self.assertIn('[ERROR]', output)
+
+
+class ManagementEntryTests(ReleaseCase):
+    """The installed command starts the active installer with its own arguments."""
+
+    def started(self, *argv):
+        """The argv of the installer that the entry starts."""
+        with mock.patch('installer.runner.run_command', return_value=ToolResult(7)) as run:
+            code, output = self.captured(cli.main, ['--management-entry', *argv])
+        self.assertEqual(code, 7, output)
+        ((command,), _), = run.call_args_list
+        return command
+
+    def test_the_install_record_names_the_active_installer_also_when_a_journal_cannot_be_read(self):
+        entry = self.home / 'later/core/_shared/installer/cli.py'
+        entry.parent.mkdir(parents=True)
+        entry.touch()
+        self.write_record(active=entry.parents[2])
+        # A later release wrote the journal.
+        journal = self.ghost / 'rollbacks/20261020T000000Z-1-aaaaaaaa/journal.json'
+        journal.parent.mkdir(parents=True)
+        journal.write_text(json.dumps({'schema_version': 2, 'phase': 'prepare'}))
+        self.assertEqual(self.started('--status'), [sys.executable, str(entry), '--status'])
+        # Recovery restores the record that names the active installer.
+        for content in (None, '{broken', json.dumps({'schema_version': 2, 'targets': {}})):
+            with self.subTest(record=content), mock.patch.object(
+                    cli.install_transaction, 'record_after_recovery',
+                    return_value={'installer': {'active_root': str(entry.parents[2])}}):
+                self.record.unlink(missing_ok=True)
+                if content is not None:
+                    self.record.write_text(content)
+                self.assertEqual(self.started(), [sys.executable, str(entry)])
+
+
+class RepairOwnerTests(ReleaseCase):
+    """The active installer runs a repair. Another installer starts it with the same arguments and returns its exit code."""
+
+    ARGV = ['--repair', '--platform', 'claude']
+
+    def setUp(self):
+        super().setUp()
+        (self.home / '.claude').mkdir()
+        self.active = self.saved_package(status='successful', selections={'claude': ['alpha']}, root=self.source, remote=REMOTE)
+        self.state_commands(['--repair'])
+        self.write_record(active=self.active, skills={'claude': ['alpha']}, root=str(self.source), remote=REMOTE)
+        # The checkout holds another release than the active installer.
+        (self.source / 'VERSION').write_text('another release\n')
+        self.stub('installer.lifecycle.run_repair', 5)
+        self.stub('installer.lock.acquire', (self.home / 'lock', 'generation'))
+        self.stub('installer.lock.release')
+        self.started: list = []
+        run_command = runner.run_command
+
+        def run(argv, **kwargs):
+            if argv[0] != sys.executable:
+                return run_command(argv, **kwargs)
+            self.started.append(([str(value) for value in argv], kwargs))
+            return ToolResult(37)
+
+        self.patches.enter_context(mock.patch('installer.runner.run_command', side_effect=run))
+
+    def state_commands(self, commands):
+        """The commands that the active package states its installer runs for another installer; none when None."""
+        version = self.active.parent / 'version.json'
+        saved = json.loads(version.read_text())
+        saved.pop('active_runs', None)
+        version.write_text(json.dumps(saved if commands is None else dict(saved, active_runs=commands)))
+
+    def repair(self):
+        self.calls.clear()
+        self.started.clear()
+        return self.captured(cli.main, list(self.ARGV))
+
+    def assert_own_repair(self):
+        code, output = self.repair()
+        self.assertEqual((code, self.started), (5, []), output)
+        self.assertEqual(self.names(), ['acquire', 'run_repair', 'release'])
+
+    def test_another_installer_starts_the_active_installer_and_returns_its_exit_code(self):
+        entry = [sys.executable, str(self.active / '_shared/installer/cli.py')]
+        (self.home / '.codex').mkdir()
+        addon = self.home / 'addon'
+        addon.mkdir()
+        options = ['--skip-source-health', '--visibility', 'strict', '--verbose', '--addon-source', str(addon), '--addon-tag', 'v1']
+        # Like the ghost-alice command, the handover starts the active installer outside any install request.
+        started = {'inherit_stdin': True, 'env': {source.REQUEST_ENV: '', 'GHOST_ALICE_INSTALL_HOST_CHILD': '0'}}
+        # Claude is the host of a repair that names none; the options go on unchanged.
+        for argv, passed in ((['--repair'], ['--platform', 'claude', '--repair']),
+                             (['--repair', '--platform', 'codex', *options], ['--platform', 'codex', *options, '--repair']),
+                             (['--repair', '--addon-skip'], ['--platform', 'claude', '--addon-skip', '--repair'])):
+            with self.subTest(argv=argv), mock.patch.object(self, 'ARGV', argv):
+                code, output = self.repair()
+                self.assertEqual(code, 37, output)
+                self.assertEqual(self.started, [([*entry, *passed], started)])
+                self.assertEqual(self.names(), [])
+        with self.subTest('a saved package that is not active'):
+            (self.source / 'VERSION').write_text('an earlier saved release\n')
+            with use_source(self.source):
+                folder, _ = source.prepare_source(make_context(self.home), selections={}, provenance=dict(
+                    root=str(self.source), remote=REMOTE, ref='refs/heads/main', branch='main', commit='c0ffee', dirty='clean'))
+            with use_source(folder / 'core'):
+                code, output = self.repair()
+            self.assertEqual((code, self.started), (37, [([*entry, '--platform', 'claude', '--repair'], started)]), output)
+
+    def test_a_release_that_states_no_repair_for_another_installer_gets_none(self):
+        # An earlier release restores every skill of its package; this installer keeps its own repair and its stop.
+        for commands in (None, [], ['--status']):
+            with self.subTest(commands=commands):
+                self.state_commands(commands)
+                self.assert_own_repair()
+
+    def test_the_active_installer_names_the_source_that_recovery_restores(self):
+        # A publish that stopped halfway wrote its own source into the record; the source check reads the restored one.
+        self.write_record(active=self.active, skills={'claude': ['alpha']}, root=str(self.home / 'halfway'), remote='/halfway')
+        restored = {'source': {'root': str(self.source), 'remote': REMOTE}}
+        with mock.patch.object(cli.install_transaction, 'record_after_recovery', return_value=restored):
+            origin = source.input_record(self.active)
+        self.assertEqual((origin['root'], origin['remote']), (str(self.source), REMOTE))
+        # A later release wrote a journal that this package cannot read: the package names the source that it saved.
+        unreadable = cli.install_transaction.InstallTransactionError('journal of a later release')
+        with mock.patch.object(cli.install_transaction, 'record_after_recovery', side_effect=unreadable):
+            self.assertEqual(source.input_record(self.active)['root'], str(self.source))
+
+    def test_the_active_installer_repairs_by_itself(self):
+        with use_source(self.active):
+            self.assert_own_repair()
+
+    def test_an_installer_repairs_by_itself_while_the_active_package_cannot_run(self):
+        with self.subTest('a file of the active package is missing'):
+            (self.active / 'VERSION').unlink()
+            self.assert_own_repair()
+        with self.subTest('no active package'):
+            shutil.rmtree(self.active)
+            self.assert_own_repair()
+        with self.subTest('an installation of an earlier installer names no active package'):
+            self.write_record(skills={'claude': ['alpha']}, root=str(self.source), remote=REMOTE)
+            self.assert_own_repair()
+
+    def test_a_changed_active_package_and_another_checkout_stop_before_anything_starts(self):
+        with self.subTest('another checkout'):
+            other = self.home / 'another-checkout'
+            other.mkdir()
+            self.write_record(active=self.active, skills={'claude': ['alpha']}, root=str(other), remote=REMOTE)
+            code, output = self.repair()
+            self.assertEqual((code, self.started, self.names()), (2, [], []), output)
+        with self.subTest('a changed file of the active package'):
+            self.write_record(active=self.active, skills={'claude': ['alpha']}, root=str(self.source), remote=REMOTE)
+            (self.active / 'VERSION').write_text('changed\n')
+            code, output = self.repair()
+            self.assertEqual((code, self.started, self.names()), (1, [], []), output)
+            self.assertIn(str(self.active / 'VERSION'), output)
+
+
+class AcquiredReleaseTests(ReleaseCase):
+    """The downloaded installer installs its own files for the folder and the remote that its caller names."""
+
+    ENTRY = '--install-acquired-release'
+
+    def setUp(self):
+        super().setUp()
+        self.release = make_source(self.home.parent / 'release')
+        self.patches.enter_context(mock.patch('installer.runner.REPO_ROOT', self.release))
+        for host in ('.claude', '.codex'):
+            (self.home / host).mkdir()
+        self.stub('installer.hosts.observe_writers',
+                  side_effect=lambda platforms: {host: cli.hosts.WriterObservation('absent') for host in platforms})
+        self.stub('installer.hosts.confirm_project_trust', '')
+        for target in ('installer.source.acquire_release', 'installer.prerequisites.require_git_for_release'):
+            self.patches.enter_context(mock.patch(target, side_effect=AssertionError(f'{target} belongs to the caller')))
+        run_command = runner.run_command
+        self.children: list[tuple[list[str], dict]] = []
+
+        def run(argv, **kwargs):
+            if argv[0] != sys.executable:
+                return run_command(argv, **kwargs)
+            self.children.append(([str(value) for value in argv], kwargs))
+            return ToolResult(0)
+
+        self.patches.enter_context(mock.patch('installer.runner.run_command', side_effect=run))
+
+    def publish(self, text: str) -> str:
+        """Give the release its own files and commit."""
+        (self.release / 'VERSION').write_text(text + '\n')
+        return self.repository(self.release)
+
+    def run_entry(self, *argv, start=True):
+        """Start an entry. Like the calling installer, pass an installation the install source read before the download."""
+        self.children.clear()
+        argv = [str(value) for value in argv]
+        environment = {}
+        if (start and argv[:1] == [self.ENTRY] and argv[3:4] != ['update'] and cli.START_ORIGIN_ENV not in os.environ
+                and len(argv) > 1 and Path(argv[1]).is_absolute() and Path(argv[1]).is_dir()):
+            environment[cli.START_ORIGIN_ENV] = json.dumps(dict(source.input_record(Path(argv[1])),
+                                                                registered=source.registration(cli.install_transaction.record_after_recovery(self.ghost))))
+        with mock.patch.dict(os.environ, environment):
+            return self.captured(cli.main, argv)
+
+    def installed(self, *argv, root: Path, version: str, commit: str, cause: str, remote: str = REMOTE) -> dict:
+        """Run the entry and check the package that it prepared and the two processes that it started; the
+        candidate's request."""
+        code, output = self.run_entry(*argv)
+        self.assertEqual(code, 0, output)
+        (candidate, sent), (followup, handed) = self.children
+        request, move = (json.loads(kwargs['env']['GHOST_ALICE_PACKAGE_REQUEST']) for kwargs in (sent, handed))
+        core = Path(request['package_root'])
+        self.assertEqual(core.parent.parent, (self.ghost / 'versions').resolve())
+        self.assertEqual(json.loads((core.parent / 'version.json').read_text())['active_runs'], ['--repair'])
+        self.assertEqual((core / 'VERSION').read_text(), version + '\n')
+        for process in (candidate, followup):
+            self.assertEqual(Path(process[1]), core / '_shared/installer/cli.py')
+        expected = dict(root=str(root), remote=remote, ref='refs/heads/main', branch='main', commit=commit, dirty='clean')
+        for fields in (request['source'], move['source']):
+            self.assertEqual({key: fields.get(key) for key in expected}, expected)
+        self.assertEqual(move['package_root'], str(core))
+        self.assertEqual((move['stage'], move['execution_cause']), ('record-move', cause))
+        self.assertEqual(request.get('execution_cause'), cause if cause != 'install' else None)
+        self.assertTrue(handed['inherit_stdin'])
+        return request
+
+    def test_a_checkout_and_an_unpacked_archive_stay_the_install_source(self):
+        checkout = make_source(self.home.parent / 'checkout').resolve()
+        (checkout / 'VERSION').write_text('checkout\n')
+        self.repository(checkout, remote='https://example.invalid/checkout.git')
+        for root in (checkout, self.source.resolve()):
+            with self.subTest(root=root.name):
+                commit = self.publish('for ' + root.name)
+                request = self.installed(self.ENTRY, root, REMOTE, '--platform', 'claude', 'alpha', root=root,
+                                         version='for ' + root.name, commit=commit, cause='install')
+                self.assertNotIn('selections', request)
+                self.assertEqual(self.children[0][0][2:], ['--platform', 'claude', 'alpha'])
+                saved = json.loads((Path(request['package_root']).parent / 'version.json').read_text())
+                self.assertEqual((saved['status'], saved['selections']), ('candidate', {'claude': ['alpha']}))
+
+    def test_a_saved_package_that_never_finished_gives_its_own_selection_and_source(self):
+        core = self.saved_package(status='candidate', selections={'claude': ['alpha']}, root=self.source,
+                                  remote='https://example.invalid/saved.git')
+        commit = self.publish('release')
+        request = self.installed(self.ENTRY, core, REMOTE, root=self.source, version='release', commit=commit, cause='install')
+        self.assertEqual(request['selections'], {'claude': ['alpha']})
+        self.assertEqual(self.children[0][0][2:], [])
+
+    def test_a_release_that_a_saved_package_downloads_gives_the_commands_addon_source_to_every_host(self):
+        core = self.saved_package(status='successful', selections={'claude': ['alpha']}, root=self.source,
+                                  remote='https://example.invalid/saved.git')
+        installed = {'claude': ['alpha'], 'codex': ['alpha']}
+        self.write_record(active=core, skills=installed, root=str(self.source), remote='https://example.invalid/recorded.git')
+        addon = self.home.parent / 'addon'
+        (addon / 'demo/skill').mkdir(parents=True)
+        (addon / 'addons-manifest.json').write_text(json.dumps({'manifest_version': 1, 'addons': [{'id': 'demo', 'path': 'demo'}]}))
+        (addon / 'demo/addon.json').write_text('{}')
+        (addon / 'demo/skill/SKILL.md').write_text('addon bytes')
+        commit = self.publish('with an addon')
+        request = self.installed(self.ENTRY, core, REMOTE, '--addon-source', str(addon), root=self.source,
+                                 version='with an addon', commit=commit, cause='install')
+        # The record names the hosts. Only a package that installs itself again asks each host's addon registry.
+        self.assertEqual(request['selections'], installed)
+        self.assertNotIn('held_addons', request)
+        (saved,) = request['addon_commits']
+        self.assertEqual(self.children[0][0][2:], ['--addon-source', saved])
+
+    def test_a_source_that_another_command_recorded_during_the_download_stops_the_installation(self):
+        core = self.saved_package(status='successful', selections={'claude': ['alpha']}, root=self.source,
+                                  remote='https://example.invalid/saved.git')
+        self.publish('release')
+        self.write_record(active=core, skills={'claude': ['alpha']}, root=str(self.home), remote=REMOTE)
+        before = self.home_files()
+        # A saved package can name no remote; the release installs from the one that it was downloaded from.
+        start = json.dumps(dict(root=str(self.source), registered=None))
+        with mock.patch.dict(os.environ, {cli.START_ORIGIN_ENV: start}):
+            for argv in ([], ['--platform', 'claude', 'alpha']):
+                with self.subTest(argv=argv):
+                    code, output = self.run_entry(self.ENTRY, core, REMOTE, *argv)
+                    self.assertEqual((code, self.children), (1, []), output)
+                    self.assertIn('registered checkout or remote changed', output)
+                    self.assertNotIn('--remote', output)
+                    self.assertEqual(self.home_files(), before)
+
+    def test_local_install_keeps_a_registration_created_after_its_source_check(self):
+        self.publish('local release')
+        code, output = self.run_entry('--platform', 'claude', '--adopt-source', '--local-source', 'alpha')
+        self.assertEqual(code, 0, output)
+        (candidate, sent), _ = self.children
+        self.write_record(root=str(self.home), remote=REMOTE)
+        before = self.record.read_bytes()
+        with mock.patch.dict(os.environ, sent['env']), use_source(Path(candidate[1]).parents[2]), \
+                mock.patch.object(cli.transaction, 'activate') as activate, \
+                mock.patch.object(cli, '_dispatch', return_value=0), mock.patch.object(source, 'finalize_source', return_value=[]):
+            code, output = self.captured(cli.main, candidate[2:])
+        self.assertEqual(code, 1, output)
+        self.assertIn('registered checkout or remote changed', output)
+        self.assertNotIn('--remote', output)
+        self.assertEqual(self.record.read_bytes(), before)
+        activate.assert_not_called()
+
+    def test_update_and_saved_reinstall_keep_a_concurrent_removal(self):
+        self.publish('release')
+        package = self.saved_package(status='successful', selections={'claude': ['alpha', 'fam']},
+                                     root=self.source, remote=REMOTE)
+        installed = {'claude': ['alpha', 'fam'], 'codex': ['alpha']}
+        for argv in ([], ['update'], ['update', '--platform', 'claude']):
+            with self.subTest(argv=argv):
+                self.write_record(active=package, skills=installed, root=str(self.source), remote=REMOTE)
+                code, output = self.run_entry(self.ENTRY, package, REMOTE, *argv)
+                self.assertEqual(code, 0, output)
+                (candidate, sent), _ = self.children
+                self.write_record(active=package, skills=dict(installed, claude=['alpha']), root=str(self.source), remote=REMOTE)
+                before = self.record.read_bytes()
+                with mock.patch.dict(os.environ, sent['env']), use_source(Path(candidate[1]).parents[2]), \
+                        mock.patch.object(cli.transaction, 'activate') as activate, \
+                        mock.patch.object(cli, '_dispatch', return_value=0), mock.patch.object(source, 'finalize_source', return_value=[]):
+                    code, output = self.captured(cli.main, candidate[2:])
+                self.assertEqual(code, 1, output)
+                self.assertIn('Core selection changed', output)
+                self.assertEqual(self.record.read_bytes(), before)
+                activate.assert_not_called()
+
+    def test_an_installation_without_the_source_that_the_calling_installer_read_is_refused(self):
+        self.publish('release')
+        self.write_record(skills={'claude': ['alpha']}, root=str(self.source), remote=REMOTE)
+        before = self.home_files()
+        for argv in ([], ['--platform', 'claude', 'alpha'], ['--post-merge']):
+            with self.subTest(argv=argv):
+                code, output = self.run_entry(self.ENTRY, self.source, REMOTE, *argv, start=False)
+                self.assertEqual((code, self.children), (1, []), output)
+                self.assertIn('[ERROR]', output)
+                self.assertEqual(self.home_files(), before)
+
+    def test_a_request_that_did_not_finish_never_narrows_the_installed_selection(self):
+        installed = {'claude': ['alpha', 'two'], 'codex': ['one']}
+        self.patches.enter_context(mock.patch('installer.selection.ALL_SKILLS', ('alpha', 'fam')))
+        for text, names, active, expected in (
+                # The family and its skill name one target.
+                ('one host', ['fam', 'one'], True, {'claude': ['alpha', 'one', 'two'], 'codex': ['one']}),
+                ('a skill that the release does not hold', ['retired'], True, None),
+                # An earlier release prepared this package and its request was refused.
+                ('refused', ['fam'], False, installed)):
+            with self.subTest(text):
+                core = self.saved_package(status='candidate', selections={'claude': names}, root=self.source,
+                                          remote='https://example.invalid/saved.git')
+                self.write_record(active=core if active else self.home / 'earlier/core', skills=installed,
+                                  root=str(self.source), remote='https://example.invalid/recorded.git')
+                commit = self.publish(text)
+                if expected is None:
+                    code, output = self.run_entry(self.ENTRY, core, REMOTE)
+                    self.assertEqual((code, self.children), (1, []), output)
+                    self.assertIn('Skill not found: retired', output)
+                else:
+                    request = self.installed(self.ENTRY, core, REMOTE, root=self.source, version=text, commit=commit,
+                                             cause='install')
+                    self.assertEqual(request['selections'], expected)
+                shutil.rmtree(core.parent)
+
+    def test_a_saved_package_that_finished_gives_the_installed_selection_and_the_platform_filters_it(self):
+        core = self.saved_package(status='successful', selections={'claude': ['fam']}, root=self.source,
+                                  remote='https://example.invalid/saved.git')
+        installed = {'claude': ['alpha'], 'codex': ['alpha', 'fam']}
+        self.write_record(active=core, skills=installed, root=str(self.source), remote='https://example.invalid/recorded.git')
+        for argv, expected in (([], installed), (['--platform', 'codex'], {'codex': ['alpha', 'fam']})):
+            with self.subTest(argv=argv):
+                version = ' '.join(['release', *argv])
+                commit = self.publish(version)
+                request = self.installed(self.ENTRY, core, REMOTE, *argv, root=self.source, version=version, commit=commit,
+                                         cause='install')
+                self.assertEqual(request['selections'], expected)
+                # The installer that holds the install lock compares the registration of the command's start.
+                self.assertEqual(request['start_registration'],
+                                 dict(root=str(self.source), remote='https://example.invalid/recorded.git'))
+        # Named skills replace the recorded selection.
+        commit = self.publish('named skills')
+        request = self.installed(self.ENTRY, core, REMOTE, '--platform', 'claude', 'fam', root=self.source,
+                                 version='named skills', commit=commit, cause='install')
+        self.assertNotIn('selections', request)
+        self.assertEqual(self.children[0][0][2:], ['--platform', 'claude', 'fam'])
+
+    def test_a_named_host_without_an_installed_selection_receives_every_skill(self):
+        core = self.saved_package(status='successful', selections={'claude': ['fam']}, root=self.source,
+                                  remote='https://example.invalid/saved.git')
+        self.write_record(active=core, skills={'claude': ['alpha']}, root=str(self.source),
+                          remote='https://example.invalid/recorded.git')
+        commit = self.publish('another host')
+        request = self.installed(self.ENTRY, core, REMOTE, '--platform', 'codex', root=self.source, version='another host',
+                                 commit=commit, cause='install')
+        self.assertNotIn('selections', request)
+        self.assertEqual(self.children[0][0][2:], ['--platform', 'codex'])
+        saved = json.loads((Path(request['package_root']).parent / 'version.json').read_text())
+        self.assertEqual(saved['selections'], {'codex': list(ALL_SKILLS)})
+
+    def test_a_merge_installs_for_every_detected_host_and_names_its_cause(self):
+        commit = self.publish('release')
+        self.repository(self.source, remote='https://example.invalid/checkout.git')
+        merged = self.source.resolve()
+        self.write_record(skills={'claude': ['alpha']}, root=str(merged), remote='https://example.invalid/recorded.git')
+        with mock.patch('installer.source.interactive', side_effect=AssertionError('a merge asks nothing')):
+            request = self.installed(self.ENTRY, merged, REMOTE, '--post-merge', root=merged, version='release',
+                                     commit=commit, cause='post-merge')
+        self.assertNotIn('selections', request)
+        self.assertEqual(self.children[0][0][2:], [])
+        saved = json.loads((Path(request['package_root']).parent / 'version.json').read_text())
+        self.assertEqual(saved['selections'], {host: list(ALL_SKILLS) for host in ('claude', 'codex')})
+
+    def test_update_keeps_the_recorded_source_takes_the_remote_and_installs_the_installed_selection(self):
+        core = self.saved_package(status='successful', selections={'claude': ['fam']}, root=self.source,
+                                  remote='https://example.invalid/saved.git')
+        installed = {'claude': ['alpha'], 'codex': ['fam']}
+        release_input = source.release_input
+        for argv, expected in ((['update'], installed), (['update', '--platform', 'claude'], {'claude': ['alpha']}),
+                               (['update', '--remote', REMOTE, '--ref', 'main', '--skip-source-health'], installed)):
+            with self.subTest(argv=argv):
+                recorded = 'https://example.invalid/recorded.git' if '--remote' in argv else REMOTE
+                self.write_record(active=core, skills=installed, root=str(self.source), remote=recorded)
+                version = ' '.join(argv)
+                commit = self.publish(version)
+
+                def switch_after_the_comparison(checkout, origin):
+                    self.write_record(active=core, skills=installed, root=str(self.release), remote='/another/remote')
+                    return release_input(checkout, origin)
+
+                # The candidate compares the origin of the request under the lock.
+                with mock.patch('installer.source.release_input', side_effect=switch_after_the_comparison):
+                    request = self.installed(self.ENTRY, core, REMOTE, *argv, root=self.source, version=version, commit=commit,
+                                             cause='update')
+                self.assertEqual(request['selections'], expected)
+                self.assertEqual(request['start_registration'], dict(root=str(self.source), remote=recorded))
+        self.write_record(active=core, skills=installed, root=str(self.source), remote=REMOTE)
+        for start in (dict(root='/another/folder', remote=REMOTE), dict(root=str(self.source), remote='/another/remote')):
+            with self.subTest(start=start), mock.patch.dict(os.environ, {cli.START_ORIGIN_ENV: json.dumps(start)}):
+                code, output = self.run_entry(self.ENTRY, core, REMOTE, 'update', '--remote', REMOTE)
+                self.assertEqual((code, self.children), (1, []), output)
+        # An earlier caller can supply only the download remote. Detect a change when it used no override.
+        self.write_record(active=core, skills=installed, root=str(self.source), remote='/changed')
+        code, output = self.run_entry(self.ENTRY, core, REMOTE, 'update')
+        self.assertEqual((code, self.children), (1, []), output)
+        self.assertIn(report.message('update_origin_changed'), output)
+        self.write_record(active=core, root=str(self.source), remote=REMOTE)
+        code, output = self.run_entry(self.ENTRY, core, REMOTE, 'update')
+        self.assertEqual((code, self.children), (1, []), output)
+
+    def test_a_skill_that_the_release_does_not_hold_stops_before_the_package_is_saved(self):
+        self.publish('release')
+        core = self.saved_package(status='successful', selections={'claude': ['fam']}, root=self.source,
+                                  remote='https://example.invalid/saved.git')
+        self.write_record(active=core, skills={'claude': ['alpha', 'no-longer-here']}, root=str(self.source), remote=REMOTE)
+        before = self.home_files()
+        for entry, argv, name in (
+                (self.ENTRY, ['--platform', 'claude', 'alpha', 'no-such-skill'], 'no-such-skill'),
+                (self.ENTRY, ['no-such-skill'], 'no-such-skill'),
+                (self.ENTRY, ['update'], 'no-longer-here'), (self.ENTRY, [], 'no-longer-here'),
+                ('--install-acquired-update', ['update'], 'no-longer-here')):
+            with self.subTest(entry=entry, argv=argv):
+                root = core if not argv else self.source
+                coordinates = [root, REMOTE, *(['main'] if entry != self.ENTRY else [])]
+                code, output = self.run_entry(entry, *coordinates, *argv)
+                self.assertEqual((code, self.children), (1, []), output)
+                self.assertIn(f'Skill not found: {name}', output)
+                self.assertEqual(self.home_files(), before)
+
+    def test_the_help_of_update_comes_from_the_release_and_installs_nothing(self):
+        self.publish('release')
+        self.write_record(skills={'claude': ['alpha']}, root=str(self.source), remote=REMOTE)
+        before = self.home_files()
+        for entry in ([self.ENTRY, self.source, REMOTE], ['--install-acquired-update', self.source, REMOTE, 'main']):
+            with self.subTest(entry=entry[0]):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as stop:
+                    cli.main([*map(str, entry), 'update', '--help'])
+                self.assertEqual((stop.exception.code, self.children), (0, []))
+                self.assertIn('usage: ghost-alice update', output.getvalue())
+                self.assertEqual(self.home_files(), before)
+
+    def test_everything_else_is_refused_before_any_change(self):
+        commit = self.publish('release')
+        self.write_record(skills={'claude': ['alpha']}, root=str(self.source), remote=REMOTE, commit=commit)
+        root, request = str(self.source), {'package_root': str(runner.REPO_ROOT.resolve()), 'source': {'root': str(self.source)}}
+        before = self.home_files()
+        for arguments in ([], [root], [root, ''], ['', REMOTE], ['relative/folder', REMOTE],
+                          [str(self.home / 'no-such-folder'), REMOTE],
+                          *([root, REMOTE, *command] for command in (
+                              ['--local-source'], ['update', '--local-source'], ['--platform', 'claude', '--local-source'],
+                              ['--status'], ['--uninstall'], ['--platform', 'claude', '--uninstall', 'alpha'], ['--repair'],
+                              ['--doctor'], ['--list'], ['--update-source'], ['--cleanup-pending'], ['gateway', 'detach'],
+                              ['--help'], ['--bogus']))):
+            with self.subTest(arguments=['ROOT' if argument == root else argument for argument in arguments]):
+                code, output = self.run_entry(self.ENTRY, *arguments)
+                self.assertEqual((code, self.children), (1, []), output)
+                self.assertIn('[ERROR]', output)
+                self.assertNotIn(f'Unknown option: {self.ENTRY}', output)
+                self.assertEqual(self.home_files(), before)
+        for command in ([], ['update'], ['--post-merge']):
+            with self.subTest(request=command), \
+                    mock.patch.dict(os.environ, {'GHOST_ALICE_PACKAGE_REQUEST': json.dumps(request)}):
+                code, output = self.run_entry(self.ENTRY, root, REMOTE, *command)
+                self.assertEqual((code, self.children), (1, []), output)
+                self.assertNotIn(f'Unknown option: {self.ENTRY}', output)
+                self.assertEqual(self.home_files(), before)
+
+    def test_the_update_entry_of_earlier_releases_compares_its_coordinates_with_the_record(self):
+        entry = '--install-acquired-update'
+        installed = {'claude': ['alpha'], 'codex': ['fam']}
+        recorded = dict(root=str(self.source), remote=REMOTE)
+        for ref, argv, remote, expected in (
+                ('main', ['update'], REMOTE, installed), ('refs/heads/main', ['update'], REMOTE, installed),
+                ('main', ['update', '--platform', 'claude', '--ref', 'main'], REMOTE, {'claude': ['alpha']}),
+                ('main', ['update', '--remote', '/another/remote'], '/another/remote', installed)):
+            with self.subTest(ref=ref, argv=argv):
+                self.write_record(skills=installed, **recorded)
+                version = ' '.join([ref, *argv])
+                commit = self.publish(version)
+                request = self.installed(entry, self.source, remote, ref, *argv, root=self.source, version=version,
+                                         commit=commit, cause='update', remote=remote)
+                self.assertEqual(request['selections'], expected)
+                self.assertEqual(request['start_registration'], recorded)
+        before = self.home_files()
+        request = {'package_root': str(runner.REPO_ROOT.resolve()), 'source': recorded}
+        for name, coordinates, argv, environment in (
+                ('another folder', [str(self.release), REMOTE, 'main'], ['update'], {}),
+                ('another remote', [str(self.source), '/another/remote', 'main'], ['update'], {}),
+                ('another branch', [str(self.source), REMOTE, 'refs/heads/feature'], ['update'], {}),
+                ('a remote of the arguments', [str(self.source), REMOTE, 'main'], ['update', '--remote', '/another/remote'], {}),
+                ('a branch of the arguments', [str(self.source), REMOTE, 'main'], ['update', '--ref', 'feature'], {}),
+                ('local files', [str(self.source), REMOTE, 'main'], ['update', '--local-source'], {}),
+                ('an install', [str(self.source), REMOTE, 'main'], ['--platform', 'claude'], {}),
+                ('a status', [str(self.source), REMOTE, 'main'], ['--status'], {}),
+                ('a request', [str(self.source), REMOTE, 'main'], ['update'],
+                 {'GHOST_ALICE_PACKAGE_REQUEST': json.dumps(request)})):
+            with self.subTest(refused=name), mock.patch.dict(os.environ, environment):
+                code, output = self.run_entry(entry, *coordinates, *argv)
+                self.assertEqual((code, self.children), (1, []), output)
+                self.assertIn('[ERROR]', output)
+                self.assertEqual(self.home_files(), before)
 
 
 class DispatchCase(CliCase):
@@ -772,7 +1745,6 @@ class DispatchCase(CliCase):
         self.stub("installer.addons.prepare_sources")
         self.stub("installer.auto.run_install_children", 0)
         self.stub("installer.auto.run_uninstall_children", 0)
-        self.stub("installer.cli.prepare_install")
         self.stub("installer.cli.run_install", 0)
         self.stub("installer.lock.acquire", (self.home / "lock", "generation"))
         self.stub("installer.lock.release")
@@ -783,6 +1755,17 @@ class DispatchCase(CliCase):
                                               side_effect=lambda remote: contextlib.nullcontext(self.release)))
         self.patches.enter_context(mock.patch('installer.source.release_input',
             side_effect=lambda checkout, origin: dict(origin, branch='main', commit='fixture-release')))
+        run_command = runner.run_command
+        self.release_processes: list[list[str]] = []
+
+        def run_release_in_this_process(argv, **kwargs):
+            if list(argv[2:3]) != ['--install-acquired-release']:
+                return run_command(argv, **kwargs)
+            self.release_processes.append([str(value) for value in argv])
+            with mock.patch.dict(os.environ, kwargs.get('env') or {}):
+                return ToolResult(cli.main(argv[2:]))
+
+        self.patches.enter_context(mock.patch('installer.runner.run_command', side_effect=run_release_in_this_process))
         self.dispatched_inputs = []
         def dispatch_without_candidate_process(options, **kwargs):
             self.dispatched_inputs.append(kwargs)
@@ -851,8 +1834,8 @@ class DispatchTests(DispatchCase):
     def test_install_paths(self):
         rc, _ = self.dispatch(["--platform", "claude"])
         self.assertEqual(rc, 0)
-        self.assertEqual([n for n in self.names() if n in ("prepare_install", "acquire", "run_install", "release")],
-                         ["prepare_install", "acquire", "run_install", "release"])
+        self.assertEqual([n for n in self.names() if n in ("acquire", "run_install", "release")],
+                         ["acquire", "run_install", "release"])
         _, args, _ = next(c for c in self.calls if c[0] == "run_install")
         self.assertEqual(args[0].options.args, [])
         self.assertEqual(args[0].platform, "claude")
@@ -885,13 +1868,8 @@ class DispatchTests(DispatchCase):
             with self.subTest(command=command.usage):
                 self.calls.clear()
                 handler = mock.Mock(side_effect=lambda c: self.calls.append(("handler", (c,), {})) or 7)
-                before = mock.Mock(side_effect=lambda c: self.calls.append(("before_lock", (c,), {})))
-                probe = dataclasses.replace(command, run=handler,
-                                            before_lock=before if command.before_lock is not None else None)
-                self.assertEqual(cli.run_command(probe, ctx), 7)
-                expected = ["before_lock"] if command.before_lock is not None else []
-                expected += ["acquire", "handler", "release"] if command.lock else ["handler"]
-                self.assertEqual(self.names(), expected)
+                self.assertEqual(cli.run_command(dataclasses.replace(command, run=handler), ctx), 7)
+                self.assertEqual(self.names(), ["acquire", "handler", "release"] if command.lock else ["handler"])
                 if command.lock:
                     self.assertEqual(self.calls[self.names().index("acquire")][1], (command.lock, "codex"))
                     self.assertEqual(self.calls[self.names().index("release")][1], ((self.home / "lock", "generation"),))
@@ -964,7 +1942,7 @@ class DispatchTests(DispatchCase):
 class SourceCheckTests(DispatchCase):
     """Install (auto mode and one platform) and repair compare the install record's `source.root` with the
     checkout the installer runs from before anything changes: before addon sources are prepared, before the
-    prerequisites and the git hook path, before the lock (which restores unfinished publishes)."""
+    prerequisites, before the lock (which restores unfinished publishes)."""
 
     def setUp(self):
         super().setUp()
@@ -978,7 +1956,7 @@ class SourceCheckTests(DispatchCase):
         self.record.write_text(json.dumps({"schema_version": 1, "targets": {}, "source": {
             "root": str(root), "commit": "c0ffee", "dirty": "clean", "hooks_path": "hooks"}}), encoding="utf-8")
 
-    CHANGES = ("prepare_sources", "prepare_install", "acquire", "run_install", "run_repair", "run_install_children")
+    CHANGES = ("prepare_sources", "acquire", "run_install", "run_repair", "run_install_children")
 
     def test_another_checkout_stops_install_and_repair_before_anything_changes(self):
         self.record_source(self.other)
@@ -1000,11 +1978,10 @@ class SourceCheckTests(DispatchCase):
                                                   side_effect=lambda ctx, _name=name, **kwargs:
                                                   self.calls.append((_name, (), kwargs))))
         for argv, steps in ((["--platform", "codex", "--addon-source", "/a"],
-                             ["check_install_source", "prepare_sources", "prepare_install", "acquire",
-                              "recheck_install_source", "run_install", "release"]),
-                            (["--platform", "claude"],
-                             ["check_install_source", "prepare_install", "acquire", "recheck_install_source",
+                             ["check_install_source", "prepare_sources", "acquire", "recheck_install_source",
                               "run_install", "release"]),
+                            (["--platform", "claude"],
+                             ["check_install_source", "acquire", "recheck_install_source", "run_install", "release"]),
                             (["--platform", "claude", "--repair"],
                              ["check_install_source", "acquire", "recheck_install_source", "run_repair", "release"]),
                             (["--addon-source", "/a"], ["check_install_source", "prepare_sources", "run_install_children"]),
@@ -1108,7 +2085,7 @@ class PostMergeTests(DispatchCase):
         self.record.write_text(json.dumps({"schema_version": 1, "targets": {}, "source": {
             "root": str(root), "commit": "c0ffee", "dirty": "clean", "hooks_path": "hooks"}}), encoding="utf-8")
 
-    INSTALLS = ("prepare_sources", "prepare_install", "acquire", "run_install", "run_repair", "run_install_children")
+    INSTALLS = ("prepare_sources", "acquire", "run_install", "run_repair", "run_install_children")
 
     def test_the_install_source_goes_on_with_the_auto_mode_install(self):
         self.record_source(self.source)
@@ -1118,7 +2095,8 @@ class PostMergeTests(DispatchCase):
         _, args, _ = next(call for call in self.calls if call[0] == "run_install_children")
         self.assertFalse(args[0].options.platform_explicit)
         self.assertEqual(args[1], ["claude", "codex"])
-        self.assertEqual(self.dispatched_inputs[-1]['input_root'], self.release)
+        self.assertEqual([(Path(entry[1]), entry[3], entry[5:]) for entry in self.release_processes],
+                         [(self.release / '_shared/installer/cli.py', str(self.source.resolve()), ['--post-merge'])])
         self.assertEqual(self.dispatched_inputs[-1]['provenance']['root'], str(self.source.resolve()))
         # The step itself takes no lock: each platform's install takes it, and refuses while another install holds it.
         self.assertNotIn("acquire", self.names())
@@ -1159,6 +2137,22 @@ class PostMergeTests(DispatchCase):
         self.assertTrue(out.endswith("); nothing was installed.\n"))
         self.assertEqual([name for name in self.names() if name in self.INSTALLS], [])
 
+    def test_management_entry_identifies_the_missing_active_file_and_repair_source(self):
+        active = self.home / "incomplete package"
+        with mock.patch.object(source, "active_root", return_value=str(active)):
+            code, output = self.dispatch(["--management-entry", "--doctor"])
+        self.assertEqual(code, 1)
+        self.assertIn(str(active / "_shared/installer/cli.py"), output)
+        self.assertIn("--repair from a Ghost-ALICE checkout", output)
+
+    def test_a_merge_without_an_active_installer_installs_nothing(self):
+        # Git can run the hook with another HOME, which holds no installation.
+        rc, out = self.dispatch(["--management-entry", "--post-merge", "--merged-checkout", str(self.source)])
+        self.assertEqual((rc, out), (0, "[INFO] Post-merge: no install record names an install source; "
+                                        "nothing was installed.\n"))
+        rc, out = self.dispatch(["--management-entry", "--doctor"])
+        self.assertEqual((rc, out), (1, "[ERROR] No installer is active. Run the installation command again.\n"))
+
     def test_the_install_source_check_function_judges(self):
         # The record names another folder, but the one judgment says this is the install source: the step and the
         # install's own check both follow it, so the hook keeps no copy of the comparison.
@@ -1184,7 +2178,6 @@ class UnfinishedPublishTests(CliCase):
         folder = self.home / ".ghost-alice" / "rollbacks" / "20261020T000000Z-1-aaaaaaaa"
         folder.mkdir(parents=True)
         (folder / "journal.json").write_text("{broken", encoding="utf-8")
-        self.stub("installer.cli.prepare_install")
         for target in ("installer.cli.run_install", "installer.lifecycle.uninstall", "installer.lifecycle.run_repair",
                        "installer.preservation.cleanup_pending"):
             self.stub(target, 0)
@@ -1199,13 +2192,13 @@ class UnfinishedPublishTests(CliCase):
                 with runner.patch():
                     out = self.expect_exit(1, cli.run_command, command, ctx)
                 self.assertIn(f"review {folder}", out)
-                self.assertEqual([name for name, _, _ in self.calls if name != "prepare_install"], [])
+                self.assertEqual(self.calls, [])
                 self.assertEqual(runner.tool_calls("context_gateway_install.py"), [])
                 self.assertFalse((self.home / ".ghost-alice" / "install.lock").exists())
 
 
 class InstallOrderTests(CliCase):
-    STEPS = ("install_prerequisites", "setup_git_hooks", "acquire", "migrate_record", "check_source_health",
+    STEPS = ("acquire", "check_source_health",
              "collect_targets",
              "cleanup_deprecated_installed_skills", "encoding_guard", "preflight", "resume_pending_uninstalls",
              "check_addon_collisions", "sync_runtime_shared", "report_gateway", "install_hooks", "ensure_bootstrap",
@@ -1217,8 +2210,6 @@ class InstallOrderTests(CliCase):
         super().setUp()
         (self.source / "task-router").mkdir()
         (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
-        self.stub("installer.prerequisites.install_prerequisites", True)
-        self.stub("installer.source.setup_git_hooks", HookPathChange(changed=False, recorded=False))
         self.stub("installer.lock.acquire", (self.home / "lock", "generation"))
         self.stub("installer.lock.release")
         self.stub("installer.transaction.migrate_record")
@@ -1278,6 +2269,17 @@ class InstallOrderTests(CliCase):
         self.assertFalse(journal.folder.exists())
         self.assertEqual((current / 'ghost-state.sqlite3').read_bytes(), b'current records')
 
+    def test_install_reports_the_cause_and_backup_for_an_unreadable_inventory(self):
+        state = self.home / '.ghost-alice' / 'install-state' / 'claude.json'
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text('{"targets":[{}]}')
+        rc, output = self.captured(cli.run_install, make_context(self.home, "claude", args=["alpha"]))
+        self.assertEqual(rc, 0, output)
+        backup, = state.parent.glob('claude.json.*.bak')
+        self.assertEqual(backup.read_text(), '{"targets":[{}]}')
+        self.assertIn(str(backup), output)
+        self.assertIn('invalid install-state target', output)
+
     def test_real_postflight_source_loss_stops_the_cli_before_snapshot(self):
         checkout = Path(__file__).resolve().parents[1]
         verifier = self.source / "merge-companion" / "scripts"
@@ -1325,6 +2327,8 @@ class InstallOrderTests(CliCase):
         self.assertLess(names.index("check_addon_collisions"), names.index("copy_targets_batch"))
         self.assertLess(names.index("install_hooks"), names.index("ensure_claude_bootstrap"))
         self.assertLess(names.index("sync_runtime_shared"), names.index("install_hooks"))
+        # The activation migrates the record before it starts this host's installation.
+        self.assertNotIn("migrate_record", names)
         for name, args, _ in self.calls:
             if name in ("encoding_guard", "preflight"):
                 self.assertIs(args[1], self.collected)
@@ -1391,7 +2395,6 @@ class InstallOrderTests(CliCase):
         self.assertEqual(stop.exception.code, 1)
         names = [n for n, _, _ in self.calls]
         self.assertNotIn("collect_targets", names)
-        self.assertIn("migrate_record", names)
         self.assertEqual(names[-1], "release")
 
     def test_the_earlier_records_are_still_written_after_placement(self):
@@ -1461,8 +2464,7 @@ class InstallOrderTests(CliCase):
                 ctx = make_context(self.home, platform, args=["task-router"])
                 rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
                 self.assertEqual(rc, 0)
-                command = self.home / '.ghost-alice/bin' / ('ghost-alice.cmd' if os.name == 'nt' else 'ghost-alice')
-                self.assertIn(f'To update the installed Core selection: {command} update', out)
+                self.assertIn(f"To update the installed Core selection: {locations.management_command('update')}", out)
 
     def test_default_skills_are_all_skills(self):
         ctx = make_context(self.home, "claude")

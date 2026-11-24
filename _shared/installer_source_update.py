@@ -11,6 +11,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from installer import locations
+
 
 class SourceUpdate:
     def __init__(self, root):
@@ -76,7 +78,7 @@ def main(argv=None):
     try:
         operation.prepare()
         operation.run_unmanaged()
-        print('Source checkout updated. Now rerun the installer: bash install.sh', file=sys.stderr)
+        print(f'Source checkout updated. To install these files, run {locations.package_command(args.source_dir, "--local-source")}', file=sys.stderr)
         return 0
     except (ValueError, OSError, RuntimeError) as exc:
         print(json.dumps(dict(status='blocked', error_code='SOURCE_UPDATE', phase='source-update', detail=str(exc))),

@@ -9,7 +9,7 @@ copy markers belong to the staged payload; the snapshot, the sidecars and the in
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import os
 from pathlib import Path
@@ -25,7 +25,6 @@ from installer.runner import ToolResult
 if TYPE_CHECKING:
     from installer.cli import Context
     from installer.selection import Collected, Target
-    from installer.source import HookPathChange
 
 # The runtime companion scripts the context gateway runs beside the runtime `_shared`, relative to the
 # checkout and to the runtime root; the runtime publish carries them with `_shared`.
@@ -64,7 +63,7 @@ class LedgerLocations:
                 *self.unavailable_hosts.items())
 
 
-def installed_ledger_locations(*, ghost_root: Path | None = None, before_handoff: dict | None = None) -> LedgerLocations:
+def installed_ledger_locations(*, ghost_root: Path | None = None) -> LedgerLocations:
     """Group actual installed bindings and their source relationships, without changing them."""
     import install_hooks
     import runtime_config
@@ -80,20 +79,13 @@ def installed_ledger_locations(*, ghost_root: Path | None = None, before_handoff
     record_path = str(installed_payload.read_path(ghost_root))
     try:
         record = installed_payload.read(ghost_root) or {}
-        source_record = installed_payload.recorded_source(ghost_root, record)
+        source_record = record.get('source', {})
     except (OSError, installed_payload.RecordError) as exc:
         record = {}
         source_record = {}
         errors[record_path] = str(exc)
     retained = source_record.get('ledger_source_roots', {})
     origin = source_record.get('root')
-    if before_handoff and before_handoff.get('root') == origin:
-        # During an old manager's last publication, v2 contains the source path only.
-        # Keep the observed hosts for a still-matching path if its binding became unreadable.
-        retained = dict(retained)
-        for path, fact in before_handoff.get('ledger_source_roots', {}).items():
-            if isinstance(fact, dict) and retained.get(path) == fact['source_root']:
-                retained[path] = fact
     fixed = (ghost_root / 'session-intent').resolve()
     retired = {Path(value).resolve() for value in config.get('retired_ledger_roots', [])}
     grouped = {}
@@ -394,7 +386,7 @@ def migrate_ledger(old_root: Path, *, writers_stopped: bool) -> LedgerMoveResult
     The caller confirms host and CLI writers have stopped. The gateway participant confirms
     service absence. Commit data and every binding before allowing that service to resume.
     """
-    from dataclasses import asdict, replace
+    from dataclasses import asdict
     import shutil
     import install_destination
     import install_hooks
@@ -567,8 +559,7 @@ class SyncCounts:
 
 
 def record_source(ctx: "Context") -> dict:
-    """The `source` section every publish of this command records: the checkout's root,
-    commit, dirty state and git hook path, read once per command."""
+    """The origin of the Core files this command copies. Repair binds it to the verified active package."""
     if ctx.record_source is None:
         ctx.record_source = source.input_record()
     return ctx.record_source
@@ -585,7 +576,18 @@ def _request_target(ctx: "Context", name: str, source_path: Path, dest: Path, *,
     return target
 
 
-def publish(ctx: "Context", targets: list[dict], progress: dict | None = None) -> ToolResult:
+def _relation_errors(ctx: "Context", observed: LedgerLocations) -> dict[str, str]:
+    """The causes that stop every publish of this checkout."""
+    errors = dict(observed.observation_errors)
+    if observed.source_root is not None and observed.source_root != Path(record_source(ctx)['root']).resolve():
+        # A malformed active host entry may still depend on the old common source
+        # even when no individual ledger relationship was recorded before it broke.
+        errors.update(observed.active_config_errors)
+    return errors
+
+
+def publish(ctx: "Context", targets: list[dict], progress: dict | None = None, *,
+            repair_from: Path | None = None) -> ToolResult:
     """Build one publish request for `targets` and call `install_transaction.publish` in this process
     with the participants the install record names.
 
@@ -595,22 +597,25 @@ def publish(ctx: "Context", targets: list[dict], progress: dict | None = None) -
     """
     checkout = record_source(ctx)
     observed = installed_ledger_locations()
-    errors = dict(observed.observation_errors)
+    errors = _relation_errors(ctx, observed)
     if ctx.platform in observed.host_config_errors:
         errors[ctx.platform] = observed.host_config_errors[ctx.platform]
-    if observed.source_root is not None and observed.source_root != Path(checkout['root']).resolve():
-        # A malformed active host entry may still depend on the old common source
-        # even when no individual ledger relationship was recorded before it broke.
-        errors.update(observed.active_config_errors)
     if errors:
         raise ValueError('Cannot confirm installed record source relationships: ' + '; '.join(
             f'{path}: {cause}' for path, cause in errors.items()))
+    # Repair replaces missing targets. Only an installation assigns the installer and its release origin.
+    installer, origin = {}, {}
+    if repair_from is None:
+        origin = checkout
+        installer = {"commit": checkout["commit"], "schema_version": installed_payload.SCHEMA_VERSION}
+        if source.install_request():
+            installer["active_root"] = str(runner.REPO_ROOT)
     request = {"schema_version": install_transaction.REQUEST_SCHEMA_VERSION, "host": ctx.platform,
                "ghost_root": str(locations.record_root()), "event_log": str(locations.events_log(ctx.platform)),
-               "installer": {"commit": checkout["commit"], "schema_version": installed_payload.SCHEMA_VERSION},
-               "source": observed.publication_source(checkout), "asset_root": str(runner.REPO_ROOT), "targets": targets}
-    request['source'] = source.check_previous_manager(request['source'])
-    if any(target['kind'] == 'support' and target['name'] == '_shared' for target in targets):
+               "installer": installer,
+               "source": observed.publication_source(origin), "asset_root": str(repair_from or runner.REPO_ROOT),
+               "targets": targets}
+    if repair_from is None and any(target['kind'] == 'support' and target['name'] == '_shared' for target in targets):
         request['install_state'] = str(locations.install_state_path(ctx.platform))
     if progress:
         request["progress"] = progress
@@ -627,10 +632,11 @@ def publish(ctx: "Context", targets: list[dict], progress: dict | None = None) -
     return ToolResult(0)
 
 
-def copy_target(ctx: "Context", target: "Target", dest: Path, kind: str = "skill") -> bool:
+def copy_target(ctx: "Context", target: "Target", dest: Path, kind: str = "skill", *,
+                repair_from: Path | None = None) -> bool:
     """One copy publish of `target` at `dest`; `Staged copy replace failed: <dest>` on failure."""
     request = _request_target(ctx, target.name, target.path, dest, kind=kind, mode="copy", provider=target.provider)
-    if not publish(ctx, [request]).ok:
+    if not publish(ctx, [request], repair_from=repair_from).ok:
         report.error(f"Staged copy replace failed: {dest}")
         return False
     return True
@@ -680,39 +686,30 @@ def record_current_links(ctx: "Context", links: list[tuple["Target", Path, str]]
         report.warn("The install record could not record the targets that were already installed")
 
 
-def _shared_target() -> "Target":
+def _shared_target(source_root: Path | None = None) -> "Target":
     from installer.selection import Target
 
-    return Target("_shared", runner.REPO_ROOT / "_shared")
+    return Target("_shared", (source_root or runner.REPO_ROOT) / "_shared")
 
 
-def install_shared(ctx: "Context", skills_dir: Path, copy_only: bool) -> int:
+def install_shared(ctx: "Context", skills_dir: Path, copy_only: bool, *, repair_from: Path | None = None) -> int:
     """`_shared` placement: copy in copy mode, skip when already linked to the
     source, else link-or-copy."""
-    shared = _shared_target()
+    shared = _shared_target(repair_from)
     shared_dest = Path(skills_dir) / "_shared"
     if not shared.path.is_dir():
         return 0
-    if copy_only:
-        return 0 if copy_target(ctx, shared, shared_dest, "support") else 1
+    if copy_only or repair_from is not None:
+        return 0 if copy_target(ctx, shared, shared_dest, "support", repair_from=repair_from) else 1
     if shared_dest.is_symlink() and os.readlink(shared_dest) == str(shared.path):
         report.warn("_shared. Already installed (skipped)")
         return 0
     return link_or_copy(ctx, shared, shared_dest, "support")
 
 
-def sync_runtime_shared(ctx: "Context") -> bool:
-    """Publish `<checkout>/_shared` and the runtime companions under the runtime root in one request;
-    one publish, so a registered gateway stops and starts once."""
-    shared = _shared_target()
-    if not shared.path.is_dir():
-        return True
-    runtime_root = locations.runtime_root()
-    targets = [_request_target(ctx, shared.name, shared.path, runtime_root / "_shared", kind="runtime", mode="copy")]
-    for relative in RUNTIME_COMPANIONS:
-        companion = runner.REPO_ROOT / relative
-        if companion.is_file():
-            targets.append(_request_target(ctx, relative, companion, runtime_root / relative, kind="runtime", mode="copy"))
+def _command_targets(ctx: "Context") -> list[dict]:
+    """The commands in `bin/` that start this package."""
+    targets = []
     for name, original in locations.MANAGEMENT_COMMANDS.items():
         entry = runner.REPO_ROOT / original
         if entry.is_file():
@@ -723,6 +720,22 @@ def sync_runtime_shared(ctx: "Context") -> bool:
             elif original == 'install.ps1':
                 target['command_text'] = "& '" + str(entry).replace("'", "''") + "' --management-entry @args\nexit $LASTEXITCODE\n"
             targets.append(target)
+    return targets
+
+
+def sync_runtime_shared(ctx: "Context") -> bool:
+    """Publish `<checkout>/_shared` and the runtime companions under the runtime root, and the commands in `bin/`,
+    in one request; one publish, so a registered gateway stops and starts once."""
+    shared = _shared_target()
+    if not shared.path.is_dir():
+        return True
+    runtime_root = locations.runtime_root()
+    targets = [_request_target(ctx, shared.name, shared.path, runtime_root / "_shared", kind="runtime", mode="copy")]
+    for relative in RUNTIME_COMPANIONS:
+        companion = runner.REPO_ROOT / relative
+        if companion.is_file():
+            targets.append(_request_target(ctx, relative, companion, runtime_root / relative, kind="runtime", mode="copy"))
+    targets.extend(_command_targets(ctx))
     if not publish(ctx, targets).ok:
         report.error(f"Staged copy replace failed: {runtime_root / '_shared'}")
         return False
@@ -782,20 +795,78 @@ def _report_unrecorded_service() -> tuple[str, bool] | None:
     return summary, True
 
 
-def migrate_record(ctx: "Context") -> None:
+def activate(ctx: "Context", selections: dict[str, list[str]]) -> None:
+    """Make this package the active installer, under the install lock and before any host file changes.
+
+    Every stop condition and the Git hook registration come first, so a stop leaves the install record unchanged.
+    The package then keeps `selections` and the source of this request as an unfinished installation, and one
+    replacement of the record names this package. From that point on the management command, also one an earlier
+    package published, starts this package, and this package recovers an interrupted placement. Each recorded command
+    is then replaced for one of its users: from then on no earlier package starts before this one. A host that does not
+    use a command yet receives it with its runtime (`sync_runtime_shared`)."""
+    from installer import git_hooks
+
+    root, folder = locations.record_root(), runner.REPO_ROOT.parent
+    source.check_saved_package(folder)
+    sections = {'installer': {'active_root': str(runner.REPO_ROOT)}}
+    pending = installed_payload.pending_source(root)
+    if pending is not None and installed_payload.matches_pending(installed_payload.read(root) or {}, pending):
+        sections['source'] = pending['source']
+    observed = installed_ledger_locations()
+    errors = _relation_errors(ctx, observed)
+    if selections.keys() <= observed.host_config_errors.keys():
+        errors.update(observed.host_config_errors)
+    if errors:
+        raise ValueError('; '.join(f'{path}: {cause}' for path, cause in errors.items()))
+    inventories, errors = migration_inventories(root)
+    for error in errors:
+        if error.host not in selections:
+            raise error
+    git_hooks.register(Path(source.input_record()['root']))
+    for error in errors:
+        backup_unreadable_inventory(error.file)
+    report.run_logged(migrate_record, ctx, inventories=inventories)
+    install_transaction._write_json(folder / 'version.json', dict(
+        source._version_metadata(folder), status='candidate', selections=selections, source=source.input_record()))
+    record = installed_payload.read(root)
+    if record is not None:
+        installed_payload.update(root, sections)
+    if pending is not None:
+        (root / installed_payload.PENDING_SOURCE_FILENAME).unlink()
+    recorded = (record or {}).get('targets', {})
+    commands: dict[str, list[dict]] = {}
+    for target in _command_targets(ctx):
+        key = installed_payload.target_key(target['dest'], recorded)
+        users = set(recorded.get(key, {}).get('used_by', ())) - observed.host_config_errors.keys()
+        if users:
+            commands.setdefault(min(users), []).append(target)
+    for host, targets in commands.items():
+        if not publish(replace(ctx, platform=host), targets).ok:
+            raise ValueError(f"Staged copy replace failed: {root / 'bin'}")
+
+
+def migration_inventories(root: Path) -> tuple[dict[str, dict], list[installed_payload.InventoryError]]:
+    if not installed_payload.awaits_migration(installed_payload.read(root)):
+        return {}, []
+    hosts = [path.stem for path in locations.install_state_manifests(root / 'install-state')]
+    return installed_payload.earlier_inventories(root, hosts)
+
+
+def migrate_record(ctx: "Context", *, inventories=None) -> None:
     """Create the install record once from an earlier installer's records (`installed_payload.migrate`)
     for every host, then the gateway's `service` section once from its installation receipt
-    (`installed_payload.migrate_service`); a migration
-    that cannot finish is reported and the command goes on."""
+    (`installed_payload.migrate_service`). An unreadable inventory stops migration before any write."""
     root = locations.record_root()
     try:
-        hosts = [path.stem for path in locations.install_state_manifests(root / 'install-state')]
+        if inventories is None:
+            inventories, errors = migration_inventories(root)
+            if errors:
+                raise errors[0]
         runtime_targets = {}
-        existing = installed_payload.read(root)
-        if existing is None or existing['schema_version'] == 1:
+        if inventories:
             import runtime_config
             config = runtime_config.load_config(env={'GHOST_ALICE_GHOST_ROOT': str(root)}, strict=True)
-            for host in hosts:
+            for host in inventories:
                 binding = config.get('install_locations', {}).get(host, {})
                 shared = Path(binding.get('runtime_shared_dir') or locations.runtime_shared_dir())
                 for relative in ('_shared', *RUNTIME_COMPANIONS):
@@ -803,8 +874,8 @@ def migrate_record(ctx: "Context") -> None:
                     runtime_targets.setdefault(host, []).append(dict(target_name=relative,
                         dest_path=str(shared if relative == '_shared' else shared.parent / relative),
                         source_path=str(Path(origin) / relative) if origin else '', install_mode='copy'))
-        summary = installed_payload.migrate(root, hosts, installer_commit=record_source(ctx)["commit"],
-                                            runtime_targets=runtime_targets)
+        summary = installed_payload.migrate(root, list(inventories), installer_commit=record_source(ctx)["commit"],
+                                            runtime_targets=runtime_targets, inventories=inventories)
     except (installed_payload.RecordError, installed_payload.NotLockHolder, OSError) as exc:
         report.warn(f"Install record migration skipped: {exc}")
     else:
@@ -819,6 +890,13 @@ def migrate_record(ctx: "Context") -> None:
     if service is not None:
         report.info(f"Gateway record created from its installation receipt: {service['label']} "
                     f"(companion targets added {service['companions']})")
+
+
+def backup_unreadable_inventory(inventory: Path) -> None:
+    import install_state_writer
+    moved = install_state_writer.preserve_unreadable(inventory)
+    if moved:
+        report.warn(report.message('inventory_preserved', file=inventory, backup=moved[0], cause=moved[1]))
 
 
 def cleanup_obsolete_copies(ctx: "Context", collected: "Collected") -> bool:
@@ -864,19 +942,20 @@ def remove_installed_target(ctx: "Context", label: str, target: Path, *,
     A preview returns its proposed action. An applied removal also retires only that
     destination from the current host inventory; historical publish records stay.
     """
-    import install_state_writer
     from uninstall_cleanup import _target_item, _apply_target_item, release_target_records
 
     target = Path(target)
     state_path = locations.install_state_path(ctx.platform)
     try:
-        manifest = install_state_writer.read_state(state_path)
+        manifest = installed_payload.read_inventory(state_path, platform=ctx.platform)
     except (OSError, ValueError) as exc:
         return dict(target_name=label, path=str(target), action="manual-review",
                     reason="install-state-unreadable", detail=str(exc), removal_incomplete=True)
     manifest = manifest or dict(platform=ctx.platform, source_root=str(runner.REPO_ROOT), targets=[])
-    row = next((row for row in manifest["targets"] if Path(row["dest_path"]) == target), None)
-    if row is not None and row["target_name"] != label:
+    matches = [row for row in manifest['targets']
+               if installed_payload.inventory_destination(row['dest_path']) == target]
+    row = matches[0] if matches else None
+    if any(row['target_name'] != label for row in matches):
         return dict(target_name=label, path=str(target), action="manual-review",
                     reason="target-name-mismatch", removal_incomplete=True)
     if row is None:
@@ -965,11 +1044,8 @@ def write_empty_pending_manifest_if_missing(ctx: "Context", platform_dir: str, m
     return runner.run_tool("_shared/pending_manifest_writer.py", str(manifest), platform_dir).ok
 
 
-def write_install_state_manifest(ctx: "Context", skills_dir: Path, copy_only: bool, collected: "Collected",
-                                 hook_change: "HookPathChange | None") -> bool:
-    """`install_state_writer.py <platform> <root> <branch> <head> <dirty> <state> NAME SRC DEST MODE ...`
-    with the `GHOST_ALICE_SOURCE_REPO_HOOK_*` environment: the shared git hook path this
-    install owns and the value the full uninstall restores, whenever the install knows that value (`hook_change`)."""
+def write_install_state_manifest(ctx: "Context", skills_dir: Path, copy_only: bool, collected: "Collected") -> bool:
+    """`install_state_writer.py <platform> <root> <branch> <head> <dirty> <state> NAME SRC DEST MODE ...`."""
     skills_dir = Path(skills_dir)
     state_path = locations.install_state_path(ctx.platform)
     try:
@@ -986,17 +1062,8 @@ def write_install_state_manifest(ctx: "Context", skills_dir: Path, copy_only: bo
     for target in collected.all_targets:
         dest = skills_dir / target.name
         targets.extend([target.name, str(target.path), str(dest), detect_install_mode(dest, copy_only)])
-    recorded = hook_change if hook_change is not None and hook_change.recorded else None
-    env = {
-        "GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED": "1" if recorded else "0",
-        "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT": "1" if recorded and recorded.before_present else "0",
-        "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE": recorded.before if recorded else "",
-        "GHOST_ALICE_SOURCE_REPO_HOOK_AFTER": recorded.after if recorded else "",
-        "GHOST_ALICE_SOURCE_REPO_HOOK_APPLIED_AT": (recorded.applied_at or "") if recorded else "",
-        "GHOST_ALICE_SOURCE_REPO_HOOK_ROOT": str(info.root),
-    }
     result = runner.run_tool("_shared/install_state_writer.py", ctx.platform, str(runner.REPO_ROOT), info.branch, info.head,
-                             info.dirty, str(state_path), *targets, env=env)
+                             info.dirty, str(state_path), *targets)
     if not result.ok:
         report.error(f"Install-state manifest write failed; aborting install: {state_path}")
         return False
