@@ -96,10 +96,12 @@ Nov 24, 2026 · sk
 | 2 | `/visibility minimal`을 처리하는 동안(적용 직전) 내부 사유 코드 `row-not-found`가 든 영어 안내가 show로 나옴 | 세션 C 06:19:33Z tool-checkpoint 출력 | 설정을 바꾸는 순간에는 minimal이 아직 적용되지 않음 | 기록만 |
 | 3 | 재현 절차의 "Core 폴더로 이동" 단계를 놓치기 쉬움 | 세션 A 대화 기록의 작업 폴더가 `~` | 세션 A가 이슈 1 조건을 만족하지 못함 | 기록만. 절차에 작업 폴더 확인 단계 추가 필요 |
 | 4 | 전역 CLAUDE.md의 공유 작업 기록 규칙이 도구 호출을 늘림 | 세션 A 1회, 세션 C 2회 `history_tool.py add` 호출 | 도구 수와 훅 수 비교가 jy 환경과 달라짐 | 기록만 |
+| 5 | 기준 버전 재설치 뒤 pending-merge "버림" 결정 일부가 기록되지 않음(`mark_decided`가 같은 id의 예전 항목만 고침) | [이슈 문서](issues/2026-11-24/1-mark-decided-skips-pending-duplicate-id.md), [재현 스크립트](evidence/2026-11-24/repro_mark_decided_duplicate_id.py) | 결정한 항목이 계속 미결정으로 남고 `-Status`가 warning | 기록만. 최신 `main`은 `97185bd`에서 고쳐짐 |
 
 ## 5. 확인하지 못한 것
 
 - **Core 버전이 기준과 다릅니다.** 이번 설치본(`df903bc`)에는 기준(`c6019ac`) 이후의 변경이 들어 있습니다. 그래서 이슈 1~3이 재현되지 않은 것이 버전 차이 때문인지는 알 수 없습니다. 기준 버전으로는 이번 절차를 돌리지 않았습니다.
+- 재현에 쓴 설치본(`df903bc`)에는 Autopilot 훅이 하나도 등록되어 있지 않았습니다. 같은 날 기준 버전(`c6019ac` + Autopilot `v0.5.1`)으로 다시 설치하니 jy 이슈에 나오는 훅이 등록됐습니다: PreToolUse `adapter-autopilot-mode-prepare-origin`, Stop `adapter-autopilot-mode-continue`, UserPromptSubmit `pending-merge-prompt`. jy 이슈 4의 "도구 1번에 훅 3개" 중 하나가 `adapter-autopilot-mode-prepare-origin`이므로, 이 훅이 없던 것이 그 부분이 재현되지 않은 이유일 가능성이 큽니다. 기준 버전으로 다시 실행해 확인하지는 않았습니다.
 - 각 단계를 1회씩만 실행했습니다. jy는 5회입니다.
 - 입력 파일이 jy와 다릅니다. jy는 16줄짜리 `test-fixture/README.md`를 썼고, 이번에는 Core 폴더의 `README.md`를 썼습니다.
 - show로 기록된 훅 출력이 실제 화면에 표시됐는지는 확인하지 않았습니다.
@@ -109,5 +111,6 @@ Nov 24, 2026 · sk
 
 ## 6. 다음 단계
 
-- 기준 버전(`c6019ac`)을 별도 홈에 설치하고 같은 절차를 5회씩 반복합니다. 작업 폴더 확인 단계를 넣고, 공유 작업 기록 규칙은 뺀 상태로 합니다.
+- 이 PC는 2026-11-24에 기준 버전(Core `c6019ac`, Autopilot `v0.5.1`)으로 다시 설치했습니다. 이 설치로 같은 절차를 5회씩 반복합니다. 작업 폴더 확인 단계를 넣고, 공유 작업 기록 규칙은 뺀 상태로 합니다.
+- `mark_decided` 수정(`97185bd`)을 기준 브랜치에 옮겨 올지 팀이 정합니다.
 - 켬/끔 벤치를 3회씩 다시 돌릴지 정합니다. 1회 기준으로 켬은 약 $15에 30분, 끔은 약 $8에 20분이 걸립니다. 정확도가 이미 97~100%여서 차이가 드러나지 않을 수 있습니다. 그러면 더 어려운 문항이 필요합니다.
