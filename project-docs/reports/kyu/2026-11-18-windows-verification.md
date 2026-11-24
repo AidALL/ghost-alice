@@ -124,7 +124,7 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
   ```text
   python autopilot_completion.py publish --schema-version autopilot-completion-receipt.v2 --receipt-token <token> --verified-at <time> --evidence-source <id> --completion-file completion.md --criterion-dependencies-json <mapping>
   ```
-  재현용 테스트([`test_zz_repro_crlf_completion_file.py`](evidence/2026-11-23/test_zz_repro_crlf_completion_file.py))가 이 과정을 자동으로 합니다.
+  재현용 테스트([`repro_crlf_completion_file.py`](evidence/2026-11-23/repro_crlf_completion_file.py))가 이 과정을 자동으로 합니다. 이 파일은 Autopilot 저장소의 테스트 도구를 가져다 쓰므로, 실행할 때는 Autopilot 저장소 `tests/` 폴더에 `test_zz_repro_crlf_completion_file.py` 이름으로 복사해 pytest로 돌립니다. 이 저장소의 CI가 테스트 파일로 잡지 않도록 `test_` 없이 보관합니다.
 - **기대 결과:** 줄바꿈 형식과 관계없이 같은 완료 문구는 받아들여짐(종료 코드 0).
 - **실제 결과:**
 
@@ -147,7 +147,7 @@ Linux CI에서는 Windows에서 건너뛰거나 xfail로 둔 테스트까지 모
   | PowerShell 7.7.0 파이프 (`Get-Content -Raw 파일 \| python ... --completion-file -`) | 끝에 CRLF 1개 추가 (674바이트). **기록 통과** |
   | Windows PowerShell 5.1 파이프 (같은 명령) | 맨 앞에 UTF-8 BOM(`ef bb bf`), 끝에 CRLF 추가 (677바이트). **거부:** `completion publication rejected: A retained explanation requires the current explanation route` |
 
-  파이프 세 줄은 실제 `publish` 까지 실행한 결과입니다(재현 테스트 [`test_zz_repro_pipe_completion.py`](evidence/2026-11-23/test_zz_repro_pipe_completion.py), 출력 [`4-2-pipe-20261123.txt`](evidence/2026-11-23/4-2-pipe-20261123.txt)). 끝에 붙은 줄바꿈은 허용되지만, 중간 줄바꿈(CRLF 파일)이나 맨 앞(BOM)이 바뀌면 거부됩니다. 원인(전달 중 바이트가 바뀜)은 같은데 바뀐 위치에 따라 오류 문구가 달라, 사용자가 원인을 짐작하기 어렵습니다. 파이프 실험은 테스트 실행기 환경(`PYTHONUTF8=1`)에서 영어만 있는 문구로 했습니다.
+  파이프 세 줄은 실제 `publish` 까지 실행한 결과입니다(재현 테스트 [`repro_pipe_completion.py`](evidence/2026-11-23/repro_pipe_completion.py), 실행 방법은 위 CRLF 재현 테스트와 같음, 출력 [`4-2-pipe-20261123.txt`](evidence/2026-11-23/4-2-pipe-20261123.txt)). 끝에 붙은 줄바꿈은 허용되지만, 중간 줄바꿈(CRLF 파일)이나 맨 앞(BOM)이 바뀌면 거부됩니다. 원인(전달 중 바이트가 바뀜)은 같은데 바뀐 위치에 따라 오류 문구가 달라, 사용자가 원인을 짐작하기 어렵습니다. 파이프 실험은 테스트 실행기 환경(`PYTHONUTF8=1`)에서 영어만 있는 문구로 했습니다.
 
   공식 테스트 2건(`NativeGeneratedPublicationV2Test.test_generated_publish_command_and_native_stop_apply_exact_original_proof`, `CompletionV2BoundaryTest.test_v2_cli_explicit_schema_publishes_and_reuses_exact_reference`)이 Windows에서 같은 메시지로 실패한 것도 이 경로(텍스트 모드 입력) 때문입니다.
 - **재현 범위:** W1·L1에서 같은 결과. 줄바꿈만 다르면 OS와 관계없이 항상 재현됩니다(결정적). 파이프 결과는 W1에서 두 번 실행해 같았습니다.
