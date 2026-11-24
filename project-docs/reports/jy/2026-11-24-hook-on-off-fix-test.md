@@ -37,6 +37,7 @@ Nov 24, 2026 · jy
 - 훅 켬 세션 109개의 훅 기록 3,579줄과 도구 호출을 훅별로 세어 원인을 찾았습니다.
 - 설치본의 훅 코드 3개 파일을 고쳤습니다(4절의 1, 2번).
 - 고친 뒤 훅 켬 19개 사례를 5번씩 다시 실행했습니다(수정 후).
+- 수정이 기존 기능을 망가뜨리지 않았는지 보려고, 고친 세 파일을 쓰는 기존 테스트 10개 파일을 고치기 전과 고친 뒤에 돌려 비교했습니다(회귀 테스트).
 - 훅을 끄면 틀리고 켜면 걸러지는지를 보려고, 확인 없이 답하면 틀리는 검증 사례 3개를 새로 만들어 훅 끔에서 3번씩 시험했습니다. 모델을 `claude-opus-5-5`와 `claude-haiku-5-5` 두 가지로 돌렸습니다.
 
 오류안내 사례의 '할 일이 쉬운 말로 없다' 조건은 막힘 메시지에 한국어가 있는지로 판정했습니다.
@@ -122,6 +123,19 @@ Stop `adapter-autopilot-mode-continue` 훅이 낸 `completion_recording` 상태�
 | 상태 없음 | 12 | 5 |
 
 수정 후 `recording-unavailable(completion-body-invalid)`가 111회에서 41회로 줄었습니다. 읽기 입력에서 `route-unavailable`이 나오지 않게 된 만큼 줄었습니다. 수정 전·후 모두 훅은 `"continue": true`만 냈습니다.
+
+### 회귀 테스트 (기존 테스트, 고치기 전과 고친 뒤)
+
+Core `c6019ac`를 두 벌 복사해, 한 벌은 그대로 두고 한 벌에는 고친 파일 3개를 덮어쓴 뒤 같은 테스트를 `pytest` 9.2.0(Python 3.14.4)으로 돌렸습니다. 대상은 `_shared`에서 `native_transcript`, `native_completion`, `claude_stop_verification_hook`을 쓰는 테스트 파일 10개입니다.
+
+| | 통과 | 실패 | 건너뜀 | 하위 테스트 통과 | 걸린 시간 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 고치기 전 | 364 | 5 | 24 | 733 | 9분 57초 |
+| 고친 뒤 | 364 | 5 | 24 | 733 | 9분 57초 |
+
+결과가 같습니다. 고친 뒤에 새로 실패한 테스트는 없습니다. 실패 5건은 고치기 전에도 똑같이 실패하는 것으로, 모두 `test_install_hooks.py`의 설치 관련 테스트입니다(`test_installed_tool_checkpoint_hooks_run_from_system32_for_both_platforms` 2건, `test_managed_prompt_reinstall_preserves_custom_sibling_commands_and_settings` 2건, `test_foreground_hook_messages_run_under_cmd_exe` 1건).
+
+대상 파일: `test_completion_assessment.py`, `test_completion_recovery.py`, `test_completion_skill_evidence.py`, `test_historical_status_context.py`, `test_install_hooks.py`, `test_native_completion.py`, `test_response_delivery.py`, `test_stop_retry_surface.py`, `test_trace_display_repair.py`, `test_trace_hook_isolated_matrix.py`.
 
 ### 검증 사례 시험 (훅 끔, 3개 사례 × 3회 × 모델 2개)
 
