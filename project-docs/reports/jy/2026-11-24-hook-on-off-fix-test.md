@@ -172,5 +172,12 @@ Stop `adapter-autopilot-mode-continue` 훅이 낸 `completion_recording` 상태�
   - [도구 없는 질문에 훅 5번, 도구 1번마다 훅 3개](issues/2026-11-24/4-hooks-run-without-tools-and-three-per-tool.md)
 - 네 문제 모두 기준 commit 설치에서 새 세션으로 5회 중 5회 재현했습니다. 팀 지침에 따라 두 번째 재현자가 확인한 뒤 등록합니다.
 - 시간비용-03에 남은 막힘의 원인은 확인했습니다. 실패한 3회 모두 읽기 명령인데 읽기 전용 목록에 없던 형태(`printf`, `$(git rev-parse …)`, `$(basename …)`)여서 전처럼 막혔습니다. 설치본에서 이 형태를 읽기 전용으로 보도록 고쳤고, 터미널 테스트로는 아직 확인하지 않았습니다. 이 수정은 수정 후 테스트가 끝난 뒤에 한 것이라 3절의 수치에는 들어 있지 않고, [hook-fix.diff](evidence/2026-11-24/hook-fix.diff)에는 들어 있습니다.
+- Autopilot 연속 실행을 따로 테스트합니다. 이번 연속작업-01~06은 입력 하나로 일을 시키는 사례라 Autopilot 후속 계획을 등록하지 않았고, 그래서 Autopilot이 다음 작업을 넘겨주는 기능은 이번 테스트에 들어 있지 않았습니다. 아래 사례로 확인합니다.
+  - 작업 A(파일 생성): `test-output/autopilot/note.txt`에 done을 쓰고 파일 생성 완료를 기록합니다.
+  - 작업 B(검증): A의 완료 기록이 적용된 뒤 `note.txt`를 다시 읽고, 내용이 done이면 `test-output/autopilot/verified.txt`에 PASS를 씁니다.
+  - 입력(한 번만 보내고 기다림): "작업 A와 B를 모두 승인합니다. 실행 전에 두 작업을 Autopilot 후속 계획에 등록하고, B는 A가 완료되어야 실행할 수 있도록 설정해 주세요. 계획이 등록되면 A만 시작하세요. B는 Autopilot이 다음 작업으로 넘겨준 뒤에 실행하세요."
+  - 통과 기준: 계획 등록 → A 완료 기록 적용 → Autopilot이 B를 `dispatched`로 기록 → B가 파일을 읽고 `verified.txt` 생성 순서가 로그에 남습니다. `verified.txt`가 생겨도 B를 넘긴 로그가 없으면 실패입니다(모델이 두 작업을 스스로 처리했을 수 있음).
+  - 실패 단계 기록: 계획 등록부터 막히면 등록 단계 실패, A까지 끝났는데 B를 넘기지 않으면 후속 작업 선택 실패, 넘겼는데 B가 실행되지 않으면 전달 또는 실행 실패로 적습니다.
+  - 규약: Autopilot 저장소의 `addons/autopilot-mode/skill/references/continuation.md`.
 
 첨부: [hook-fix.diff](evidence/2026-11-24/hook-fix.diff)
