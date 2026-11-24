@@ -17,3 +17,4 @@
 | 2026-11-18 | kyu | [Autopilot Windows 검증](kyu/2026-11-18-windows-verification.md) |
 | 2026-11-19 | jy | [Ghost-ALICE OS & Autopilot 실사용 개선](jy/2026-11-19-real-use-improvement.md) |
 | 2026-11-24 | jy | [훅 끔·켬·수정 후 비교 테스트](jy/2026-11-24-hook-on-off-fix-test.md) |
+| 2026-11-24 | sk | [jy 이슈 1~4 두 번째 재현 시도와 켬/끔 허위율 벤치 준비](sk/2026-11-24-repro-and-onoff-bench.md) |
