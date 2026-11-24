@@ -429,9 +429,15 @@ class RefusedRegistrationTests(GitHooksCase):
         (self.repo / ".git" / "config").write_text("")
         for root in (broken, self.repo):
             with self.subTest(root=root.name):
+                probe = subprocess.run(
+                    ["git", "-C", str(root), "rev-parse", "--git-common-dir"],
+                    capture_output=True, text=True,
+                )
+                self.assertNotEqual(probe.returncode, 0)
+                self.assertTrue(probe.stderr.strip())
                 message = self.refused(root)
-                self.assertIn(str(root), message)
-                self.assertIn("not a git repository", message)
+                self.assertIn(f"Git could not read the repository at {root}", message)
+                self.assertIn(f"Diagnostic details: {probe.stderr.strip()}", message)
         self.assertFalse(self.folder.exists())
 
     def test_a_locked_git_configuration_stops_the_first_registration(self):
