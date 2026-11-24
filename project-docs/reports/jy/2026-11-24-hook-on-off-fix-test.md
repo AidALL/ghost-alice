@@ -38,6 +38,7 @@ Nov 24, 2026 · jy
 - 설치본의 훅 코드 3개 파일을 고쳤습니다(4절의 1, 2번).
 - 고친 뒤 훅 켬 19개 사례를 5번씩 다시 실행했습니다(수정 후).
 - 수정이 기존 기능을 망가뜨리지 않았는지 보려고, 고친 세 파일을 쓰는 기존 테스트 10개 파일을 고치기 전과 고친 뒤에 돌려 비교했습니다(회귀 테스트).
+- Autopilot이 다음 작업을 넘겨주는지 보려고, 작업 두 개를 Autopilot 후속 계획에 등록하는 사례(연속실행-01)를 만들어 훅 켬에서 5번 실행했습니다.
 - 훅을 끄면 틀리고 켜면 걸러지는지를 보려고, 확인 없이 답하면 틀리는 검증 사례 3개를 새로 만들어 훅 끔에서 3번씩 시험했습니다. 모델을 `claude-opus-5-5`와 `claude-haiku-5-5` 두 가지로 돌렸습니다.
 
 오류안내 사례의 '할 일이 쉬운 말로 없다' 조건은 막힘 메시지에 한국어가 있는지로 판정했습니다.
@@ -124,6 +125,29 @@ Stop `adapter-autopilot-mode-continue` 훅이 낸 `completion_recording` 상태�
 
 수정 후 `recording-unavailable(completion-body-invalid)`가 111회에서 41회로 줄었습니다. 읽기 입력에서 `route-unavailable`이 나오지 않게 된 만큼 줄었습니다. 수정 전·후 모두 훅은 `"continue": true`만 냈습니다.
 
+### Autopilot 연속 실행 테스트 (연속실행-01, 훅 켬, 5회)
+
+연속작업-01~06은 입력 하나로 일을 시키는 사례라 Autopilot 후속 계획을 등록하지 않았고, Autopilot이 다음 작업을 넘겨주는 기능이 테스트에 들어 있지 않았습니다. 그래서 작업 A와 B를 계획에 등록하는 사례를 따로 만들어 돌렸습니다. 고친 설치본에서 돌렸습니다.
+
+- 작업 A: `test-output/autopilot/note.txt`에 done을 쓰고 파일 생성 완료를 기록합니다.
+- 작업 B: A의 완료 기록이 적용된 뒤 `note.txt`를 다시 읽고, 내용이 done이면 `test-output/autopilot/verified.txt`에 PASS를 씁니다.
+- 입력(한 번만 보냄): 위 두 작업의 정의에 이어 "작업 A와 B를 모두 승인합니다. 실행 전에 두 작업을 Autopilot 후속 계획에 등록하고, B는 A가 완료되어야 실행할 수 있도록 설정해 주세요. 계획이 등록되면 A만 시작하세요. B는 Autopilot이 다음 작업으로 넘겨준 뒤에 실행하세요."
+- 통과 기준: 계획 등록 → A 완료 기록 적용 → Autopilot이 B를 `dispatched`로 기록 → B가 파일을 읽고 `verified.txt` 생성. `verified.txt`가 생겨도 B를 넘긴 기록이 없거나 넘기기 전에 만들어졌으면 실패입니다.
+
+| 회차 | 판정 | 계획 등록 | A 완료 기록 | B 넘김 (UTC) | `verified.txt` 쓴 시각 (UTC) | 계획 상태 | 시간 | 도구 호출 |
+| ---: | --- | --- | --- | --- | --- | --- | ---: | ---: |
+| 1 | 통과 | admitted | applied | 02:25:50 | 02:25:57 | complete | 247.53초 | 39 |
+| 2 | 통과 | admitted | applied | 02:30:14 | 02:30:21 | complete | 239.19초 | 29 |
+| 3 | 통과 | admitted | applied | 02:34:09 | 02:34:14 | complete | 216.24초 | 29 |
+| 4 | 통과 | admitted | applied | 02:37:44 | 02:37:50 | complete | 209.56초 | 30 |
+| 5 | 통과 | admitted | applied | 02:41:44 | 02:41:52 | B의 완료 기록 실패 | 261.37초 | 32 |
+
+- 5회 모두 Stop `adapter-autopilot-mode-continue` 훅이 A의 완료 기록을 `applied`로 적용하고, `continuation: {"status": "dispatched", "task_id": "task-b"}`를 내며 턴을 이어 갔습니다. `verified.txt`는 5회 모두 B를 넘긴 뒤에 만들어졌습니다.
+- 1~4회차는 B의 완료 기록도 `applied`가 되고 계획이 `complete`로 끝났습니다.
+- 5회차는 B를 실행해 `verified.txt`까지 만들었지만, 그 뒤 Stop `completion` 훅이 `response-assessment-required`로 답변을 한 번 막았고 B의 완료 기록이 `recording-unavailable(completion-body-invalid)`로 남았습니다.
+- 5회 합계는 1,173.88초, 16,657,426 토큰, $8.76, 도구 호출 159회입니다.
+- 자동 판정은 처음에 5회를 모두 실패로 저장했습니다. 판정 함수가 3,000자에서 잘린 훅 출력을 읽어 `continuation` 기록을 보지 못한 탓입니다. 잘리지 않은 훅 기록 파일을 읽도록 고친 뒤 같은 원자료로 다시 판정해 통과로 저장했습니다.
+
 ### 회귀 테스트 (기존 테스트, 고치기 전과 고친 뒤)
 
 Core `c6019ac`를 두 벌 복사해, 한 벌은 그대로 두고 한 벌에는 고친 파일 3개를 덮어쓴 뒤 같은 테스트를 `pytest` 9.2.0(Python 3.14.4)으로 돌렸습니다. 대상은 `_shared`에서 `native_transcript`, `native_completion`, `claude_stop_verification_hook`을 쓰는 테스트 파일 10개입니다.
@@ -159,7 +183,7 @@ Core `c6019ac`를 두 벌 복사해, 한 벌은 그대로 두고 한 벌에는 �
 | 4 | 도구 1번마다 훅 3개가 실행됨 (PreToolUse 2, PostToolUse 1) | 세 훅 합계 2,600회, 1,106초. 도구 1번에 약 1.27초 | 시간비용-02가 수정 후에도 5회 모두 실패 | 기록만 |
 | 5 | 도구를 쓰지 않는 질문에도 훅이 5번 실행됨 | 시간비용-01: SessionStart 1, UserPromptSubmit 2, Stop 2 | 시간비용-01이 수정 전·후 5회 모두 실패 | 기록만 |
 | 6 | `/visibility minimal`에서도 내부 사유 코드와 훅 오류 문구가 화면에 나옴 | 수정 전: Stop `completion` 막힘이 `force_show`. 수정 후: Stop `adapter-autopilot-mode-continue`의 `[autopilot-mode adapter error] … intent-events.jsonl: current input event and digest are required`가 `show` | 오류안내-05가 수정 전·후 5회 모두 실패 | 기록만 |
-| 7 | Autopilot의 완료 기록이 `route-unavailable` 때문에 실패함 | 수정 전 Stop `adapter-autopilot-mode-continue` 203회 중 `recording-unavailable(completion-body-invalid)` 111회, `recording-error` 10회. 수정 후 153회 중 41회, 5회 | Autopilot이 다음 작업을 이어서 실행한 회차가 없음 | 1번 수정으로 111회에서 41회로 줄어듦. 나머지는 기록만 |
+| 7 | Autopilot의 완료 기록이 `route-unavailable` 때문에 실패함 | 수정 전 Stop `adapter-autopilot-mode-continue` 203회 중 `recording-unavailable(completion-body-invalid)` 111회, `recording-error` 10회. 수정 후 153회 중 41회, 5회 | 완료 기록이 남지 않음. 다음 작업을 넘겨주는 기능 자체는 연속실행-01에서 5회 중 5회 동작함 | 1번 수정으로 111회에서 41회로 줄어듦. 나머지는 기록만 |
 | 8 | 모니터 해설에 `criterion-unbound` 코드가 없음 | 오류안내-01 수정 전 5회 중 3회가 '해설 미등록' | hook-monitor에서 그 알림의 뜻을 볼 수 없음 | 보류 |
 | 9 | Ghost-ALICE 자체 스크립트 호출이 실패함 | `response_route.py`가 `route-schema` 오류로 5회 실패 | 경로 등록을 다시 시도하느라 도구 호출이 늘어남 | 기록만 |
 
@@ -186,12 +210,6 @@ Core `c6019ac`를 두 벌 복사해, 한 벌은 그대로 두고 한 벌에는 �
   - [도구 없는 질문에 훅 5번, 도구 1번마다 훅 3개](issues/2026-11-24/4-hooks-run-without-tools-and-three-per-tool.md)
 - 네 문제 모두 기준 commit 설치에서 새 세션으로 5회 중 5회 재현했습니다. 팀 지침에 따라 두 번째 재현자가 확인한 뒤 등록합니다.
 - 시간비용-03에 남은 막힘의 원인은 확인했습니다. 실패한 3회 모두 읽기 명령인데 읽기 전용 목록에 없던 형태(`printf`, `$(git rev-parse …)`, `$(basename …)`)여서 전처럼 막혔습니다. 설치본에서 이 형태를 읽기 전용으로 보도록 고쳤고, 터미널 테스트로는 아직 확인하지 않았습니다. 이 수정은 수정 후 테스트가 끝난 뒤에 한 것이라 3절의 수치에는 들어 있지 않고, [hook-fix.diff](evidence/2026-11-24/hook-fix.diff)에는 들어 있습니다.
-- Autopilot 연속 실행을 따로 테스트합니다. 이번 연속작업-01~06은 입력 하나로 일을 시키는 사례라 Autopilot 후속 계획을 등록하지 않았고, 그래서 Autopilot이 다음 작업을 넘겨주는 기능은 이번 테스트에 들어 있지 않았습니다. 아래 사례로 확인합니다.
-  - 작업 A(파일 생성): `test-output/autopilot/note.txt`에 done을 쓰고 파일 생성 완료를 기록합니다.
-  - 작업 B(검증): A의 완료 기록이 적용된 뒤 `note.txt`를 다시 읽고, 내용이 done이면 `test-output/autopilot/verified.txt`에 PASS를 씁니다.
-  - 입력(한 번만 보내고 기다림): "작업 A와 B를 모두 승인합니다. 실행 전에 두 작업을 Autopilot 후속 계획에 등록하고, B는 A가 완료되어야 실행할 수 있도록 설정해 주세요. 계획이 등록되면 A만 시작하세요. B는 Autopilot이 다음 작업으로 넘겨준 뒤에 실행하세요."
-  - 통과 기준: 계획 등록 → A 완료 기록 적용 → Autopilot이 B를 `dispatched`로 기록 → B가 파일을 읽고 `verified.txt` 생성 순서가 로그에 남습니다. `verified.txt`가 생겨도 B를 넘긴 로그가 없으면 실패입니다(모델이 두 작업을 스스로 처리했을 수 있음).
-  - 실패 단계 기록: 계획 등록부터 막히면 등록 단계 실패, A까지 끝났는데 B를 넘기지 않으면 후속 작업 선택 실패, 넘겼는데 B가 실행되지 않으면 전달 또는 실행 실패로 적습니다.
-  - 규약: Autopilot 저장소의 `addons/autopilot-mode/skill/references/continuation.md`.
+- 연속실행-01의 5회차처럼 B를 실행한 뒤 완료 기록이 실패하는 경우의 원인을 확인합니다.
 
 첨부: [hook-fix.diff](evidence/2026-11-24/hook-fix.diff)
