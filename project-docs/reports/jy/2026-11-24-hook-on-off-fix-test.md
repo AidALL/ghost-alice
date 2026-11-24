@@ -33,7 +33,7 @@ Nov 24, 2026 · jy
 - 터미널에서 Claude Code를 대화형으로 띄우고 입력을 실제 키 입력으로 넣는 실행기를 만들었습니다. 회차마다 새 세션을 열고, 턴이 끝난 것을 대화 기록으로 확인한 뒤 다음 입력을 넣습니다. 지시 변경 사례의 Esc도 실행기가 넣습니다.
 - 사례마다 판정 함수를 만들어 답변, 도구 호출, 파일 상태, 훅 기록으로 실패 조건을 판정했습니다. 확신할 수 없는 회차는 통과로 넘기지 않고 '검토 필요'로 멈추게 했고, 원자료를 확인한 뒤 다시 판정했습니다.
 - 판정은 hook-monitor에 저장했습니다. 시간·토큰·비용은 hook-monitor가 계산한 값이고, 훅 횟수·막힘·훅 시간은 Ghost-ALICE 훅 기록(`strict-hook-output.jsonl`)에서 센 값입니다.
-- 훅 끔 14개 사례, 훅 켬 19개 사례를 5번씩 실행했습니다(수정 전).
+- 훅 끔 14개 사례, 훅 켬 19개 사례를 5번씩 실행했습니다(수정 전). 이때 설치본은 기준 commit 그대로였습니다. 설치본 `_shared`의 72개 파일을 Core `c6019ac`와 비교해 모두 같은 것을 확인했습니다.
 - 훅 켬 세션 109개의 훅 기록 3,579줄과 도구 호출을 훅별로 세어 원인을 찾았습니다.
 - 설치본의 훅 코드 3개 파일을 고쳤습니다(4절의 1, 2번).
 - 고친 뒤 훅 켬 19개 사례를 5번씩 다시 실행했습니다(수정 후).
@@ -102,7 +102,25 @@ Nov 24, 2026 · jy
 - 연속작업-06의 수정 후 1회는 '검토 필요'로 남겼습니다. 파일을 쓰는 명령 안에서 대조까지 해서, 만든 뒤 따로 다시 읽는 호출이 없습니다.
 - 오류안내-03의 수정 후는 결과가 나온 3회 기준입니다.
 - 오류안내-04는 막힘 횟수가 그대로입니다. 쓰기 작업은 전과 같이 막히고, 그 메시지에 한국어 안내가 붙어 통과로 바뀌었습니다.
+- 오류안내-04의 Stop 훅 메시지 6종류에는 사용자가 실행할 명령이 들어 있지 않았습니다. Windows에서 실행되지 않는 명령 형태는 없었습니다.
 - 훅 끔과 비교하면 수정 후에도 14개 사례 기준으로 시간이 3.8배입니다(782.67초 대 2,984.08초).
+
+### Autopilot 완료 기록 상태
+
+Stop `adapter-autopilot-mode-continue` 훅이 낸 `completion_recording` 상태를 회차의 마지막 시도 기준으로 센 값입니다(19개 사례).
+
+| 상태 | 수정 전 (203회) | 수정 후 (153회) |
+| --- | ---: | ---: |
+| `recording-unavailable(completion-body-invalid)` | 111 | 41 |
+| `skipped(response-no-publication)` | 30 | 68 |
+| `skipped(no-current-execution)` | 25 | 23 |
+| `recording-error(authority-unavailable)` | 10 | 5 |
+| `v2-unit-state` 작업 단위 없음 | 9 | 9 |
+| `v2-unit-state` `applied` | 3 | 1 |
+| `v2-unit-state` `recording-unavailable` | 3 | 1 |
+| 상태 없음 | 12 | 5 |
+
+수정 후 `recording-unavailable(completion-body-invalid)`가 111회에서 41회로 줄었습니다. 읽기 입력에서 `route-unavailable`이 나오지 않게 된 만큼 줄었습니다. 수정 전·후 모두 훅은 `"continue": true`만 냈습니다.
 
 ## 4. 발견한 문제
 
@@ -114,7 +132,7 @@ Nov 24, 2026 · jy
 | 4 | 도구 1번마다 훅 3개가 실행됨 (PreToolUse 2, PostToolUse 1) | 세 훅 합계 2,600회, 1,106초. 도구 1번에 약 1.27초 | 시간비용-02가 수정 후에도 5회 모두 실패 | 기록만 |
 | 5 | 도구를 쓰지 않는 질문에도 훅이 5번 실행됨 | 시간비용-01: SessionStart 1, UserPromptSubmit 2, Stop 2 | 시간비용-01이 수정 전·후 5회 모두 실패 | 기록만 |
 | 6 | `/visibility minimal`에서도 내부 사유 코드와 훅 오류 문구가 화면에 나옴 | 수정 전: Stop `completion` 막힘이 `force_show`. 수정 후: Stop `adapter-autopilot-mode-continue`의 `[autopilot-mode adapter error] … intent-events.jsonl: current input event and digest are required`가 `show` | 오류안내-05가 수정 전·후 5회 모두 실패 | 기록만 |
-| 7 | Autopilot 완료 기록이 대부분 남지 않음 | Stop `adapter-autopilot-mode-continue` 248회 중 `recording-unavailable` 134, `skipped` 88, `recording-error` 10. 작업 단위가 `applied`로 나온 것은 2건 | Autopilot이 다음 작업을 이어서 실행한 것을 한 번도 관찰하지 못함 | 기록만 |
+| 7 | Autopilot의 완료 기록이 `route-unavailable` 때문에 실패함 | 수정 전 Stop `adapter-autopilot-mode-continue` 203회 중 `recording-unavailable(completion-body-invalid)` 111회, `recording-error` 10회. 수정 후 153회 중 41회, 5회 | Autopilot이 다음 작업을 이어서 실행한 회차가 없음 | 1번 수정으로 111회에서 41회로 줄어듦. 나머지는 기록만 |
 | 8 | 모니터 해설에 `criterion-unbound` 코드가 없음 | 오류안내-01 수정 전 5회 중 3회가 '해설 미등록' | hook-monitor에서 그 알림의 뜻을 볼 수 없음 | 보류 |
 | 9 | Ghost-ALICE 자체 스크립트 호출이 실패함 | `response_route.py`가 `route-schema` 오류로 5회 실패 | 경로 등록을 다시 시도하느라 도구 호출이 늘어남 | 기록만 |
 
@@ -138,7 +156,7 @@ Nov 24, 2026 · jy
   - [막힘 메시지가 영어 사유 코드뿐임](issues/2026-11-24/2-block-message-not-understandable.md)
   - [minimal에서도 내부 코드와 어댑터 오류가 표시됨](issues/2026-11-24/3-minimal-visibility-shows-internal-output.md)
   - [도구 없는 질문에 훅 5번, 도구 1번마다 훅 3개](issues/2026-11-24/4-hooks-run-without-tools-and-three-per-tool.md)
-- 네 문제 모두 한 명이 한 PC에서 5회 중 5회 재현한 것입니다. 팀 지침의 두 명 이상 재현 조건은 아직 채우지 못했습니다.
+- 네 문제 모두 기준 commit 설치에서 새 세션으로 5회 중 5회 재현했습니다. 팀 지침에 따라 두 번째 재현자가 확인한 뒤 등록합니다.
 - 시간비용-03에 남은 막힘의 원인은 확인했습니다. 실패한 3회 모두 읽기 명령인데 읽기 전용 목록에 없던 형태(`printf`, `$(git rev-parse …)`, `$(basename …)`)여서 전처럼 막혔습니다. 설치본에서 이 형태를 읽기 전용으로 보도록 고쳤고, 터미널 테스트로는 아직 확인하지 않았습니다. 이 수정은 수정 후 테스트가 끝난 뒤에 한 것이라 3절의 수치에는 들어 있지 않고, [hook-fix.diff](evidence/2026-11-24/hook-fix.diff)에는 들어 있습니다.
 
 첨부: [hook-fix.diff](evidence/2026-11-24/hook-fix.diff)
