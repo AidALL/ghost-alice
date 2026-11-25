@@ -5,7 +5,7 @@
 This guide is the command reference for installing, updating, checking, and repairing Ghost-ALICE OS. Public guidance uses OS-native entrypoints with the same long flag surface.
 
 - macOS, Linux, WSL, or Git Bash: `bash install.sh ...`
-- Windows Command Prompt or PowerShell: `.\install.cmd ...`
+- From a checkout in Windows Command Prompt or PowerShell: `.\install.cmd ...`. The `cmd` examples below use Command Prompt.
 
 On Windows, `install.cmd` keeps the native wrapper path, Python 3.11+ installer contract, UTF-8 console setup, and `-NoProfile -ExecutionPolicy Bypass`. This handles PowerShell execution policy blocks and does not change the user or machine execution policy.
 
@@ -120,19 +120,35 @@ Doctor also prints informational Core lines: `native-intake-waits`, `native-inta
 
 ## Update
 
-The fixed command downloads the remote main branch and passes your terminal to its installer. That installer asks the installation questions and updates the Core skills already selected for each host. It works after the development clone moves or disappears, adds no newly detected hosts or skills, and leaves existing addons unchanged.
+To update your installed copy, run the command below from any directory. The installed command fetches `main` from the remote in the install record. That release's installer updates the Core skills already installed for each host. It works without a local clone and leaves existing addons and checkout files in place.
 
 ```bash
 ~/.ghost-alice/bin/ghost-alice update
-~/.ghost-alice/bin/ghost-alice --doctor
 ```
 
 ```cmd
-%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd update
-%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd --doctor
+"%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd" update
 ```
 
-Update uses the recorded remote or, if missing, the Ghost-ALICE GitHub repository. Supply `--remote URL` to select another remote hosting the release branch. To update the developer checkout itself, use the existing `bash install.sh --update-source` or `.\install.cmd --update-source`; that separate path stashes local changes before a fast-forward and follows [source update recovery](./troubleshooting.md#git-update-recovery). Fixed update leaves the checkout unchanged. See [installer architecture](../reference/installer-architecture.md#fixed-commands-policies-and-ledger-data) for saved-code reinstallation and ledger locations.
+In PowerShell, run `& "$env:USERPROFILE\.ghost-alice\bin\ghost-alice.cmd" update` to update the installed copy. Replace `update` with `--doctor` or `--status` to check that installation.
+
+To update both the files in your checkout (including `install.sh`) and your installed copy, run the following in a local checkout on `main` that tracks the release remote’s `main`. The shell starts the second command when Git fast-forwards the branch or reports that it is already up to date. If Git fails, the shell stops there.
+
+```bash
+git pull --ff-only && ~/.ghost-alice/bin/ghost-alice update
+```
+
+```cmd
+git pull --ff-only && "%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd" update
+```
+
+In PowerShell 7, the combined command is `git pull --ff-only && & "$env:USERPROFILE\.ghost-alice\bin\ghost-alice.cmd" update`.
+
+When Git merges new commits in the checkout registered as the install source, the [post-merge hook](#install-source) can run before the second command. The hook attempts to install the default Core skills on every detected host. The subsequent `update` reads the selections recorded at that point. Check Git’s output for the pull result and the installer’s output for the installation result.
+
+Running `bash install.sh` (on Windows, `.\install.cmd`) again from an ordinary checkout installs the default Core skills for the detected hosts from remote `main`. If you installed from a feature branch before [change #167](https://github.com/AidALL/ghost-alice/pull/167) made remote `main` the default, append `--ref refs/heads/main` to the first example’s `update` command for the first update. If the older updater reports `Update needs its acquisition source`, the install record lacks a remote or ref. Supply both for that update. For the official repository, use `update --remote https://github.com/AidALL/ghost-alice.git --ref refs/heads/main`. After a successful update, use `update` alone.
+
+If the install record has no remote URL, `update` uses the Ghost-ALICE GitHub repository. Pass `--remote URL` to fetch `main` from another remote. To save local edits in a Git stash before updating the checkout, see [source update recovery](./troubleshooting.md#git-update-recovery). See [installer architecture](../reference/installer-architecture.md#fixed-commands-policies-and-ledger-data) for saved-version reinstallation and ledger locations.
 
 If a recorded Core skill has an invalid host list (`used_by`), the installer stops and identifies the installation record and skill path.
 
@@ -180,7 +196,7 @@ The installer sets the repository's git hook path (`core.hooksPath`, which every
 | List skills | `bash install.sh --list` | `.\install.cmd --list` |
 | Show install state | `bash install.sh --status` | `.\install.cmd --status` |
 | Run protected diagnostic | `bash install.sh --doctor` | `.\install.cmd --doctor` |
-| Safe source update | `bash install.sh --update-source` | `.\install.cmd --update-source` |
+| Stash local edits and update the checkout | `bash install.sh --update-source` | `.\install.cmd --update-source` |
 | Install an addon | `bash install.sh --addon-source /path/to/addon-repo` | `.\install.cmd --addon-source C:\path\to\addon-repo` |
 | Selective core install | `bash install.sh task-router verification-before-completion` | `.\install.cmd task-router verification-before-completion` |
 | Full uninstall | `bash install.sh --uninstall` | `.\install.cmd --uninstall` |
@@ -211,7 +227,7 @@ Ghost-ALICE installs `/visibility strict|dynamic|minimal` as a Claude Code works
 
 The installer requires Python 3.11 or newer for every command, `--help` and `--list` included: `install.sh` only finds or prepares Python and hands the arguments to `_shared/installer/cli.py`. If Python 3.11+ is missing, it attempts automatic preparation where possible.
 
-The optional macOS native context gateway requires Python 3.14 or newer with `compression.zstd`. Its registration command, `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`, checks that capability first, then writes the launch agent, `state.json` and the Codex provider blocks and records the service in the install record. It copies no module: the service runs the runtime `_shared` the installer published, so install Core first. This component requirement does not change the Core installer and hook minimum of Python 3.11. If Codex `config.toml`, the launch agent or a state file is a symlink, registration and detachment stop before changing the service and preserve the link and its target. A refresh keeps the listener's port and scope while the three service files are as the install record says; a file changed outside the installer stops the command before any change, and an existing launch agent, state directory entry or provider block the record does not name is preserved. If a first registration fails and the candidate service is confirmed stopped, rollback removes that attempt's new state artifacts and record entry so a new attempt can proceed. An uncertain stop or concurrent artifact change preserves recovery material for review. After the registration, `bash install.sh` alone updates the installation; `bash install.sh gateway detach --apply` unregisters the service and keeps its state directory. When launchd runs a gateway service that the install record does not name, install and `--repair` leave that service as it is and print one warning that names the registration command; the registration records the service and restarts it on the new code.
+The optional macOS native context gateway requires Python 3.14 or newer with `compression.zstd`. Its registration command, `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`, checks that capability first, then writes the launch agent, `state.json` and the Codex provider blocks and records the service in the install record. It copies no module: the service runs the runtime `_shared` the installer published, so install Core first. This component requirement does not change the Core installer and hook minimum of Python 3.11. If Codex `config.toml`, the launch agent or a state file is a symlink, registration and detachment stop before changing the service and preserve the link and its target. A refresh keeps the listener's port and scope while the three service files are as the install record says; a file changed outside the installer stops the command before any change, and an existing launch agent, state directory entry or provider block the record does not name is preserved. If a first registration fails and the candidate service is confirmed stopped, rollback removes that attempt's new state artifacts and record entry so a new attempt can proceed. An uncertain stop or concurrent artifact change preserves recovery material for review. After registration, the [installed update command](#update) refreshes each host’s installed Core skills and the runtime used by the gateway. `bash install.sh gateway detach --apply` unregisters the service and keeps its state directory. When launchd runs a gateway service that the install record does not name, install and `--repair` leave that service as it is and print one warning that names the registration command; the registration records the service and restarts it on the new code.
 
 - macOS: if Homebrew is available, `brew install python3`
 - Linux / WSL: available package managers such as `apt-get`, `dnf`, `yum`, or `pacman`
@@ -243,9 +259,10 @@ Every supported OS receives Core and `_shared` as copies. Editing development fi
 
 Core installation and addon removal are separate operations. A fresh Core installation supplies the instructions, input/source bindings, work and review records, and Core hooks. Updating Core without an addon option preserves an already installed addon; `--addon-skip` skips addon installation and does not request its removal.
 
-| Operation | Example for Codex | Managed scope |
+| Operation | Command or procedure | What changes |
 | --- | --- | --- |
-| Fresh Core install or Core update | `bash install.sh --platform codex` | Core; preserve existing addon files and registrations on update |
+| Install the default Core skills on Codex | `bash install.sh --platform codex` | Install all default Core skills on Codex and keep existing addons |
+| Update the Core skills already installed on each host | [Run the installed update command](#update) | Read each host’s Core skill selection from the install record and keep existing addons |
 | Add or update an addon | `bash install.sh --platform codex --addon-source /path/to/addon-repo` | Core plus the addon's manifest-selected skills and observational hooks |
 | Remove an addon while retaining Core | `bash install.sh --platform codex --uninstall --addon <addon-id>` | Detach recorded addon hooks before removing verified addon targets |
 | Remove one platform | `bash install.sh --platform codex --uninstall` | That platform's addons and Core; retain shared assets needed by other installed platforms |
@@ -274,13 +291,13 @@ A full install deploys:
 - `~/.ghost-alice/rollbacks/<txid>/`: the files one placement replaced, the install record as it was before, and the placement's journal; the next locked installer command restores a placement that stopped halfway, and [runtime state retention](../reference/repository-structure.md#runtime-state-retention) sets how many finished folders stay
 - support state for install-state, pending merges, and uninstall reports
 
-An installation that registered the optional context gateway: the install record's `service` section names the service's code root, `~/.ghost-alice/runtime/current`, and its three service files. The runtime placement (`_shared` and the companion script `session-intent-analyzer/scripts/session_intent_ledger.py`) stops the service before its files change and starts it after. `bash install.sh` alone is the update; no gateway refresh precedes it. The install prints one `Context gateway:` line with the service's runtime root and whether the service is running. An installation an earlier installer registered gets its `service` section once from the gateway's installation receipt, at the first install, repair or uninstall.
+An installation that registered the optional context gateway: the install record's `service` section names the service's code root, `~/.ghost-alice/runtime/current`, and its three service files. The runtime placement (`_shared` and the companion script `session-intent-analyzer/scripts/session_intent_ledger.py`) stops the service before its files change and starts it after. The installer handles this restart during both installation and update. The install prints one `Context gateway:` line with the service's runtime root and whether the service is running. An installation an earlier installer registered gets its `service` section once from the gateway's installation receipt, at the first install, repair or uninstall.
 
 The installer owns only the marked Ghost-ALICE block in each global rule file. It refreshes that block while preserving text outside the bootstrap. If the destination is a file without a Ghost-ALICE marker, installation leaves it unchanged, writes `<rule-file>.ghost-alice-proposed`, and status/doctor does not report the proposal as an installed global rule.
 
 ### Common Governance and Project Instructions
 
-Ghost-ALICE common governance applies across projects and task domains. On a normal Codex route, the response model reads the common contract at the path rendered into the managed `~/.codex/AGENTS.md` loader. The installer writes that contract to the sibling `ghost-alice-governance.md`. Claude Code receives the common contract directly in the managed portion of `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. Project instruction files add project-specific constraints; they do not supply a second copy of the common procedures. The common contract's [Operating Model](../../platforms/common-governance.md#operating-model) defines the precedence of instructions that the human user enters in the conversation and the constraints stated in instruction files.
+Ghost-ALICE common governance applies across projects and task domains. On a normal Codex route, the response model reads the common contract at the path rendered into the managed `~/.codex/AGENTS.md` loader. The installer writes that contract to the sibling `ghost-alice-governance.md`. Claude Code receives the common contract directly in the managed portion of `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. Project instruction files add project-specific constraints; they do not supply a second copy of the common procedures. The common contract's [Operating Model](https://github.com/AidALL/ghost-alice/blob/main/platforms/common-governance.md#operating-model) defines the precedence of instructions that the human user enters in the conversation and the constraints stated in instruction files.
 
 ```mermaid
 flowchart LR

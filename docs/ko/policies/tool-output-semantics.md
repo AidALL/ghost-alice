@@ -14,7 +14,7 @@
 
 ## 검토·출력·계속 작업
 
-응답 모델의 두 판단과 Core의 인증은 [근거와 네이티브 표시](../../../architecture_ko.md#근거와-네이티브-표시)가 설명합니다. 검토 영수증은 상태와 참조를 반환하며 답변 본문을 반복하지 않습니다. 부정적인 검토나 누락된 선행 조건은 [검토 절차](../../../coding-convention/verification-before-completion/references/response-review.md)에 따라 미해결로 남습니다.
+응답 모델의 두 판단과 Core의 인증은 [근거와 네이티브 표시](../../../architecture_ko.md#근거와-네이티브-표시)가 설명합니다. 검토 영수증은 상태와 참조를 반환하며 답변 본문을 반복하지 않습니다. 부정적인 검토나 누락된 선행 조건은 [검토 절차](https://github.com/AidALL/ghost-alice/blob/main/coding-convention/verification-before-completion/references/response-review.md)에 따라 미해결로 남습니다.
 
 ```mermaid
 flowchart LR

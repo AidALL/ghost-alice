@@ -38,7 +38,7 @@
 
 - 읽기 전용 평가 중에는 평가를 실행하는 응답 모델도, 그 응답 모델이 실행하는 평가 도구나 위임 에이전트도 설치 파일을 변경하지 않습니다.
 - 인간 사용자, 또는 인간 사용자가 결정한 승격을 수행하는 응답 모델이나 위임 에이전트는 `verifier-result.json`의 `verifier_accepted: true` 판정 없이 `candidate-playbook.md`를 승격하지 않습니다.
-- 요구되는 검증에는 무효 입력이나 근거 누락 때문에 거부된 후보를 최소 하나 포함합니다. 해당 결과는 그 후보·조건에서의 거부 동작만 뒷받침하며 검증을 실행하는 검토 도구나 위임 에이전트의 일반 능력이나 전체 품질을 입증하지 않습니다. 변경 없는 사례 근거는 [근거 재사용 절차](../../../coding-convention/verification-before-completion/references/verify-or-reuse.md)를 따릅니다.
+- 요구되는 검증에는 무효 입력이나 근거 누락 때문에 거부된 후보를 최소 하나 포함합니다. 해당 결과는 그 후보·조건에서의 거부 동작만 뒷받침하며 검증을 실행하는 검토 도구나 위임 에이전트의 일반 능력이나 전체 품질을 입증하지 않습니다. 변경 없는 사례 근거는 [근거 재사용 절차](https://github.com/AidALL/ghost-alice/blob/main/coding-convention/verification-before-completion/references/verify-or-reuse.md)를 따릅니다.
 - 인간 사용자, 또는 인간 사용자가 결정한 승격을 수행하는 응답 모델이나 위임 에이전트는 `verifier-result.json`에 `verifier_accepted: false`가 있으면 설치 파일 변경을 중지합니다.
 
 ## verifier-result.json의 최소 형태

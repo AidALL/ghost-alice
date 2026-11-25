@@ -23,16 +23,17 @@ A human project maintainer, or the response model or a delegate carrying out the
 ## Documentation And Public Surfaces
 
 - A human project maintainer, or the response model or a delegate carrying out the release that a human project maintainer approved, synchronizes `README.md`/`README_ko.md`, architecture, paired `docs/`/`docs/ko/`, Wiki pages and the English/Korean GitHub Pages entrypoints within the same release scope that a human project maintainer directing the release approved.
-- Describe current responsibilities, commands and limits in documentation, Wiki and Pages. The [pull request expectations](../../CONTRIBUTING.md#pull-request-expectations) keep change history in commit messages only.
+- Describe current responsibilities, commands and limits in documentation, Wiki and Pages. The [pull request expectations](https://github.com/AidALL/ghost-alice/blob/main/CONTRIBUTING.md#pull-request-expectations) keep change history in commit messages only.
 - Preserve literal command, path, hook, schema and enum tokens across languages. Check counterpart links and generated public surfaces against their owning catalogs.
 - Keep repository docs authoritative for implementation contracts. The Wiki provides paired explanation and recovery guidance; Pages provides the public entrypoint. A human project maintainer, or the response model or a delegate carrying out the release that a human project maintainer approved, publishes their current meaning consistently.
+- Use relative links between documents published on Pages. When `_config.yml` excludes the target from the site, link to the file and section on GitHub. Before publishing, check that the link in the built HTML reaches that file and section.
 - Keep `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`, the code of conduct and issue/PR templates consistent with actual project policy.
 
 ## Source Verification
 
 A human project maintainer, or the response model or a delegate carrying out the release that a human project maintainer approved, builds the verification plan from the candidate's affected contracts. Reuse unchanged proof under the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery). Missing required coverage remains unresolved.
 
-The [validation commands](../../CONTRIBUTING.md#validation-commands) and the [CI commands](../policies/installer-platform-compatibility-matrix.md#ci-commands) list the source checks. A human project maintainer, or the response model or a delegate carrying out the release that a human project maintainer approved, also runs the prose wrapping check on the candidate:
+The [validation commands](https://github.com/AidALL/ghost-alice/blob/main/CONTRIBUTING.md#validation-commands) and the [CI commands](../policies/installer-platform-compatibility-matrix.md#ci-commands) list the source checks. A human project maintainer, or the response model or a delegate carrying out the release that a human project maintainer approved, also runs the prose wrapping check on the candidate:
 
 ```bash
 python3 scripts/check_prose_wrapping.py
@@ -65,7 +66,7 @@ Required records must have exit code zero, `verdict=pass`, the intended installe
 
 1. When a human project maintainer decides to integrate, integrate only the release scope that a human project maintainer reviewed, through the repository's existing branch and review process. Do not initialize a replacement repository or rewrite history as a release step.
 2. Confirm the required source, installation and behavior evidence covers the candidate and record any unsupported platform or scope explicitly.
-3. Publish only the commit, version tag and release artifact within the release scope that a human project maintainer directing the release approved. Release descriptions state the current package behavior, installation, validation and limitations; [change history](../../CONTRIBUTING.md#pull-request-expectations) belongs only in commit messages.
+3. Publish only the commit, version tag and release artifact within the release scope that a human project maintainer directing the release approved. Release descriptions state the current package behavior, installation, validation and limitations; [change history](https://github.com/AidALL/ghost-alice/blob/main/CONTRIBUTING.md#pull-request-expectations) belongs only in commit messages.
 4. Publish the paired Wiki and GitHub Pages content from their reviewed sources and confirm that the published pages match the intended candidate.
 5. Check the actual CI and publication results. A local commit, queued deployment or successful upload request is not proof of visible publication.
 6. When distribution or installer paths changed, use a clean clone in a disposable account or machine for the affected public-install check. Preserve unrelated development installations.

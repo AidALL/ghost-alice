@@ -5,7 +5,7 @@
 이 문서는 Ghost-ALICE OS의 설치, 업데이트, 상태 점검과 복구 명령을 안내합니다. 운영체제별 기본 실행 명령에서도 같은 긴 옵션 이름을 사용합니다.
 
 - macOS, Linux, WSL, Git Bash: `bash install.sh ...`
-- Windows Command Prompt 또는 PowerShell: `.\install.cmd ...`
+- Windows 명령 프롬프트 또는 PowerShell에서 체크아웃의 인스톨러 실행: `.\install.cmd ...`. 아래 `cmd` 예시는 명령 프롬프트용입니다.
 
 Windows에서는 `install.cmd`가 기본 래퍼를 통해 인스톨러를 실행합니다. Python 3.11 이상을 요구하고 콘솔을 UTF-8로 설정하며 `-NoProfile -ExecutionPolicy Bypass`를 사용합니다. PowerShell 실행 정책으로 인한 차단을 처리하되 사용자나 컴퓨터의 실행 정책은 변경하지 않습니다.
 
@@ -43,7 +43,7 @@ cd %USERPROFILE%\ghost-alice
 .\install.cmd
 ```
 
-`bash install.sh`와 `.\install.cmd`는 원격 Git 브랜치 `refs/heads/main`에서 Core를 내려받고 그 릴리스를 시작합니다. 내려받은 릴리스는 감지한 에이전트 플랫폼에 자신을 설치합니다. 인스톨러는 체크아웃의 `origin`을 사용하고, 원격 저장소 설정이 없으면 Ghost-ALICE GitHub 저장소를 사용합니다. 개발 폴더의 미커밋 파일이나 보관본의 정확한 버전을 설치하려면 해당 폴더의 설치 명령에 `--local-source`를 붙입니다. 이후 `update`는 다시 원격 `main`을 받습니다. 아래 옵션으로 특정 플랫폼을 선택하거나 설치를 개별적으로 관리하실 수 있습니다.
+`bash install.sh`와 `.\install.cmd`는 원격 Git 브랜치 `refs/heads/main`에서 Core를 내려받고 그 릴리스를 시작합니다. 내려받은 릴리스는 감지한 에이전트 플랫폼에 자신을 설치합니다. 인스톨러는 체크아웃의 `origin`을 사용하고, 원격 저장소 설정이 없으면 Ghost-ALICE GitHub 저장소를 사용합니다. 개발 체크아웃에 있는 파일이나 보관본의 정확한 버전을 설치하려면 해당 폴더의 설치 명령에 `--local-source`를 붙입니다. 이후 `update`는 다시 원격 `main`을 받습니다. 아래 옵션으로 특정 플랫폼을 선택하거나 설치를 개별적으로 관리하실 수 있습니다.
 
 설치가 성공하면 `~/.ghost-alice/bin/ghost-alice`(Windows: `%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd`)로 상태 확인·갱신·제거를 실행할 수 있습니다. 설치를 완료하지 못하면, 표시된 오류에 다른 명령이 안내되어 있을 때는 그 명령을 실행해 주세요. 안내된 명령이 없으면 표시된 원인을 해결한 뒤 같은 명령을 다시 실행해 주세요. 이 인스톨러가 배치한 Core 스킬과 런타임·관리 명령은 개발 clone의 실행 파일에 의존하지 않습니다. 인스톨러는 Python 3.11+·Git·Node.js가 없을 때 자동 설치를 시도하며, 첫 프로그램 설치 전에 패키지 관리자의 자동 동의 인자 의미를 안내합니다.
 
@@ -120,19 +120,35 @@ Doctor는 Core 정보 항목 `native-intake-waits`, `native-intake-failures`, `h
 
 ## 업데이트
 
-고정 명령은 원격 main 브랜치를 내려받고 그 버전의 인스톨러에 터미널을 넘깁니다. 새 인스톨러가 설치에 필요한 질문을 표시하고 호스트마다 이미 선택된 Core 스킬을 갱신합니다. 개발 clone을 이동하거나 삭제해도 실행할 수 있으며, 새로 감지한 호스트·스킬을 추가하거나 기존 애드온을 갱신하지 않습니다.
+설치한 Ghost-ALICE만 갱신하려면 어느 폴더에서든 아래 명령을 실행해 주세요. 설치된 관리 명령은 설치 기록에 적힌 원격 저장소에서 `main`을 내려받습니다. 그 릴리스의 인스톨러는 각 호스트에 이미 설치된 Core 스킬을 갱신합니다. 로컬 저장소가 없어도 실행할 수 있으며, 기존 애드온과 로컬 저장소 파일은 그대로 둡니다.
 
 ```bash
 ~/.ghost-alice/bin/ghost-alice update
-~/.ghost-alice/bin/ghost-alice --doctor
 ```
 
 ```cmd
-%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd update
-%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd --doctor
+"%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd" update
 ```
 
-업데이트는 설치 기록에 적힌 원격 저장소를 사용하고, 기록이 없으면 Ghost-ALICE GitHub 저장소를 사용합니다. 릴리스 브랜치를 제공하는 다른 저장소를 지정하려면 `--remote URL`을 사용합니다. 개발 checkout 자체를 갱신하려면 기존 `bash install.sh --update-source` 또는 `.\install.cmd --update-source`를 사용합니다. 이 별도 경로는 로컬 변경을 stash한 뒤 fast-forward하며 [소스 갱신 오류](./troubleshooting.md#git-업데이트-복구)를 안내합니다. 고정 update는 개발 checkout을 변경하지 않습니다. 보관한 성공 코드의 재설치와 원장 위치는 [인스톨러 구조](../reference/installer-architecture.md#고정-명령정책원장-데이터)를 참고해 주세요.
+PowerShell에서 설치본을 갱신하려면 `& "$env:USERPROFILE\.ghost-alice\bin\ghost-alice.cmd" update`를 실행해 주세요. 설치를 점검하려면 같은 명령에서 `update`를 `--doctor`나 `--status`로 바꿔 주세요.
+
+로컬 저장소의 파일(예: `install.sh`)과 설치본을 모두 갱신하려면, 릴리스 저장소의 `main`을 추적하는 로컬 `main` 폴더에서 다음 명령을 실행해 주세요. Git이 현재 브랜치를 최신 커밋까지 앞으로 옮길 수 있거나 이미 최신이면 두 번째 명령을 실행합니다. Git이 실패하면 셸은 두 번째 명령을 실행하지 않습니다.
+
+```bash
+git pull --ff-only && ~/.ghost-alice/bin/ghost-alice update
+```
+
+```cmd
+git pull --ff-only && "%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd" update
+```
+
+PowerShell 7에서 로컬 저장소와 설치본을 함께 갱신하는 명령은 `git pull --ff-only && & "$env:USERPROFILE\.ghost-alice\bin\ghost-alice.cmd" update`입니다.
+
+등록된 설치 원본 폴더에서 Git이 새 커밋을 병합하면 [병합 훅](#설치-원본)이 두 번째 명령보다 먼저 실행될 수 있습니다. 이 훅은 감지한 모든 호스트에 기본 Core 스킬을 설치하려고 합니다. 이어서 실행하는 `update`는 그 시점의 설치 기록을 읽습니다. Git의 성공 여부와 설치 결과는 각각의 명령 출력에서 확인해 주세요.
+
+일반 체크아웃에서 `bash install.sh`(Windows에서는 `.\install.cmd`)를 다시 실행하면 인스톨러는 원격 `main`에서 감지한 호스트의 기본 Core 스킬 전체를 설치합니다. 원격 `main`을 기본값으로 정한 [변경 #167](https://github.com/AidALL/ghost-alice/pull/167) 전에 기능 브랜치에서 설치했다면, 첫 번째 예시의 `update` 뒤에 `--ref refs/heads/main`을 한 번 붙여 주세요. 구형 관리 명령이 `Update needs its acquisition source`를 표시하면 설치 기록에 원격 주소나 브랜치가 빠져 있습니다. 인수로 두 값을 모두 지정해 주세요. 공식 저장소를 사용한다면 `update --remote https://github.com/AidALL/ghost-alice.git --ref refs/heads/main`입니다. 갱신에 성공한 뒤에는 `update`만 사용합니다.
+
+설치 기록에 원격 저장소 주소가 없으면 `update`는 Ghost-ALICE GitHub 저장소를 사용합니다. 다른 저장소의 `main`을 받으려면 `--remote URL`을 지정해 주세요. 로컬에서 편집한 파일을 먼저 Git stash에 보관하고 체크아웃을 갱신하려면 [소스 갱신 오류](./troubleshooting.md#git-업데이트-복구)를 참고해 주세요. 보관한 버전의 재설치와 원장 위치는 [인스톨러 구조](../reference/installer-architecture.md#고정-명령정책원장-데이터)에 설명되어 있습니다.
 
 설치된 Core 스킬의 호스트 목록(`used_by`)이 손상되면 인스톨러는 설치를 중단하고 해당 설치 기록 파일과 스킬 경로를 표시합니다.
 
@@ -180,7 +196,7 @@ cd C:\path\to\new-checkout
 | 스킬 목록 | `bash install.sh --list` | `.\install.cmd --list` |
 | 설치 상태 확인 | `bash install.sh --status` | `.\install.cmd --status` |
 | 보호 진단 실행 | `bash install.sh --doctor` | `.\install.cmd --doctor` |
-| 안전한 소스 갱신 | `bash install.sh --update-source` | `.\install.cmd --update-source` |
+| 로컬 편집분을 stash에 보관하고 체크아웃 갱신 | `bash install.sh --update-source` | `.\install.cmd --update-source` |
 | 애드온 설치 | `bash install.sh --addon-source /path/to/addon-repo` | `.\install.cmd --addon-source C:\path\to\addon-repo` |
 | 선택한 Core 스킬 설치 | `bash install.sh task-router verification-before-completion` | `.\install.cmd task-router verification-before-completion` |
 | 전체 제거 | `bash install.sh --uninstall` | `.\install.cmd --uninstall` |
@@ -211,7 +227,7 @@ Ghost-ALICE는 Claude Code 작업 공간 명령으로 `/visibility strict|dynami
 
 인스톨러는 `--help`와 `--list`를 포함한 모든 명령에 Python 3.11 이상을 요구합니다. `install.sh`는 Python을 찾거나 준비하고 인수를 `_shared/installer/cli.py`에 전달하는 일만 합니다. 해당 버전이 없으면 가능한 환경에서 자동 준비를 시도합니다.
 
-선택적인 macOS 네이티브 문맥 게이트웨이는 `compression.zstd`를 제공하는 Python 3.14 이상을 요구합니다. 등록 명령 `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`는 먼저 이 기능을 확인한 뒤 launch agent, `state.json`, Codex provider 블록을 작성하고 설치 기록에 서비스를 기록합니다. 등록 명령은 모듈을 복사하지 않습니다. 서비스는 인스톨러가 게시한 런타임 `_shared`를 실행하므로 Core를 먼저 설치해 주세요. Core 인스톨러와 훅의 최소 요구 버전은 Python 3.11로 유지됩니다. Codex `config.toml`, launch agent, 상태 파일이 심볼릭 링크이면 등록과 분리는 서비스를 변경하기 전에 종료하고 링크와 원본을 보존합니다. 갱신은 서비스 파일 세 개가 설치 기록과 같은 동안 리스너의 포트와 `scope` 값을 유지합니다. 인스톨러 밖에서 변경된 파일이 있으면 명령은 무엇이든 변경하기 전에 종료하고, 기록이 지정하지 않은 launch agent, 상태 디렉터리 항목, provider 블록은 보존합니다. 첫 등록이 실패하고 후보 서비스의 중지가 확인되면, 롤백이 그 시도가 새로 작성한 상태 자료와 기록 항목을 삭제해 다음 등록을 진행할 수 있게 합니다. 중지를 확인할 수 없거나 자료가 동시에 변경되면 검토용으로 복구 자료를 보존합니다. 등록 뒤에는 `bash install.sh`만으로 설치본을 갱신합니다. `bash install.sh gateway detach --apply`는 서비스 등록을 해제하고 상태 디렉터리를 남깁니다. 설치 기록에 없는 게이트웨이 서비스를 launchd가 실행 중이면, 설치와 `--repair`는 그 서비스를 변경하지 않고 등록 명령을 안내하는 경고 한 줄을 출력합니다. 등록 명령은 서비스를 기록에 작성하고 새 코드로 재시작합니다.
+선택적인 macOS 네이티브 문맥 게이트웨이는 `compression.zstd`를 제공하는 Python 3.14 이상을 요구합니다. 등록 명령 `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`는 먼저 이 기능을 확인한 뒤 launch agent, `state.json`, Codex provider 블록을 작성하고 설치 기록에 서비스를 기록합니다. 등록 명령은 모듈을 복사하지 않습니다. 서비스는 인스톨러가 게시한 런타임 `_shared`를 실행하므로 Core를 먼저 설치해 주세요. Core 인스톨러와 훅의 최소 요구 버전은 Python 3.11로 유지됩니다. Codex `config.toml`, launch agent, 상태 파일이 심볼릭 링크이면 등록과 분리는 서비스를 변경하기 전에 종료하고 링크와 원본을 보존합니다. 갱신은 서비스 파일 세 개가 설치 기록과 같은 동안 리스너의 포트와 `scope` 값을 유지합니다. 인스톨러 밖에서 변경된 파일이 있으면 명령은 무엇이든 변경하기 전에 종료하고, 기록이 지정하지 않은 launch agent, 상태 디렉터리 항목, provider 블록은 보존합니다. 첫 등록이 실패하고 후보 서비스의 중지가 확인되면, 롤백이 그 시도가 새로 작성한 상태 자료와 기록 항목을 삭제해 다음 등록을 진행할 수 있게 합니다. 중지를 확인할 수 없거나 자료가 동시에 변경되면 검토용으로 복구 자료를 보존합니다. 등록 뒤에는 [설치본 갱신 명령](#업데이트)으로 각 호스트에 이미 설치한 Core 스킬과 게이트웨이가 사용하는 런타임을 갱신합니다. `bash install.sh gateway detach --apply`는 서비스 등록을 해제하고 상태 디렉터리를 남깁니다. 설치 기록에 없는 게이트웨이 서비스를 launchd가 실행 중이면, 설치와 `--repair`는 그 서비스를 변경하지 않고 등록 명령을 안내하는 경고 한 줄을 출력합니다. 등록 명령은 서비스를 기록에 작성하고 새 코드로 재시작합니다.
 
 - macOS: Homebrew가 있으면 `brew install python3`
 - Linux / WSL: `apt-get`, `dnf`, `yum`, `pacman` 같은 패키지 관리자
@@ -242,9 +258,10 @@ Claude Code와 Codex의 훅 설치에는 사용 가능한 Node.js 실행 환경�
 
 Core 설치와 애드온 제거는 별도 작업입니다. 새 Core 설치는 지침, 입력·출처 연결, 작업·검토 기록과 Core 훅을 제공합니다. 애드온 옵션 없이 Core를 갱신하면 이미 설치된 애드온은 유지합니다. `--addon-skip`은 애드온 설치를 건너뛰며 기존 애드온의 제거를 요청하지 않습니다.
 
-| 동작 | Codex 예시 | 관리 범위 |
+| 동작 | 명령 또는 절차 | 변경하는 대상 |
 | --- | --- | --- |
-| 새 Core 설치 또는 Core 갱신 | `bash install.sh --platform codex` | Core를 설치·갱신하며 기존 애드온 파일과 등록은 유지합니다 |
+| Codex에 기본 Core 스킬 설치 | `bash install.sh --platform codex` | Codex에 기본 Core 스킬 전체를 설치하고 기존 애드온을 유지합니다 |
+| 각 호스트에 이미 설치된 Core 스킬 갱신 | [설치된 관리 명령으로 갱신](#업데이트) | 설치 기록에서 호스트별 Core 스킬 목록을 읽고 기존 애드온을 유지합니다 |
 | 애드온 추가 또는 갱신 | `bash install.sh --platform codex --addon-source /path/to/addon-repo` | Core와 애드온 매니페스트가 선택한 스킬·관찰용 훅을 설치합니다 |
 | Core를 유지하며 애드온 제거 | `bash install.sh --platform codex --uninstall --addon <addon-id>` | 기록된 애드온 훅을 먼저 해제하고 검증된 애드온 파일을 제거합니다 |
 | 한 플랫폼 제거 | `bash install.sh --platform codex --uninstall` | 해당 플랫폼의 애드온·Core를 제거하고 다른 설치 플랫폼이 사용하는 공용 파일은 유지합니다 |
@@ -273,13 +290,13 @@ Claude Code에서 인스톨러는 매니페스트가 선택한 애드온의 `Ski
 - `~/.ghost-alice/rollbacks/<txid>/`: 배치 한 번이 교체한 원래 파일, 배치 전의 설치 기록, 배치의 저널을 보관합니다. 설치 잠금을 획득하는 다음 인스톨러 명령이 중간에 중지된 배치를 복원하며, 완료된 폴더를 남기는 개수는 [런타임 상태 보존](../reference/repository-structure.md#런타임-상태-보존)이 정합니다
 - 설치 상태, 병합 대기 자료와 제거 보고서의 지원 상태
 
-선택적인 문맥 게이트웨이를 등록한 설치본에서는 설치 기록의 `service` 섹션이 서비스의 코드 루트 `~/.ghost-alice/runtime/current`와 서비스 파일 세 개를 지정합니다. 런타임 배치(`_shared`와 동반 스크립트 `session-intent-analyzer/scripts/session_intent_ledger.py`)는 파일 교체 전에 서비스를 중지하고 교체 뒤에 시작합니다. 갱신은 `bash install.sh` 한 번이며 게이트웨이 갱신 명령을 먼저 실행하지 않습니다. 인스톨러는 서비스의 런타임 루트와 서비스 실행 여부를 `Context gateway:` 한 줄로 출력합니다. 이전 인스톨러가 등록한 설치본은 첫 설치, 복구 또는 제거 때 게이트웨이 설치 영수증에서 `service` 섹션을 한 번 작성합니다.
+선택적인 문맥 게이트웨이를 등록한 설치본에서는 설치 기록의 `service` 섹션이 서비스의 코드 루트 `~/.ghost-alice/runtime/current`와 서비스 파일 세 개를 지정합니다. 런타임 배치(`_shared`와 동반 스크립트 `session-intent-analyzer/scripts/session_intent_ledger.py`)는 파일 교체 전에 서비스를 중지하고 교체 뒤에 시작합니다. 설치와 갱신 모두 인스톨러가 이 서비스 재시작을 처리합니다. 인스톨러는 서비스의 런타임 루트와 서비스 실행 여부를 `Context gateway:` 한 줄로 출력합니다. 이전 인스톨러가 등록한 설치본은 첫 설치, 복구 또는 제거 때 게이트웨이 설치 영수증에서 `service` 섹션을 한 번 작성합니다.
 
 인스톨러는 전역 규칙 파일에서 표지가 붙은 Ghost-ALICE 블록만 관리합니다. 그 블록을 갱신하면서 부트스트랩 밖의 글은 보존합니다. 대상이 Ghost-ALICE 표지가 없는 파일이면 원본 대신 `<rule-file>.ghost-alice-proposed` 제안 파일을 작성하며, status와 doctor는 이를 설치된 전역 규칙으로 취급하지 않습니다.
 
 ### 공통 거버넌스와 프로젝트 지침
 
-Ghost-ALICE 공통 거버넌스는 프로젝트와 업무 분야에 관계없이 적용됩니다. Codex의 정상 작업 경로에서 응답 모델은 관리되는 `~/.codex/AGENTS.md` 로더가 지정한 공용 계약 파일을 조회합니다. 인스톨러는 같은 디렉터리의 `ghost-alice-governance.md`에 그 계약을 기록합니다. Claude Code에서는 인스톨러가 `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`의 관리 블록에 공용 계약을 직접 기록합니다. 프로젝트 지침 파일은 프로젝트 고유 제약을 추가하며, 공통 절차의 복사본을 별도로 제공하지 않습니다. 공용 계약의 [Operating Model](../../../platforms/common-governance.md#operating-model)은 인간 사용자가 대화 입력창에 입력한 지시의 우선순위와 지시 파일에 작성된 제약을 정합니다.
+Ghost-ALICE 공통 거버넌스는 프로젝트와 업무 분야에 관계없이 적용됩니다. Codex의 정상 작업 경로에서 응답 모델은 관리되는 `~/.codex/AGENTS.md` 로더가 지정한 공용 계약 파일을 조회합니다. 인스톨러는 같은 디렉터리의 `ghost-alice-governance.md`에 그 계약을 기록합니다. Claude Code에서는 인스톨러가 `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`의 관리 블록에 공용 계약을 직접 기록합니다. 프로젝트 지침 파일은 프로젝트 고유 제약을 추가하며, 공통 절차의 복사본을 별도로 제공하지 않습니다. 공용 계약의 [Operating Model](https://github.com/AidALL/ghost-alice/blob/main/platforms/common-governance.md#operating-model)은 인간 사용자가 대화 입력창에 입력한 지시의 우선순위와 지시 파일에 작성된 제약을 정합니다.
 
 ```mermaid
 flowchart LR

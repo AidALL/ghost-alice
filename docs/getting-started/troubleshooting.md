@@ -25,7 +25,7 @@ This document is a fast recovery playbook for cases where a user cannot pull the
 
 ### Target Symptoms
 
-If any of the following appears, the installer is not the first problem. The local checkout is blocked from synchronizing and must be repaired first.
+These messages come from Git while updating the local checkout. To update only installed Core, run the [installed update command](./installation.md#update) from any directory. To update the checkout too, find the matching symptom below.
 
 - `Committer identity unknown`
 - `CONFLICT (content)`
@@ -36,18 +36,16 @@ If any of the following appears, the installer is not the first problem. The loc
 - `## main...origin/main [ahead N, behind M]`
 - `git status --short` shows `UU` or `AA`
 
-Do not keep rerunning the installer in this state. Clean up the Git state first, then rerun the installer.
-
-For normal source updates, prefer the safe installer path instead of raw `git pull`:
+If the current branch can fast-forward to its upstream and you want to save local edits, run this command from the checkout.
 
 ```bash
 cd ~/ghost-alice
 bash install.sh --update-source
 ```
 
-This command saves local tracked and untracked changes in the checkout in `git stash`, fast-forwards the checkout, and leaves the stash for the human user to review. Git does not record who made those changes.
+This command saves local tracked and untracked changes in the checkout in `git stash`, fast-forwards the checkout, and leaves the stash for the human user to review. If Git merges new commits in the registered install source, the [post-merge hook](./installation.md#install-source) can start an automatic installation.
 
-On Windows, use `.\install.cmd` for the same installer path. If PowerShell shows `cannot be loaded because running scripts is disabled`, the wrapper invokes PowerShell with `-NoProfile -ExecutionPolicy Bypass` and does not change the user or machine execution policy.
+On Windows, use `.\install.cmd --update-source` for the same installer path. If PowerShell shows `cannot be loaded because running scripts is disabled`, the wrapper invokes PowerShell with `-NoProfile -ExecutionPolicy Bypass` and does not change the user or machine execution policy.
 
 If raw `git pull` is already blocked before the checkout can receive `--update-source`, use the bootstrap one-command update:
 
@@ -137,22 +135,29 @@ Then share `git status --short --branch`, the conflict file list, and both diff 
 
 ### 5. Run the Installer After Git Is Clean
 
-After source recovery, reinstall Core. `--update-source` alone refreshes the Core source; the installation command below installs it, and installed addons stay installed. On Windows, use `.\install.cmd`, then `--doctor` and `--status`:
+If Git stopped before your first installation finished, run `bash install.sh` or `.\install.cmd` from the recovered checkout as shown in [Quick Install](./installation.md#quick-install).
+
+For an existing installation, use these commands to update each host’s installed Core skills and check the result. The Windows example uses Command Prompt. For PowerShell, see [Update](./installation.md#update).
 
 ```bash
-bash install.sh
-bash install.sh --doctor
-bash install.sh --status
+~/.ghost-alice/bin/ghost-alice update
+~/.ghost-alice/bin/ghost-alice --doctor
+~/.ghost-alice/bin/ghost-alice --status
+```
+
+```cmd
+"%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd" update
+"%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd" --doctor
+"%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd" --status
 ```
 
 If `Doctor` or `Status` reports a pending merge warning, the installer created a protective backup during install. Open a fresh Claude Code/Codex session and ask it to review backed-up changes. The response model follows merge-companion to explain the choices, and the human user decides what to keep.
 
 ### 6. Operating Principles
 
-- Update commands should use the safe installer updater by default; the updater itself fast-forwards after saving source-local changes.
 - If `git pull` creates a merge conflict, the installer cannot resolve that conflict for the user.
 - A blocked-user guide is not enough when it exists only inside the repo. Keep an online source link available from the Wiki so the guide can be read without pulling.
-- Do not run the installer while `UU` or `AA` remains in Git status.
+- If `git status --short` still shows `UU` or `AA` in the checkout you are recovering, resolve those files before running that checkout’s install script.
 
 ## Git Hook Registration Failure
 

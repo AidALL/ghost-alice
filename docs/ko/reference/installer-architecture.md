@@ -95,7 +95,7 @@ macOS에서 `hosts`는 번들 식별자와 번들이 선언한 주 실행 파일
 | --- | --- |
 | `schema_version` | 원장·출처 관계에 확인된 호스트가 있으면 `3`, 게시할 관계가 모두 경로뿐이거나 비어 있으면 `2`입니다. 레거시 파일 이름에는 스키마 안내를 기록하고 v3가 활성 상태인 동안에는 v2 파일 이름에도 안내를 기록합니다 |
 | `installer` | `commit`, `schema_version`, `active_root`(`ghost-alice` 명령이 실행하는 보관 패키지). 설치는 호스트 파일을 배치하기 전에 `active_root`를 기록합니다 |
-| `source` | 개발 원본 `root`, 입력 `commit`·`dirty`, 갱신 입력 `remote`·`ref`, [기록 스키마](../../../installer_update/install_state_schema.md#installed-ledger-source-relationships)가 정의한 설치 원장 출처 관계 |
+| `source` | 개발 원본 `root`, 입력 `commit`·`dirty`, 갱신 입력 `remote`·`ref`, [기록 스키마](https://github.com/AidALL/ghost-alice/blob/main/installer_update/install_state_schema.md#installed-ledger-source-relationships)가 정의한 설치 원장 출처 관계 |
 | `last_transaction` | 마지막 게시의 `id`, `updated_at`, `rollback_dir` |
 | `targets` | 설치 위치마다 `name`, `kind`(`skill`, `support`, `runtime`, `command`, `resource`), `mode`(`link`, `copy`), `provider`(`core` 또는 `addon:<id>`), `source`, `source_commit`, `used_by`, 링크이면 `link_target`, 복사이면 `files`, `installed_at`, `baseline` |
 | `service` | 등록된 문맥 게이트웨이. 등록이 없으면 이 섹션도 없습니다. `label`, `runtime_root`(서비스가 실행하는 런타임 `_shared`의 상위 폴더), `program`, 서비스 파일 세 개 `launch_agent`·`state_path`·`config_path`와 지문 `launch_agent_digest`·`state_digest`·`config_block_digest`(Codex `config.toml`의 provider 블록 지문. 등록 명령이 기록하기 전에는 `null`), `config_backup`, `registered_at`, `restarted_at`, `listener_ready` |
@@ -171,7 +171,7 @@ Core 설치가 요청받은 배치·훅·부트스트랩·검증·설치 기록�
 
 새 설치는 `<ghost-root>/session-intent`(B)를 사용합니다. `transaction.installed_ledger_locations`는 설치 잠금 옆의 설정과 실제 관리 훅의 경로를 독립적으로 읽습니다. 해석한 설정을 `install_hooks.observed_installation`에 전달하면서 훅 fallback을 끄고, 설정을 읽지 못해도 `install_hooks.installed_hook_ledger_roots`로 훅 경로를 읽습니다. 따라서 설정의 B가 아직 A를 지정하는 훅을 가리지 않습니다. 환경 override나 기본값을 설치 사실로 반환하지 않습니다. `_default_destination`은 관측한 필드와 기존 입력·기본값으로 목적지를 완성한 뒤 검증하며, 명시적 원장 override가 있으면 관리 훅 fallback을 건너뜁니다. `transaction.installed_ledger_locations`는 관측 결과를 정규화한 원장 경로별로 묶고 설치 기록의 보존된 출처 관계와 연결합니다. 그 호스트에 적용할 보존 관계가 없을 때만 현재 출처 안의 경로인지 확인합니다. B와 사용 종료한 경로는 새 이동 후보가 아니지만, 사용 종료한 원본의 미완료 정리는 같은 후속 단계에서 처리합니다. 설치 결합 밖의 독립 개발 경로는 조회 입력에 없습니다. 출처 관계를 확인하지 못한 설치 경로도 관계 미확인 상태로 표시할 수 있습니다. 조회 결과는 설정 관찰 오류와 호스트별 훅 조회 불가를 구분하며, 다른 관찰 위치를 유지합니다. 설정과 필요한 훅 관찰이 성공할 때까지 기록 이동을 보류합니다.
 
-`transaction.publish`는 설치 잠금 안에서 설치 설정·관리 훅·설치 기록을 통해 원장과 출처의 관계를 조회합니다. 관계를 알면 현재 체크아웃에서 관찰한 경우에도 출처 폴더와 호스트 식별자를 함께 보존합니다. 호스트를 읽지 못하게 되어도 기록된 귀속을 유지할 수 있습니다. 새 호스트가 같은 경로를 사용한다는 사실만으로 이전 호스트의 귀속을 물려받지 않습니다. 옛 v2 문자열만으로는 과거 호스트를 알 수 없습니다. 관찰자는 별도 근거로 현재 관계를 확인할 수 있으며, 모든 호스트를 관찰했고 어떤 호스트도 귀속 미확인 경로를 쓰지 않으면 그 관계를 제거할 수 있습니다. 이전 인스톨러의 활성화가 중단되어 설치 기록 옆에 남은 `pending-install-source.json`에는 설치 기록에 없는 호스트 이름이 있습니다. `transaction.activate`는 이 파일의 활성 패키지·출처·원장 경로가 설치 기록과 아직 일치하면 그 이름을 설치 기록에 추가하며, 일치하지 않더라도 이 파일을 삭제합니다. [기록 스키마](../../../installer_update/install_state_schema.md#installed-ledger-source-relationships)
+`transaction.publish`는 설치 잠금 안에서 설치 설정·관리 훅·설치 기록을 통해 원장과 출처의 관계를 조회합니다. 관계를 알면 현재 체크아웃에서 관찰한 경우에도 출처 폴더와 호스트 식별자를 함께 보존합니다. 호스트를 읽지 못하게 되어도 기록된 귀속을 유지할 수 있습니다. 새 호스트가 같은 경로를 사용한다는 사실만으로 이전 호스트의 귀속을 물려받지 않습니다. 옛 v2 문자열만으로는 과거 호스트를 알 수 없습니다. 관찰자는 별도 근거로 현재 관계를 확인할 수 있으며, 모든 호스트를 관찰했고 어떤 호스트도 귀속 미확인 경로를 쓰지 않으면 그 관계를 제거할 수 있습니다. 이전 인스톨러의 활성화가 중단되어 설치 기록 옆에 남은 `pending-install-source.json`에는 설치 기록에 없는 호스트 이름이 있습니다. `transaction.activate`는 이 파일의 활성 패키지·출처·원장 경로가 설치 기록과 아직 일치하면 그 이름을 설치 기록에 추가하며, 일치하지 않더라도 이 파일을 삭제합니다. [기록 스키마](https://github.com/AidALL/ghost-alice/blob/main/installer_update/install_state_schema.md#installed-ledger-source-relationships)
 
 설치 요청을 실행하는 인스톨러는 성공 버전 메타데이터를 확정한 뒤 종료합니다. 종료 코드가 0이면 설치 요청을 작성하는 인스톨러의 `dispatch`가 같은 패키지의 `record_move`를 한 번 실행하며, 원래 설치·update·post-merge 실행 원인을 전달합니다. 관리 진입점, 내려받은 릴리스, 복구를 인계받은 활성 인스톨러와 이 후속 단계는 `runner.run_command`로 터미널을 상속하고, 설치 요청을 실행하는 인스톨러와 호스트별 설치 프로세스는 표준 입력을 닫는 기본값을 유지합니다. 기존 요청 채널은 선택한 패키지와 출처 결합을 전달합니다. `record_move`는 비대화 실행과 post-merge에서도 이미 수락하고 사용 종료한 원본의 미완료 정리를 마치며, 이 실행들은 새 이동을 요청하지 않습니다. 이 모듈은 이동·대기 질문마다 공통 `terminal` reader를 사용하며 자신의 기본값과 취소 의미를 유지합니다. 질문·대기·옮기기와 정리 호출·경로별 결과도 이 모듈이 담당하며, 응답 방법은 [설치 안내](../getting-started/installation.md#기존-작업-기록-옮기기)가 설명합니다. `report`는 `install.sh`가 UTF-8 locale 보정 전에 보존한 언어로 후속 표시 언어를 한 번 선택하며, 경로와 명령은 바꾸지 않습니다.
 
@@ -191,7 +191,7 @@ Doctor와 status는 경로별 기록 위치와 기존 저널의 원본 정리 �
 flowchart TD
   ENTRY["ghost-alice 명령: 기록된 활성 인스톨러에 터미널 전달"] -->|사용자 인수와 상속한 표준 입력| MANAGE["활성 인스톨러: 요청한 명령의 담당자 호출"]
   START["설치 스크립트: installer.cli 시작"] -->|"--local-source가 없으면 원격 main을 한 번 내려받음"| ACQUIRED
-  START -->|"--local-source를 지정함"| INPUT
+  START -->|"--local-source를 지정함"| CHOOSE
   INPUT["요청 작성 인스톨러: 입력 파일과 호스트별 선택 확정"] -->|소스 상태와 신뢰 확인 통과| EXIT["cli.confirm_host_shutdown: 기존 관찰자가 관련 호스트·CLI 상태 전달"]
   EXIT -->|요청 작성 인스톨러가 터미널 동의 또는 무인 확인 수행; 부재 확인| PKG["소스 담당자: 상태가 candidate인 버전 폴더 보관"]
   EXIT -->|취소 또는 부재 미확인| CANCEL["CLI: 자신의 설치 변경 전에 종료 1"]
@@ -211,8 +211,20 @@ flowchart TD
   RETRY -->|ghost-alice| ENTRY
   COMMIT -->|요청 작성 인스톨러가 성공 뒤 후속 단계 시작| FOLLOW["같은 패키지가 터미널과 원래 실행 원인으로 record_move 실행"]
   MANAGE -->|설치 또는 갱신: 활성 인스톨러가 원격 main을 한 번 내려받음| ACQUIRED["내려받은 릴리스가 시작 폴더·설치 원본·원격 저장소·터미널·인수를 받음"]
-  ACQUIRED -->|요청·기록·저장·감지한 호스트별 선택| INPUT
+  ACQUIRED --> CHOOSE["인스톨러가 시작 폴더, 명령, 인수로 설치 대상을 선택"]
+  CHOOSE -->|update| INSTALLED["설치 기록에서 호스트별 Core 스킬 이름을 읽음"]
+  CHOOSE -->|일반 체크아웃에서 옵션 없이 설치하거나 병합 훅이 설치| DEFAULTS["감지한 호스트마다 기본 Core 스킬 전체를 선택함"]
+  CHOOSE -->|보관한 패키지에서 스킬 이름 없이 설치| SAVED["호스트별 설치 목록을 읽고, 설치 목록이 비었거나 이 패키지가 활성 상태에서 설치를 끝내지 못했으면 패키지에 저장한 선택을 합침"]
+  SAVED -->|호스트를 생략하면 전체 목록을 사용하고 지정하면 해당 호스트의 목록을 사용| INPUT
+  SAVED -->|다른 호스트의 목록만 있고 지정한 호스트의 목록은 없음| NEW_HOST["지정한 호스트의 기본 Core 스킬 전체를 선택"]
+  NEW_HOST --> INPUT
+  SAVED -->|설치 목록과 패키지에 저장한 선택이 모두 비었음| NO_CHOICES["인스톨러가 호스트와 스킬 이름을 지정하라고 안내하고 중단"]
+  CHOOSE -->|그 밖의 설치에서 호스트나 스킬을 지정함| EXPLICIT["설치 인수에서 호스트나 스킬 선택을 읽음"]
+  INSTALLED --> INPUT
+  DEFAULTS --> INPUT
+  EXPLICIT --> INPUT
   MERGE["Git 훅: 표준 입력을 닫고 ghost-alice --post-merge 실행"] -->|활성 인스톨러가 기록된 개발 원본만 허용하고 원격 main을 내려받음| ACQUIRED
+  MERGE -->|병합한 폴더가 등록된 설치 원본과 다름| SKIP["설치 명령이 설치를 건너뛰고 Git에 제어를 돌려줌"]
   MANAGE -->|사용자가 진단 또는 제거 요청| OP["기존 명령 담당자: 대상 진단 또는 제거"]
   DETACH -->|제거 담당자가 확인된 참조 해제| RECORD
   OP -->|전체·마지막 Core 제거의 훅 해제 전: 관찰한 결합과 오류 전달| SAVE["transaction.retain_record_source_writers: 기존 저널에 필요한 호스트 범위 저장"]
@@ -325,6 +337,8 @@ flowchart LR
 Claude Code는 네이티브 스킬 호출과 훅 권한을 제공할 수 있지만, 이 수단은 저장소 밖의 세션에 전역 지침을 전달하는 경로를 대신하지 않습니다. 그래서 인스톨러는 `platforms/claude/CLAUDE.md`의 관리 블록을 Claude 설정 디렉터리에 병합합니다. Codex는 같은 스킬 호출 수단을 제공하지 않으므로, Codex의 별도 부트스트랩과 훅 설정이 필수 게이트를 `SKILL.md` 조회 기록과 훅 입력·출력으로 감사할 수 있게 합니다. 두 전역 규칙 파일은 관리 블록 밖의 글을 보존하며, Ghost-ALICE 표지가 없는 파일은 교체하지 않고 `.ghost-alice-proposed` 제안 파일을 따로 작성합니다.
 
 인스톨러가 관리하는 훅 명령과, 인스톨러가 설치할 때마다 그 명령에 기록하는 Codex의 훅 신뢰 항목은 설치 기록과 일치해야 합니다. 실행 중인 호스트가 이전 등록을 유지할 수 있으므로, 호스트별 재로드 절차를 실행한 뒤 실제 네이티브 콜백으로 적용을 확인합니다. [훅 신뢰와 재로드](../getting-started/troubleshooting.md#네이티브-훅-신뢰와-재로드)를 참고해 주세요. [세션 게이트 참고 사항](../policies/session-gate-matrix.md#참고)은 설치된 바이트와 네이티브 실행을 서로 다른 주장으로 나열합니다.
+
+인스톨러는 등록된 입력 훅을 식별할 때 명령의 `--root`를 훅 등록에 저장된 원장 경로와 비교합니다. 훅 실행기 역시 명령에 `--root`나 `--session-intent-root`가 있으면 등록된 경로와 비교합니다. 두 곳 모두 Windows에서는 대소문자와 경로 구분자 표기(`/`, `\`) 차이를 허용하고, macOS·Linux에서는 경로 문자열이 정확히 일치해야 합니다. 경로가 다르면 인스톨러는 해당 명령을 관리 대상 입력 훅으로 식별하지 않고, 실행기는 명령을 실행하기 전에 거부합니다.
 
 부트스트랩 작성기는 바이트 내용이 같은 기존 일반 제안 파일을 다시 기록하지 않고 재사용합니다. 기본 파일 이름과 별도 이름으로 만든 형제 파일들을 확인합니다. 같은 내용의 파일이 없으면 기본 경로에 새 파일을 만들고, 그 경로가 이미 있으면 옆에 별도 이름의 제안 파일을 만듭니다. 기존 파일과 링크는 보존합니다. 선택한 경로를 출력하고 설치를 계속합니다. 훅 설정 편집기는 관리하는 TOML 할당문을 수정하면서 다른 여러 줄 값, 따옴표로 묶은 표 이름과 주석을 보존하며, 점 표기와 인라인 표도 편집합니다. 유효한 TOML을 보존할 수 없는 정리 편집은 검토 대상으로 보고합니다.
 

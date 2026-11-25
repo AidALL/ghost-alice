@@ -14,7 +14,7 @@ Counts retain their declared unit. A unique finding count differs from physical 
 
 ## Review, output and continuation
 
-[Evidence and native delivery](../../architecture.md#evidence-and-native-delivery) describes the model's two judgments and Core's authentication. A review receipt returns status and references; it does not repeat the answer body. An unfavorable review or missing prerequisite remains unresolved under the [review procedure](../../coding-convention/verification-before-completion/references/response-review.md).
+[Evidence and native delivery](../../architecture.md#evidence-and-native-delivery) describes the model's two judgments and Core's authentication. A review receipt returns status and references; it does not repeat the answer body. An unfavorable review or missing prerequisite remains unresolved under the [review procedure](https://github.com/AidALL/ghost-alice/blob/main/coding-convention/verification-before-completion/references/response-review.md).
 
 ```mermaid
 flowchart LR
