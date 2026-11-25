@@ -43,7 +43,9 @@ cd %USERPROFILE%\ghost-alice
 .\install.cmd
 ```
 
-`bash install.sh`와 `.\install.cmd`는 원격 Git 브랜치 `refs/heads/main`에서 Core를 내려받고 그 릴리스를 시작합니다. 내려받은 릴리스는 감지한 에이전트 플랫폼에 자신을 설치합니다. 인스톨러는 체크아웃의 `origin`을 사용하고, 원격 저장소 설정이 없으면 Ghost-ALICE GitHub 저장소를 사용합니다. 개발 체크아웃에 있는 파일이나 보관본의 정확한 버전을 설치하려면 해당 폴더의 설치 명령에 `--local-source`를 붙입니다. 이후 `update`는 다시 원격 `main`을 받습니다. 아래 옵션으로 특정 플랫폼을 선택하거나 설치를 개별적으로 관리하실 수 있습니다.
+`bash install.sh`와 `.\install.cmd`는 원격 Git 브랜치 `refs/heads/main`에서 Core를 내려받고 감지한 에이전트 플랫폼에 설치할 인스톨러를 시작합니다. 인스톨러는 체크아웃의 `origin`을 사용하고, 원격 저장소 설정이 없으면 Ghost-ALICE GitHub 저장소를 사용합니다.
+
+v0.6.0을 그대로 설치하려면 [v0.6.0 릴리스](https://github.com/AidALL/ghost-alice/releases/tag/v0.6.0)에서 소스 압축 파일을 받아 풀거나 해당 Git 태그를 체크아웃해 주세요. 그 폴더에서 `bash install.sh --local-source`를, Windows에서는 `.\install.cmd --local-source`를 실행해 주세요. 개발 체크아웃이나 보관된 패키지에서도 같은 옵션으로 해당 폴더의 파일을 설치할 수 있습니다. 이후 `update`는 원격 `main`을 내려받습니다.
 
 설치가 성공하면 `~/.ghost-alice/bin/ghost-alice`(Windows: `%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd`)로 상태 확인·갱신·제거를 실행할 수 있습니다. 설치를 완료하지 못하면, 표시된 오류에 다른 명령이 안내되어 있을 때는 그 명령을 실행해 주세요. 안내된 명령이 없으면 표시된 원인을 해결한 뒤 같은 명령을 다시 실행해 주세요. 이 인스톨러가 배치한 Core 스킬과 런타임·관리 명령은 개발 clone의 실행 파일에 의존하지 않습니다. 인스톨러는 Python 3.11+·Git·Node.js가 없을 때 자동 설치를 시도하며, 첫 프로그램 설치 전에 패키지 관리자의 자동 동의 인자 의미를 안내합니다.
 
@@ -119,6 +121,8 @@ bash install.sh --status
 Doctor는 Core 정보 항목 `native-intake-waits`, `native-intake-failures`, `hook-failures`, `intake-hook-degraded`를 출력합니다. 이 목록은 기록된 대기·실패·입력 훅 오류 표지를 보고하며 `overall`과 종료 코드를 변경하지 않습니다. 입력 훅 오류 표지만으로 입력 저장 여부를 판정할 수 없습니다. [입력 경고와 doctor 목록](troubleshooting.md#입력-경고와-doctor-목록)에서 각 목록의 조회 대상을 설명합니다. Doctor와 status는 기존 이동 저널에서 정리가 남은 옛 기록 경로도 안내합니다. 이 진단은 기록을 옮기거나 삭제를 재시도하지 않으며 현재 파일의 삭제 가능 여부를 다시 판정하지 않습니다.
 
 ## 업데이트
+
+설치본에 `ghost-alice` 관리 명령이 없으면 릴리스 원격 저장소의 `main`을 추적하는 로컬 `main` 체크아웃에서 `git pull --ff-only`를 실행해 주세요. pull이 성공하면 `bash install.sh`를, Windows에서는 `.\install.cmd`를 실행해 주세요. 인스톨러가 원격 `main`에서 Core를 받아 설치하고 관리 명령을 만듭니다. 호스트나 스킬을 개별 선택해 설치했다면 인스톨러에 해당 호스트나 스킬을 지정해 주세요.
 
 설치한 Ghost-ALICE만 갱신하려면 어느 폴더에서든 아래 명령을 실행해 주세요. 설치된 관리 명령은 설치 기록에 적힌 원격 저장소에서 `main`을 내려받습니다. 그 릴리스의 인스톨러는 각 호스트에 이미 설치된 Core 스킬을 갱신합니다. 로컬 저장소가 없어도 실행할 수 있으며, 기존 애드온과 로컬 저장소 파일은 그대로 둡니다.
 

@@ -8,11 +8,11 @@ Ghost-ALICE OS는 AI 에이전트의 작업을 관리하는 거버넌스 계층�
 
 기존 에이전트 실행 환경 위에서 동작하며, 에이전트가 완료를 선언하기 전에 작업 과정과 근거를 검토할 수 있도록 돕습니다. 프롬프트 모음이나 챗봇 연결 도구, 독립 실행형 에이전트 런타임을 제공하는 저장소는 아닙니다.
 
-## 버전 0.5.1
+## 버전 0.6.0
 
-[웹사이트](https://aidall.github.io/ghost-alice/index_ko.html) · [아키텍처](./architecture_ko.md)
+[v0.6.0 릴리스](https://github.com/AidALL/ghost-alice/releases/tag/v0.6.0) · [웹사이트](https://aidall.github.io/ghost-alice/index_ko.html) · [아키텍처](./architecture_ko.md)
 
-Core 0.5.1은 현재 response-route와 완료 계약을 사용합니다. Apache-2.0으로 제공됩니다.
+Core는 SQLite에 세션 기록을 저장합니다. 설치 후에는 어느 디렉터리에서든 관리 명령으로 호스트별로 선택한 Core 스킬을 갱신할 수 있습니다.
 
 ## 거버넌스를 따르는 작업의 진행 방식
 
@@ -22,13 +22,13 @@ Core 0.5.1은 현재 response-route와 완료 계약을 사용합니다. Apache-
 
 ## 빠른 시작
 
-복제한 Ghost-ALICE 저장소 폴더에서 Core를 설치해 주세요. 인스톨러가 사용 가능한 에이전트 플랫폼을 자동으로 감지합니다:
+복제한 Ghost-ALICE 저장소에서 다음 명령을 실행하면 인스톨러가 에이전트 플랫폼을 감지하고 원격 `main`에서 Core를 받아 설치합니다.
 
 ```bash
 bash install.sh
 ```
 
-저장소 복제와 운영체제별 설치 명령은 [설치 안내](./docs/ko/getting-started/installation.md)를 확인해 주세요. 설치한 Core를 갱신하거나 로컬 `main`도 함께 갱신하려면 [업데이트](./docs/ko/getting-started/installation.md#업데이트)를 참고해 주세요.
+v0.6.0을 그대로 설치하려면 릴리스 압축을 푼 폴더나 `v0.6.0` 태그를 체크아웃한 폴더에서 `bash install.sh --local-source`(Windows에서는 `.\install.cmd --local-source`)를 실행해 주세요. 운영체제별 명령은 [설치 안내](./docs/ko/getting-started/installation.md), 설치본과 로컬 저장소를 갱신하는 방법은 [업데이트](./docs/ko/getting-started/installation.md#업데이트)를 참고해 주세요.
 
 ## 애드온
 

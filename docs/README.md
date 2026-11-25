@@ -8,7 +8,7 @@ Every paired document has a language switch near the top. The [language policy](
 
 ## Quick Install
 
-From the cloned Core repository, install Core with automatic agent-platform detection:
+From the cloned Core repository, run this command to install Core from remote `main` for each detected agent platform.
 
 ```bash
 bash install.sh
