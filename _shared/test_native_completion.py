@@ -614,12 +614,12 @@ class NativeProofBindingTests(unittest.TestCase):
             '  - none', '  - AC1: Native application remains unverified')
         body = proof + '\n\nThe footer observation is retained. Native application remains unverified.'
         response_file = Path(self.owner.fixture.tmp.name) / 'answer.txt'
-        response_file.write_text(body)
+        response_file.write_text(body, encoding='utf-8')
         shared = Path(__file__).parent
         env = dict(os.environ, **self.owner.source, PYTHONDONTWRITEBYTECODE='1')
         def cli(*args):
             return subprocess.run([sys.executable, '-B', str(shared / 'completion_assessment.py'), *args],
-                env=env, text=True, capture_output=True)
+                env=env, encoding='utf-8', capture_output=True)
         prepared = cli('prepare-response', '--response-file', str(response_file),
             '--verified-at', self.owner.time, '--source', str(self.owner.observation))
         self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
@@ -632,7 +632,7 @@ class NativeProofBindingTests(unittest.TestCase):
             rationale='The observed footer result supports only the retained partial claim.')
             for b in candidate['bindings']]
         judgment_file = response_file.with_suffix('.json')
-        judgment_file.write_text(json.dumps(dict(claims=claims)))
+        judgment_file.write_text(json.dumps(dict(claims=claims)), encoding='utf-8')
         rejected = cli('record-response', '--candidate', candidate['candidate_reference'],
             '--judgment-file', str(judgment_file))
         self.assertNotEqual(rejected.returncode, 0)
@@ -640,7 +640,7 @@ class NativeProofBindingTests(unittest.TestCase):
             self.api.lookup_current_proof(self.owner.source, proof)
         judgment_file.write_text(json.dumps(dict(claims=claims, response=dict(
             binding_id=candidate['response_binding']['binding_id'], verdict='supported',
-            source_ids=sources, rationale='The complete answer retains the same partial scope and uncertainty.'))))
+            source_ids=sources, rationale='The complete answer retains the same partial scope and uncertainty.'))), encoding='utf-8')
         recorded = cli('record-response', '--candidate', candidate['candidate_reference'],
             '--judgment-file', str(judgment_file))
         self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
