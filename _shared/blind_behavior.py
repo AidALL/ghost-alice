@@ -16,7 +16,7 @@ from typing import Any, Callable, Mapping, Sequence
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import atomic_write
-from fresh_agent_session import FreshAgentSessionError, run_fresh_agent_session
+from fresh_agent_session import FreshAgentSessionError, run_fresh_agent_session, validate_in_memory_command
 from hook_definitions import SUPPORTED_PLATFORMS
 from project_runtime import ProjectRuntime, project_runtime
 from source_reference import canonical_json
@@ -225,17 +225,7 @@ def _invoke(runtime: ProjectRuntime,
 def _preserve_evaluator_failure(
     runtime: ProjectRuntime,
     stage: str,
-    capture: subprocess.CompletedProcess[str] | BaseException | None,
 ) -> None:
-    def captured_text(name: str) -> str:
-        value = getattr(capture, name, None)
-        if isinstance(value, bytes):
-            return value.decode("utf-8", errors="replace")
-        return value if isinstance(value, str) else ""
-
-    stdout, stderr = captured_text("stdout"), captured_text("stderr")
-    (runtime.work_dir / "evaluator-stdout.txt").write_text(stdout, encoding="utf-8")
-    (runtime.work_dir / "evaluator-stderr.txt").write_text(stderr, encoding="utf-8")
     (runtime.work_dir / "failure-stage.txt").write_text(f"{stage}\n", encoding="utf-8")
     runtime.preserve(stage)
 
@@ -293,6 +283,7 @@ def run_blind_behavior_case(
     case, suite_digest = load_sealed_case(case_path)
     installed = load_installed_provenance(platform, install_manifest_path)
     subject, evaluator = _command(subject_command, "subject command"), _command(evaluator_command, "evaluator command")
+    validate_in_memory_command(evaluator)
     if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
     private = list(_strings(case))
@@ -302,24 +293,24 @@ def run_blind_behavior_case(
         raise ValueError("subject argv contains case or evaluator-private state")
     record = _record(case, installed, suite_digest)
     runtime_root = Path(repo_root).resolve() if repo_root else CODE_OWNER_ROOT
+    try:
+        response = run_fresh_agent_session(
+            platform=platform,
+            prompt=case["prompt"],
+            cli_command=subject,
+            repo_root=runtime_root,
+            timeout_seconds=timeout_seconds,
+            run_process=run_process,
+            response_in_memory=True,
+        )
+    except subprocess.TimeoutExpired:
+        record["reason"], record["process"]["subject"] = "subject-timeout", _state(timed_out=True)
+        return _outcome(record)
+    except (FreshAgentSessionError, OSError, subprocess.SubprocessError):
+        record["reason"] = "subject-process-failure"
+        return _outcome(record)
+    record["process"]["subject"] = _state(0)
     with project_runtime(runtime_root, "blind-behavior") as runtime:
-        try:
-            response = run_fresh_agent_session(
-                platform=platform,
-                prompt=case["prompt"],
-                cli_command=subject,
-                repo_root=runtime_root,
-                timeout_seconds=timeout_seconds,
-                run_process=run_process,
-            )
-        except subprocess.TimeoutExpired:
-            record["reason"], record["process"]["subject"] = "subject-timeout", _state(timed_out=True)
-            return _outcome(record)
-        except (FreshAgentSessionError, OSError, subprocess.SubprocessError):
-            record["reason"] = "subject-process-failure"
-            return _outcome(record)
-        record["process"]["subject"] = _state(0)
-        (runtime.work_dir / "subject-response.txt").write_text(response, encoding="utf-8")
         packet = json.dumps({
             "prompt": case["prompt"], "evaluator_private": case["evaluator_private"],
             "response": response,
@@ -327,18 +318,18 @@ def run_blind_behavior_case(
         try:
             process = _invoke(runtime, run_process, evaluator, packet, controller_cwd,
                               timeout_seconds)
-        except subprocess.TimeoutExpired as exc:
+        except subprocess.TimeoutExpired:
             record["reason"], record["process"]["evaluator"] = "evaluator-timeout", _state(timed_out=True)
-            _preserve_evaluator_failure(runtime, "evaluator-timeout", exc)
+            _preserve_evaluator_failure(runtime, record["reason"])
             return _outcome(record)
-        except (OSError, subprocess.SubprocessError) as exc:
-            _preserve_evaluator_failure(runtime, "evaluator-process-failure", exc)
+        except (OSError, subprocess.SubprocessError):
             record["reason"] = "evaluator-process-failure"
+            _preserve_evaluator_failure(runtime, record["reason"])
             return _outcome(record)
         record["process"]["evaluator"] = _state(process.returncode)
         if process.returncode != 0:
-            _preserve_evaluator_failure(runtime, "evaluator-process-failure", process)
             record["reason"] = "evaluator-process-failure"
+            _preserve_evaluator_failure(runtime, record["reason"])
             return _outcome(record)
         try:
             raw = json.loads(process.stdout)
@@ -347,14 +338,14 @@ def run_blind_behavior_case(
         ids = [item["id"] for item in case["evaluator_private"]["pass_criteria"]]
         result = _evaluator_result(raw, ids)
         if result is None:
-            _preserve_evaluator_failure(runtime, "invalid-evaluator-output", process)
             record["reason"] = "invalid-evaluator-output"
+            _preserve_evaluator_failure(runtime, record["reason"])
             return _outcome(record)
         record.update(verdict=result["verdict"], dimensions=result["dimensions"],
                       reason=f"evaluator-confirmed-{result['verdict']}")
         if result["verdict"] == "pass":
             return _outcome(record)
-        _preserve_evaluator_failure(runtime, "evaluator-confirmed-fail", process)
+        _preserve_evaluator_failure(runtime, record["reason"])
         failed = sorted(key for key, status in result["dimensions"].items() if status == "fail")
         return _outcome(record, {
             "id": f"blind-behavior:{record['case_hash'][:16]}",

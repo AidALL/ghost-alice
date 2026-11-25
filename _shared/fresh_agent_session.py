@@ -22,6 +22,7 @@ from text_lines import split_lines
 CODE_OWNER_ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_SESSION_FLAGS = {"--resume", "--continue", "--session-id"}
 CLAUDE_SESSION_SHORT_FLAGS = {"-r", "-c"}
+BLIND_FILE_FLAGS = {"--output-last-message", "--response-file", "--output-file", "--debug-file"}
 ORDINARY_AUTH_ENV_KEYS = frozenset({
     "PATH",
     "PATHEXT",
@@ -143,7 +144,7 @@ def build_claude_command(cli_command: Sequence[str]) -> list[str]:
 
 def build_codex_command(
     cli_command: Sequence[str],
-    last_message_path: Path,
+    last_message_path: Path | None,
 ) -> list[str]:
     command = _command(cli_command)
     command.extend([
@@ -152,11 +153,21 @@ def build_codex_command(
         "--sandbox",
         "read-only",
         "--skip-git-repo-check",
-        "--output-last-message",
-        str(last_message_path),
-        "-",
     ])
+    if last_message_path is not None:
+        command.extend(["--output-last-message", str(last_message_path)])
+    command.append("-")
     return command
+
+
+def validate_in_memory_command(command: Sequence[str], *, subject_platform: str | None = None) -> None:
+    """Reject reserved output options for a blind subject or an independent evaluator."""
+    for arg in command[1:]:
+        flag = arg.partition("=")[0]
+        if flag in BLIND_FILE_FLAGS or arg.startswith("-o"):
+            raise ValueError("response-file options are forbidden for in-memory output")
+        if subject_platform == "codex" and flag in {"--json", "--experimental-json"}:
+            raise ValueError("Codex must deliver its final message on stdout")
 
 
 def parse_claude_response(stream_text: str) -> str:
@@ -206,9 +217,14 @@ def read_codex_response(last_message_path: Path) -> str:
         response = last_message_path.read_text(
             encoding="utf-8",
             errors="replace",
-        ).strip()
+        )
     except OSError as exc:
         raise FreshAgentSessionError("Codex produced no readable final response") from exc
+    return _codex_final_text(response)
+
+
+def _codex_final_text(response: str) -> str:
+    response = response.strip()
     if not response:
         raise FreshAgentSessionError("Codex produced no final assistant response")
     return response
@@ -223,6 +239,7 @@ def run_fresh_agent_session(
     timeout_seconds: float = 600,
     run_process: Callable[..., Any] | None = None,
     reporter: Callable[[str], None] | None = None,
+    response_in_memory: bool = False,
 ) -> str:
     """Run a one-shot nonpersistent CLI process for one stdin prompt."""
 
@@ -242,6 +259,8 @@ def run_fresh_agent_session(
         if cli_command is not None
         else resolve_cli_command(platform)
     )
+    if response_in_memory:
+        validate_in_memory_command(base_command, subject_platform=platform)
     owning_root = Path(repo_root).resolve() if repo_root else CODE_OWNER_ROOT
     process_runner = run_process or subprocess.run
     with project_runtime(
@@ -249,7 +268,7 @@ def run_fresh_agent_session(
         f"fresh-agent-{platform}",
         reporter=reporter,
     ) as runtime:
-        last_message_path = runtime.root / "last-message.txt"
+        last_message_path = None if response_in_memory else runtime.root / "last-message.txt"
         subject_environment = _ordinary_cli_env()
         subject_environment["GIT_CEILING_DIRECTORIES"] = str(runtime.root)
         command = (
@@ -277,6 +296,8 @@ def run_fresh_agent_session(
             )
         if platform == "claude":
             return parse_claude_response(completed.stdout)
+        if last_message_path is None:
+            return _codex_final_text(completed.stdout)
         return read_codex_response(last_message_path)
 
 
