@@ -28,7 +28,7 @@ Core 0.5.1은 현재 response-route와 완료 계약을 사용합니다. Apache-
 bash install.sh
 ```
 
-저장소 복제, 운영체제별 실행 명령, 플랫폼 선택, 업데이트와 문제 해결은 [상세 설치 안내](./docs/ko/getting-started/installation.md)를 확인해 주세요.
+저장소 복제와 운영체제별 설치 명령은 [설치 안내](./docs/ko/getting-started/installation.md)를 확인해 주세요. 설치한 Core를 갱신하거나 로컬 `main`도 함께 갱신하려면 [업데이트](./docs/ko/getting-started/installation.md#업데이트)를 참고해 주세요.
 
 ## 애드온
 
@@ -66,7 +66,7 @@ bash install.sh --uninstall
 
 ## 기여와 검증
 
-스킬, 인스톨러 동작, 공개 명령을 변경하기 전에는 [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md)를 읽어 주세요. 스킬을 추가하거나 수정할 때는 기여 안내의 [Skill Changes](./CONTRIBUTING.md#skill-changes) 단계를 따라 주세요.
+스킬, 인스톨러 동작, 공개 명령을 변경하기 전에는 [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md)를 읽어 주세요. 스킬을 추가하거나 수정할 때는 기여 안내의 [Skill Changes](https://github.com/AidALL/ghost-alice/blob/main/CONTRIBUTING.md#skill-changes) 단계를 따라 주세요.
 
 공개 문서와 명령 안내의 일관성은 다음 명령으로 검증하실 수 있습니다.
 

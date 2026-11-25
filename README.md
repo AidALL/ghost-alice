@@ -28,7 +28,7 @@ From the cloned Ghost-ALICE repository, install Core. The installer automaticall
 bash install.sh
 ```
 
-See the [detailed installation guide](./docs/getting-started/installation.md) for cloning, OS-native entrypoints, platform selection, updates and troubleshooting.
+See the [installation guide](./docs/getting-started/installation.md) for cloning and OS-specific commands. To update installed Core or update both Core and a local `main` checkout, see [Update](./docs/getting-started/installation.md#update).
 
 ## Addons
 
@@ -66,7 +66,7 @@ bash install.sh --uninstall
 
 ## Contributing And Validation
 
-Before changing skills, installer behavior, or public command surfaces, read [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md). Skill changes follow the [Skill Changes](./CONTRIBUTING.md#skill-changes) steps of the contributing guide.
+Before changing skills, installer behavior, or public command surfaces, read [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md). Skill changes follow the [Skill Changes](https://github.com/AidALL/ghost-alice/blob/main/CONTRIBUTING.md#skill-changes) steps of the contributing guide.
 
 Public surface validation:
 

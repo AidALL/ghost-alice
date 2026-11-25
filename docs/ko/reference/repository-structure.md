@@ -21,8 +21,8 @@
 | [README.md](../../../README.md) | 간결한 공개 진입점 |
 | [README_ko.md](../../../README_ko.md) | README.md와 짝을 이루는 한국어 공개 진입점 |
 | [architecture.md](../../../architecture.md), [architecture_ko.md](../../../architecture_ko.md) | 양 언어 Core 책임·데이터 흐름 안내 |
-| [AGENTS.md](../../../AGENTS.md) | 현재 호스트 계약의 프로젝트 로더 |
-| [공통 거버넌스](../../../platforms/common-governance.md) | 호스트별 규칙과 결합하는 공통 계약 원본 |
+| [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md) | 현재 호스트 계약의 프로젝트 로더 |
+| [공통 거버넌스](https://github.com/AidALL/ghost-alice/blob/main/platforms/common-governance.md) | 호스트별 규칙과 결합하는 공통 계약 원본 |
 | [CLAUDE.md](https://github.com/AidALL/ghost-alice/blob/main/CLAUDE.md) | Claude Code 프로젝트 규칙의 진입점 |
 | [index.html](../../../index.html) | GitHub Pages 홈페이지 |
 

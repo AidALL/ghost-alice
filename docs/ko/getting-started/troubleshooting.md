@@ -25,7 +25,7 @@
 
 ### 대상 증상
 
-아래 중 하나가 보이면 먼저 해결할 문제는 인스톨러가 아닙니다. 로컬 체크아웃이 동기화되지 못한 상태이므로 Git 상태부터 복구합니다.
+다음 메시지는 Git이 로컬 저장소를 갱신하다가 만난 문제입니다. 설치본만 갱신하려면 [설치 안내의 업데이트 명령](./installation.md#업데이트)을 어느 폴더에서든 실행할 수 있습니다. 로컬 저장소도 갱신하려면 아래에서 해당 증상을 찾아 주세요.
 
 - `Committer identity unknown`
 - `CONFLICT (content)`
@@ -36,18 +36,16 @@
 - `## main...origin/main [ahead N, behind M]`
 - `git status --short`에 `UU` 또는 `AA`가 보임
 
-이 상태에서는 인스톨러를 반복 실행하지 않습니다. Git 상태를 먼저 깨끗하게 복구한 뒤 인스톨러를 다시 실행합니다.
-
-일반 소스 업데이트에는 직접 실행하는 `git pull`보다 안전한 인스톨러 업데이트 명령을 우선 사용합니다.
+현재 브랜치를 원격 추적 브랜치까지 앞으로 옮길 수 있고 로컬 편집분을 보관하려면 체크아웃에서 다음 명령을 실행해 주세요.
 
 ```bash
 cd ~/ghost-alice
 bash install.sh --update-source
 ```
 
-인스톨러는 이 명령에서 체크아웃의 추적·미추적 로컬 변경을 `git stash`에 저장하고 체크아웃을 fast-forward합니다. 저장한 stash는 인간 사용자가 검토하도록 보관합니다. 변경한 주체를 git이 기록하지 않습니다.
+인스톨러는 이 명령에서 체크아웃의 추적·미추적 로컬 변경을 `git stash`에 저장하고 체크아웃을 fast-forward합니다. 저장한 stash는 인간 사용자가 검토하도록 보관합니다. 등록된 설치 원본에서 Git이 새 커밋을 병합하면 [병합 훅](./installation.md#설치-원본)이 자동 설치를 시도할 수 있습니다.
 
-Windows에서는 같은 업데이트에 `.\install.cmd`를 실행합니다. PowerShell이 `cannot be loaded because running scripts is disabled`를 표시하면 래퍼가 `-NoProfile -ExecutionPolicy Bypass`로 PowerShell을 호출하고 사용자 또는 컴퓨터의 실행 정책을 변경하지 않습니다.
+Windows에서는 같은 업데이트에 `.\install.cmd --update-source`를 실행합니다. PowerShell이 `cannot be loaded because running scripts is disabled`를 표시하면 래퍼가 `-NoProfile -ExecutionPolicy Bypass`로 PowerShell을 호출하고 사용자 또는 컴퓨터의 실행 정책을 변경하지 않습니다.
 
 직접 실행한 `git pull`이 이미 막혀서 체크아웃이 `--update-source`를 받지 못하면 아래의 부트스트랩 단일 명령 업데이트를 실행합니다.
 
@@ -137,22 +135,29 @@ git diff --staged > ghost-alice-local-staged.diff
 
 ### 5. Git이 깨끗해진 뒤 인스톨러 실행
 
-소스를 복구하신 뒤 Core를 다시 설치해 주세요. `--update-source`만으로는 Core 소스만 갱신되며, 아래 설치 명령이 설치를 수행합니다. 설치된 애드온은 그대로 유지됩니다. Windows에서는 `.\install.cmd`를 실행한 뒤 `--doctor`와 `--status`로 확인해 주세요.
+첫 설치를 마치기 전에 Git이 멈췄다면, 복구한 체크아웃에서 [빠른 설치](./installation.md#빠른-설치)의 `bash install.sh` 또는 `.\install.cmd`를 실행해 주세요.
+
+기존 설치를 갱신하려면 아래 명령으로 호스트별 Core 스킬을 갱신하고 결과를 확인해 주세요. Windows 예시는 명령 프롬프트용입니다. PowerShell에서는 [업데이트 안내](./installation.md#업데이트)의 명령을 사용해 주세요.
 
 ```bash
-bash install.sh
-bash install.sh --doctor
-bash install.sh --status
+~/.ghost-alice/bin/ghost-alice update
+~/.ghost-alice/bin/ghost-alice --doctor
+~/.ghost-alice/bin/ghost-alice --status
+```
+
+```cmd
+"%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd" update
+"%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd" --doctor
+"%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd" --status
 ```
 
 `Doctor` 또는 `Status`가 병합 대기(`pending-merge`) 경고를 표시하면, 인스톨러가 설치 중에 보호용 백업을 생성했다는 뜻입니다. 새 Claude Code/Codex 세션에서 백업된 변경의 검토를 요청해 주세요. 응답 모델이 merge-companion을 따라 선택지를 설명하면 인간 사용자가 무엇을 유지할지 결정합니다.
 
 ### 6. 운영 원칙
 
-- 업데이트 명령은 기본적으로 안전한 인스톨러 갱신기를 사용합니다. 갱신기가 소스의 로컬 변경을 저장한 뒤 체크아웃을 직접 fast-forward합니다.
 - `git pull`이 병합 충돌을 일으키면 인스톨러가 사용자 대신 그 충돌을 해결하지 못합니다.
 - 막힌 사용자를 위한 안내가 저장소 안에만 있으면 부족합니다. 관리자는 위키에 이 안내의 온라인 링크를 유지해, 사용자가 pull 없이 조회할 수 있게 합니다.
-- Git 상태에 `UU` 또는 `AA`가 남아 있으면 인스톨러를 실행하지 않습니다.
+- 복구 중인 체크아웃에서 `git status --short`가 `UU`나 `AA`를 표시하면 충돌한 파일을 해결한 뒤 그 체크아웃의 설치 스크립트를 실행해 주세요.
 
 ## Git 훅 등록 실패
 

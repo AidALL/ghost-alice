@@ -51,7 +51,7 @@ The Codex managed loader declares the installed `~/.codex/ghost-alice-governance
 
 ### task-router
 
-The common contract's [Work Selection](../../platforms/common-governance.md#work-selection) section sets whether an input gets a direct answer or follows task-router as work.
+The common contract's [Work Selection](https://github.com/AidALL/ghost-alice/blob/main/platforms/common-governance.md#work-selection) section sets whether an input gets a direct answer or follows task-router as work.
 
 ### session-intent-analyzer
 
@@ -59,13 +59,13 @@ The installer registers session-intent-analyzer as the sole Core code input inta
 
 ### pending merge precheck
 
-[merge-companion](../../merge-companion/SKILL.md#entry-and-activation) sets what the SessionStart pending-merge report means and when the response model checks the manifest and reviews its entries.
+[merge-companion](https://github.com/AidALL/ghost-alice/blob/main/merge-companion/SKILL.md#entry-and-activation) sets what the SessionStart pending-merge report means and when the response model checks the manifest and reviews its entries.
 
 ### completion-reminder
 
 [Hook calls](../../architecture.md#hook-calls) describes Core code's Stop script, and [Evidence and native delivery](../../architecture.md#evidence-and-native-delivery) describes the two judgments that Core authenticates.
 
-The hook runner removes the block, stop and permission-decision controls from the JSON output of every hook it runs and reports block, stop, deny and ask requests in `systemMessage`; it turns a hook's exit code 2 into a non-blocking exit code 1, and the hook log keeps the original code. [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md) owns claim scope and control formats. Its [review reference](../../coding-convention/verification-before-completion/references/response-review.md) owns recording recovery and delivery; [tool output semantics](tool-output-semantics.md#review-output-and-continuation) names returned states. Installer tests check the registered hook payloads and platform mappings, not the truth of model judgments.
+The hook runner removes the block, stop and permission-decision controls from the JSON output of every hook it runs and reports block, stop, deny and ask requests in `systemMessage`; it turns a hook's exit code 2 into a non-blocking exit code 1, and the hook log keeps the original code. [Verification-before-completion](https://github.com/AidALL/ghost-alice/blob/main/coding-convention/verification-before-completion/SKILL.md) owns claim scope and control formats. Its [review reference](https://github.com/AidALL/ghost-alice/blob/main/coding-convention/verification-before-completion/references/response-review.md) owns recording recovery and delivery; [tool output semantics](tool-output-semantics.md#review-output-and-continuation) names returned states. Installer tests check the registered hook payloads and platform mappings, not the truth of model judgments.
 
 ## Shell Matrix
 

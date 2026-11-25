@@ -23,16 +23,17 @@
 ## 문서와 공개 안내
 
 - 프로젝트를 관리하는 사람, 또는 프로젝트를 관리하는 사람이 승인한 배포를 실행하는 응답 모델이나 위임 에이전트는 프로젝트를 관리하는 사람이 배포를 지시하며 승인한 같은 범위에서 `README.md`/`README_ko.md`, 아키텍처, `docs/`/`docs/ko/` 대응 문서, 위키 페이지와 영어·한국어 GitHub Pages 진입점을 같은 내용으로 갱신합니다.
-- 문서·위키·Pages에는 현재의 책임, 명령과 한계를 설명합니다. 변경 이력은 [PR 기대 사항](../../../CONTRIBUTING.md#pull-request-expectations)에 따라 커밋 메시지에만 기록합니다.
+- 문서·위키·Pages에는 현재의 책임, 명령과 한계를 설명합니다. 변경 이력은 [PR 기대 사항](https://github.com/AidALL/ghost-alice/blob/main/CONTRIBUTING.md#pull-request-expectations)에 따라 커밋 메시지에만 기록합니다.
 - 언어가 달라도 명령·경로·훅·스키마·열거 토큰은 유지합니다. 대응 문서 링크와 생성되는 공개 안내를 담당 카탈로그와 대조합니다.
 - 구현 계약의 기준은 저장소 문서입니다. 위키는 영어·한국어 짝으로 설명과 복구 안내를, Pages는 공개 진입점을 제공합니다. 프로젝트를 관리하는 사람, 또는 프로젝트를 관리하는 사람이 승인한 배포를 실행하는 응답 모델이나 위임 에이전트는 세 곳의 현재 의미가 일치하도록 게시합니다.
+- Pages에서 공개하는 문서끼리는 상대 링크로 연결합니다. 대상 파일을 `_config.yml`의 `exclude`에 지정했다면 GitHub의 해당 파일과 절을 연결합니다. 배포 전에 빌드된 HTML에서 파일과 절이 열리는지 확인합니다.
 - `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`, 행동 강령과 이슈·PR 양식을 실제 정책과 일치시킵니다.
 
 ## 소스 검증
 
 프로젝트를 관리하는 사람, 또는 프로젝트를 관리하는 사람이 승인한 배포를 실행하는 응답 모델이나 위임 에이전트는 후보가 영향을 주는 계약으로 검증 계획을 구성합니다. 변경 없는 근거는 [근거 재사용 규칙](../../../architecture_ko.md#근거와-네이티브-표시)대로 재사용합니다. 필수 검증이 없으면 해당 기준은 미해결로 남습니다.
 
-소스 검사 명령은 [검증 명령](../../../CONTRIBUTING.md#validation-commands)과 [CI 명령](../policies/installer-platform-compatibility-matrix.md#ci-명령)에 있습니다. 프로젝트를 관리하는 사람, 또는 프로젝트를 관리하는 사람이 승인한 배포를 실행하는 응답 모델이나 위임 에이전트는 후보 커밋에 문장 줄바꿈 검사도 실행합니다.
+소스 검사 명령은 [검증 명령](https://github.com/AidALL/ghost-alice/blob/main/CONTRIBUTING.md#validation-commands)과 [CI 명령](../policies/installer-platform-compatibility-matrix.md#ci-명령)에 있습니다. 프로젝트를 관리하는 사람, 또는 프로젝트를 관리하는 사람이 승인한 배포를 실행하는 응답 모델이나 위임 에이전트는 후보 커밋에 문장 줄바꿈 검사도 실행합니다.
 
 ```bash
 python3 scripts/check_prose_wrapping.py
@@ -65,7 +66,7 @@ python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform 
 
 1. 프로젝트를 관리하는 사람이 통합을 결정하면, 프로젝트를 관리하는 사람이 검토한 배포 범위만 기존 브랜치·검토 절차를 통해 통합합니다. 배포를 위해 저장소를 새로 초기화하거나 이력을 재작성하지 않습니다.
 2. 필수 소스·설치·행동 근거가 후보에 적용되는지 확인하고 지원 근거가 없는 플랫폼이나 범위를 명시합니다.
-3. 프로젝트를 관리하는 사람이 배포를 지시하며 승인한 범위의 커밋·버전 태그·배포 산출물만 게시합니다. 배포 설명에는 현재 패키지 동작·설치·검증·한계를 담으며, [변경 이력](../../../CONTRIBUTING.md#pull-request-expectations)은 커밋 메시지에만 기록합니다.
+3. 프로젝트를 관리하는 사람이 배포를 지시하며 승인한 범위의 커밋·버전 태그·배포 산출물만 게시합니다. 배포 설명에는 현재 패키지 동작·설치·검증·한계를 담으며, [변경 이력](https://github.com/AidALL/ghost-alice/blob/main/CONTRIBUTING.md#pull-request-expectations)은 커밋 메시지에만 기록합니다.
 4. 검토된 소스에서 영어·한국어 짝 위키와 GitHub Pages를 게시하고, 공개된 페이지가 의도한 후보와 일치하는지 확인합니다.
 5. 실제 CI와 게시 결과를 확인합니다. 로컬 커밋, 대기 중인 배포, 성공한 업로드 요청은 공개 게시의 증거가 아닙니다.
 6. 배포·설치 경로가 바뀌었다면 임시 계정이나 컴퓨터의 새 복제본에서 영향받은 공개 설치 경로를 확인합니다. 무관한 개발 설치본은 보존합니다.

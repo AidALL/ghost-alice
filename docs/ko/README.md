@@ -18,7 +18,7 @@ bash install.sh
 
 ## 시작 안내
 
-1. 설치와 업데이트는 [getting-started/installation.md](./getting-started/installation.md)를 확인해 주세요.
+1. [처음 설치하기](./getting-started/installation.md#빠른-설치) 또는 [설치본과 로컬 저장소 갱신하기](./getting-started/installation.md#업데이트).
 2. 업데이트가 막히면 [getting-started/troubleshooting.md](./getting-started/troubleshooting.md)를 확인해 주세요.
 3. 저장소 구조는 [reference/repository-structure.md](./reference/repository-structure.md)를 확인해 주세요.
 4. 인스톨러 아키텍처는 [reference/installer-architecture.md](./reference/installer-architecture.md)를 확인해 주세요.

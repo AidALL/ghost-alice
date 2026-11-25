@@ -37,7 +37,7 @@ The response model reads an older `accepted` field as `verifier_accepted` and `a
 
 - During a read-only evaluation pass, neither the response model that runs the evaluation nor any evaluator tool or delegate it runs changes installed assets.
 - The human user, or the response model or a delegate carrying out a promotion that the human user decided, does not promote `candidate-playbook.md` without the verifier's `verifier_accepted: true` judgment in `verifier-result.json`.
-- Required verification includes at least one candidate rejected for invalid input or missing evidence. That result supports refusal for that candidate and condition only; it does not establish the verifier’s general ability or overall quality. Unchanged case evidence follows the [evidence reuse procedure](../../coding-convention/verification-before-completion/references/verify-or-reuse.md).
+- Required verification includes at least one candidate rejected for invalid input or missing evidence. That result supports refusal for that candidate and condition only; it does not establish the verifier’s general ability or overall quality. Unchanged case evidence follows the [evidence reuse procedure](https://github.com/AidALL/ghost-alice/blob/main/coding-convention/verification-before-completion/references/verify-or-reuse.md).
 - The human user, or the response model or a delegate carrying out a promotion that the human user decided, stops installed asset changes if `verifier-result.json` has `verifier_accepted: false`.
 
 ## Minimum verifier-result.json Shape

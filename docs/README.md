@@ -18,7 +18,7 @@ The [installation guide](./getting-started/installation.md) covers cloning, OS-n
 
 ## Start Here
 
-1. Install or update from [getting-started/installation.md](./getting-started/installation.md).
+1. [Install for the first time](./getting-started/installation.md#quick-install) or [update your installation and local checkout](./getting-started/installation.md#update).
 2. Recover blocked updates from [getting-started/troubleshooting.md](./getting-started/troubleshooting.md).
 3. Understand the repository map from [reference/repository-structure.md](./reference/repository-structure.md).
 4. Understand the installer architecture from [reference/installer-architecture.md](./reference/installer-architecture.md).

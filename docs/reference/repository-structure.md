@@ -21,8 +21,8 @@ This document is the repository map.
 | [README.md](../../README.md) | Concise public entry point |
 | [README_ko.md](../../README_ko.md) | Korean paired public entry point |
 | [architecture.md](../../architecture.md), [architecture_ko.md](../../architecture_ko.md) | Paired Core responsibility and data-flow map |
-| [AGENTS.md](../../AGENTS.md) | Project loader for the current host contract |
-| [Common governance](../../platforms/common-governance.md) | Shared contract source composed with host-specific rules |
+| [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md) | Project loader for the current host contract |
+| [Common governance](https://github.com/AidALL/ghost-alice/blob/main/platforms/common-governance.md) | Shared contract source composed with host-specific rules |
 | [CLAUDE.md](https://github.com/AidALL/ghost-alice/blob/main/CLAUDE.md) | Claude Code project rule entrypoint |
 | [index.html](../../index.html) | GitHub Pages homepage |
 

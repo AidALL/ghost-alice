@@ -51,7 +51,7 @@ Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공�
 
 ### task-router
 
-입력마다 바로 답할지, 작업으로 task-router를 따를지는 공통 계약의 [Work Selection](../../../platforms/common-governance.md#work-selection) 절이 정합니다.
+입력마다 바로 답할지, 작업으로 task-router를 따를지는 공통 계약의 [Work Selection](https://github.com/AidALL/ghost-alice/blob/main/platforms/common-governance.md#work-selection) 절이 정합니다.
 
 ### session-intent-analyzer
 
@@ -59,13 +59,13 @@ Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공�
 
 ### 병합 대기 사전 확인
 
-SessionStart 훅의 병합 대기 알림이 뜻하는 것과, 응답 모델이 매니페스트를 확인하고 그 항목을 검토하는 시점은 [merge-companion](../../../merge-companion/SKILL.md#entry-and-activation)이 정합니다.
+SessionStart 훅의 병합 대기 알림이 뜻하는 것과, 응답 모델이 매니페스트를 확인하고 그 항목을 검토하는 시점은 [merge-companion](https://github.com/AidALL/ghost-alice/blob/main/merge-companion/SKILL.md#entry-and-activation)이 정합니다.
 
 ### completion-reminder
 
 Core 코드의 Stop 스크립트는 [훅 호출](../../../architecture_ko.md#훅-호출)이, Core가 인증하는 두 판단은 [근거와 네이티브 표시](../../../architecture_ko.md#근거와-네이티브-표시)가 설명합니다.
 
-훅 실행기는 실행하는 모든 훅의 JSON 출력에서 차단·정지·권한 결정 제어를 제거하고 차단·정지·거부·사용자 확인 요청을 `systemMessage`로 알리며, 훅의 종료 코드 2를 차단하지 않는 종료 코드 1로 변환합니다. 훅 로그는 원래 종료 코드를 보존합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 완료 확인 블록의 형식을 정합니다. [검토 참조](../../../coding-convention/verification-before-completion/references/response-review.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 인스톨러 테스트는 등록된 훅 항목과 플랫폼 연결을 확인할 뿐 모델 판단이 참인지 검증하지 않습니다.
+훅 실행기는 실행하는 모든 훅의 JSON 출력에서 차단·정지·권한 결정 제어를 제거하고 차단·정지·거부·사용자 확인 요청을 `systemMessage`로 알리며, 훅의 종료 코드 2를 차단하지 않는 종료 코드 1로 변환합니다. 훅 로그는 원래 종료 코드를 보존합니다. [Verification-before-completion](https://github.com/AidALL/ghost-alice/blob/main/coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 완료 확인 블록의 형식을 정합니다. [검토 참조](https://github.com/AidALL/ghost-alice/blob/main/coding-convention/verification-before-completion/references/response-review.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 인스톨러 테스트는 등록된 훅 항목과 플랫폼 연결을 확인할 뿐 모델 판단이 참인지 검증하지 않습니다.
 
 ## 셸 매트릭스
 
