@@ -10,7 +10,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, asdict
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 _ACTIVE = ContextVar('ghost_alice_install_destination', default=None)
 FIELDS = frozenset({'mode','owned_root','platform_dir','skills_dir','ghost_root','ledger_root','project_root','core_source_root','runtime_shared_dir'})
@@ -103,6 +103,13 @@ def default_ledger_root(env=None):
         return Path(configured).expanduser()
     active = current()
     return Path(active.ledger_root) if active else ghost_root(env=source) / 'session-intent'
+
+
+def same_ledger_root(candidate: str, bound: str) -> bool:
+    """Compare a hook's root spelling with its binding, without consulting the filesystem."""
+    if os.name == 'nt':
+        return PureWindowsPath(candidate) == PureWindowsPath(bound)
+    return candidate == bound
 
 
 def assert_mutation_path(path, *, env=None):

@@ -1897,7 +1897,7 @@ def _managed_session_intent_options(command: str):
                 or len(options) != len(argv[2:]) // 2
                 or options["--platform"] != runner["platform"]
                 or options["--format"] not in {"json", "text"}
-                or options["--root"] != destination.ledger_root
+                or not install_destination.same_ledger_root(options["--root"], destination.ledger_root)
                 or options["--context"] != "prompt_submit"):
             return None
         return options

@@ -682,8 +682,9 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     stdin_text = _read_stdin()
     hook_payload = _payload_from_stdin(stdin_text)
     if binding is not None:
-        for flag in ("--root","--session-intent-root"):
-            if flag in argv and argv[argv.index(flag)+1] != env["GHOST_ALICE_SESSION_INTENT_ROOT"]:
+        for flag in ("--root", "--session-intent-root"):
+            if flag in argv and not install_destination.same_ledger_root(
+                    argv[argv.index(flag) + 1], env["GHOST_ALICE_SESSION_INTENT_ROOT"]):
                 raise HookCommandRejected("inner ledger root conflicts with trusted binding", hook_payload=hook_payload)
     native_intake_failure = None
     if binding is not None:

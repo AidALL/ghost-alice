@@ -6,7 +6,9 @@ import os
 import shlex
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
+import install_destination
 import install_hooks
 import hook_profile_gate
 import pytest
@@ -36,6 +38,54 @@ def test_native_assessment_needs_no_display_trace_or_delivery_instruction():
 
 def test_bound_runner_transports_locations_in_the_binding():
     assert 'binding' in inspect.signature(hook_profile_gate.run).parameters
+
+
+@pytest.fixture(params=[
+    ('nt', r'\\server\share\ledger', True),
+    ('nt', r'\\server\share\other', False),
+    ('posix', '//Server/Share/Ledger', True),
+    ('posix', '//Server/Share/ledger', False),
+    ('posix', '//Server/Share/./Ledger', False),
+])
+def ledger_root_binding(tmp_path, request, monkeypatch):
+    host, inner_root, matches = request.param
+    value = destination_fixture(tmp_path, mode='normal', ledger_root='//Server/Share/Ledger',
+                                runtime_shared_dir=str(tmp_path))
+    hook = tmp_path / 'session_intent_analyzer_hook.py'
+    receipt = tmp_path / 'child-root'
+    hook.write_text("import sys\nfrom pathlib import Path\n"
+                    "Path(__file__).with_name('child-root').write_text(sys.argv[-1])\n", encoding='utf-8')
+    monkeypatch.setenv('HOME', str(tmp_path))
+    monkeypatch.delenv('GHOST_ALICE_DISABLED_HOOKS', raising=False)
+    # Select the binding's host without changing the host that owns the test filesystem.
+    monkeypatch.setattr(install_destination, 'os', SimpleNamespace(name=host, environ=os.environ))
+    return value, hook, inner_root, receipt, matches
+
+
+def test_registration_checks_ledger_root_spelling(ledger_root_binding):
+    value, hook, inner_root, _, matches = ledger_root_binding
+    inner = shlex.join([install_hooks.HOOK_PYTHON_SENTINEL, str(hook), '--platform', 'codex',
+                        '--format', 'json', '--context', 'prompt_submit', '--root', inner_root])
+    with install_destination.use(value):
+        command = install_hooks._hook_runner_command('session-intent', inner, install_hooks.SESSION_INTENT_MARKER,
+                                                     platform_key='codex')
+    assert (install_hooks._managed_session_intent_options(command) is not None) is matches
+
+
+@pytest.mark.parametrize('flag', ('--root', '--session-intent-root'))
+def test_bound_runner_checks_ledger_root_spelling(ledger_root_binding, flag):
+    value, hook, inner_root, receipt, matches = ledger_root_binding
+    inner = shlex.join([install_hooks.HOOK_PYTHON_SENTINEL, str(hook), flag, inner_root])
+    binding = install_destination.InstallDestination.parse(value).binding()
+    payload = base64.urlsafe_b64encode(inner.encode()).decode()
+    with patch.object(hook_profile_gate, '_read_stdin', return_value='{}'):
+        if matches:
+            assert hook_profile_gate.run('session-intent', payload, platform='codex', binding=binding) == 0
+            assert receipt.read_text() == inner_root
+        else:
+            with pytest.raises(hook_profile_gate.HookCommandRejected, match='inner ledger root conflicts'):
+                hook_profile_gate.run('session-intent', payload, platform='codex', binding=binding)
+            assert not receipt.exists()
 
 
 def test_binding_with_an_adapter_key_is_rejected(tmp_path):
