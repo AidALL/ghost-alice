@@ -192,6 +192,23 @@ class FreshAgentSessionTest(unittest.TestCase):
         self.assertFalse(run_root.exists())
         self.assertFalse(last_message.exists())
 
+    def test_ordinary_codex_session_preserves_its_last_message_file_on_failure(self):
+        partial = "Partial output from an ordinary session."
+        message_paths = []
+
+        def run_process(command, **kwargs):
+            path = Path(command[command.index("--output-last-message") + 1])
+            path.write_text(partial, encoding="utf-8")
+            message_paths.append(path)
+            return subprocess.CompletedProcess(command, 7, "", "diagnostic")
+
+        with self.assertRaises(self.session.FreshAgentSessionError):
+            self.session.run_fresh_agent_session(
+                platform="codex", prompt="Ordinary session", cli_command=["codex-test"],
+                repo_root=self.fixture, run_process=run_process,
+            )
+        self.assertEqual(message_paths[0].read_text(encoding="utf-8"), partial)
+
     def test_subject_environment_cannot_discover_the_parent_repository(self):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):

@@ -82,14 +82,6 @@ def write_case(folder: Path, case=CASE) -> Path:
     return path
 
 
-def adapt_fake_codex_subject(command, completed):
-    if "--output-last-message" not in command or completed.returncode != 0:
-        return completed
-    output = Path(command[command.index("--output-last-message") + 1])
-    output.write_text(completed.stdout, encoding="utf-8")
-    return subprocess.CompletedProcess(command, 0, "", completed.stderr)
-
-
 def home_environment(home: Path) -> dict[str, str]:
     return {"HOME": str(home), "USERPROFILE": str(home)}
 
@@ -157,7 +149,7 @@ class BlindBehaviorContractTest(unittest.TestCase):
             reply = next(replies)
             if isinstance(reply, BaseException):
                 raise reply
-            return adapt_fake_codex_subject(command, reply)
+            return reply
 
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -240,7 +232,7 @@ class BlindBehaviorContractTest(unittest.TestCase):
         command, kwargs = calls[0]
         self.assertEqual(command[:2], ["subject-agent", "exec"])
         self.assertIn("--ephemeral", command)
-        self.assertIn("--output-last-message", command)
+        self.assertNotIn("--output-last-message", command)
         self.assertEqual(command[-1], "-")
         self.assertFalse({"--resume", "--continue", "--session-id"}.intersection(command))
         self.assertEqual(kwargs["input"], CASE["prompt"])
@@ -273,6 +265,37 @@ class BlindBehaviorContractTest(unittest.TestCase):
                         run_process=runner,
                     )
         self.assertEqual(calls, [])
+
+    def test_output_overrides_are_rejected_before_either_process_starts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            case_path = write_case(root)
+            runner = mock.Mock(side_effect=AssertionError("unexpected process launch"))
+            for platform in ("claude", "codex"):
+                manifest = write_manifest(root, platform=platform)
+                output_args = [
+                    ["--output-last-message", "out"], ["--output-last-message=out"],
+                    ["--response-file", "out"], ["--response-file=out"],
+                    ["--output-file", "out"], ["--output-file=out"],
+                ]
+                short_output = [["-o", "out"], ["-oout"], ["-o=out"]]
+                for role in ("subject", "evaluator"):
+                    flags = output_args.copy()
+                    flags.extend(short_output)
+                    if role == "subject" and platform == "codex":
+                        flags.extend([["--json"], ["--experimental-json"]])
+                    if role == "subject" and platform == "claude":
+                        flags.extend([["--debug-file", "out"], ["--debug-file=out"]])
+                    for override in flags:
+                        with self.subTest(platform=platform, role=role, override=override):
+                            with mock.patch.dict(os.environ, home_environment(root)), self.assertRaises(ValueError):
+                                self.blind.run_blind_behavior_case(
+                                    case_path=case_path, platform=platform, install_manifest_path=manifest,
+                                    subject_command=["subject", *(override if role == "subject" else [])],
+                                    evaluator_command=["evaluator", *(override if role == "evaluator" else [])],
+                                    repo_root=root, run_process=runner,
+                                )
+            runner.assert_not_called()
 
     def test_canonical_install_manifest_is_loaded_and_allowlisted(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -359,7 +382,6 @@ class BlindBehaviorContractTest(unittest.TestCase):
         subject_command, kwargs = calls[0]
         self.assertEqual(subject_command[:2], ["subject-agent", "exec"])
         self.assertIn("--ephemeral", subject_command)
-        self.assertIn("--output-last-message", subject_command)
         self.assertEqual(kwargs["input"], CASE["prompt"])
         self.assertFalse(kwargs["shell"])
         self.assertNotEqual(Path(kwargs["cwd"]), controller)
@@ -403,128 +425,60 @@ class BlindBehaviorContractTest(unittest.TestCase):
         self.assertEqual(observed_kwargs.get("encoding"), "utf-8")
         self.assertEqual(observed_kwargs.get("errors"), "replace")
 
-    def test_subject_response_exists_before_evaluator_and_pass_cleans_runtime(self):
+    def test_subject_response_reaches_evaluator_stdin_without_a_run_file(self):
         response = "Pause — 검증 근거가 부족합니다."
         observed = {}
 
         def observe_evaluator(_command, kwargs):
             runtime = Path(kwargs["env"]["TMPDIR"]).parent
-            response_paths = list(runtime.rglob("subject-response.txt"))
             observed["runtime"] = runtime
-            observed["exists_before_evaluator"] = len(response_paths) == 1
-            observed["response"] = (
-                response_paths[0].read_text(encoding="utf-8")
-                if response_paths else None
-            )
+            observed["files"] = [p for p in runtime.parent.rglob("*") if p.is_file()]
+            observed["response"] = json.loads(kwargs["input"])["response"]
 
         def observe_runtime(_calls):
             observed["exists_after_pass"] = observed["runtime"].exists()
 
-        outcome, _ = self._execute(
+        outcome, calls = self._execute(
             subject=subprocess.CompletedProcess(["subject-agent"], 0, response, ""),
             evaluator_observer=observe_evaluator,
             runtime_observer=observe_runtime,
         )
 
         self.assertEqual(outcome["record"]["verdict"], "pass")
-        self.assertTrue(observed["exists_before_evaluator"])
         self.assertEqual(observed["response"], response)
-        self.assertNotIn(PRIVATE["purpose"], observed["response"])
-        self.assertNotIn(PRIVATE["rubric"], observed["response"])
+        self.assertEqual(observed["files"], [])
+        self.assertNotIn("--output-last-message", calls[0][0])
         self.assertFalse(observed["exists_after_pass"])
 
-    def _execute_evaluator_failure_with_artifacts(self, evaluator_process):
-        observed = {}
+    def test_evaluator_failures_preserve_only_the_sanitized_stage(self):
+        response = "Keep this subject response in memory."
+        private = PRIVATE["rubric"]
+        failed = {**PASS_RESULT, "verdict": "fail", "reason": response,
+                  "dimensions": {"claim-discipline": "fail", "scope-control": "pass"}}
+        cases = [
+            ("evaluator-timeout", subprocess.TimeoutExpired(
+                "evaluator", 5, output=response.encode(), stderr=private.encode())),
+            ("evaluator-process-failure", OSError(response)),
+            ("evaluator-process-failure", subprocess.CompletedProcess("evaluator", 9, response, private)),
+            ("invalid-evaluator-output", subprocess.CompletedProcess("evaluator", 0, response, private)),
+            ("evaluator-confirmed-fail", subprocess.CompletedProcess("evaluator", 0, json.dumps(failed), private)),
+        ]
+        for stage, process in cases:
+            with self.subTest(stage=stage, process_type=type(process).__name__):
+                def inspect_runs(calls):
+                    run_parent = Path(calls[0][1]["env"]["TMPDIR"]).parent.parent
+                    files = [p for p in run_parent.rglob("*") if p.is_file()]
+                    self.assertEqual([p.name for p in files], ["failure-stage.txt"])
+                    self.assertEqual(files[0].read_text(encoding="utf-8"), stage + "\n")
 
-        def observe_evaluator(_command, kwargs):
-            observed["runtime"] = Path(kwargs["env"]["TMPDIR"]).parent
-
-        def observe_runtime(_calls):
-            runtime = observed["runtime"]
-            observed["artifacts"] = {
-                path.name: path.read_text(encoding="utf-8")
-                for path in runtime.rglob("*")
-                if path.is_file()
-            }
-
-        outcome, calls = self._execute(
-            evaluator_process=evaluator_process,
-            evaluator_observer=observe_evaluator,
-            runtime_observer=observe_runtime,
-        )
-        return outcome, calls, observed["artifacts"]
-
-    def test_evaluator_timeout_preserves_partial_failure_diagnostics(self):
-        timeout = subprocess.TimeoutExpired(
-            ["evaluator-agent"], 5,
-            output=b"partial evaluator stdout",
-            stderr=b"partial evaluator stderr",
-        )
-
-        outcome, _, artifacts = self._execute_evaluator_failure_with_artifacts(timeout)
-
-        self.assertEqual(outcome["record"]["reason"], "evaluator-timeout")
-        self.assertEqual(artifacts.get("subject-response.txt"), "Keep the release blocked.")
-        self.assertEqual(artifacts.get("evaluator-stdout.txt"), "partial evaluator stdout")
-        self.assertEqual(artifacts.get("evaluator-stderr.txt"), "partial evaluator stderr")
-        self.assertEqual(artifacts.get("failure-stage.txt"), "evaluator-timeout\n")
-
-    def test_evaluator_launch_exception_preserves_empty_failure_diagnostics(self):
-        outcome, _, artifacts = self._execute_evaluator_failure_with_artifacts(
-            OSError("evaluator launch failed")
-        )
-
-        self.assertEqual(outcome["record"]["reason"], "evaluator-process-failure")
-        self.assertEqual(artifacts.get("subject-response.txt"), "Keep the release blocked.")
-        self.assertEqual(artifacts.get("evaluator-stdout.txt"), "")
-        self.assertEqual(artifacts.get("evaluator-stderr.txt"), "")
-        self.assertEqual(artifacts.get("failure-stage.txt"), "evaluator-process-failure\n")
-
-    def test_evaluator_confirmed_fail_preserves_captured_failure_diagnostics(self):
-        result = {
-            "verdict": "fail",
-            "dimensions": {"claim-discipline": "fail", "scope-control": "pass"},
-            "reason": "private evaluator prose",
-        }
-        process = subprocess.CompletedProcess(
-            ["evaluator-agent"], 0, json.dumps(result), "evaluator warning"
-        )
-
-        outcome, _, artifacts = self._execute_evaluator_failure_with_artifacts(process)
-
-        self.assertEqual(outcome["record"]["reason"], "evaluator-confirmed-fail")
-        self.assertEqual(artifacts.get("subject-response.txt"), "Keep the release blocked.")
-        self.assertEqual(artifacts.get("evaluator-stdout.txt"), json.dumps(result))
-        self.assertEqual(artifacts.get("evaluator-stderr.txt"), "evaluator warning")
-        self.assertEqual(artifacts.get("failure-stage.txt"), "evaluator-confirmed-fail\n")
-
-    def test_nonzero_evaluator_preserves_captured_failure_diagnostics(self):
-        outcome, _, artifacts = self._execute_evaluator_failure_with_artifacts(
-            subprocess.CompletedProcess(
-                ["evaluator-agent"], 9, "evaluator stdout", "evaluator stderr"
-            ),
-        )
-
-        self.assertEqual(outcome["record"]["reason"], "evaluator-process-failure")
-        self.assertEqual(artifacts["subject-response.txt"],
-                         "Keep the release blocked.")
-        self.assertEqual(artifacts["evaluator-stdout.txt"], "evaluator stdout")
-        self.assertEqual(artifacts["evaluator-stderr.txt"], "evaluator stderr")
-        self.assertEqual(artifacts["failure-stage.txt"],
-                         "evaluator-process-failure\n")
-
-    def test_invalid_evaluator_output_preserves_captured_failure_diagnostics(self):
-        outcome, _, artifacts = self._execute_evaluator_failure_with_artifacts(
-            subprocess.CompletedProcess(
-                ["evaluator-agent"], 0, "{invalid", "parse warning"
-            ),
-        )
-
-        self.assertEqual(outcome["record"]["reason"], "invalid-evaluator-output")
-        self.assertEqual(artifacts["evaluator-stdout.txt"], "{invalid")
-        self.assertEqual(artifacts["evaluator-stderr.txt"], "parse warning")
-        self.assertEqual(artifacts["failure-stage.txt"],
-                         "invalid-evaluator-output\n")
+                outcome, calls = self._execute(
+                    subject=subprocess.CompletedProcess("subject", 0, response, ""),
+                    evaluator_process=process, runtime_observer=inspect_runs,
+                )
+                self.assertEqual(json.loads(calls[1][1]["input"])["response"], response)
+                self.assertEqual(outcome["record"]["reason"], stage)
+                self.assertNotIn(response, json.dumps(outcome))
+                self.assertNotIn(private, json.dumps(outcome))
 
     def test_processes_use_repo_local_temp_under_hostile_parent_env(self):
         hostile = r"C:\Users\Public\Documents\ESTsoft\CreatorTemp"
@@ -583,7 +537,7 @@ class BlindBehaviorContractTest(unittest.TestCase):
 
         def run_process(command, **kwargs):
             calls.append((command, kwargs))
-            return adapt_fake_codex_subject(command, next(replies))
+            return next(replies)
 
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder)
@@ -657,6 +611,33 @@ class BlindBehaviorContractTest(unittest.TestCase):
                 self.assertEqual(outcome["record"]["verdict"], "fail")
                 self.assertIsNone(outcome["conduct_feedback"])
                 self.assertEqual(len(calls), 1)
+
+    def test_failed_codex_subject_cannot_leave_a_partial_last_message_file(self):
+        partial = "A partial private response."
+        for reason in ("subject-timeout", "subject-process-failure"):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                calls = []
+
+                def failing_subject(command, **kwargs):
+                    calls.append(command)
+                    if "--output-last-message" in command:
+                        path = Path(command[command.index("--output-last-message") + 1])
+                        path.write_text(partial, encoding="utf-8")
+                    if reason == "subject-timeout":
+                        raise subprocess.TimeoutExpired(command, kwargs["timeout"], output=partial)
+                    return subprocess.CompletedProcess(command, 7, partial, partial)
+
+                with mock.patch.dict(os.environ, home_environment(root)):
+                    outcome = self.blind.run_blind_behavior_case(
+                        case_path=write_case(root), platform="codex", install_manifest_path=write_manifest(root),
+                        subject_command=["subject"], evaluator_command=["evaluator"], repo_root=root,
+                        run_process=failing_subject,
+                    )
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(outcome["record"]["reason"], reason)
+                self.assertNotIn(partial, json.dumps(outcome))
+                self.assertEqual([p for p in (root / ".tmp").rglob("*") if p.is_file()], [])
 
     def test_durable_record_uses_opaque_dimensions_and_omits_every_private_string(self):
         outcome, _ = self._execute()
@@ -754,9 +735,9 @@ class BlindBehaviorContractTest(unittest.TestCase):
                     "claude_config_dir": os.environ.get("CLAUDE_CONFIG_DIR"),
                     "codex_home": os.environ.get("CODEX_HOME"),
                 })
-                if "--output-last-message" in sys.argv:
-                    output = Path(sys.argv[sys.argv.index("--output-last-message") + 1])
-                    output.write_text(response, encoding="utf-8")
+                if "--ephemeral" in sys.argv:
+                    print(response)
+                    print("Codex progress output", file=sys.stderr)
                 else:
                     print(json.dumps({"type": "assistant", "message": {"content": [
                         {"type": "text", "text": response}
@@ -770,11 +751,14 @@ class BlindBehaviorContractTest(unittest.TestCase):
                     evaluator_script = harness / f"evaluator-{platform}.py"
                     required_flag = "--no-session-persistence" if platform == "claude" else "--ephemeral"
                     evaluator_script.write_text(textwrap.dedent(f"""
-                        import json, sys
+                        import json, os, sys
+                        from pathlib import Path
                         packet = json.loads(sys.stdin.read())
                         response = json.loads(packet["response"])
                         private = packet["evaluator_private"]
-                        forbidden = ("--resume", "--continue", "--session-id")
+                        forbidden = ("--resume", "--continue", "--session-id", "--output-last-message")
+                        run_dir = Path(os.environ["TMPDIR"]).parent
+                        response_bytes = packet["response"].encode("utf-8")
                         passed = (
                             response["prompt"] == {CASE['prompt']!r}
                             and response["private_env"] == {{
@@ -786,6 +770,7 @@ class BlindBehaviorContractTest(unittest.TestCase):
                             and response["cwd_files"] == []
                             and {required_flag!r} in response["argv"]
                             and not any(flag in response["argv"] for flag in forbidden)
+                            and not any(response_bytes in path.read_bytes() for path in run_dir.rglob("*") if path.is_file())
                             and response["claude_config_dir"].endswith("claude-config")
                             and response["codex_home"].endswith("codex-config")
                             and private["purpose"] == {PRIVATE['purpose']!r}
@@ -814,6 +799,7 @@ class BlindBehaviorContractTest(unittest.TestCase):
                             subject_command=[sys.executable, str(subject_script)],
                             evaluator_command=[sys.executable, str(evaluator_script)],
                             controller_cwd=controller,
+                            repo_root=root,
                             timeout_seconds=5,
                         )
                     self.assertEqual(outcome["record"]["verdict"], "pass")
@@ -850,10 +836,8 @@ class BlindBehaviorCliTest(unittest.TestCase):
             subject = harness / "subject.py"
             subject.write_text(textwrap.dedent("""
                 import sys
-                from pathlib import Path
                 response = sys.stdin.read()
-                output = Path(sys.argv[sys.argv.index("--output-last-message") + 1])
-                output.write_text(response, encoding="utf-8")
+                print(response)
             """), encoding="utf-8")
             evaluator = harness / "evaluator.py"
             evaluator.write_text(textwrap.dedent("""
