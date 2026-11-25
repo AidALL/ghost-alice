@@ -344,6 +344,9 @@ def _obsolete_copy_item(copy: Path, *, root: Path, platform: str, completed: lis
     marker = None
     if not copy.is_symlink():
         marker, error = _load_marker(copy)
+        if marker is None and error is None and copy.is_dir():
+            item.update(action='preserved', reason='no-ownership-marker')
+            return item
         if error or not marker or marker.get('asset_id') != name:
             return item
         if marker.get('platform') != platform:
