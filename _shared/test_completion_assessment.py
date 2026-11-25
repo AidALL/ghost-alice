@@ -3,8 +3,11 @@ import copy
 from contextlib import closing
 import completion_assessment
 import json
+import os
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 import unittest
 from unittest import mock
 
@@ -166,6 +169,45 @@ class CompletionAssessmentTests(unittest.TestCase):
         with self.assertRaises(api.CompletionAssessmentError):
             api.read_review_claims(dict(self.source, GHOST_ALICE_SESSION_ID='foreign'),
                                    candidate['candidate_reference'], [0])
+
+    def assessment_cli(self, *args):
+        # Reject locale-default file I/O even on UTF-8 hosts, and start stdout in CP949.
+        script = Path(__file__).with_name('completion_assessment.py')
+        run = subprocess.run([sys.executable, '-B', '-X', 'warn_default_encoding',
+            '-W', 'error::EncodingWarning', str(script), *args], capture_output=True,
+            env=dict(os.environ, **self.source, PYTHONUTF8='0', PYTHONIOENCODING='cp949'))
+        self.assertEqual(run.returncode, 0, (run.stdout, run.stderr))
+        return json.loads(run.stdout.decode('utf-8'))
+
+    def test_cli_reads_utf8_response_claims_and_judgment_files(self):
+        claim = '폴더 탭의 푸터가 목록을 가리지 않습니다.'
+        body = '관찰 결과\n' + claim
+        folder = Path(self.fixture.tmp.name)
+        response, claims, judgment = (folder / name for name in ('answer.md', 'claims.json', 'review.json'))
+        response.write_text(body, encoding='utf-8')
+        claims.write_text(json.dumps([claim], ensure_ascii=False), encoding='utf-8')
+        candidate = self.assessment_cli('prepare-response', '--response-file', response,
+            '--claims-file', claims, '--source', self.observation)
+        self.assertNotIn('text', candidate['response_binding'])
+        self.assertNotIn('claim', candidate['bindings'][0])
+        self.assertEqual(self.stored_candidate(candidate)['bindings'][0]['claim'], claim)
+
+        review = self.response_review(candidate)
+        review['response']['rationale'] = '전체 답변이 원본과 일치합니다.'
+        judgment.write_text(json.dumps(review, ensure_ascii=False), encoding='utf-8')
+        recorded = self.assessment_cli('record-response', '--candidate', candidate['candidate_reference'],
+            '--judgment-file', judgment)
+        self.assertEqual(recorded['status'], 'reviewed')
+        self.assertNotIn('response_text', recorded)
+        stored = completion_assessment.lookup_current_response(self.source, body)
+        self.assertEqual(stored['judgment'], review['response'])
+
+    def test_cli_read_claims_emits_utf8_on_cp949_stdout(self):
+        claim = '📖 푸터가 목록을 가리지 않습니다.'
+        candidate = completion_assessment.prepare_response_review(self.source, response_text=claim,
+            source_paths=[str(self.observation)], claim_statements=[claim])
+        selected = self.assessment_cli('read-claims', '--candidate', candidate['candidate_reference'], '--index', '0')
+        self.assertEqual(selected, [dict(candidate['bindings'][0], claim=claim)])
 
     def test_retained_inline_original_is_referenced_without_copying_its_body(self):
         import base64

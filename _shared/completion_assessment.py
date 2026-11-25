@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 
 from completion_check_validator import (extract_original_proof, parse_original_completion_evidence,
                                         looks_like_evidence_claim, review_comparison_text)
@@ -947,6 +948,8 @@ def review_receipt(result):
 
 
 def main():
+    from fresh_agent_session import write_utf8
+
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='action', required=True)
     response_prepare = commands.add_parser('prepare-response')
@@ -967,23 +970,24 @@ def main():
     args = parser.parse_args()
     try:
         if args.action == 'read-claims':
-            print(json.dumps(read_review_claims(os.environ, args.candidate, args.index), ensure_ascii=False))
-            return 0
-        if args.action == 'prepare-response':
+            result = read_review_claims(os.environ, args.candidate, args.index)
+        elif args.action == 'prepare-response':
             result = prepare_response_review(os.environ,
-                response_text=Path(args.response_file).read_text(), source_paths=args.source,
+                response_text=Path(args.response_file).read_text(encoding='utf-8'), source_paths=args.source,
                 verified_at=args.verified_at, reuse_candidate=args.reuse_candidate,
                 work_unit_id=args.work_unit_id,
-                claim_statements=json.loads(Path(args.claims_file).read_text()) if args.claims_file else None)
+                claim_statements=json.loads(Path(args.claims_file).read_text(encoding='utf-8')) if args.claims_file else None)
         else:
             result = record_response_review(os.environ, args.candidate,
-                json.loads(Path(args.judgment_file).read_text()),
+                json.loads(Path(args.judgment_file).read_text(encoding='utf-8')),
                 context_use_judgments=json.loads(args.context_use_judgments_json)
                     if args.context_use_judgments_json is not None else None,
                 expected_input_event_id=args.expected_input_event_id)
-        print(json.dumps(review_receipt(result), ensure_ascii=False))
+        output = result if args.action == 'read-claims' else review_receipt(result)
+        write_utf8(sys.stdout, json.dumps(output, ensure_ascii=False) + '\n')
     except (CompletionAssessmentError, ValueError, OSError) as exc:
-        print(json.dumps(dict(status='unavailable', reason=getattr(exc, 'reason', 'assessment-unavailable'), detail=str(exc))))
+        error = dict(status='unavailable', reason=getattr(exc, 'reason', 'assessment-unavailable'), detail=str(exc))
+        write_utf8(sys.stdout, json.dumps(error) + '\n')
         return 1
     return 0
 
