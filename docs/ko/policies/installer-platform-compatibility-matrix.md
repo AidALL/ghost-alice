@@ -28,7 +28,9 @@
 | 사용자 홈 경로 | 공백과 ASCII가 아닌 문자를 포함한 HOME 픽스처 지원 유지 | `scripts.tests.test_installer_asset_inventory`, 인스톨러 통합 테스트 |
 | PSScriptAnalyzer 선택 사항 | PSScriptAnalyzer는 선택 사항입니다. 모듈이 없으면 파서·정적 테스트가 최소 게이트입니다 | 로컬 전체 검증 |
 | 공개 안내 일치 | Claude 명령 래퍼의 대상 경로는 `skill-catalog/skills.json`과 일치해야 합니다. README는 필수 제목과 명령을, index.html은 저장소 루트 기준 링크를 유지해야 합니다 | `scripts/validate_public_surfaces.py`, `scripts/run_installer_compat_tests.py --group public-surface-contract` |
-| Ghost-ALICE 새 복제 설치 정책 | 공개 설치는 `AidALL/ghost-alice`를 새로 복제한 뒤 설치합니다. 인스톨러는 설치된 Claude 권한에서 관리 대상인 오래된 체크아웃 경로의 허용 규칙과 더 이상 설치하지 않는 스킬의 `Skill(<name>)` 권한만 삭제합니다. | `_shared.test_install_hooks.TestInstallHook`, `_shared.test_installed_hook_cleanup` |
+| Ghost-ALICE 새 복제 설치 정책 | `AidALL/ghost-alice`를 새로 복제하고 설치 명령을 실행하면 원격 `refs/heads/main`에서 Core를 내려받습니다. 릴리스 압축을 푼 폴더나 태그를 체크아웃한 폴더에서 `--local-source`를 지정하면 해당 폴더의 파일을 설치합니다. 설치된 관리 명령의 `update`는 원격 `main`을 내려받습니다. | `scripts.tests.test_installer_version_handoff`, `_shared.test_installer_source` |
+| v0.5.1에서 업그레이드 | 로컬 `main` 체크아웃을 릴리스 커밋으로 fast-forward한 뒤 그 인스톨러를 실행하면 감지된 두 호스트의 Core를 갱신하고 설치한 커밋을 기록하며, 설치와 무관한 호스트 설정을 보존합니다. | `scripts.tests.test_installer_version_handoff.OfficialReleaseUpgradeTests` |
+| 설치된 Claude 권한 | 인스톨러는 관리 대상인 오래된 체크아웃 경로의 허용 규칙과 더 이상 설치하지 않는 스킬의 `Skill(<name>)` 권한만 삭제합니다. | `_shared.test_install_hooks.TestInstallHook`, `_shared.test_installed_hook_cleanup` |
 | 에이전트 표시 프로필 | 기본값, 허용 값, `--visibility` 옵션과 `--agent-visibility` 별칭은 [에이전트 표시 프로필](../getting-started/installation.md#에이전트-표시-프로필) 절에 있습니다. 네이티브 래퍼의 호환 별칭은 구현 테스트가 계속 검증합니다. 프로필은 생성된 훅 명령 계약을 변경하지 않습니다. | `_shared.test_runtime_config`, `_shared.test_hook_profile_gate`, `_shared.test_install_hooks`, `scripts.tests.test_install_status_contract` |
 | 에이전트 표시 런타임 명령 | 플랫폼별 명령은 [플랫폼별 슬래시 명령](../getting-started/installation.md#플랫폼별-슬래시-명령) 절에 있습니다. 문서는 `/visibility`를 Codex 명령으로 안내하면 안 됩니다 | `scripts.tests.test_install_status_contract` |
 

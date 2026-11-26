@@ -914,7 +914,7 @@ def cleanup_obsolete_copies(ctx: "Context", collected: "Collected") -> bool:
     completed = [dict(target_name=name, source_path=str(src), dest_path=str(dest), provider=provider,
                       source_root=str(runner.REPO_ROOT), action='replacement-verified')
                  for name, src, dest, provider in targets]
-    results = cleanup(root=root, platform=ctx.platform, completed=completed)
+    results = cleanup(root=root, platform=ctx.platform, completed=completed, after_verified_install=True)
     for item in results:
         message = f"Previous original {item['path']}: {item['action']} ({item['reason']})"
         if item['action'] == 'manual-review':

@@ -88,10 +88,12 @@ def _content_hashes(root: Path) -> dict[str, str]:
 
 def _load_marker(root: Path) -> tuple[Optional[dict], Optional[str]]:
     marker_path = root / GHOST_ALICE_MARKER_FILENAME
-    if not marker_path.exists():
-        return None, None
     try:
         data = json.loads(marker_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        if marker_path.is_symlink():
+            return None, "invalid-ghost-alice-marker:dangling-link"
+        return None, None
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return None, f"invalid-ghost-alice-marker:{exc.__class__.__name__}"
     if not isinstance(data, dict):

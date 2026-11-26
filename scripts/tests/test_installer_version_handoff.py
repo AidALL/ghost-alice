@@ -7,11 +7,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / '_shared'))
 from installer_testing import checkout_copy, inject_installer_python, installer_env, run_pty
+import content_digest
 import install_transaction
 import installed_payload
 from installer.selection import ALL_SKILLS, installed_core_selection, leaf_names
@@ -306,6 +308,69 @@ class OlderReleaseTests(HandoffCase):
         before = self.installation()
         stopped(['update'])
         self.assert_unchanged(before)
+
+
+class OfficialReleaseUpgradeTests(HandoffCase):
+    """In a shallow clone, fetch the fixture with `git fetch --depth=1 origin tag v0.5.1`."""
+
+    @unittest.skipUnless(shutil.which('node'), 'the full release installation requires Node.js')
+    def test_plain_install_after_pulling_main_from_v0_5_1(self):
+        # Publish the candidate working tree as the next commit even when CI has a shallow checkout.
+        self.env['GIT_ALLOW_PROTOCOL'] = 'file'
+        tag = 'v0.5.1'
+        self.assertEqual(self.git('tag', '--list', tag, root=ROOT), tag,
+                         f'Fetch the official upgrade fixture with: git fetch --depth=1 origin tag {tag}')
+        self.git('fetch', '--no-tags', '--depth=1', str(ROOT), 'tag', tag, root=self.remote)
+        previous = self.git('rev-parse', f'{tag}^{{commit}}', root=self.remote)
+        self.assertEqual(previous, '400621d7a8e3559120efba537dbb8afb247cb8c4')
+        candidate = self.git('commit-tree', 'main^{tree}', '-p', previous, '-m', 'Release candidate', root=self.remote)
+        self.git('reset', '--hard', previous, root=self.remote)
+        self.git('remote', 'set-url', 'origin', str(self.remote))
+        self.git('fetch', '--depth=1', 'origin', '+refs/heads/main:refs/remotes/origin/main')
+        self.git('switch', '-C', 'main', '--track', 'origin/main')
+        self.assertEqual(self.git('rev-parse', 'HEAD'), previous)
+
+        (self.home / '.codex').mkdir()
+        claude_settings = self.home / '.claude/settings.json'
+        codex_config = self.home / '.codex/config.toml'
+        claude_settings.write_text('{"permissions":{"deny":["Bash(example)"]}}')
+        codex_config.write_text('model = "user-selected-model"\n')
+        self.shell(self.entry)
+        skill = Path('task-router/SKILL.md')
+        hosts = (self.home / '.claude/skills', self.home / '.agents/skills')
+        previous_skill = (self.repo / skill).read_bytes()
+        for folder in hosts:
+            self.assertEqual((folder / skill).read_bytes(), previous_skill)
+        backups = list((self.ghost / 'install-rollbacks').glob('rollback-_shared-*'))
+        self.assertEqual(len(backups), 1, backups)
+        backup = backups[0]
+        self.assertFalse((backup / content_digest.MARKER_FILENAME).exists())
+        self.assertEqual((backup / 'encoding_guard.py').read_bytes(),
+                         (self.repo / '_shared/encoding_guard.py').read_bytes())
+        original = content_digest.state(backup, include_generated=True)
+
+        self.git('reset', '--hard', candidate, root=self.remote)
+        self.git('pull', '--ff-only')
+        self.assertEqual(self.git('rev-parse', 'HEAD'), candidate)
+        self.shell(self.entry)
+        self.assertEqual(content_digest.state(backup, include_generated=True), original)
+        record = installed_payload.read(self.ghost)
+        self.assertEqual(record['source']['commit'], candidate)
+        self.assertEqual(installed_core_selection(record), {host: leaf_names(ALL_SKILLS) for host in ('claude', 'codex')})
+        candidate_skill = (self.repo / skill).read_bytes()
+        self.assertNotEqual(candidate_skill, previous_skill)
+        for folder in hosts:
+            self.assertEqual((folder / skill).read_bytes(), candidate_skill)
+        claude = json.loads(claude_settings.read_text())
+        codex = json.loads((self.home / '.codex/hooks.json').read_text())
+        for settings in (claude, codex):
+            self.assertIn('[hook-runner:session-receipt]', json.dumps(settings['hooks']['SessionStart']))
+        self.assertIn('Bash(example)', claude['permissions']['deny'])
+        config = tomllib.loads(codex_config.read_text())
+        self.assertEqual(config['model'], 'user-selected-model')
+        self.assertTrue(config['features']['hooks'])
+        self.shell([*self.command, 'update'])
+        self.assertEqual(content_digest.state(backup, include_generated=True), original)
 
 
 class EarlierInstallerTests(HandoffCase):

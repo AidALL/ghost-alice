@@ -8,11 +8,11 @@ Ghost-ALICE OS is an agent governance layer for AI work. It keeps the response m
 
 It is not a prompt library, a chatbot wrapper, or a standalone agent runtime. It runs on top of existing agent runtimes as the operating layer that makes agent work auditable before the agent claims completion.
 
-## Version 0.5.1
+## Version 0.6.0
 
-[Website](https://aidall.github.io/ghost-alice/) · [Architecture](./architecture.md)
+[Release v0.6.0](https://github.com/AidALL/ghost-alice/releases/tag/v0.6.0) · [Website](https://aidall.github.io/ghost-alice/) · [Architecture](./architecture.md)
 
-Core 0.5.1 uses the current response-route and completion contract. Apache-2.0.
+Core keeps session records in SQLite. Once installed, its management command can update the Core skills selected for each host from any directory.
 
 ## How governed work proceeds
 
@@ -22,13 +22,13 @@ See the [Core architecture](./architecture.md) for the standalone flow and [sess
 
 ## Quick Start
 
-From the cloned Ghost-ALICE repository, install Core. The installer automatically detects the available agent platforms:
+From the cloned Ghost-ALICE repository, run the following command to install Core from remote `main` for the agent platforms the installer detects.
 
 ```bash
 bash install.sh
 ```
 
-See the [installation guide](./docs/getting-started/installation.md) for cloning and OS-specific commands. To update installed Core or update both Core and a local `main` checkout, see [Update](./docs/getting-started/installation.md#update).
+To install v0.6.0 exactly, run `bash install.sh --local-source` (Windows: `.\install.cmd --local-source`) in the extracted release archive or a checkout of the `v0.6.0` tag. See the [installation guide](./docs/getting-started/installation.md) for platform commands and [Update](./docs/getting-started/installation.md#update) for updating installed Core or your local checkout.
 
 ## Addons
 
