@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 import install_transaction
 import installed_payload
+from installer_assets import is_link_or_reparse_point
 from installer import gateway_participant, locations, report, runner, source
 from installer.runner import ToolResult
 
@@ -222,8 +223,8 @@ def retain_record_source_writers(ghost: Path, prior_locations: LedgerLocations |
                     remaining.setdefault(path, set()).add(host)
     root = install_transaction.rollbacks_root(ghost)
     try:
-        if root.is_symlink():
-            raise ValueError(f'Cleanup journal root is a symbolic link: {root}')
+        if is_link_or_reparse_point(root):
+            raise ValueError(f'Cleanup journal root is a linked path: {root}')
         folders = sorted(root.iterdir()) if root.exists() else []
     except (OSError, ValueError) as exc:
         result.errors[str(root)] = str(exc)

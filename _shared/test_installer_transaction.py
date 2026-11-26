@@ -138,7 +138,7 @@ class OriginalCopyCleanupTests(TransactionCase):
         # Full removal needs to know whether it can archive this backup and release its records.
         item, = self.clean([])
         self.assertEqual(item['action'], 'manual-review')
-        with mock.patch.object(self.cleanup, '_is_junction', return_value=True):
+        with mock.patch.object(self.cleanup, 'is_link_or_reparse_point', return_value=True):
             item, = self.clean([], after_verified_install=True)
         self.assertEqual(item['action'], 'manual-review')
         self.assertEqual(content.read_bytes(), b'previous runtime')

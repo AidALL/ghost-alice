@@ -10,6 +10,28 @@ permissions:
   contents: read
 
 jobs:
+  windows-junction-upgrade:
+    name: Windows junction upgrade (Python ${{ matrix.python }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the Windows pseudoterminal for the record-move prompt
+        run: python -m pip install pywinpty
+      - name: Fetch the reporter's installer and v0.6.0 for retry
+        run: git fetch --no-tags --depth=1 origin (Get-Content scripts/tests/_fixtures/junction-installer-commit.txt) tag v0.6.0
+      - name: Upgrade and retry through install.cmd and check preserved links
+        env:
+          PYTHONPATH: "_shared;session-intent-analyzer/scripts"
+        run: python -m unittest -v scripts.tests.test_installer_version_handoff.DirectoryLinkUpgradeTests _shared.test_install_transaction_publish.DirectoryLinkCleanupTests scripts.tests.test_uninstall_cleanup.UninstallCleanupTest.test_apply_removes_manifest_junction_without_removing_source_on_windows
+
   context-gateway:
     name: Context gateway (Python 3.14 / zstd)
     runs-on: ubuntu-latest
@@ -75,7 +97,7 @@ jobs:
         run: npm install -g @openai/codex@0.161.0
 
       - name: Fetch the earlier installer and official release used by the upgrade tests
-        run: git fetch --no-tags --depth=1 origin "$(cat scripts/tests/_fixtures/earlier-installer-commit.txt)" tag v0.5.1
+        run: git fetch --no-tags --depth=1 origin "$(cat scripts/tests/_fixtures/earlier-installer-commit.txt)" "$(cat scripts/tests/_fixtures/junction-installer-commit.txt)" tag v0.5.1 tag v0.6.0
 
       - name: Run script unit tests
         env:

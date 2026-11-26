@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import content_digest
 import installed_payload
+from installer_assets import is_link_or_reparse_point
 from installer import hosts, locations, record_move, report, runner, source
 
 if TYPE_CHECKING:
@@ -139,8 +140,8 @@ def report_record_cleanup() -> int:
     ghost = locations.record_root()
     root = install_transaction.rollbacks_root(ghost)
     try:
-        if root.is_symlink():
-            raise ValueError('Journal root is a symbolic link')
+        if is_link_or_reparse_point(root):
+            raise ValueError('Journal root is a linked path')
         if not root.exists():
             return 0
         folders = sorted(root.iterdir())

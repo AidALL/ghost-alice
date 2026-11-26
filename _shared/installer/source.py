@@ -25,7 +25,7 @@ import install_transaction
 import installed_payload
 import addon_registry
 import content_digest
-from installer_assets import _is_windows_junction, unrecorded_copy_content
+from installer_assets import is_link_or_reparse_point, unrecorded_copy_content
 from installer import locations, report, runner, terminal
 from installer.runner import InstallerExit
 
@@ -546,7 +546,7 @@ def _active_version(root: Path) -> Path | None:
 
 def _version_root() -> Path:
     root = locations.record_root() / 'versions'
-    if root.is_symlink() or _is_windows_junction(root):
+    if is_link_or_reparse_point(root):
         raise ValueError(f'Source version root is a link: {root}')
     return root.resolve()
 
