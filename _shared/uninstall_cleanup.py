@@ -329,7 +329,8 @@ def _original_dependency_reason(copy: Path, *, root: Path, platform: str,
     return None
 
 
-def _obsolete_copy_item(copy: Path, *, root: Path, platform: str, completed: list[dict]) -> dict:
+def _obsolete_copy_item(copy: Path, *, root: Path, platform: str, completed: list[dict],
+                        after_verified_install: bool) -> dict:
     """Classify an old copy against the requested scope and its actual dependencies."""
     import content_digest
     import installed_payload
@@ -344,7 +345,7 @@ def _obsolete_copy_item(copy: Path, *, root: Path, platform: str, completed: lis
     marker = None
     if not copy.is_symlink():
         marker, error = _load_marker(copy)
-        if marker is None and error is None and copy.is_dir():
+        if after_verified_install and marker is None and error is None and copy.is_dir() and not _is_junction(copy):
             item.update(action='preserved', reason='no-ownership-marker')
             return item
         if error or not marker or marker.get('asset_id') != name:
@@ -417,7 +418,7 @@ def _obsolete_copy_item(copy: Path, *, root: Path, platform: str, completed: lis
 
 
 def cleanup_obsolete_copies(*, root: Path, platform: str, completed: list[dict],
-                            apply_changes: bool = True) -> list[dict]:
+                            apply_changes: bool = True, after_verified_install: bool = False) -> list[dict]:
     """Delete only confirmed unnecessary originals; modern publish retention is separate."""
     import retired_assets
     items = []
@@ -431,7 +432,8 @@ def cleanup_obsolete_copies(*, root: Path, platform: str, completed: list[dict],
         for copy in sorted(folder.iterdir()):
             item = dict(kind='obsolete-copy', path=str(copy), action='manual-review')
             try:
-                item = _obsolete_copy_item(copy, root=root, platform=platform, completed=completed)
+                item = _obsolete_copy_item(copy, root=root, platform=platform, completed=completed,
+                                           after_verified_install=after_verified_install)
                 if item['action'] == 'would-remove' and apply_changes:
                     _remove_path(copy)
                     item['action'] = 'removed'

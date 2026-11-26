@@ -124,16 +124,23 @@ class OriginalCopyCleanupTests(TransactionCase):
         return [dict(target_name='alpha', source_path=str(self.source / 'alpha'), dest_path=str(dest),
                      source_root=str(self.source), provider='core', action=action)]
 
-    def clean(self, completed):
-        return self.cleanup.cleanup_obsolete_copies(root=self.ghost, platform='claude', completed=completed)
+    def clean(self, completed, *, after_verified_install=False):
+        return self.cleanup.cleanup_obsolete_copies(root=self.ghost, platform='claude', completed=completed,
+                                                   after_verified_install=after_verified_install)
 
     def test_rollback_directory_without_an_ownership_marker_is_preserved(self):
         original = self.ghost / 'install-rollbacks/rollback-_shared-20261001T000000Z-1-abcdef12'
         original.mkdir(parents=True)
         content = original / 'runtime.py'
         content.write_bytes(b'previous runtime')
-        item, = self.clean([])
+        item, = self.clean([], after_verified_install=True)
         self.assertEqual((item['action'], item['reason']), ('preserved', 'no-ownership-marker'))
+        # Full removal needs to know whether it can archive this backup and release its records.
+        item, = self.clean([])
+        self.assertEqual(item['action'], 'manual-review')
+        with mock.patch.object(self.cleanup, '_is_junction', return_value=True):
+            item, = self.clean([], after_verified_install=True)
+        self.assertEqual(item['action'], 'manual-review')
         self.assertEqual(content.read_bytes(), b'previous runtime')
 
     def test_unreadable_rollback_marker_still_requires_review(self):
@@ -141,12 +148,12 @@ class OriginalCopyCleanupTests(TransactionCase):
         original = self.original()
         marker = original / GHOST_ALICE_MARKER_FILENAME
         marker.write_text('{')
-        item, = self.clean([])
+        item, = self.clean([], after_verified_install=True)
         self.assertEqual(item['action'], 'manual-review')
         self.assertEqual(marker.read_text(), '{')
         marker.unlink()
         marker.symlink_to('missing-marker')
-        item, = self.clean([])
+        item, = self.clean([], after_verified_install=True)
         self.assertEqual(item['action'], 'manual-review')
         self.assertTrue(marker.is_symlink())
 
