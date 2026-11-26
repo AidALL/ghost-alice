@@ -27,19 +27,15 @@ class DirectoryLinkUpgradeTests(unittest.TestCase):
     """Upgrade the reporter's installer against a local main and inspect both ends of its skill link."""
 
     def setUp(self):
-        self.repo, self.remote = checkout_copy(self), checkout_copy(self)
-        self.home = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
-        (self.home / '.claude').mkdir()
+        candidate_source = checkout_copy(self)
+        fixture = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.home, self.repo, self.remote = fixture / 'home', fixture / 'checkout', fixture / 'release'
+        (self.home / '.claude').mkdir(parents=True)
+        self.repo.mkdir()
         self.env = installer_env(self.home)
         self.env.update(GIT_ALLOW_PROTOCOL='file', GHOST_ALICE_INSTALL_LOCALE='en')
         self.entry = ['cmd.exe', '/d', '/c', 'install.cmd'] if os.name == 'nt' else ['bash', './install.sh']
         if os.name == 'nt':
-            # checkout_copy copied worktree bytes from the runner's Git environment. Materialize both
-            # disposable checkouts using the same line-ending policy as the installer's release clones.
-            self.git(self.repo, 'config', '--global', 'core.autocrlf', 'false')
-            for fixture in (self.repo, self.remote):
-                self.git(fixture, 'checkout-index', '--all', '--force')
-                self.git(fixture, 'diff', '--exit-code', 'HEAD')
             # install.ps1 chooses the newest Python it discovers in PATH or in standard install folders.
             python_dir = Path(sys.executable).parent
             paths = [p for p in self.env['PATH'].split(os.pathsep) if p and Path(p).name.lower() != 'windowsapps'
@@ -61,8 +57,11 @@ if os.environ.get('DENY_DIRECTORY_SYMLINK') == '1':
         return native_symlink(src, dst, target_is_directory, **kwargs)
     os.symlink = symlink
 ''')
+        # Use the candidate's Git objects only. Git creates both indexes and writes all worktree
+        # bytes in the same isolated environment that the installer will use to clone its release.
+        self.command('git', 'clone', '--quiet', '--branch', 'main', str(candidate_source), str(self.remote))
+        self.command('git', 'clone', '--quiet', '--no-checkout', str(self.remote), str(self.repo))
         old = (ROOT / 'scripts/tests/_fixtures/junction-installer-commit.txt').read_text().strip()
-        self.git(self.repo, 'remote', 'set-url', 'origin', str(self.remote))
         self.git(self.repo, 'fetch', '--no-tags', '--depth=1', str(ROOT), old)
         self.git(self.repo, 'switch', '--detach', old)
         self.ledger = self.repo / '.tmp/session-intent'
