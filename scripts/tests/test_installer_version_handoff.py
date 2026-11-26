@@ -34,6 +34,12 @@ class DirectoryLinkUpgradeTests(unittest.TestCase):
         self.env.update(GIT_ALLOW_PROTOCOL='file', GHOST_ALICE_INSTALL_LOCALE='en')
         self.entry = ['cmd.exe', '/d', '/c', 'install.cmd'] if os.name == 'nt' else ['bash', './install.sh']
         if os.name == 'nt':
+            # checkout_copy copied worktree bytes from the runner's Git environment. Materialize both
+            # disposable checkouts using the same line-ending policy as the installer's release clones.
+            self.git(self.repo, 'config', '--global', 'core.autocrlf', 'false')
+            for fixture in (self.repo, self.remote):
+                self.git(fixture, 'checkout-index', '--all', '--force')
+                self.git(fixture, 'diff', '--exit-code', 'HEAD')
             # install.ps1 chooses the newest Python it discovers in PATH or in standard install folders.
             python_dir = Path(sys.executable).parent
             paths = [p for p in self.env['PATH'].split(os.pathsep) if p and Path(p).name.lower() != 'windowsapps'
