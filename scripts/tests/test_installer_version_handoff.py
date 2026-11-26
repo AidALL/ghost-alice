@@ -114,10 +114,10 @@ if os.environ.get('DENY_DIRECTORY_SYMLINK') == '1':
                     if not answered and question in output:
                         process.write('y\r')
                         answered = True
-                self.assertEqual(process.wait(), 0, output)
-                self.assertTrue(answered, output)
             finally:
                 process.close(force=True)
+            self.assertEqual(process.exitstatus, 0, output)
+            self.assertTrue(answered, output)
         else:
             code, output = run_pty(self.entry, cwd=self.repo, env=self.env, responses=[(question, 'y\n')])
             self.assertEqual(code, 0, output)
