@@ -5,7 +5,7 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import shutil
 import stat
 import subprocess
@@ -21,6 +21,7 @@ import content_digest  # noqa: E402
 from context_gateway_model import GatewayServiceError  # noqa: E402
 import install_lock  # noqa: E402
 import install_transaction  # noqa: E402
+import installer_assets  # noqa: E402
 import installed_payload  # noqa: E402
 from installer_testing import installer_env  # noqa: E402
 
@@ -417,7 +418,17 @@ class DirectoryLinkCleanupTests(PublishCase):
         else:
             path.symlink_to(target, target_is_directory=True)
 
+    def test_reference_paths_compare_windows_drive_and_unc_spellings(self):
+        for raw, expected in (
+                (r'\\?\C:\saved\alpha', r'C:\saved\alpha'),
+                (r'\\?\UNC\host\share\saved\alpha', r'\\host\share\saved\alpha'),
+                (r'\\?\Volume{123}\saved\alpha', r'\\?\Volume{123}\saved\alpha'),
+                (r'\\.\pipe\alpha', r'\\.\pipe\alpha')):
+            with self.subTest(raw=raw):
+                self.assertEqual(installer_assets.reference_path(PureWindowsPath(raw)), PureWindowsPath(expected))
+
     def test_retain_referenced_old_link_then_remove_only_that_link(self):
+        from uninstall_cleanup import platforms_referencing_target
         dest = self.codex / 'alpha'
         source = self.src / 'alpha'
         self.directory_link(dest, source)
@@ -429,10 +440,14 @@ class DirectoryLinkCleanupTests(PublishCase):
         original = Path(self.journal(txid)['targets'][0]['rollback'])
         other = self.claude / 'alpha'
         self.directory_link(other, original)
-        installed_payload.update(self.ghost, {'targets': {str(other): dict(entry, source=str(original),
-            link_target=os.readlink(other), used_by=['claude'])}})
+        # Earlier host inventories could omit source_path. Migration records the raw link target.
+        migrated = dict(entry, source='', link_target=os.readlink(other), baseline='migrated', used_by=['claude'])
+        installed_payload.update(self.ghost, {'targets': {installed_payload.target_key(other): migrated}})
+        self.assertEqual(platforms_referencing_target(original, current_manifest=self.ghost/'install-state/codex.json',
+                                                      current_platform='codex', source_tree=True), ['claude'])
         reasons = install_transaction.cleanup_completed(self.ghost)
-        self.assertTrue(any(str(original) in reason and 'reference' in reason for reason in reasons), reasons)
+        self.assertTrue(any(str(original) in reason and 'current-target-reference:claude' in reason
+                            for reason in reasons), reasons)
         self.assertTrue(other.samefile(source))
         if os.name == 'nt':
             other.rmdir()

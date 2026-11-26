@@ -9,7 +9,7 @@ import shutil
 import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePath, PureWindowsPath
 from typing import Iterable, Optional
 
 
@@ -130,6 +130,18 @@ def path_entry_kind(path: Path) -> str:
 
 def is_link_or_reparse_point(path: Path) -> bool:
     return path_entry_kind(path) in ("symlink", "junction", "other-reparse-point")
+
+
+def reference_path(path: PurePath) -> PurePath:
+    """Compare a recorded link target with an installer path without following the link."""
+    if isinstance(path, PureWindowsPath) and path.drive.startswith("\\\\?\\"):
+        # Windows readlink() uses the extended spelling for drive letters and network shares.
+        drive = path.drive[4:]
+        if re.fullmatch(r"[a-zA-Z]:", drive):
+            return PureWindowsPath(drive + "\\", *path.parts[1:])
+        if drive.upper().startswith("UNC\\"):
+            return PureWindowsPath("\\\\" + drive[4:] + "\\", *path.parts[1:])
+    return path
 
 
 def remove_path(path: Path) -> None:

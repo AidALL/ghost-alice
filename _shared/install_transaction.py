@@ -980,10 +980,11 @@ def _cleanup_references(ghost_root: Path, *, record: dict | None = None) -> list
 
 def _reference_reason(path: Path, references: list[tuple[Path, str]], *, ghost_root: Path, platform: str) -> str | None:
     """Keep recorded consumers and ask the live-reference owner about every host's inventory and addons."""
-    original = path.absolute()
+    original = installer_assets.reference_path(path.absolute())
     for reference, reason in references:
         # Do not resolve the original: deleting a recorded old link does not delete its source.
-        for candidate in (reference.absolute(), reference.resolve()):
+        for spelling in (reference.absolute(), reference.resolve()):
+            candidate = installer_assets.reference_path(spelling)
             if candidate == original or original in candidate.parents or candidate in original.parents:
                 return reason
     from uninstall_cleanup import platforms_referencing_target

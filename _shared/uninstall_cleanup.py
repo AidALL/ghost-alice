@@ -24,6 +24,7 @@ from installer_assets import (
     classify_skill_root,
     is_link_or_reparse_point,
     path_entry_kind,
+    reference_path,
     remove_path as _remove_path,
 )
 from global_rule_blocks import GlobalRuleBlockError, remove_claude_bootstrap, remove_codex_rule_file
@@ -153,7 +154,8 @@ def platforms_referencing_target(path: Path | None, *, current_manifest: Path,
             if isinstance(source, str) and source:
                 candidate = Path(source).expanduser()
                 candidates.append(candidate if candidate.is_absolute() else dest.parent / candidate)
-        return any(_is_under(candidate, path) for candidate in candidates)
+        root = reference_path(_lexical_absolute(path))
+        return any(reference_path(_lexical_absolute(candidate)).is_relative_to(root) for candidate in candidates)
 
     root = current_manifest.parent.parent
     platforms: set[str] = set()
