@@ -314,13 +314,14 @@ function startServer() {
     if (shutdownReason) return;
     shutdownReason = reason;
     console.log(JSON.stringify({ type: 'server-stopping', reason }));
-    const infoFile = path.join(STATE_DIR, 'server-info');
-    if (fs.existsSync(infoFile)) fs.unlinkSync(infoFile);
     watcher.close();
     clearInterval(lifecycleCheck);
     for (const timer of debounceTimers.values()) clearTimeout(timer);
     debounceTimers.clear();
-    server.close();
+    server.close(() => {
+      const infoFile = path.join(STATE_DIR, 'server-info');
+      if (fs.existsSync(infoFile)) fs.unlinkSync(infoFile);
+    });
     for (const socket of connections) {
       if (clients.has(socket)) {
         socket.end(encodeFrame(OPCODES.CLOSE, Buffer.alloc(0)));

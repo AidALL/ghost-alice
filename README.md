@@ -8,9 +8,9 @@ Ghost-ALICE OS is an agent governance layer for AI work. It keeps the response m
 
 It is not a prompt library, a chatbot wrapper, or a standalone agent runtime. It runs on top of existing agent runtimes as the operating layer that makes agent work auditable before the agent claims completion.
 
-## Version 0.6.0
+## Version 0.6.1
 
-[Release v0.6.0](https://github.com/AidALL/ghost-alice/releases/tag/v0.6.0) · [Website](https://aidall.github.io/ghost-alice/) · [Architecture](./architecture.md)
+[Release v0.6.1](https://github.com/AidALL/ghost-alice/releases/tag/v0.6.1) · [Website](https://aidall.github.io/ghost-alice/) · [Architecture](./architecture.md)
 
 Core keeps session records in SQLite. Once installed, its management command can update the Core skills selected for each host from any directory.
 
@@ -28,7 +28,7 @@ From the cloned Ghost-ALICE repository, run the following command to install Cor
 bash install.sh
 ```
 
-To install v0.6.0 exactly, run `bash install.sh --local-source` (Windows: `.\install.cmd --local-source`) in the extracted release archive or a checkout of the `v0.6.0` tag. See the [installation guide](./docs/getting-started/installation.md) for platform commands and [Update](./docs/getting-started/installation.md#update) for updating installed Core or your local checkout.
+To install v0.6.1 exactly, run `bash install.sh --local-source` (Windows: `.\install.cmd --local-source`) in the extracted release archive or a checkout of the `v0.6.1` tag. See the [installation guide](./docs/getting-started/installation.md) for platform commands and [Update](./docs/getting-started/installation.md#update) for updating installed Core or your local checkout.
 
 ## Addons
 

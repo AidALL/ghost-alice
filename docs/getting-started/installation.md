@@ -45,7 +45,7 @@ cd %USERPROFILE%\ghost-alice
 
 `bash install.sh` and `.\install.cmd` fetch Core from the remote Git branch `refs/heads/main` and start the downloaded installer for the detected agent platforms. The installer uses this checkout’s `origin`, or the Ghost-ALICE GitHub repository when no remote is configured.
 
-To install v0.6.0 exactly, extract a source archive from the [v0.6.0 release](https://github.com/AidALL/ghost-alice/releases/tag/v0.6.0) or check out its Git tag. From that folder, run `bash install.sh --local-source` or, on Windows, `.\install.cmd --local-source`. The same option installs the local files from a development checkout or saved package. A later `update` fetches remote `main`.
+To install v0.6.1 exactly, extract a source archive from the [v0.6.1 release](https://github.com/AidALL/ghost-alice/releases/tag/v0.6.1) or check out its Git tag. From that folder, run `bash install.sh --local-source` or, on Windows, `.\install.cmd --local-source`. The same option installs the local files from a development checkout or saved package. A later `update` fetches remote `main`.
 
 After a successful installation, use `~/.ghost-alice/bin/ghost-alice` (Windows: `%USERPROFILE%\.ghost-alice\bin\ghost-alice.cmd`) for status, update and removal. When an installation does not finish, run the command that a reported error names; when no error names a command, resolve the reported cause and run the same command again. The Core skills this installer places, runtime and management commands execute without the development clone. The installer attempts automatic acquisition of missing Python 3.11+, Git and Node.js and explains package-manager automatic-consent flags before acquiring the first program.
 
@@ -121,6 +121,8 @@ The healthy target is `overall: ok`.
 Doctor also prints informational Core lines: `native-intake-waits`, `native-intake-failures`, `hook-failures` and `intake-hook-degraded`. These lists do not change `overall` or the exit code. They report recorded waits, failures or degradation markers; a degradation marker alone does not establish whether an input was stored. See [intake warning and doctor lists](troubleshooting.md#intake-warning-and-doctor-lists). Doctor and status also report old record paths whose cleanup remains pending in existing move journals. These diagnostics do not move records, retry deletion or decide that the current files may be deleted.
 
 ## Update
+
+If a Windows upgrade stopped with `Cannot call rmtree on a symbolic link` while removing an old skill junction, run `git pull --ff-only` in the original `main` checkout. After the pull succeeds, run `.\install.cmd` with the same host and skill options you used before. The installer reads the saved transaction and retries cleanup. Keep the rollback folder and the source checkout in place for that retry.
 
 If your installation has no `ghost-alice` management command, open its local `main` checkout that tracks the release remote’s `main` and run `git pull --ff-only`. After the pull succeeds, run `bash install.sh` or, on Windows, `.\install.cmd`. This installs Core from remote `main` and creates the management command. If you selected individual hosts or skills, pass those selections to the installer.
 
