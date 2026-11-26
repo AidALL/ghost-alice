@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ EXCLUDED_DIR_NAMES = {
 }
 EXCLUDED_FILE_NAMES = {GHOST_ALICE_MARKER_FILENAME, ".DS_Store"}
 EXCLUDED_FILE_SUFFIXES = {".pyc"}
+_MOUNT_POINT_TAG = getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003)
 
 
 @dataclass(frozen=True)
@@ -111,17 +113,36 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
         return False
 
 
-def _is_windows_junction(path: Path) -> bool:
-    is_junction = getattr(path, "is_junction", None)
-    if is_junction is not None:
-        return bool(is_junction())
-    if os.name != "nt" or path.is_symlink():
-        return False
+def path_entry_kind(path: Path) -> str:
+    """Classify the directory entry itself; propagate unreadable metadata to the caller."""
     try:
-        attrs = path.stat().st_file_attributes
-    except (AttributeError, OSError):
-        return False
-    return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+        info = path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return "absent"
+    if stat.S_ISLNK(info.st_mode):
+        return "symlink"
+    if getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+        if stat.S_ISDIR(info.st_mode) and getattr(info, "st_reparse_tag", None) == _MOUNT_POINT_TAG:
+            return "junction"
+        return "other-reparse-point"
+    return "directory" if stat.S_ISDIR(info.st_mode) else "non-directory"
+
+
+def is_link_or_reparse_point(path: Path) -> bool:
+    return path_entry_kind(path) in ("symlink", "junction", "other-reparse-point")
+
+
+def remove_path(path: Path) -> None:
+    """Remove one caller-approved entry. Only an ordinary directory permits tree removal."""
+    kind = path_entry_kind(path)
+    if kind == "junction":
+        path.rmdir()
+    elif kind == "directory":
+        shutil.rmtree(path)
+    elif kind == "other-reparse-point":
+        raise OSError(f"Cannot remove unsupported Windows reparse point: {path}")
+    else:
+        path.unlink()
 
 
 def _classify_repo_link(
@@ -202,7 +223,7 @@ def unrecorded_copy_content(path: Path, expected_files: Iterable[str]) -> Option
     A real folder holds no bytes of its own, so an empty folder or one holding only caches is not user content;
     the walk still checks every file and link below it.
     """
-    if path.is_symlink() or _is_windows_junction(path) or not (path.is_dir() or path.is_file()):
+    if is_link_or_reparse_point(path) or not (path.is_dir() or path.is_file()):
         return "unrecorded-copy-content"
     expected_files = set(expected_files)
     if path.is_file():
@@ -219,7 +240,7 @@ def unrecorded_copy_content(path: Path, expected_files: Iterable[str]) -> Option
             rel = relative.as_posix()
             generated = (bool(set(relative.parts) & generated_dirs) or name == '.DS_Store'
                          or child.suffix == '.pyc')
-            if (child.is_symlink() or _is_windows_junction(child)
+            if (is_link_or_reparse_point(child)
                     or not (child.is_dir() or child.is_file())
                     or (child.is_file() and not generated and rel != GHOST_ALICE_MARKER_FILENAME
                         and rel not in expected_files)):
@@ -250,16 +271,15 @@ def classify_skill_root(
     """
     asset_id = expected_asset_id or path.name
 
-    if path.is_symlink():
-        # Symlink contract: ownership comes from the link target; expected_addon_id is intentionally not consulted (no marker exists on a symlink).
-        return _classify_repo_link(path, asset_id=asset_id, repo_root=repo_root, link_kind="symlink")
+    kind = path_entry_kind(path)
+    if kind in ("symlink", "junction"):
+        return _classify_repo_link(path, asset_id=asset_id, repo_root=repo_root, link_kind=kind)
+    if kind == "other-reparse-point":
+        return AssetClassification(path, KIND_SKILL_ROOT, asset_id, OWNERSHIP_CONFLICT, "unsupported-reparse-point")
 
-    if not path.exists():
+    if kind == "absent":
         reason = "expected-target-absent" if expected_asset_id else "path-absent"
         return AssetClassification(path, KIND_SKILL_ROOT, asset_id, OWNERSHIP_ABSENT, reason)
-
-    if _is_windows_junction(path):
-        return _classify_repo_link(path, asset_id=asset_id, repo_root=repo_root, link_kind="junction")
 
     if not path.is_dir():
         return AssetClassification(path, KIND_SKILL_ROOT, asset_id, OWNERSHIP_CONFLICT, "target-not-directory")

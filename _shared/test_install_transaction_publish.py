@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -407,7 +408,110 @@ class JournalDiscoveryTests(PublishCase):
         self.assertEqual(install_transaction.recover(self.ghost, journal.txid), [])
 
 
+class DirectoryLinkCleanupTests(PublishCase):
+    def directory_link(self, path, target):
+        if os.name == 'nt':
+            subprocess.run(['cmd.exe', '/d', '/c', 'mklink', '/J', str(path), str(target)],
+                           capture_output=True, check=True)
+            self.assertEqual(path.lstat().st_reparse_tag, stat.IO_REPARSE_TAG_MOUNT_POINT)
+        else:
+            path.symlink_to(target, target_is_directory=True)
+
+    def test_retain_referenced_old_link_then_remove_only_that_link(self):
+        dest = self.codex / 'alpha'
+        source = self.src / 'alpha'
+        self.directory_link(dest, source)
+        entry = dict(name='alpha', kind='skill', provider='core', mode='link', source=str(source),
+                     link_target=os.readlink(dest), baseline='recorded', used_by=['codex'])
+        installed_payload.update(self.ghost, {'targets': {str(dest): entry}})
+        txid = install_transaction.publish(self.request('codex', self.target('alpha', dest, 'copy',
+                                                                             source=self.src / 'beta')))
+        original = Path(self.journal(txid)['targets'][0]['rollback'])
+        other = self.claude / 'alpha'
+        self.directory_link(other, original)
+        installed_payload.update(self.ghost, {'targets': {str(other): dict(entry, source=str(original),
+            link_target=os.readlink(other), used_by=['claude'])}})
+        reasons = install_transaction.cleanup_completed(self.ghost)
+        self.assertTrue(any(str(original) in reason and 'reference' in reason for reason in reasons), reasons)
+        self.assertTrue(other.samefile(source))
+        if os.name == 'nt':
+            other.rmdir()
+        else:
+            other.unlink()
+        installed_payload.release_target(self.ghost, destination=other, provider='core', platform='claude')
+        self.assertEqual(install_transaction.cleanup_completed(self.ghost), ())
+        self.assertFalse(os.path.lexists(original))
+        self.assertEqual((source / 'SKILL.md').read_text(), 'alpha v2\n')
+        self.assertEqual((dest / 'SKILL.md').read_text(), 'beta v2\n')
+
+    def test_do_not_inspect_a_linked_journal_root_folder_or_preparation_directory(self):
+        journal = install_transaction.Journal.begin(self.request('claude'), [])
+        journal.data['preparation_dir'] = 'input'
+        journal.mark('done')
+        root = journal.folder.parent
+        self.directory_link(journal.folder / 'input', self.src)
+        alias = root / 'alias'
+        self.directory_link(alias, journal.folder)
+        with mock.patch.object(install_transaction, '_journal_phase', wraps=install_transaction._journal_phase) as phase:
+            self.assertEqual(install_transaction.unfinished(self.ghost), [])
+            self.assertNotIn(mock.call(alias), phase.call_args_list)
+        reasons = install_transaction.cleanup_completed(self.ghost)
+        self.assertTrue(any('linked-preparation-directory' in reason for reason in reasons), reasons)
+        self.assertTrue(any('linked-publish-entry' in reason for reason in reasons), reasons)
+        self.assertTrue((self.src / 'alpha/SKILL.md').is_file())
+        moved = self.home / 'moved-rollbacks'
+        root.rename(moved)
+        self.directory_link(root, moved)
+        with mock.patch.object(Path, 'iterdir', side_effect=AssertionError('enumerated linked rollback root')):
+            self.assertIn('linked-publish-root', install_transaction.cleanup_completed(self.ghost)[0])
+            with self.assertRaises(install_transaction.InstallTransactionError):
+                install_transaction.unfinished(self.ghost)
+            with self.assertRaises(install_transaction.InstallTransactionError):
+                install_transaction.Journal.begin(self.request('claude'), [])
+
+
 class CompletedCleanupTests(PublishCase):
+    def test_junction_removal_does_not_recurse(self):
+        # POSIX has no junctions. Report the Windows mount-point metadata on a nonempty
+        # directory: a non-recursive removal must fail and leave its contents intact.
+        original = self.src / 'alpha'
+        before = (original / 'SKILL.md').read_bytes()
+        info = SimpleNamespace(st_mode=original.lstat().st_mode, st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT,
+                               st_reparse_tag=0xA0000003)
+        with mock.patch.object(Path, 'lstat', return_value=info):
+            with self.assertRaises(OSError):
+                install_transaction._remove_path(original)
+        self.assertEqual((original / 'SKILL.md').read_bytes(), before)
+
+    def test_cleanup_preserves_directories_with_unrecognized_reparse_tags(self):
+        txid, original = self.replaced_copy()
+        before = (original / 'SKILL.md').read_bytes()
+        lstat = Path.lstat
+
+        def reparse_stat(path):
+            info = lstat(path)
+            if path == original:
+                return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT,
+                                       st_reparse_tag=0x80000042)
+            return info
+
+        with mock.patch.object(Path, 'lstat', reparse_stat):
+            reasons = install_transaction.cleanup_completed(self.ghost, txids=[txid])
+        self.assertTrue(any(str(original) in reason for reason in reasons), reasons)
+        self.assertEqual((original / 'SKILL.md').read_bytes(), before)
+        self.assertEqual(install_transaction.Journal.load(self.ghost, txid).phase, 'done')
+
+    def test_failure_to_remove_a_superseded_skill_reports_its_path_and_can_be_retried(self):
+        txid, original = self.replaced_copy()
+        with mock.patch.object(install_transaction, '_remove_path', side_effect=PermissionError('sharing violation')):
+            with self.assertRaises(install_transaction.InstallTransactionError) as failure:
+                install_transaction.cleanup_completed(self.ghost, txids=[txid])
+        self.assertIn(str(original), str(failure.exception))
+        self.assertIn('sharing violation', str(failure.exception))
+        self.assertEqual(install_transaction.Journal.load(self.ghost, txid).phase, 'done')
+        self.assertEqual(install_transaction.cleanup_completed(self.ghost, txids=[txid]), ())
+        self.assertFalse(os.path.lexists(original))
+
     @unittest.skipUnless(sys.platform == 'darwin' or os.name == 'nt', 'requires a native immutable or read-only file')
     def test_completed_journal_with_older_locked_metadata_copy_retires_only_the_copy(self):
         inventory = self.home / 'inventory'

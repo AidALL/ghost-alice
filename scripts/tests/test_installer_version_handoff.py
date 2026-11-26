@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,146 @@ from installer.selection import ALL_SKILLS, installed_core_selection, leaf_names
 
 # The installer of this commit starts a newer package from its own process for a plain install and the hook.
 EARLIER_COMMIT = (Path(__file__).parent / '_fixtures/earlier-installer-commit.txt').read_text().strip()
+
+
+class DirectoryLinkUpgradeTests(unittest.TestCase):
+    """Upgrade the reporter's installer against a local main and inspect both ends of its skill link."""
+
+    def setUp(self):
+        self.repo, self.remote = checkout_copy(self), checkout_copy(self)
+        self.home = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        (self.home / '.claude').mkdir()
+        self.env = installer_env(self.home)
+        self.env.update(GIT_ALLOW_PROTOCOL='file', GHOST_ALICE_INSTALL_LOCALE='en')
+        self.entry = ['cmd.exe', '/d', '/c', 'install.cmd'] if os.name == 'nt' else ['bash', './install.sh']
+        if os.name == 'nt':
+            # install.ps1 chooses the newest Python it discovers in PATH or in standard install folders.
+            python_dir = Path(sys.executable).parent
+            paths = [p for p in self.env['PATH'].split(os.pathsep) if p and Path(p).name.lower() != 'windowsapps'
+                     and not (Path(p) / 'python.exe').is_file() and not list(Path(p).glob('python3*.exe'))]
+            self.env['PATH'] = os.pathsep.join([str(python_dir), *paths])
+            for key in ('LOCALAPPDATA', 'APPDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)'):
+                self.env[key] = str(self.home / key)
+            # CI runners can create symlinks. Reproduce error 1314 so the old installer itself creates a junction.
+            inject_installer_python(self.env, '''
+import ctypes, sys
+if Path(sys.argv[0]).name == 'cli.py':
+    with (Path(os.environ['HOME']) / 'installer-python.txt').open('a') as output:
+        print(sys.version_info.major, sys.version_info.minor, file=output)
+if os.environ.get('DENY_DIRECTORY_SYMLINK') == '1':
+    native_symlink = os.symlink
+    def symlink(src, dst, target_is_directory=False, **kwargs):
+        if target_is_directory:
+            raise ctypes.WinError(1314)
+        return native_symlink(src, dst, target_is_directory, **kwargs)
+    os.symlink = symlink
+''')
+        old = (ROOT / 'scripts/tests/_fixtures/junction-installer-commit.txt').read_text().strip()
+        self.git(self.repo, 'remote', 'set-url', 'origin', str(self.remote))
+        self.git(self.repo, 'fetch', '--no-tags', '--depth=1', str(ROOT), old)
+        self.git(self.repo, 'switch', '--detach', old)
+        self.ledger = self.repo / '.tmp/session-intent'
+        self.ledger.mkdir(parents=True, exist_ok=True)
+        self.ledger_cli = [sys.executable, 'session-intent-analyzer/scripts/session_intent_ledger.py',
+                           '--platform', 'claude', '--session-id', 'issue-177-upgrade']
+        self.command(*self.ledger_cli, '--root', str(self.ledger), '--input', 'previous work')
+        self.input_id = json.loads(self.command(*self.ledger_cli, '--root', str(self.ledger),
+                                                '--read-intent'))['input_event_id']
+        self.assertTrue(self.input_id)
+        self.command(*self.entry, '--platform', 'claude', 'task-router',
+                     DENY_DIRECTORY_SYMLINK='1', GHOST_ALICE_SESSION_INTENT_ROOT=str(self.ledger))
+        self.skill = self.home / '.claude/skills/task-router'
+        if os.name == 'nt':
+            self.assertEqual(self.skill.lstat().st_reparse_tag, stat.IO_REPARSE_TAG_MOUNT_POINT)
+        else:
+            self.assertTrue(self.skill.is_symlink())
+        self.source_skill = self.skill.resolve(strict=True)
+        self.ghost = self.home / '.ghost-alice'
+        self.candidate = self.git(self.remote, 'rev-parse', 'main')
+
+    def command(self, *args, code=0, **env):
+        result = subprocess.run(args, cwd=self.repo, env={**self.env, **env}, stdin=subprocess.DEVNULL,
+                                capture_output=True, encoding='utf-8', errors='replace', timeout=180)
+        self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+        return result.stdout.strip()
+
+    def git(self, root, *args):
+        return self.command('git', '-C', str(root), *args)
+
+    def upgrade_and_check(self):
+        self.git(self.repo, 'switch', 'main')
+        source_file = self.source_skill / 'SKILL.md'
+        before = source_file.read_bytes()
+        question = 'Move your existing work records to the new location? [Y/n]'
+        if os.name == 'nt':
+            from winpty import PtyProcess
+            process = PtyProcess.spawn(self.entry, cwd=str(self.repo), env=self.env, dimensions=(60, 240))
+            output = ''
+            answered = False
+            try:
+                process.fileobj.settimeout(180)
+                while True:
+                    try:
+                        output += process.read()
+                    except EOFError:
+                        break
+                    except TimeoutError:
+                        self.fail(f'Windows installer stopped producing terminal output:\n{output}')
+                    if not answered and question in output:
+                        process.write('y\r')
+                        answered = True
+                self.assertEqual(process.wait(), 0, output)
+                self.assertTrue(answered, output)
+            finally:
+                process.close(force=True)
+        else:
+            code, output = run_pty(self.entry, cwd=self.repo, env=self.env, responses=[(question, 'y\n')])
+            self.assertEqual(code, 0, output)
+        self.assertFalse(self.ledger.exists(), output)
+        moved = json.loads(self.command(*self.ledger_cli, '--root', str(self.ghost / 'session-intent'), '--read-intent'))
+        self.assertEqual(moved['input_event_id'], self.input_id)
+        self.command(*self.entry)
+        self.assertEqual(installed_payload.read(self.ghost)['source']['commit'], self.candidate)
+        self.assertEqual((self.skill / 'SKILL.md').read_bytes(), (self.remote / 'task-router/SKILL.md').read_bytes())
+        self.assertFalse(os.path.samefile(self.skill, self.source_skill))
+        self.assertEqual(source_file.read_bytes(), before)
+        self.assertFalse(list((self.ghost / 'rollbacks').glob('*/rollback-task-router-*')))
+        if os.name == 'nt':
+            versions = (self.home / 'installer-python.txt').read_text().splitlines()
+            self.assertEqual(set(versions), {f'{sys.version_info.major} {sys.version_info.minor}'})
+
+    def test_plain_install_replaces_the_legacy_link_and_moves_work_records(self):
+        self.upgrade_and_check()
+
+    def test_retry_after_v0_6_0_left_a_completed_transaction(self):
+        release = '737ec399d65e11eb10cfd315d3f60ba3d1eb7237'
+        for root in (self.repo, self.remote):
+            self.git(root, 'fetch', '--no-tags', '--depth=1', str(ROOT), release)
+        self.git(self.repo, 'switch', '--detach', release)
+        self.git(self.remote, 'reset', '--hard', release)
+        if os.name != 'nt':
+            # POSIX symlinks normally clean up successfully. Stop v0.6.0 at the equivalent removal.
+            inject_installer_python(self.env, '''
+if os.environ.get('FAIL_OLD_LINK_REMOVAL'):
+    unlink = Path.unlink
+    def fail_old_link(path, *args, **kwargs):
+        if path.name.startswith('rollback-task-router-') and path.is_symlink():
+            raise PermissionError('fixture: cannot remove old skill link')
+        return unlink(path, *args, **kwargs)
+    Path.unlink = fail_old_link
+''')
+        self.command(*self.entry, code=1, FAIL_OLD_LINK_REMOVAL='1')
+        self.assertFalse(os.path.samefile(self.skill, self.source_skill))
+        saved = list((self.ghost / 'rollbacks').glob('*/rollback-task-router-*'))
+        self.assertTrue(saved)
+        for path in saved:
+            if os.name == 'nt':
+                self.assertEqual(path.lstat().st_reparse_tag, stat.IO_REPARSE_TAG_MOUNT_POINT)
+            else:
+                self.assertTrue(path.is_symlink())
+            self.assertEqual(json.loads((path.parent / 'journal.json').read_bytes())['phase'], 'done')
+        self.git(self.remote, 'reset', '--hard', self.candidate)
+        self.upgrade_and_check()
 
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'requires the POSIX installer')

@@ -11,7 +11,6 @@ import os
 import re
 import shutil
 import subprocess
-import stat
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -23,6 +22,9 @@ from installer_assets import (
     OWNERSHIP_GHOST_ALICE_MANAGED,
     OWNERSHIP_EXTERNALLY_MODIFIED_MANAGED,
     classify_skill_root,
+    is_link_or_reparse_point,
+    path_entry_kind,
+    remove_path as _remove_path,
 )
 from global_rule_blocks import GlobalRuleBlockError, remove_claude_bootstrap, remove_codex_rule_file
 from install_hooks import (
@@ -78,19 +80,6 @@ def _load_manifest(path: Path, *, platform: str | None = None) -> tuple[dict[str
     return (data, None) if data is not None else (None, "manifest-missing")
 
 
-def _is_junction(path: Path) -> bool:
-    is_junction = getattr(path, "is_junction", None)
-    if is_junction is not None:
-        return bool(is_junction())
-    if os.name != "nt" or path.is_symlink():
-        return False
-    try:
-        attrs = path.stat().st_file_attributes
-    except (AttributeError, OSError):
-        return False
-    return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
-
-
 def _lexical_absolute(path: Path) -> Path:
     return Path(os.path.normpath(os.path.abspath(os.fspath(path))))
 
@@ -104,7 +93,7 @@ def _is_under(path: Path, root: Path) -> bool:
 
 
 def _linked_under(path: Path, root: Path) -> bool:
-    return any((part.is_symlink() or _is_junction(part)) for part in (path, *path.parents) if _is_under(part, root))
+    return any(is_link_or_reparse_point(part) for part in (path, *path.parents) if _is_under(part, root))
 
 
 def _platform_target_roots(platform: str) -> list[Path]:
@@ -121,15 +110,6 @@ def _is_allowed_target_path(path: Path, platform: str) -> bool:
 
 def _is_allowed_support_path(path: Path) -> bool:
     return _is_under(path, _ghost_alice_root())
-
-
-def _remove_path(path: Path) -> None:
-    if _is_junction(path):
-        path.rmdir()
-    elif path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-    else:
-        path.unlink()
 
 
 def _manifest_repo_root(manifest: dict[str, Any], target=None) -> Path | None:
@@ -166,7 +146,7 @@ def platforms_referencing_target(path: Path | None, *, current_manifest: Path,
         if not os.path.lexists(dest):
             return False
         candidates = [dest]
-        if dest.is_symlink() or _is_junction(dest):
+        if path_entry_kind(dest) in ('symlink', 'junction'):
             candidates.append(dest.resolve())
             sources = (*sources, os.readlink(dest))
         for source in sources:
@@ -345,7 +325,7 @@ def _obsolete_copy_item(copy: Path, *, root: Path, platform: str, completed: lis
     marker = None
     if not copy.is_symlink():
         marker, error = _load_marker(copy)
-        if after_verified_install and marker is None and error is None and copy.is_dir() and not _is_junction(copy):
+        if after_verified_install and marker is None and error is None and copy.is_dir() and not is_link_or_reparse_point(copy):
             item.update(action='preserved', reason='no-ownership-marker')
             return item
         if error or not marker or marker.get('asset_id') != name:
@@ -1064,7 +1044,7 @@ def _recovery_layout(path: Path) -> tuple[Path | None, list[tuple[Path, int]]]:
         if current.is_symlink():
             links.append((relative, current.lstat().st_mtime_ns))
             continue
-        if _is_junction(current):
+        if is_link_or_reparse_point(current):
             return current, links
         if current.is_dir():
             pending.extend((child, relative / child.name) for child in current.iterdir())
@@ -1092,7 +1072,7 @@ def _support_artifact_item(
     if not path.exists() and not path.is_symlink():
         item.update(action="missing", reason="support-artifact-absent")
         return item
-    if name in _SUPPORT_RECORD_FILES and (not path.is_file() or path.is_symlink() or _is_junction(path)):
+    if name in _SUPPORT_RECORD_FILES and (not path.is_file() or is_link_or_reparse_point(path)):
         item.update(action='manual-review', reason='support-artifact-not-regular-file', removal_incomplete=True)
         return item
     if shared_platforms:
@@ -1309,7 +1289,7 @@ def _release_shared_support(items: list[dict], platform: str, state_path: Path, 
                 raise ValueError(f"{candidate['path']}: {candidate['reason']}")
             if candidate['action'] == 'would-remove':
                 path = Path(candidate['path'])
-                if path.is_symlink() or _is_junction(path) or not path.is_file():
+                if is_link_or_reparse_point(path) or not path.is_file():
                     raise ValueError(f'{path}: management-command-not-regular-file')
                 physical_commands.append(path)
         final_cleanup = bool(physical_commands) or not any(
@@ -1430,7 +1410,7 @@ def _retry_completed_reference_cleanup(platform: str, state_path: Path, *, apply
     if records or skipped:
         return []
     rollbacks = install_transaction.rollbacks_root(root)
-    if not rollbacks.is_dir() or rollbacks.is_symlink():
+    if is_link_or_reparse_point(rollbacks) or not rollbacks.is_dir():
         return []
     expected = str(state_path.resolve())
     allowed = {expected, str((root / 'pending-merges' / platform / 'snapshot.json').resolve())}
@@ -1626,11 +1606,11 @@ def retire_unused_management(platform: str, state_path: Path, *, apply_changes: 
 
 def _empty_publish_folders(path: Path, retiring: set[Path]) -> list[Path] | None:
     """Recognize empty transaction directories besides the journals already selected for cleanup."""
-    if path.is_symlink() or _is_junction(path) or not path.is_dir():
+    if is_link_or_reparse_point(path) or not path.is_dir():
         return None
     folders = [folder for folder in path.iterdir() if folder not in retiring]
     if all(re.fullmatch(r'[0-9]{8}T[0-9]{12}Z-[0-9]+-[0-9a-f]{8}', folder.name)
-           and not folder.is_symlink() and not _is_junction(folder) and folder.is_dir()
+           and not is_link_or_reparse_point(folder) and folder.is_dir()
            and not any(folder.iterdir()) for folder in folders):
         return folders
     return None

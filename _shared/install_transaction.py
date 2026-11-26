@@ -36,7 +36,7 @@ import content_digest
 import install_lock
 import installed_payload
 import installer_assets
-from installer_assets import write_ownership_marker
+from installer_assets import is_link_or_reparse_point, path_entry_kind, remove_path as _remove_path, write_ownership_marker
 import pending_manifest
 import state_retention
 from installer.participant import PublishContext
@@ -97,13 +97,6 @@ def _copy_to_stage(source: Path, stage: Path) -> None:
             shutil.copy2(source, stage)
         return
     raise InstallTransactionError(f"source does not exist: {source}")
-
-
-def _remove_path(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-        return
-    path.unlink()
 
 
 def _rename_path(source: Path, dest: Path) -> None:
@@ -542,7 +535,11 @@ class Journal:
     @classmethod
     def begin(cls, request: dict, targets: list[dict]) -> "Journal":
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        folder = rollbacks_root(request["ghost_root"]) / f"{stamp}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        root = rollbacks_root(request["ghost_root"])
+        if is_link_or_reparse_point(root):
+            raise InstallTransactionError(f"cannot create a journal under linked publish root: {root}",
+                                          journal_reason='linked-publish-root')
+        folder = root / f"{stamp}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
         folder.mkdir(parents=True)
         record_files = []
         for name in installed_payload.RECORD_FILENAMES:
@@ -576,8 +573,8 @@ class Journal:
         try:
             for path, reason in ((root, 'linked-publish-root'), (folder, 'linked-publish-entry'),
                                  (folder / JOURNAL_FILENAME, 'linked-publish-journal')):
-                if path.is_symlink():
-                    raise InstallTransactionError(f"journal of publish {txid} uses a symbolic link: {path}",
+                if is_link_or_reparse_point(path):
+                    raise InstallTransactionError(f"journal of publish {txid} uses a linked path: {path}",
                                                   journal_reason=reason)
             data = json.loads((folder / JOURNAL_FILENAME).read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, ValueError) as exc:
@@ -633,12 +630,12 @@ class Journal:
             if 'restore_if_absent' in item and not isinstance(item['restore_if_absent'], bool):
                 invalid('metadata restoration condition')
             # preserve_metadata resolves the destination and names each saved copy by its index.
-            if item['copy'] is not None and (folder / item['copy']).is_symlink():
+            if item['copy'] is not None and is_link_or_reparse_point(folder / item['copy']):
                 raise InstallTransactionError(f"journal of publish {txid} has linked metadata copies; review {folder}",
                                               journal_reason='linked-publish-metadata')
         if data.get('preparation_dir') not in (None, 'input'):
             invalid('preparation directory')
-        if data.get('preparation_dir') is not None and (folder / data['preparation_dir']).is_symlink():
+        if data.get('preparation_dir') is not None and is_link_or_reparse_point(folder / data['preparation_dir']):
             raise InstallTransactionError(f"journal of publish {txid} has a linked preparation directory; review {folder}",
                                           journal_reason='linked-preparation-directory')
         copies = data.get("record_files", [data["record_copy"]] if data.get("record_copy") else [])
@@ -646,7 +643,7 @@ class Journal:
                 or data.get("record_copy") not in (None, *copies)):
             raise InstallTransactionError(f"journal of publish {txid} has invalid record copies; review {folder}",
                                           journal_reason='invalid-journal')
-        if any((folder / name).is_symlink() for name in copies):
+        if any(is_link_or_reparse_point(folder / name) for name in copies):
             raise InstallTransactionError(f"journal of publish {txid} has linked record copies; review {folder}",
                                           journal_reason='linked-installed-baseline')
         return cls(folder, data)
@@ -732,7 +729,7 @@ def _journal_phase(folder: Path):
     """Read the stored phase; distinguish a missing file from every value the file can contain."""
     file = folder / JOURNAL_FILENAME
     try:
-        if stat.S_ISLNK(file.lstat().st_mode):
+        if is_link_or_reparse_point(file):
             return None
         data = json.loads(file.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -756,7 +753,7 @@ def unfinished(ghost_root) -> list[str]:
     """
     root = rollbacks_root(ghost_root)
     try:
-        if stat.S_ISLNK(root.lstat().st_mode):
+        if is_link_or_reparse_point(root):
             raise InstallTransactionError(f"cannot inspect linked publish root: {root}",
                                           journal_reason='linked-publish-root')
         entries = list(root.iterdir())
@@ -767,12 +764,10 @@ def unfinished(ghost_root) -> list[str]:
     folders = []
     for path in entries:
         try:
-            mode = path.lstat().st_mode
-        except FileNotFoundError:
-            continue
+            kind = path_entry_kind(path)
         except OSError as exc:
             raise InstallTransactionError(f"cannot inspect publish entry {path}: {exc}") from exc
-        if stat.S_ISDIR(mode):
+        if kind == "directory":
             folders.append(path)
     return [folder.name for folder in sorted(folders, key=lambda path: path.name, reverse=True)
             if _journal_phase(folder) not in (*FINISHED_PHASES, _ABSENT_JOURNAL)]
@@ -949,7 +944,7 @@ def _cleanup_references(ghost_root: Path, *, record: dict | None = None) -> list
                 references.append((path if path.is_absolute() else Path(dest).parent / path,
                                    reason))
         path = Path(dest)
-        if content_digest._is_link(path):
+        if path_entry_kind(path) in ('symlink', 'junction'):
             references.append((path.resolve(), reason))
     service = record.get("service") or {}
     if not isinstance(service, dict):
@@ -1008,6 +1003,8 @@ def recorded_copy_cleanup_reason(path: Path, entry: dict, *, allow_missing: bool
 
 
 def _original_cleanup_reason(original: Path, target: dict, record: dict) -> str | None:
+    if path_entry_kind(original) == 'other-reparse-point':
+        return 'unsupported-reparse-point'
     if target.get('kind') in {'data', 'configuration'} and target.get('before') is not None:
         return (None if content_digest.state(original, include_generated=target.get('mode') == 'data') == target['before']
                 else 'migration-original-changed')
@@ -1040,12 +1037,12 @@ def cleanup_completed(ghost_root: Path | str, *,
     ghost_root = Path(ghost_root)
     _require_lock(ghost_root)
     root = rollbacks_root(ghost_root)
-    if root.is_symlink():
-        return (f"{root}: linked-publish-root",)
-    if not root.exists():
-        return ()
     retained = []
     try:
+        if is_link_or_reparse_point(root):
+            return (f"{root}: linked-publish-root",)
+        if not root.exists():
+            return ()
         active = unfinished(ghost_root)
         if active:
             return tuple(f"{root / txid}: unfinished-publish" for txid in active)
@@ -1097,7 +1094,10 @@ def cleanup_completed(ghost_root: Path | str, *,
                 if reason:
                     retained.append(f"{original}: {reason}")
                 else:
-                    _remove_path(original)
+                    try:
+                        _remove_path(original)
+                    except OSError as exc:
+                        raise InstallTransactionError(f"cannot remove saved original {original}: {exc}") from exc
             if unrecognized_original:
                 continue
             preparation = journal.data.get('preparation_dir')
@@ -1106,7 +1106,7 @@ def cleanup_completed(ghost_root: Path | str, *,
                 if os.path.lexists(prepared):
                     reason = _reference_reason(prepared, references, ghost_root=ghost_root,
                                                platform=journal.data.get('host', ''))
-                    if reason or prepared.is_symlink():
+                    if reason or is_link_or_reparse_point(prepared):
                         retained.append(f'{prepared}: {reason or "linked-preparation-directory"}')
                         continue
                     _remove_path(prepared)
@@ -1123,7 +1123,7 @@ def cleanup_completed(ghost_root: Path | str, *,
             if reason:
                 retained.append(f"{folder}: {reason}")
                 continue
-            if any(path.is_symlink() or not path.is_file() for path in folder.iterdir()):
+            if any(is_link_or_reparse_point(path) or not path.is_file() for path in folder.iterdir()):
                 retained.append(f"{folder}: unrecognized-publish-metadata")
                 continue
             # Remove the legacy pointer before its detailed record, and the journal last.

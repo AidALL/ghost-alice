@@ -2638,7 +2638,7 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
                 target = self.pending / "junction-child" if nested else self.pending
                 if nested:
                     target.mkdir()
-                with mock.patch.object(cleanup, "_is_junction", side_effect=lambda p: p == target):
+                with mock.patch.object(cleanup, "is_link_or_reparse_point", side_effect=lambda p: p == target):
                     report = self._support()
                 self.assertEqual(report["pending-merges"]["action"], "manual-review")
                 self.assertEqual(report["pending-merges"]["reason"], "recovery-junction-needs-review")
